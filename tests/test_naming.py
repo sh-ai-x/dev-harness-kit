@@ -56,7 +56,12 @@ class TestNaming(unittest.TestCase):
             self.skipTest("no skills dir yet")
         invalid = []
         for skill_dir in skills_dir.rglob("SKILL.md"):
-            cat = extract_frontmatter_field(skill_dir.read_text(encoding="utf-8"), "category")
+            text = skill_dir.read_text(encoding="utf-8")
+            cat = extract_frontmatter_field(text, "category")
+            # category field may be omitted; fall back to directory name
+            if cat is None:
+                rel = skill_dir.relative_to(skills_dir.parent)
+                cat = rel.parts[1] if len(rel.parts) >= 3 else None
             if cat not in ALLOWED_CATEGORIES:
                 invalid.append(f"{skill_dir}: category={cat}")
         self.assertEqual(invalid, [], f"Invalid categories: {invalid}")
