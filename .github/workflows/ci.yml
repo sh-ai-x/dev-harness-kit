@@ -68,38 +68,57 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install pytest
+        run: pip install --quiet pytest
+
       - name: Run tests
-        run: |
-          pip install --quiet pytest
-          python -m pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -v --tb=short
         env:
           PYTHONPATH: ${{ github.workspace }}/lib
 
-      - name: Validate manifests
+      - name: Validate plugin manifests
         run: |
-          python -c "
+          python3 -c "
           import json, pathlib
           mp = json.loads(pathlib.Path('.claude-plugin/marketplace.json').read_text())
-          pl = json.loads(pathlib.Path('.claude-plugin/plugin/.claude-plugin/plugin.json').read_text())
-          assert mp['name'] == 'dev-harness-kit'
-          assert pl['name'] == 'dev-harness-kit'
+          pl = json.loads(pathlib.Path('.claude-plugin/plugin.json').read_text())
+          # marketplace wraps the plugin under plugins[0]
+          mp_plugin = mp['plugins'][0]
+          assert mp_plugin['name'] == 'dev-kit', f\"marketplace plugin name mismatch: {mp_plugin['name']}\"
+          assert pl['name'] == 'dev-kit', f\"plugin name mismatch: {pl['name']}\"
           assert pl['version'] == '0.1.0'
-          print('manifests OK')
+          print('manifests OK (name=dev-kit, v0.1.0)')
+          "
+
+      - name: Validate skill count + flat layout
+        run: |
+          python3 -c "
+          import pathlib
+          skills = sorted(pathlib.Path('skills').glob('*/SKILL.md'))
+          assert len(skills) == 27, f'expected 27 skills, got {len(skills)}'
+          # flat: no nested SKILL.md
+          nested = list(pathlib.Path('skills').glob('*/*/SKILL.md'))
+          assert not nested, f'nested SKILL.md found: {nested}'
+          # name == dir for each
+          for s in skills:
+              assert s.parent.name == s.read_text().split('\n', 5)[1].split(':',1)[1].strip(), \
+                  f'name mismatch in {s}'
+          print(f'all 27 skills flat + name==dir OK')
           "
 
       - name: Bash hook syntax
         run: |
-          for h in .claude-plugin/plugin/hooks/*.sh; do
+          for h in hooks/*.sh; do
             bash -n "$h"
           done
-          echo "hooks OK"
+          echo "hooks OK ($(ls hooks/*.sh | wc -l | tr -d ' ') scripts)"
 
       - name: Pre-push hook syntax
         run: bash -n .githooks/pre-push
 
       - name: Python module imports
         run: |
-          PYTHONPATH=lib python -c "
+          PYTHONPATH=lib python3 -c "
           import state_codec, active_hooks_codec, write_claude_md, execute
-          print('all 4 modules importable')
+          print('all 4 lib modules importable')
           "

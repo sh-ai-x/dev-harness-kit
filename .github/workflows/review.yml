@@ -1,25 +1,20 @@
 name: PR Review
 
-# Auto-run /review-code on every PR (3-dim parallel fan-out via MiniMax).
-# Uses anthropics/claude-code-action@v1 with ANTHROPIC_BASE_URL set to
-# MiniMax's Anthropic-compatible endpoint. The action auto-loads
-# .claude/skills/review-code/ from the checkout so /review-code resolves.
+# Auto-run /dev-kit:review (3-dim) and /dev-kit:security (10-dim OWASP) on every
+# PR, in parallel. dev-kit plugin is installed from this checkout via a
+# local marketplace symlink so the namespaced skills resolve.
 #
 # Severity gate + auto-approve (per claude-review-plugins spec):
-#   Approve            (no critical, no major) → check success + auto-approve
-#   Changes Requested  (no critical, ≥1 major) → check failure
-#   Blocked            (≥1 critical)             → check failure
-#
-# Each job uses ONE auth channel (env: or with.anthropic_api_key:),
-# not both. Mixing both caused action confusion in earlier review.
-#
-# Verdict discovery uses startswith('claude') rather than literal
-# 'claude[bot]' so org-scoped or renamed GitHub App installations
-# (e.g., <org>[bot]) still get found.
+#   Approve            (no critical, no major in BOTH review + security) → success + auto-approve
+#   Changes Requested  (any major in either)                              → failure
+#   Blocked            (any critical in either)                           → failure
 #
 # Empty-verdict gate: for pull_request events, missing verdict = exit 1
 # (strict). For workflow_dispatch, missing verdict = warn + exit 0
 # (manual override allowed).
+#
+# Secret name `MINIMAX_API_KEY` is preserved from prior workflow — do not
+# rename (would break existing repo secret config).
 
 on:
   pull_request:
@@ -40,7 +35,8 @@ on:
         type: string
 
 jobs:
-  review-code:
+  review:
+    name: /dev-kit:review (3-dim)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -54,6 +50,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Install dev-kit plugin from local checkout
+        run: |
+          mkdir -p ~/.claude/plugins/marketplaces
+          ln -sfn "$GITHUB_WORKSPACE" ~/.claude/plugins/marketplaces/dev-kit
+          # verify the symlink + manifest exist
+          test -f ~/.claude/plugins/marketplaces/dev-kit/.claude-plugin/plugin.json
+          test -d ~/.claude/plugins/marketplaces/dev-kit/skills/review
+          echo "dev-kit plugin symlinked: $(readlink ~/.claude/plugins/marketplaces/dev-kit)"
 
       - name: Resolve PR + provider
         id: provider
@@ -69,12 +74,12 @@ jobs:
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run /review-code via MiniMax
+      - name: Run /dev-kit:review via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
         # MiniMax channel: env-only (no with.anthropic_api_key to avoid mixed auth).
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_MODEL: MiniMax-M3[1m]
           ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M3[1m]
           ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M3[1m]
@@ -83,11 +88,11 @@ jobs:
         with:
           track_progress: ${{ github.event_name == 'pull_request' }}
           prompt: |
-            /review-code --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+            /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
             Render the standard two-layer output (PR summary at top, per-finding
-            4-field inline comments). The summary MUST begin with a single line
-            exactly of the form:
+            inline comments). The summary MUST begin with a single line exactly
+            of the form:
 
               **Verdict:** Approve
               **Verdict:** Changes Requested
@@ -97,25 +102,19 @@ jobs:
               - 🔴 critical ≥ 1          → **Verdict:** Blocked
               - 🟠 major  ≥ 1, 🔴 = 0    → **Verdict:** Changes Requested
               - no 🔴, no 🟠             → **Verdict:** Approve
-
-            Use the inline-comment MCP tool with `confirmed: true` for each
-            major or critical finding. Post the summary as a single PR comment.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
-      - name: Run /review-code via Claude Code opt-in
-        # Anthropic channel: with-only (no env: ANTHROPIC_API_KEY duplicate).
+      - name: Run /dev-kit:review via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: ${{ github.event_name == 'pull_request' }}
           prompt: |
-            /review-code --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+            /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
-            Render the standard two-layer output (PR summary at top, per-finding
-            4-field inline comments). The summary MUST begin with a single line
-            exactly of the form:
+            Render the standard two-layer output. The summary MUST begin with:
 
               **Verdict:** Approve
               **Verdict:** Changes Requested
@@ -123,61 +122,166 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
-      - name: Severity gate
-        if: always()
+  security:
+    name: /dev-kit:security (10-dim OWASP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    env:
+      MINIMAX_BASE_URL: https://api.minimax.io/anthropic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install dev-kit plugin from local checkout
+        run: |
+          mkdir -p ~/.claude/plugins/marketplaces
+          ln -sfn "$GITHUB_WORKSPACE" ~/.claude/plugins/marketplaces/dev-kit
+          test -f ~/.claude/plugins/marketplaces/dev-kit/.claude-plugin/plugin.json
+          test -d ~/.claude/plugins/marketplaces/dev-kit/skills/security
+          echo "dev-kit plugin symlinked: $(readlink ~/.claude/plugins/marketplaces/dev-kit)"
+
+      - name: Resolve PR + provider
+        id: provider
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.provider.outputs.pr_number }}
-          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
+            [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
+            echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "provider=minimax" >> "$GITHUB_OUTPUT"
+            echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run /dev-kit:security via MiniMax
+        if: steps.provider.outputs.provider == 'minimax'
+        env:
+          ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_MODEL: MiniMax-M3[1m]
+          ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M3[1m]
+          ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M3[1m]
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: MiniMax-M3[1m]
+        uses: anthropics/claude-code-action@v1
+        with:
+          track_progress: ${{ github.event_name == 'pull_request' }}
+          prompt: |
+            /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+
+            Render the security summary (per-category breakdown table + Verdict).
+            The summary MUST begin with a single line exactly of the form:
+
+              **Verdict:** Approve
+              **Verdict:** Changes Requested
+              **Verdict:** Blocked
+
+            Map verdict per spec:
+              - 🔴 critical ≥ 1          → **Verdict:** Blocked
+              - 🟠 major  ≥ 1, 🔴 = 0    → **Verdict:** Changes Requested
+              - no 🔴, no 🟠             → **Verdict:** Approve
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+
+      - name: Run /dev-kit:security via Claude Code opt-in
+        if: steps.provider.outputs.provider == 'anthropic'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: ${{ github.event_name == 'pull_request' }}
+          prompt: |
+            /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+
+            Render the security summary. The summary MUST begin with:
+
+              **Verdict:** Approve
+              **Verdict:** Changes Requested
+              **Verdict:** Blocked
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+
+  gate:
+    name: severity gate (review + security)
+    runs-on: ubuntu-latest
+    needs: [review, security]
+    if: always()
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - name: Extract latest verdict from each skill's comment
+        id: verdicts
         run: |
           set -uo pipefail
-          # Use startswith('claude') to support org-scoped or renamed App
-          # installations like <org-name>[bot]. Hardcoded 'claude[bot]' was
-          # brittle (rejected in earlier review).
-          verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
+          comments="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select((.user.login // "") | startswith("claude")) | {body: .body, id: .id}' 2>/dev/null || echo "")"
+
+          # /dev-kit:review comment carries "## Review summary"
+          review_verdict="$(echo "$comments" \
+            | grep -B2 -A20 'Review summary' \
             | grep -E '\*\*Verdict:\*\*' | tail -1 | awk '{print $NF}' || true)"
-          echo "Captured verdict: ${verdict:-<none>}"
-          case "$verdict" in
+          # /dev-kit:security comment carries "## Security summary"
+          security_verdict="$(echo "$comments" \
+            | grep -B2 -A20 'Security summary' \
+            | grep -E '\*\*Verdict:\*\*' | tail -1 | awk '{print $NF}' || true)"
+
+          echo "review_verdict=${review_verdict:-<none>}"
+          echo "security_verdict=${security_verdict:-<none>}"
+          echo "review_verdict=${review_verdict:-<none>}" >> "$GITHUB_OUTPUT"
+          echo "security_verdict=${security_verdict:-<none>}" >> "$GITHUB_OUTPUT"
+
+      - name: Combined verdict gate
+        run: |
+          R="${{ steps.verdicts.outputs.review_verdict }}"
+          S="${{ steps.verdicts.outputs.security_verdict }}"
+          EVENT="$EVENT_NAME"
+          echo "review=$R  security=$S"
+
+          # require both to be present on pull_request
+          if [ "$EVENT" = "pull_request" ]; then
+            if [ -z "$R" ] || [ -z "$S" ]; then
+              echo "::error::Missing verdict (review='$R' security='$S'). Action may have been skipped, rate-limited, or failed."
+              echo "  Re-run via workflow_dispatch if needed."
+              exit 1
+            fi
+          else
+            [ -z "$R" ] && { echo "::warning::review verdict missing (workflow_dispatch)"; R="Approve"; }
+            [ -z "$S" ] && { echo "::warning::security verdict missing (workflow_dispatch)"; S="Approve"; }
+          fi
+
+          # worst-of wins
+          rank() { case "$1" in Blocked) echo 2 ;; "Changes"*) echo 1 ;; Approve) echo 0 ;; *) echo 99 ;; esac; }
+          r=$(rank "$R"); s=$(rank "$S")
+          worst=$([ "$r" -ge "$s" ] && echo "$R" || echo "$S")
+          echo "Combined worst verdict: $worst"
+
+          case "$worst" in
             Approve) exit 0 ;;
-            "Changes"*) echo "::error::Changes Requested"; exit 1 ;;
-            Blocked) echo "::error::Blocked"; exit 1 ;;
-            "")
-              # For pull_request events: missing verdict = strict fail.
-              # This catches real action errors (rate limit, secret missing,
-              # App mis-config) instead of silently passing. For
-              # workflow_dispatch: warn + pass (manual override allowed).
-              if [ "$EVENT_NAME" = "pull_request" ]; then
-                echo "::error::No Verdict comment from claude-code-action."
-                echo "  Action may have been skipped, rate-limited, or failed."
-                echo "  Re-run /review-code manually via workflow_dispatch if needed."
-                exit 1
-              else
-                echo "::warning::No Verdict comment found (workflow_dispatch run)."
-                exit 0
-              fi
-              ;;
-            *) echo "::error::Unexpected verdict: $verdict"; exit 1 ;;
+            "Changes"*) echo "::error::Changes Requested (review=$R security=$S)"; exit 1 ;;
+            Blocked) echo "::error::Blocked (review=$R security=$S)"; exit 1 ;;
+            *) echo "::error::Unexpected worst verdict: $worst"; exit 1 ;;
           esac
 
-      - name: Auto-approve on Approve
-        # Gated on severity gate's output (success() cascades from the
-        # gate's exit code). For PR events with verdict=Approve, the
-        # gate exits 0 → this step runs. For Blocked/Changes/empty
-        # (PR), gate exits 1 → this step is skipped.
+      - name: Auto-approve on combined Approve
         if: success() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.provider.outputs.pr_number }}
+          PR_NUMBER: ${{ env.PR_NUMBER }}
         run: |
           set -uo pipefail
-          verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-            | grep -E '\*\*Verdict:\*\*' | tail -1 | awk '{print $NF}' || true)"
-          if [ "$verdict" = "Approve" ]; then
-            echo "Verdict Approve → auto-approving."
+          R="${{ steps.verdicts.outputs.review_verdict }}"
+          S="${{ steps.verdicts.outputs.security_verdict }}"
+          if [ "$R" = "Approve" ] && [ "$S" = "Approve" ]; then
+            echo "Both review + security = Approve → auto-approving."
             gh pr review "$PR_NUMBER" --approve \
-              --body "Auto-approved by /review-code: lowest severity (no 🔴 critical, no 🟠 major)."
+              --body "Auto-approved by /dev-kit:review + /dev-kit:security: lowest severity in both (no 🔴 critical, no 🟠 major)."
           else
-            echo "Verdict '$verdict' — not auto-approving."
+            echo "Not auto-approving (review='$R' security='$S')."
           fi
