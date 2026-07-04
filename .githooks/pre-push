@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# .githooks/pre-push — Block direct push to main (enforce PR-only workflow).
+#
+# Why: this repo's policy requires PR review before merge to main.
+# Direct push to main bypasses review → automatic blocker.
+#
+# Activation:
+#   git config core.hooksPath .githooks       # local-only
+#   ./lib/install.sh --setup-hooks            # install.sh 자동 호출
+#
+# Bypass (for maintainers ONLY with explicit —no-verify, NEVER default):
+#   git push --no-verify
+#
+# Note: GitHub private repos without Pro cannot enforce this server-side.
+# This hook is the client-side enforcement + CI will additionally gate.
+
+set -eo pipefail
+
+# Read push lines: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+    REMOTE_BRANCH="${REMOTE_REF#refs/heads/}"
+
+    case "$REMOTE_BRANCH" in
+        main|master)
+            echo "[pre-push] BLOCKED: direct push to '$REMOTE_BRANCH' is disabled." >&2
+            echo "" >&2
+            echo "  Policy: this repo requires PR review before merge." >&2
+            echo "" >&2
+            echo "  Workflow:" >&2
+            echo "    1. git checkout -b feat/<short-name>" >&2
+            echo "    2. git push -u origin feat/<short-name>" >&2
+            echo "    3. gh pr create --base main --head feat/<short-name>" >&2
+            echo "    4. Wait for CI ✓ + (if reviewer assigned) approval" >&2
+            echo "    5. Merge via 'gh pr merge' or GitHub UI button" >&2
+            echo "" >&2
+            echo "  Bypass (ONLY for emergency hotfix with explicit consent):" >&2
+            echo "    git push --no-verify" >&2
+            exit 1
+            ;;
+        *)
+            # Allow non-main branches
+            ;;
+    esac
+done
+
+exit 0

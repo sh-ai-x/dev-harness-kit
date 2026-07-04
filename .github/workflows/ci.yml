@@ -3,13 +3,63 @@ name: CI
 on:
   push:
     branches: [main]
+    # POLICY: this repo requires PR review before merge to main.
+    # Direct push to main triggers branch-policy job (warn-only).
+    # Enforced via .githooks/pre-push locally.
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
-  validate:
+  branch-policy:
+    name: branch-policy
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Direct push to main — policy violation recorded
+        run: |
+          echo "::warning::Direct push to 'main' detected. PR-only workflow violated."
+          echo "  Commit:  ${{ github.sha }}"
+          echo "  Author:  ${{ github.actor }}"
+          echo "  Event:   push (not pull_request)"
+          echo ""
+          echo "  Policy: this repo requires PR review before merge to main."
+          echo ""
+          echo "  Recommended fix:"
+          echo "    1. Revert:  git reset --hard \$REMOTE_PREVIOUS_SHA  (force-push)"
+          echo "    2. Branch:  git checkout -b feat/<name>"
+          echo "    3. Push:    git push -u origin feat/<name>"
+          echo "    4. PR:      gh pr create --base main"
+          echo ""
+          echo "  This is logged but does NOT hard-fail (emergency bypass allowed)."
+
+  test:
+    name: test (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pytest
+        run: pip install --quiet pytest
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+        env:
+          PYTHONPATH: ${{ github.workspace }}/lib
+
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +93,9 @@ jobs:
             bash -n "$h"
           done
           echo "hooks OK"
+
+      - name: Pre-push hook syntax
+        run: bash -n .githooks/pre-push
 
       - name: Python module imports
         run: |
