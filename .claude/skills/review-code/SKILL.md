@@ -183,12 +183,15 @@ Fix:
 ## Regression testing
 
 After any prompt change, run:
-- `bash .claude/skills/review-code/fixtures/check.sh real-bugs` → MUST catch all
-- `bash .claude/skills/review-code/fixtures/check.sh traps` → MUST NOT flag
-- `bash .claude/skills/review-code/fixtures/check.sh clean` → MUST return Approve
-- Compare against `expected.md` (source of truth).
+- `bash .claude/skills/review-code/fixtures/check.sh real-bugs` → list fixture files (then `/review-code` should catch them all)
+- `bash .claude/skills/review-code/fixtures/check.sh traps` → list fixture files (then `/review-code` should flag none)
+- `bash .claude/skills/review-code/fixtures/check.sh clean` → list fixture files (then `/review-code` should return Approve)
+- Compare against `fixtures/expected.md` (source of truth).
+
+Fixtures: `real-bugs/sql_injection.py` (must catch), `traps/parameterized_query.py` (must not flag), `clean/addition.py` (Approve).
 
 ## Scaling 3 → 10 dimensions
 
 Add a charter line + one more `Agent` call **in the same fan-out message**. The
 Step 3 verifier handles whatever candidates arrive.
+

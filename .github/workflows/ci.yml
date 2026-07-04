@@ -81,8 +81,8 @@ jobs:
           import json, pathlib
           mp = json.loads(pathlib.Path('.claude-plugin/marketplace.json').read_text())
           pl = json.loads(pathlib.Path('.claude-plugin/plugin/.claude-plugin/plugin.json').read_text())
-          assert mp['name'] == 'dev-harness-kit'
-          assert pl['name'] == 'dev-harness-kit'
+          assert mp['name'] == 'dev-kit'
+          assert pl['name'] == 'dev-kit'
           assert pl['version'] == '0.1.0'
           print('manifests OK')
           "

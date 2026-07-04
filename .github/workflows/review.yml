@@ -1,0 +1,155 @@
+name: review
+
+# Direct MiniMax LLM review (no claude-code-action).
+# 1 step: POST to MiniMax API + post comment + apply severity gate.
+# Simpler than old 6-hook setup — one workflow, one job, two steps.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run MiniMax review
+        if: env.MINMAX_API_KEY != ''
+        env:
+          MINMAX_API_KEY: ${{ secrets.MINMAX_API_KEY }}
+          ANTHROPIC_BASE_URL: https://api.minimax.io/anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.MINMAX_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          python3 - << 'PYEOF'
+          import json, os, subprocess, sys, urllib.request
+          from pathlib import Path
+          sys.path.insert(0, str(Path("lib")))
+          import llm_judge
+
+          pr_number = os.environ["PR_NUMBER"]
+          repo = os.environ["GITHUB_REPO"]
+          api_key = os.environ["MINMAX_API_KEY"]
+          base_url = os.environ["ANTHROPIC_BASE_URL"]
+
+          # Get diff + metadata via gh
+          env = {**os.environ, "GH_TOKEN": os.environ.get("GH_TOKEN", "")}
+          diff = subprocess.run(["gh", "pr", "diff", str(pr_number)], capture_output=True, text=True, env=env).stdout[:30000]
+          title = subprocess.run(["gh", "pr", "view", str(pr_number), "--json", "title", "--jq", ".title"], capture_output=True, text=True, env=env).stdout.strip()
+          body = subprocess.run(["gh", "pr", "view", str(pr_number), "--json", "body", "--jq", ".body"], capture_output=True, text=True, env=env).stdout.strip()[:2000]
+
+          # Build prompt
+          prompt = f"""You are reviewing a pull request for {repo}.
+
+PR title: {title}
+PR body: {body}
+
+Files changed (diff, first 30K chars):
+```
+{diff}
+```
+
+Score on 4 axes 0-10, give verdict:
+- architecture (modular/IRON-LAWS/SSOT)
+- correctness (tests/no bugs)
+- convention (naming/no slop)
+- safety (hooks advisory/no destructive)
+
+Map strictly to verdict:
+- 🔴 critical ≥ 1  → verdict="Blocked"
+- 🟠 major ≥ 1 (no critical)  → verdict="Changes Requested"
+- no critical, no major  → verdict="Approve"
+
+Respond ONLY with JSON:
+{{"architecture":N,"correctness":N,"convention":N,"safety":N,"summary":"<1 line>","verdict":"Approve|Changes Requested|Blocked"}}
+"""
+
+          payload = {
+              "model": "MiniMax-M3[1m",
+              "max_tokens": 1024,
+              "messages": [{"role": "user", "content": prompt}],
+              "system": "You are a code review judge. Respond ONLY with a JSON object containing 4 axis scores, summary, and verdict. No other text.",
+          }
+          req = urllib.request.Request(
+              f"{base_url.rstrip('/')}/v1/messages",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"},
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=120) as resp:
+                  data = json.loads(resp.read().decode("utf-8"))
+          except Exception as e:
+              print(f"::error::MiniMax call failed: {e}")
+              sys.exit(1)
+
+          content = " ".join(p.get("text", "") for p in data.get("content", []) if p.get("type") == "text")
+          usage = data.get("usage", {})
+          print(f"tokens_in={usage.get('input_tokens', 0)} tokens_out={usage.get('output_tokens', 0)}")
+
+          # Parse scores
+          try:
+              scores = json.loads(content)
+          except json.JSONDecodeError:
+              import re
+              m = re.search(r"\{[^{}]*?verdict[^{}]*?\}", content, re.DOTALL)
+              if m:
+                  scores = json.loads(m.group(0))
+              else:
+                  print(f"::error::Cannot parse: {content[:200]}")
+                  sys.exit(1)
+
+          verdict = scores.get("verdict", "Changes Requested")
+          summary = scores.get("summary", "(no summary)")
+
+          # Post comment
+          emoji = {"Approve": "✅", "Changes Requested": "🔴", "Blocked": "🔴"}.get(verdict, "❓")
+          comment = f"""## {emoji} {verdict}
+
+**Summary**: {summary}
+
+| Axis | Score |
+|---|---|
+| architecture | {scores.get('architecture', '?')} |
+| correctness | {scores.get('correctness', '?')} |
+| convention | {scores.get('convention', '?')} |
+| safety | {scores.get('safety', '?')} |
+
+Provider: MiniMax-M3[1m | Tokens: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out
+— /review-code via GitHub Actions (direct MiniMax API call)
+"""
+          subprocess.run(["gh", "pr", "comment", str(pr_number), "--body", comment], capture_output=True, text=True, env=env)
+          print(f"posted verdict={verdict}")
+          PYEOF
+
+      - name: Severity gate
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          verdict="$(gh api "repos/${GITHUB_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select((.user.login // "") | startswith("github-actions")) | .body' \
+            | grep -oE '## ❓ [A-Za-z ]+|## ✅ Approve|## 🔴 (Changes Requested|Blocked)' \
+            | head -1 | sed 's/## //')"
+          echo "Captured verdict: ${verdict:-<none>}"
+          if [ -z "$verdict" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "::error::No Verdict comment from review action. MiniMax may have errored."
+            exit 1
+          fi
+          case "$verdict" in
+            "✅ Approve") exit 0 ;;
+            "🔴 Blocked") echo "::error::Blocked"; exit 1 ;;
+            "🔴 Changes Requested") echo "::error::Changes Requested"; exit 1 ;;
+            *) exit 0 ;;
+          esac

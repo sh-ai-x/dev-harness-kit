@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_smoke.py — End-to-end smoke test for dev-harness-kit.
+"""test_smoke.py — End-to-end smoke test for dev-kit.
 
 Validates that all 5 → 1 mapping is correct:
 - All 13 skills absorb correctly
@@ -37,7 +37,7 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(len(found), SKILL_COUNT, f"Expected {SKILL_COUNT} skills, got {len(found)}")
 
     def test_commands_count(self):
-        commands_dir = PROJECT_ROOT / "commands"
+        commands_dir = PROJECT_ROOT / ".claude-plugin" / "plugin" / "commands"
         found = list(commands_dir.glob("*.md"))
         self.assertEqual(len(found), COMMAND_COUNT, f"Expected {COMMAND_COUNT} commands, got {len(found)}")
 
@@ -63,7 +63,7 @@ class TestSmoke(unittest.TestCase):
 
     def test_marketplace_plugin_name(self):
         mp = json.loads((PROJECT_ROOT / ".claude-plugin" / "marketplace.json").read_text())
-        self.assertEqual(mp["name"], "dev-harness-kit")
+        self.assertEqual(mp["name"], "dev-kit")
 
     def test_active_hooks_matrix_7_stages(self):
         from importlib.util import spec_from_file_location, module_from_spec

@@ -1,5 +1,5 @@
 {
-  "name": "dev-harness-kit",
+  "name": "dev-kit",
   "version": "0.1.0",
   "description": "AI-native single plugin absorbing 5 dev-harness repos. 13 categories of skills, 0-arg commands, A2A typed interface, Eval-Repair loop, Human-on-the-Loop.",
   "author": {
