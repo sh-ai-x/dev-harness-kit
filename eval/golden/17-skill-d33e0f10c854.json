@@ -1,0 +1,17 @@
+{
+  "asset": "skills/shortcuts/shortcut-tdd-fast/SKILL.md",
+  "asset_kind": "skill",
+  "baseline_hash": "sha256:37670f541e89d9e70a4175e5eb5d32e4",
+  "captured_at": "2026-07-04T16:35:00+09:00",
+  "code_refs": [
+    "skills/shortcuts/shortcut-tdd-fast/SKILL.md"
+  ],
+  "expected_behavior": "Stable skill asset for dev-harness-kit 0.1.0",
+  "iron_law_refs": [
+    "CLAUDE.md §1 L1 No-Test-No-Code",
+    "lib/write_claude_md.py:IRON_LAWS"
+  ],
+  "schema_version": "1.0.0",
+  "size_chars": 819,
+  "summary": "---"
+}

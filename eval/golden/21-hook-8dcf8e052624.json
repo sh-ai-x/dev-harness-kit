@@ -1,0 +1,14 @@
+{
+  "asset": ".claude-plugin/plugin/hooks/stop-verify.sh",
+  "asset_kind": "hook",
+  "baseline_hash": "sha256:579e560990374d6329e9a94379148f41",
+  "captured_at": "2026-07-04T16:35:00+09:00",
+  "code_refs": [
+    ".claude-plugin/plugin/hooks/stop-verify.sh"
+  ],
+  "expected_behavior": "Stable hook asset for dev-harness-kit 0.1.0",
+  "iron_law_refs": [],
+  "schema_version": "1.0.0",
+  "size_chars": 815,
+  "summary": "#!/usr/bin/env bash"
+}

@@ -1,0 +1,17 @@
+{
+  "asset": "skills/bootstrap/bootstrap-codebase-map/SKILL.md",
+  "asset_kind": "skill",
+  "baseline_hash": "sha256:199ed2c0e5187947bf42fdc342b89355",
+  "captured_at": "2026-07-04T16:35:00+09:00",
+  "code_refs": [
+    "skills/bootstrap/bootstrap-codebase-map/SKILL.md"
+  ],
+  "expected_behavior": "Stable skill asset for dev-harness-kit 0.1.0",
+  "iron_law_refs": [
+    "CLAUDE.md §1 L1 No-Test-No-Code",
+    "lib/write_claude_md.py:IRON_LAWS"
+  ],
+  "schema_version": "1.0.0",
+  "size_chars": 1753,
+  "summary": "---"
+}

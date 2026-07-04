@@ -1,0 +1,14 @@
+{
+  "asset": ".claude-plugin/plugin/hooks/slop-detector.sh",
+  "asset_kind": "hook",
+  "baseline_hash": "sha256:74ca92d463dfcb401d9b1e97e521204f",
+  "captured_at": "2026-07-04T16:35:00+09:00",
+  "code_refs": [
+    ".claude-plugin/plugin/hooks/slop-detector.sh"
+  ],
+  "expected_behavior": "Stable hook asset for dev-harness-kit 0.1.0",
+  "iron_law_refs": [],
+  "schema_version": "1.0.0",
+  "size_chars": 1101,
+  "summary": "#!/usr/bin/env bash"
+}

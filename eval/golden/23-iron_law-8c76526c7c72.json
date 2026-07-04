@@ -1,0 +1,17 @@
+{
+  "asset": "lib/write_claude_md.py: L1_NO_TEST_NO_CODE = \"No prod code witho",
+  "asset_kind": "iron_law",
+  "baseline_hash": "sha256:6abd5479a54f4d7ffacb2e98a6ad328d",
+  "captured_at": "2026-07-04T16:35:00+09:00",
+  "code_refs": [
+    "lib/write_claude_md.py: L1_NO_TEST_NO_CODE = \"No prod code witho"
+  ],
+  "expected_behavior": "Stable iron_law asset for dev-harness-kit 0.1.0",
+  "iron_law_refs": [
+    "CLAUDE.md §1 L1 No-Test-No-Code",
+    "lib/write_claude_md.py:IRON_LAWS"
+  ],
+  "schema_version": "1.0.0",
+  "size_chars": 121,
+  "summary": "L1_NO_TEST_NO_CODE = \"No prod code without verification artifact (test/contract/"
+}

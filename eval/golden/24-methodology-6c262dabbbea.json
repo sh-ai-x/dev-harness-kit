@@ -1,0 +1,14 @@
+{
+  "asset": "lib/methodology/tdd.py",
+  "asset_kind": "methodology",
+  "baseline_hash": "sha256:6b7ecaeba9ef2b836627efdc999ef4d0",
+  "captured_at": "2026-07-04T16:35:00+09:00",
+  "code_refs": [
+    "lib/methodology/tdd.py"
+  ],
+  "expected_behavior": "Stable methodology asset for dev-harness-kit 0.1.0",
+  "iron_law_refs": [],
+  "schema_version": "1.0.0",
+  "size_chars": 1259,
+  "summary": "#!/usr/bin/env python3"
+}
