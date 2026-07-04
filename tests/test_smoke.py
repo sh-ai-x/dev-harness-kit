@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """test_smoke.py — End-to-end smoke test for dev-kit.
 
-Validates that all 5 → 1 mapping is correct:
-- All 13 skills absorb correctly
-- All 15 commands present (0-arg)
-- All 4 hooks bash scripts executable + syntactically valid
-- All 9 stage→hook mapping in active_hooks_codec
+Validates the plugin-only structure:
+- All 27 skills present (flat: skills/<name>/SKILL.md; former commands merged in)
+- All 5 hook bash scripts executable + syntactically valid (hooks/)
+- 7 stage→hook mapping in active_hooks_codec
 - Iron Laws are SSOT in CLAUDE.md
 - Naming convention enforced (subset of test_naming.py)
 """
@@ -19,8 +18,7 @@ import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
-SKILL_COUNT = 17
-COMMAND_COUNT = 15
+SKILL_COUNT = 27
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",
@@ -36,13 +34,8 @@ class TestSmoke(unittest.TestCase):
         found = list(skills_dir.rglob("SKILL.md"))
         self.assertEqual(len(found), SKILL_COUNT, f"Expected {SKILL_COUNT} skills, got {len(found)}")
 
-    def test_commands_count(self):
-        commands_dir = PROJECT_ROOT / ".claude-plugin" / "plugin" / "commands"
-        found = list(commands_dir.glob("*.md"))
-        self.assertEqual(len(found), COMMAND_COUNT, f"Expected {COMMAND_COUNT} commands, got {len(found)}")
-
     def test_hook_scripts_exist_and_executable(self):
-        hooks_dir = PROJECT_ROOT / ".claude-plugin" / "plugin" / "hooks"
+        hooks_dir = PROJECT_ROOT / "hooks"
         for h in HOOK_SCRIPTS:
             path = hooks_dir / h
             self.assertTrue(path.exists(), f"hook missing: {path}")

@@ -59,16 +59,12 @@ cp "$SRC/active_hooks_codec.py" "$TARGET/lib/" 2>/dev/null || true
 cp "$SRC/write_claude_md.py" "$TARGET/lib/" 2>/dev/null || true
 cp "$SRC/execute.py" "$TARGET/lib/" 2>/dev/null || true
 
-# Skills (categories x skill-name)
-if [ -d "$SRC/../../skills" ]; then
-  for category_dir in "$SRC/../../skills"/*/; do
-    cat_name=$(basename "$category_dir")
-    mkdir -p "$TARGET/.claude/skills/$cat_name"
-    for skill_dir in "$category_dir"*/; do
-      skill_name=$(basename "$skill_dir")
-      mkdir -p "$TARGET/.claude/skills/$cat_name/$skill_name"
-      cp "$skill_dir/SKILL.md" "$TARGET/.claude/skills/$cat_name/$skill_name/" 2>/dev/null || true
-    done
+# Skills (flat: skills/<skill-name>/SKILL.md — one level, Claude Code plugin convention)
+if [ -d "$SRC/../skills" ]; then
+  for skill_dir in "$SRC/../skills"/*/; do
+    skill_name=$(basename "$skill_dir")
+    mkdir -p "$TARGET/.claude/skills/$skill_name"
+    cp "$skill_dir/SKILL.md" "$TARGET/.claude/skills/$skill_name/" 2>/dev/null || true
   done
 fi
 

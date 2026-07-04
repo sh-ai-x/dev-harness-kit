@@ -5,9 +5,9 @@
 ## Skill 디렉토리 / 파일
 
 - **포맷**: `<category>-<verb-or-noun>.md` (kebab-case, 영문)
-- **디렉토리**: `skills/<category>/<skill-name>/SKILL.md`
+- **디렉토리**: `skills/<skill-name>/SKILL.md` (한 단계 — Claude Code 플러그인 스캔 규약; category는 frontmatter에 유지)
 - **Frontmatter `name:`** = directory 마지막 segment
-- **Frontmatter `category:`** ∈ {`bootstrap`, `plan`, `design`, `build`, `review`, `security`, `audit`, `shortcuts`, `ship`}
+- **Frontmatter `category:`** ∈ {`bootstrap`, `plan`, `design`, `build`, `review`, `security`, `audit`, `shortcuts`, `ship`, `config`, `eval`, `onboard`, `repair`, `status`}
 
 ### 카테고리별 명명 패턴
 
@@ -17,8 +17,8 @@
 | `plan` | `plan-<actor>` | `plan-ralph` |
 | `design` | `design-<instrument>` | (deprecated — merged into plan) |
 | `build` | `build-<discipline>` | `build-engine`, `build-tdd`, `build-debug`, `build-verify`, `build-simplify`, `build-methodology` |
-| `review` | `review-<subject>` | `review-code` |
-| `security` | `security-<subject>` | `security-scan` |
+| `review` | `review-<subject>` | (none — `review` is standalone) |
+| `security` | `security-<subject>` | (none — `security` is standalone) |
 | `audit` | `audit-<subject>` | `audit-slop`, `audit-secret` |
 | `shortcuts` | `shortcut-<name>` | `shortcut-tdd-fast`, `shortcut-quick-fix` |
 | `ship` | (no skill, gate only) | — |

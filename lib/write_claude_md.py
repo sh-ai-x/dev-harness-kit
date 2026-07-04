@@ -40,7 +40,7 @@ def render_stub_section_3(project_root: Path) -> str:
         "```\n"
         f"{project_root}\n"
         "  ├─ .claude-plugin/{marketplace,plugin/{plugin,hooks}}.json\n"
-        "  ├─ skills/<cat>/<skill>/SKILL.md  (13 skills × 9 categories)\n"
+        "  ├─ skills/<skill-name>/SKILL.md  (flat, 1 level; category in frontmatter)\n"
         "  ├─ commands/<cmd>.md  (15 commands, 0-arg)\n"
         "  ├─ lib/{state_codec,active_hooks_codec,write_claude_md,...}.py\n"
         "  └─ eval/{golden,prompts,fixtures}/\n"

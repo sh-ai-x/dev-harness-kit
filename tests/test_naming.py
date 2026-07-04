@@ -18,7 +18,8 @@ from pathlib import Path
 # Use direct path manipulation since this test reads filesystem
 PROJECT_ROOT = Path(__file__).parent.parent
 ALLOWED_CATEGORIES = frozenset({
-    "bootstrap", "plan", "design", "build", "review", "security", "audit", "shortcuts", "ship"
+    "bootstrap", "plan", "design", "build", "review", "security", "audit", "shortcuts", "ship",
+    "config", "eval", "onboard", "repair", "status",
 })
 KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
 
@@ -41,7 +42,7 @@ class TestNaming(unittest.TestCase):
             self.skipTest("no skills dir yet")
         mismatches = []
         for skill_dir in skills_dir.rglob("SKILL.md"):
-            expected_dir_name = skill_dir.parent.name  # skills/<category>/<this>/SKILL.md
+            expected_dir_name = skill_dir.parent.name  # skills/<skill-name>/SKILL.md
             text = skill_dir.read_text(encoding="utf-8")
             name_field = extract_frontmatter_field(text, "name")
             if name_field != expected_dir_name:
@@ -51,9 +52,9 @@ class TestNaming(unittest.TestCase):
         self.assertEqual(mismatches, [], f"Naming mismatches (MUST-NOT-15):\n" + "\n".join(mismatches))
 
     def test_skill_categories_valid(self):
-        # Walk both `skills/` (plugin internal) and `.claude/skills/` (action auto-load)
+        # Plugin-only: walk `skills/` (flat, one level). category comes from frontmatter.
         invalid = []
-        for skills_dir_name in ("skills", ".claude/skills"):
+        for skills_dir_name in ("skills",):
             skills_dir = PROJECT_ROOT / skills_dir_name
             if not skills_dir.exists():
                 continue

@@ -11,7 +11,7 @@
 - **Active Hooks**: secret-scan=read-only. 그 외 OFF.
 - **Hand-off out**: bootstrap→plan.md (사용자 OK 다음)
 
-## Stage 1 — Plan+Design (`/dev-kit:plan`, alias `/dev-kit:design` DEPRECATED)
+## Stage 1 — Plan+Design (`/dev-kit:plan`)
 - **Goal**: idea → PRD.md + phases/<name>/step<N>.md
 - **Must**: 6 gates (frame → evidence → diff → non-goals → socratic → prd-writer) + Seed convergence + Phase 분해. **단일 Ralph loop, safety_valve=8** (MUST-50, MUST-15).
 - **Must-Not**: 코드·빌드·배포 작성. PRD.md 외 산출물 작성. /dev-kit:plan 외 sub-step 호출 ❌. 동일답변 ≥ 2회.
@@ -35,7 +35,7 @@
 - **Must**: 각 finding에 `failure_scenario` + `confidence`. **단일 메시지 3-dim fan-out**. verifier pass 별개.
 - **Must-Not**: verifier pass 생략 ❌. 미증거 critical 보고 ❌.
 - **AC**: PR summary **Verdict:** + 정렬된 inline findings. severity별 카운트.
-- **Active Skills**: review-code
+- **Active Skills**: review
 - **Active Hooks**: slop-detector, secret-scan, stop-verify = ON. review-pre-commit (git) + dev-kit-review.yml (CI).
 - **Hand-off out**: review→ship.md
 
@@ -44,7 +44,7 @@
 - **Must**: per-category breakdown table. 단일 메시지 10차원 fan-out. verifier CONFIRMED ≥ 5.
 - **Must-Not**: A0X ID 누락. 미증거 critical.
 - **AC**: per-category table. severity별 verdict.
-- **Active Skills**: security-scan
+- **Active Skills**: security
 - **Active Hooks**: Review와 동일.
 - **Hand-off out**: security→ship.md (Review와 독립)
 

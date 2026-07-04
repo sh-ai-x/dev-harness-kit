@@ -49,8 +49,8 @@
 | `.claude-plugin/marketplace.json` | (1 file) | dev-harness-kit marketplace 선언 | `test_marketplace_valid` | `test_install.sh_dependency` |
 | `.claude-plugin/plugin/plugin.json` | (1 file) | name=dev-harness-kit, v0.1.0 | `test_plugin_json_schema` | `test_naming_consistent` |
 | `hooks/hooks.json` (전부 `exit 0`) | (1 file) | Pre/Post/Stop × 2 = 6 hook, single file | `test_hooks_json_all_exit0` | `test_hook_portable_paths` |
-| `skills/bootstrap/bootstrap-sanity/SKILL.md` | (1 file) | 결정론 read-only audit, regex+glob 0건 | `test_sanity_deterministic` | `test_sanity_readonly_no_modify` |
-| `skills/bootstrap/bootstrap-codebase-map/SKILL.md` | (1 file) | 4 섹션 결정론 합성 → CLAUDE.md §3 | `test_codebase_map_stub` | `test_codebase_map_5line` |
+| `skills/bootstrap-sanity/SKILL.md` | (1 file) | 결정론 read-only audit, regex+glob 0건 | `test_sanity_deterministic` | `test_sanity_readonly_no_modify` |
+| `skills/bootstrap-codebase-map/SKILL.md` | (1 file) | 4 섹션 결정론 합성 → CLAUDE.md §3 | `test_codebase_map_stub` | `test_codebase_map_5line` |
 | `commands/bootstrap.md` | (1 file) | `/dev-kit:bootstrap` 0-arg orchestrator | `test_bootstrap_command_zero_arg` | `test_bootstrap_stage_aware_hooks` |
 | `lib/{state_codec,active_hooks_codec,write_claude_md}.py` | (3 files) | 각각 snake_case.py, ≥1 test | `test_state_codec_roundtrip` 등 | `test_<module>_ssot` |
 | `.env.example` | (1 file) | Provider + Token 환경변수 템플릿 | `test_env_example_keys` | `test_install_doc_consistent` |

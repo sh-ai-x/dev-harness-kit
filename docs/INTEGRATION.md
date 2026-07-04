@@ -4,10 +4,10 @@
 
 | 옛 repo | 흡수 위치 | 비고 |
 |---|---|---|
-| `pm-prd-fast` | `skills/plan/plan-ralph/SKILL.md` | Plan+Ralph loop, 6 gates + Seed convergence 통합 (MUST-50) |
+| `pm-prd-fast` | `skills/plan-ralph/SKILL.md` | Plan+Ralph loop, 6 gates + Seed convergence 통합 (MUST-50) |
 | `interview-harness-skills` | (`plan-ralph`에 흡수) | Seed convergence → plan-ralph 안의 phase 2 |
-| `dev-harness` | `lib/execute.py` + `skills/build/build-*` | harness-runner engine + 5 disciplines |
-| `claude-review-plugins` | `skills/review/review-code/` + `skills/security/security-scan/` + `cli/lib/install.sh` | 3-dim + 10-dim. install.sh 듀얼 배포 |
+| `dev-harness` | `lib/execute.py` + `skills/build-*` | harness-runner engine + 5 disciplines |
+| `claude-review-plugins` | `skills/review/` (3-dim) + `skills/security/` (10-dim OWASP) | review-code/security-scan 기능 통합 → review/security 로 단일화 |
 | `slop-shield` | `hooks/slop-detector.sh` + `hooks/secret-scan.sh` (slop-shield). Iron Laws → CLAUDE.md §1 | stop-verify 흡수, slop-detector SSOT |
 
 ## Hook 통합
@@ -20,7 +20,7 @@
 | slop-shield slop-detector | `hooks/slop-detector.sh` (SLOP= SSOT) | PostToolUse, advisory |
 | slop-shield verify-gate | `hooks/stop-verify.sh` (통합) | Stop event, fail-open |
 | dev-harness stop-verify | (위와 통합) | Stop event |
-| claude-review-plugins pre-commit | `.githooks/pre-commit` (CI용) | review-code shell call |
+| claude-review-plugins pre-commit | `.githooks/pre-commit` (CI용) | review shell call |
 | claude-review-plugins pre-push | `.githooks/pre-push` (main-block) | main push 차단 |
 
 ## 매핑 도식

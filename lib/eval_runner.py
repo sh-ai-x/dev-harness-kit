@@ -30,7 +30,7 @@ def discover_assets(project_root: Path) -> List[Dict]:
 
     Discovers:
     - CLAUDE.md (kind=claude_md)
-    - skills/<cat>/<name>/SKILL.md (kind=skill)
+    - skills/<name>/SKILL.md (kind=skill)
     - .claude-plugin/plugin/hooks/*.sh (kind=hook)
     - lib/write_claude_md.py IRON_LAWS (kind=iron_law)
     - lib/methodology/*.py excluding abc.py (kind=methodology)
