@@ -7,7 +7,7 @@ on:
     # Direct push to main triggers branch-policy job (warn-only).
     # Enforced via .githooks/pre-push locally.
   pull_request:
-    branches: [main]
+    branches: [dev, stage, main]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 

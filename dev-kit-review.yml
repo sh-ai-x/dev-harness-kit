@@ -1,0 +1,36 @@
+name: dev-kit-review (MiniMax LLM)
+
+on:
+  pull_request:
+    branches: [dev, stage, main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  llm-review:
+    name: LLM review (MiniMax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install gh CLI (already in image)
+        run: gh --version || (apt-get update && apt-get install -y gh)
+
+      - name: Run MiniMax reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINMAX_API_KEY: ${{ secrets.MINMAX_API_KEY }}
+          JUDGE_PROVIDER: minimax
+          JUDGE_MODEL: MiniMax-M3[1m]
+        run: |
+          PYTHONPATH=lib python lib/reviewer.py
+
+      - name: Score to workflow summary
+        run: |
+          echo "## MiniMax Review"
+          echo "Posted review comment to PR (status: 4-axis scores via secrets.MINMAX_API_KEY)"
