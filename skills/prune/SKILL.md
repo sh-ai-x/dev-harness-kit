@@ -38,11 +38,14 @@ phase's green evidence.
 
 - 0-arg: whole project directory. Optional `<path>` narrows scope to a
   subtree (passed through to each phase).
-- Refuse to start if `.dev-kit/ci-config.json` is absent OR
-  `ci_setup_version` < `0.2.0`. Run `/dev-kit:ci-setup` first.
-- The test suite must be runnable in < 10 minutes. If the existing
-  suite is heavier, run `/dev-kit:feat-revise` for the affected
-  feature first to keep per-pass gates fast.
+- No version-gated preconditions. The dev-harness-kit repo itself is
+  the provider of `/dev-kit:ci-setup`, so requiring a consumer-side
+  `ci-config.json` here is self-referential. The phase-1 inspect
+  baseline + phase-2 per-pass green tests (MUST-L1, MUST-L3) already
+  enforce a runnable, fast test suite.
+- The test suite must be discoverable and runnable in < 10 minutes.
+  If the existing suite is heavier, run `/dev-kit:feat-revise` for
+  the affected feature first to keep per-pass gates fast.
 - Optional `--phase N` (1|2|3) re-runs only that phase. Default: all
   three in order.
 - Optional `--dry-run` (default: ON for first pass). The skill never
