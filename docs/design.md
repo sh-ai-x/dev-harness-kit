@@ -60,7 +60,7 @@ Nothing else changes. The mirrored `SKILL.md` is byte-identical to the canonical
 
 For all 42 skills (minus any `runtimes: claude-only` opt-outs), `lib/skill_sync.py` creates `.agents/skills/dev-kit-<name>` as a **symlink** to `../../../skills/<name>/` (falling back to a recursive copy only if symlinks prove awkward for Codex's directory walk in practice — not designed around speculatively). No rewriting: the `SKILL.md` Codex reads is the exact canonical file, `when_to_use` and all — Codex ignores what it doesn't recognize per §3.2.
 
-A sidecar `agents/openai.yaml` is written **only where Codex's default diverges from canonical intent**. Codex defaults `allow_implicit_invocation: true` (§3.1) — which already matches every model-use skill (`disable-model-invocation: false`, 14 skills today) with **zero extra file**. The sidecar is needed only for the ~25 human-use skills that set `disable-model-invocation: true` and want Codex to require explicit `$skill` invocation too: those get a one-line `agents/openai.yaml: allow_implicit_invocation: false`. That is the entire "generation" surface for this design — one sidecar file, for roughly 25 of 42 skills, not a per-skill artifact for all 42.
+A sidecar `agents/openai.yaml` is written **only where Codex's default diverges from canonical intent**. Codex defaults `allow_implicit_invocation: true` (§3.1) — which already matches every skill with `disable-model-invocation: false` or unset. Checking the actual frontmatter across all 42 skills: only **one** (`plan`) sets `disable-model-invocation: true` today — every other human-use skill (`ship`, `review`, `security`, `bootstrap`, `status`, `onboard`, `repair`, `log`, `config`, `ci-setup`, etc.) leaves it `false`/unset, same as the 14 model-use skills, so Codex's default already matches them too. That is the entire "generation" surface for this design — one sidecar file, for exactly 1 of 42 skills today (`plan`'s `agents/openai.yaml: allow_implicit_invocation: false`), not a per-skill artifact for all 42. The count grows only as more skills adopt `disable-model-invocation: true` in the future — it is not a fixed ~25-skill tax.
 
 `AGENTS.md` is left as-is (a pointer to `CLAUDE.md`) — it is the project-instruction analogue, not a skill target, so the sync step does not touch it. Codex hooks are out of scope for this skill-mirroring step (see §5).
 
@@ -77,8 +77,8 @@ This is honest: there is no MiniMax plugin format to target, and inventing one w
 
 | Canonical (Claude Code) | Codex CLI | MiniMax |
 |---|---|---|
-| `disable-model-invocation: true` (human-use) | `agents/openai.yaml: allow_implicit_invocation: false` (explicit `$skill`) | inherits the harness it runs in |
-| `user-invocable: false` (model-use) | Codex default (`allow_implicit_invocation: true`) already matches — no sidecar needed | inherits |
+| `disable-model-invocation: true` (only `plan` today) | `agents/openai.yaml: allow_implicit_invocation: false` (explicit `$skill`) | inherits the harness it runs in |
+| `disable-model-invocation: false`/unset (41 of 42 skills, human-use and model-use alike) | Codex default (`allow_implicit_invocation: true`) already matches — no sidecar needed | inherits |
 | `allowed-tools` / `disallowed-tools` | **No per-skill equivalent.** Degrades to session `sandbox_mode` + `approval_policy`; MCP tools surfaced as `tool_dependencies` only | inherits |
 | `model:` (opus/sonnet/haiku) | Ignored — Codex session picks the model | With MiniMax, the model is whatever endpoint is configured |
 | `category`, `when_to_use` | Ignored by Codex reader (mirrored file still carries them, harmlessly) | n/a |
@@ -113,7 +113,7 @@ Adding `skills-sync` bumps the skill count 42 → 43: update `tests/test_smoke.p
 
 ## Decision
 
-Adopt the mirror/sync architecture: canonical Claude Code `skills/<name>/SKILL.md` stays authoritative and untouched; `lib/skill_sync.py` (driven by a new human-use `skills-sync` skill) symlinks — or, only as a fallback, copies — each one into the open-standard `.agents/skills/dev-kit-<name>` path that Codex CLI already scans. There is no parser, no rewriter, no build pipeline; a one-field sidecar (`agents/openai.yaml`) is written only for the ~25 human-use skills where Codex's default invocation behavior would otherwise diverge from canonical intent. MiniMax is served by a documented base-URL recipe with no artifact at all. Compatibility comes from mirroring the existing skills into a path Codex already discovers, not from a transformation layer — which is exactly the minimal-diff shape Codex's own convergence on the SKILL.md standard makes possible.
+Adopt the mirror/sync architecture: canonical Claude Code `skills/<name>/SKILL.md` stays authoritative and untouched; `lib/skill_sync.py` (driven by a new human-use `skills-sync` skill) symlinks — or, only as a fallback, copies — each one into the open-standard `.agents/skills/dev-kit-<name>` path that Codex CLI already scans. There is no parser, no rewriter, no build pipeline; a one-field sidecar (`agents/openai.yaml`) is written only for the skills where `disable-model-invocation: true` makes Codex's default invocation behavior diverge from canonical intent — exactly one skill (`plan`) today, growing only as more skills adopt that field. MiniMax is served by a documented base-URL recipe with no artifact at all. Compatibility comes from mirroring the existing skills into a path Codex already discovers, not from a transformation layer — which is exactly the minimal-diff shape Codex's own convergence on the SKILL.md standard makes possible.
 
 ## References
 
