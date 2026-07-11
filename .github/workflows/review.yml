@@ -16,17 +16,17 @@ name: PR Review
 # Secret name `MINMAX_API_KEY` is preserved from prior workflow — do not
 # rename (would break existing repo secret config).
 #
-# Provider selection (pull_request events): controlled by the repo-level
-# Actions VARIABLE `CI_REVIEW_PROVIDER` (Settings → Secrets and variables →
-# Actions → Variables — NOT a secret, since it holds no credential), one of
-# `minimax` / `anthropic` / `deepseek`. Defaults to `minimax` if unset. This
-# lets a maintainer switch providers at any time (e.g. MiniMax quota
-# exhausted) by editing the repo variable — no workflow_dispatch, no code
-# change, no automatic fallback chain to reason about. workflow_dispatch
-# still accepts an explicit `review_provider` input that overrides the repo
-# variable for a single manual run. Each provider requires its matching
-# secret to be configured: `MINMAX_API_KEY`, `ANTHROPIC_API_KEY`, or
-# `DEEPSEEK_API_KEY`.
+# Provider selection (pull_request events): controlled by the git-tracked
+# file `.github/ci-review-provider.txt` (one of `minimax` / `anthropic` /
+# `deepseek` on its own line, defaults to `minimax` if the file is missing
+# or empty). This is a plain local file — edit it, commit, push, and the
+# very next PR-triggered run picks it up. No GitHub Settings UI, no
+# workflow_dispatch, no automatic fallback chain to reason about: whatever
+# is committed on the PR's branch (checked out by `actions/checkout` below)
+# is what runs. workflow_dispatch still accepts an explicit
+# `review_provider` input that overrides the file for a single manual run.
+# Each provider requires its matching secret to be configured:
+# `MINMAX_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
 
 on:
   pull_request:
@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       review_provider:
-        description: "Provider for this run (default: repo variable CI_REVIEW_PROVIDER, else minimax)"
+        description: "Provider for this run (default: .github/ci-review-provider.txt, else minimax)"
         required: false
         default: ""
         type: choice
@@ -88,14 +88,13 @@ jobs:
         id: provider
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VAR_PROVIDER: ${{ vars.CI_REVIEW_PROVIDER }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             provider="${{ github.event.inputs.review_provider }}"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            provider="$VAR_PROVIDER"
+            provider="$(tr -d '[:space:]' < .github/ci-review-provider.txt 2>/dev/null || true)"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
           echo "provider=${provider:-minimax}" >> "$GITHUB_OUTPUT"
@@ -225,14 +224,13 @@ jobs:
         id: provider
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VAR_PROVIDER: ${{ vars.CI_REVIEW_PROVIDER }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             provider="${{ github.event.inputs.review_provider }}"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            provider="$VAR_PROVIDER"
+            provider="$(tr -d '[:space:]' < .github/ci-review-provider.txt 2>/dev/null || true)"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
           echo "provider=${provider:-minimax}" >> "$GITHUB_OUTPUT"
