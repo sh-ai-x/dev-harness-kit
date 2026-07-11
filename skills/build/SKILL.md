@@ -18,7 +18,7 @@ Executes `phases/<name>/step{1..N}.md` end-to-end by spawning one `claude -p` su
 
 ## Pre-flight gate
 
-Refuses to start if `.dev-kit/ci-config.json` is absent OR `ci_setup_version` < `0.2.0` OR `min_version` > `ci_setup_version`. Run `/dev-kit:ci-setup` (or `/dev-kit:ci-setup --force` to refresh stale templates) first. See `templates/ci/scripts/validate.py:validate_min_version()` for the single-version gate; plugin-level only — no per-skill bookkeeping required.
+No preconditions. `/dev-kit:build` and `/dev-kit:ci-setup` are independent skills — install the CI templates when you want them (one-shot, no contract), skip the install otherwise. The dev-harness-kit plugin ships both skills; neither is a precondition for the other.
 
 ## Behavior
 

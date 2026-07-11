@@ -106,7 +106,7 @@ claude plugin marketplace add sh-ai-x/dev-harness-kit
 claude plugin install dev-kit
 # (live source: claude --plugin-dir /path/to/dev-harness-kit)
 
-# 3. One-shot setup (CLAUDE.md + AGENTS.md + active-hooks.json + 15 CI templates + marker)
+# 3. One-shot setup (CLAUDE.md + AGENTS.md + active-hooks.json + 15 CI templates)
 /dev-kit:bootstrap-full
 #    Equivalent to running `/dev-kit:bootstrap` then `/dev-kit:ci-setup --force` in sequence.
 #    Use the two separately when you only want one half.
@@ -376,7 +376,7 @@ These appear in slash autocomplete. Run them when you have a job to do.
 | Skill | When to use it |
 |---|---|
 | `/dev-kit:bootstrap` | Minimal CLAUDE.md + AGENTS.md + active-hooks.json on a fresh repo. No noise files by default. Use `/dev-kit:bootstrap-full` to also install CI templates. |
-| `/dev-kit:ci-setup` | Wire `.dev-kit/ci-config.json` + CI workflows. Re-run with `--force` to regenerate. |
+| `/dev-kit:ci-setup` | Install the 15 CI workflow + hook + script templates. Re-run with `--force` to regenerate. |
 | `/dev-kit:plan` | Design a feature before coding. Emits `phases/<name>/step<N>.md` + index.json. |
 | `/dev-kit:build` | Main TDD cycle. Per-phase execution against the plan. |
 | `/dev-kit:review` | 3-dim review of the diff (correctness + security + architecture). |
@@ -440,7 +440,7 @@ Whole-pipeline **refactor** in 3 gated phases — read-only baseline (`/dev-kit:
                  ↓ quoted: per-dim finding count + overall verdict
 ```
 
-Refuses to start without `.dev-kit/ci-config.json` (`ci_setup_version` >= 0.2.0 — run `/dev-kit:ci-setup` first). Optional `--phase N` (1|2|3) re-runs only that phase. Full contract: [`skills/refactor/SKILL.md`](skills/refactor/SKILL.md).
+No preconditions. Optional `--phase N` (1|2|3) re-runs only that phase. Full contract: [`skills/refactor/SKILL.md`](skills/refactor/SKILL.md).
 
 > **This skill rewrites code, it does not delete it.** For project-wide deletion of AI slop, dead code, and unused features, use `/dev-kit:prune` instead. For removing one named feature end-to-end, use `/dev-kit:feat-remove <feature>`.
 
@@ -583,13 +583,13 @@ After install, consumer repos get:
 
 ### `/dev-kit:ci-setup --force` — when to use vs when NOT
 
-`ci-setup` is **idempotent by default**. The marker file `.dev-kit/ci-config.json` records installed_at + content hashes; if all 15 EXPECTED_PATHS files are present and match, the re-run is a no-op (skip + report). `--force` overwrites the 15 EXPECTED_PATHS files regardless.
+`ci-setup` is **idempotent by default**. When all 15 EXPECTED_PATHS files are present, the re-run is a no-op (skip + report). `--force` overwrites the 15 EXPECTED_PATHS files regardless.
 
 **Use `--force` when:**
 - First install on a fresh repo (default install is also correct on a truly fresh repo, but `--force` is robust against partial installs from a previous attempt and against a stale plugin cache — see "First-time consumer setup" above)
 - A new template was added to dev-kit (e.g. `templates/ci/scripts/branch-policy.sh`) and you want it on your consumer repo
 - A template was fixed in dev-kit (e.g. PR #45 patched a stale `review.yml` gate) and you want the fix
-- You suspect the install is stale: marker exists but a template file is missing or drifted (often from a stale plugin cache — see "Plugin cache refresh" above)
+- You suspect the install is stale: a template file is missing or drifted (often from a stale plugin cache — see "Plugin cache refresh" above)
 - The lint pass on a previous install reported warnings that need a refresh to clear
 
 **Do NOT use `--force` when:**

@@ -1,7 +1,7 @@
 ---
 name: bootstrap-full
 category: bootstrap
-description: One-shot setup for new projects. Runs /dev-kit:bootstrap + /dev-kit:ci-setup in a single call — writes CLAUDE.md + AGENTS.md + active-hooks.json, then installs the 15 CI templates + pre-push hook + marker.
+description: One-shot setup for new projects. Runs /dev-kit:bootstrap + /dev-kit:ci-setup in a single call — writes CLAUDE.md + AGENTS.md + active-hooks.json, then installs the 15 CI templates + pre-push hook.
 when_to_use:
   - User types `/dev-kit:bootstrap-full` on a brand-new project and wants CLAUDE.md + CI in one shot
   - User does not want to chain `/dev-kit:bootstrap` then `/dev-kit:ci-setup` manually
@@ -17,7 +17,7 @@ user-invocable: true
 
 ## What it does
 
-Runs the full new-project pipeline in a single invocation: the three deterministic sub-skills (`bootstrap-sanity`, `bootstrap-codebase-map`, `bootstrap-active-hooks`) + `lib/write_project_md.py` (writes `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`), then immediately hands off to the same `lib/ci_setup.py:install_ci_config()` path used by `/dev-kit:ci-setup` (installs the 15 CI templates + pre-push hook + writes `.dev-kit/ci-config.json` marker + runs Phase 1.5 pre-flight probe + Phase 1.7 lint + Phase 3 verify). End state on disk is identical to running `/dev-kit:bootstrap` followed by `/dev-kit:ci-setup --force`, with no intermediate user prompts.
+Runs the full new-project pipeline in a single invocation: the three deterministic sub-skills (`bootstrap-sanity`, `bootstrap-codebase-map`, `bootstrap-active-hooks`) + `lib/write_project_md.py` (writes `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`), then immediately hands off to the same `lib/ci_setup.py:install_ci_config()` path used by `/dev-kit:ci-setup` (installs the 15 CI templates + pre-push hook + Phase 1.5 pre-flight probe + Phase 1.7 lint + Phase 3 verify). End state on disk is identical to running `/dev-kit:bootstrap` followed by `/dev-kit:ci-setup --force`, with no intermediate user prompts.
 
 `/dev-kit:bootstrap` and `/dev-kit:ci-setup` remain standalone for granular cases (refreshing just one half, or onboarding an existing project that already has CLAUDE.md but no CI).
 
@@ -38,7 +38,7 @@ No visible flags. No option prompts (MUST-NOT-13).
        ↓ (auto; --skip-ci short-circuits here)
 [2] ci-setup        (delegates to lib/ci_setup.py)
        ├── 1.5 pre-flight probe       → OK/WARN/INFO/SKIP per gh dep (non-blocking)
-       ├── install_ci_config()        → 15 EXPECTED_PATHS + .dev-kit/ci-config.json marker
+       ├── install_ci_config()        → 15 EXPECTED_PATHS
        └── 1.7 lint pass              → warnings printed as rows; non-fatal
        ↓ (auto; --skip-verify short-circuits here)
 [3] verify          (delegates to ci-setup Phase 3)
@@ -47,7 +47,7 @@ No visible flags. No option prompts (MUST-NOT-13).
        ├── scripts/validate.py        → expect "OK: CI installation valid"
        └── scripts/ci-local.sh        → expect exit 0
        ↓
-[4] exit → pointer to /dev-kit:plan or /dev-kit:build (ci-config.json marker satisfies build's pre-flight gate)
+[4] exit → pointer to /dev-kit:plan or /dev-kit:build
 ```
 
 ## Hook integration (stage=bootstrap)
@@ -66,16 +66,15 @@ Same matrix as `/dev-kit:bootstrap`. `active-hooks.json` SSOT auto-initialized (
 
 - **0-arg UX (MUST-21)**: zero args. Branching via `when_to_use` auto-match.
 - **Single hand-off**: no intermediate prompt between Phase 1 and Phase 2.
-- **Idempotent CI**: Phase 2 is marker-driven (same as standalone `ci-setup`). Without `--force`, re-runs are no-op on already-installed files.
+- **Idempotent CI**: Phase 2 is file-presence-driven (same as standalone `ci-setup`). Without `--force`, re-runs are no-op on already-installed files.
 - **Never modifies dev-kit's own repo**: writes only into the target (default `$PWD`, or `--target DIR`).
-- **Minimal file footprint**: default run touches `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`, `.dev-kit/ci-config.json`, and the 15 CI template paths listed in `skills/ci-setup/SKILL.md`. Use `--skip-ci` to land only the first three.
+- **Minimal file footprint**: default run touches `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`, and the 15 CI template paths listed in `skills/ci-setup/SKILL.md`. Use `--skip-ci` to land only the first three.
 
 ## Combined summary (printed on success)
 
 ```
 [bootstrap]  created: CLAUDE.md, AGENTS.md, .dev-kit/.active-hooks.json
 [ci-setup]   created: 15 files (see ci-setup/SKILL.md)
-             marker:   .dev-kit/ci-config.json
              verify:   OK (validate.py + ci-local.sh)
              warnings: 0
 ```
@@ -86,6 +85,6 @@ Same matrix as `/dev-kit:bootstrap`. `active-hooks.json` SSOT auto-initialized (
 
 ## Next step
 
-After `/dev-kit:bootstrap-full`, the target repo is ready for `/dev-kit:build` (the `.dev-kit/ci-config.json` marker satisfies `skills/build/SKILL.md`'s pre-flight gate). `/dev-kit:plan` is opt-in and only for idea → PRD.md synthesis — it is NOT the default next stage.
+After `/dev-kit:bootstrap-full`, the target repo is ready for `/dev-kit:build`. The CI template install inside bootstrap-full is independent of build — neither skill is a precondition for the other. `/dev-kit:plan` is opt-in and only for idea → PRD.md synthesis — it is NOT the default next stage.
 
 For incremental refresh, run `/dev-kit:ci-setup --force` (CI half) or `/dev-kit:bootstrap` (CLAUDE.md half) independently — both remain invocable.

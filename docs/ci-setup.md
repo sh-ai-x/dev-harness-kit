@@ -4,7 +4,7 @@ The `/dev-kit:ci-setup` skill installs dev-kit's reusable CI workflow templates,
 
 ## Post-install checklist
 
-After `/dev-kit:ci-setup` writes `.dev-kit/ci-config.json`, do these IN ORDER:
+After `/dev-kit:ci-setup` installs the CI templates, do these IN ORDER:
 
 1. **Add GitHub secrets.** The review + security workflows need LLM credentials. Use `gh secret set` from your local terminal:
    ```bash
@@ -23,7 +23,7 @@ The skill prints this checklist automatically (via `lib/ci_setup.py:POST_INSTALL
 
 ## When to use it
 
-Run `/dev-kit:ci-setup` once per project, after `/dev-kit:bootstrap` and before `/dev-kit:build`. The skill is idempotent, so re-running it is safe (use `--force` to refresh templates after dev-kit upgrades its CI shape).
+Run `/dev-kit:ci-setup` once per project (independently of `/dev-kit:bootstrap` and `/dev-kit:build` — none are preconditions for the others). The skill is idempotent, so re-running it is safe (use `--force` to refresh templates after dev-kit upgrades its CI shape).
 
 ## What gets installed
 
@@ -35,7 +35,7 @@ The skill copies 15 files from the `templates/ci/` source tree into the target p
 | `.github/workflows/auto-fix-pr.yml` | Auto-fix loop on `changes_requested` review (5-iteration cap, label counter, forbidden-path guard) |
 | `.github/workflows/review.yml` | `/dev-kit:review` (3-dim) + `/dev-kit:security` (10-dim) PR fan-out + severity gate. **Self-aware install step** (0.1.1+): detects self-install vs consumer-install at runtime |
 | `.githooks/pre-push` | Client-side block of `git push` to `main`; activate with `git config core.hooksPath .githooks` |
-| `scripts/validate.py` | Extracted from dev-kit's own `ci.yml` 5-step validate job; checks install + marker + bash syntax |
+| `scripts/validate.py` | Extracted from dev-kit's own `ci.yml` 5-step validate job; checks install + bash syntax |
 | `scripts/test.sh` | `pytest` wrapper (gracefully skips if no `tests/` directory) |
 | `scripts/branch-policy.sh` | Mirror of `pre-push` for CI script context |
 | `scripts/ci-local.sh` | Local-runner entrypoint: `validate.py` + `test.sh` + optional `act -l` |
@@ -47,7 +47,7 @@ The skill copies 15 files from the `templates/ci/` source tree into the target p
 | **`.claude/rules/git-workflow.md`** (0.1.1+) | The worktree rule (every task = new worktree + new session + new branch) |
 | **`tests/test_worktree_guard.py`** (0.1.1+) | 14 regression tests covering the worktree rule (blocks/allows/executable bits/etc.) |
 
-After install, the marker file `.dev-kit/ci-config.json` is written at the project root. The marker is the **contract** with `/dev-kit:build` — without it, build refuses to start.
+After install, the 15 EXPECTED_PATHS files are in place. There is no separate marker; the CI templates are plain files you own.
 
 ## How to verify
 
@@ -60,8 +60,7 @@ This is the same set of checks GitHub Actions runs in `ci.yml`, but without requ
 ```
 === validate ===
 validate.py — repo_root=/path/to/repo
-  - installation complete OK (15 files)
-  - ci-config marker OK (v0.1.2, schema 1.2.0)
+  - installation complete OK (8 files)
   - bash syntax OK (5 scripts clean)
   - test runner OK (bash -n clean)
 OK: CI installation valid
@@ -74,14 +73,7 @@ Optional: `act -l` lists the discovered workflows if `nektos/act` is installed; 
 
 ## Hand-off to build
 
-The skill writes `.dev-kit/ci-config.json` as a marker. `/dev-kit:build` will refuse to start unless this marker exists and `ci_setup_version` is current. If you see the gate message:
-
-```
-Pre-flight gate: refuse to start if `.dev-kit/ci-config.json` is absent.
-Run `/dev-kit:ci-setup` first.
-```
-
-…run `/dev-kit:ci-setup` (or re-run with `--force` if the marker is stale).
+`/dev-kit:ci-setup` and `/dev-kit:build` are independent skills. Neither is a precondition for the other. Install CI templates whenever you want them; run build on whatever cadence you want. There is no gate message to chase.
 
 ## FAQ
 
@@ -104,7 +96,7 @@ A: No — re-running without `--force` is idempotent and will skip existing file
 A: No. `scripts/ci-local.sh` runs the same validators locally on any POSIX host. `act` is optional — install from <https://nektos.act.dev> if you want full GitHub Actions parity (e.g., Docker-based matrix testing).
 
 **Q: How do I uninstall?**
-A: Delete `.dev-kit/ci-config.json`, then `git rm` the 8 installed files (or `rm -rf` them if the target repo is freshly built and not yet under version control). The CI templates are intentionally not deeply integrated — they're plain files you own.
+A: `git rm` the 8 installed files in `.github/`, `.githooks/`, and `scripts/` (or `rm -rf` them if the target repo is freshly built and not yet under version control). The CI templates are intentionally not deeply integrated — they're plain files you own.
 
 **Q: My CI fails on `Install dev-kit plugin` with `DEV_KIT_GITHUB_TOKEN secret is required`. What now?**
 A: The dev-harness-kit source repo (`sh-ai-x/dev-harness-kit`) is private. The consumer-install branch of `review.yml` clones it via `git clone https://x-access-token:${DEV_KIT_GITHUB_TOKEN}@github.com/sh-ai-x/dev-harness-kit.git`. To make this work in your CI:
@@ -120,9 +112,6 @@ A: The dev-harness-kit source repo (`sh-ai-x/dev-harness-kit`) is private. The c
   The install step exposes the secret as `${{ secrets.DEV_KIT_GITHUB_TOKEN }}` in both the `review` and `security` jobs. Without it, the consumer-install branch fails fast (exit 1) with a clear `::error::` message instead of a generic git auth failure.
 
   If dev-harness-kit is later made public, you can remove the secret and `git clone` will work without credentials. Re-run `/dev-kit:ci-setup --force` to refresh the install step if you want.
-
-**Q: Why is the marker file versioned?**
-A: So `/dev-kit:build` can refuse to run on stale templates after a dev-kit upgrade that changes the CI shape. Re-run `/dev-kit:ci-setup --force` after upgrading dev-kit to pick up new validator logic.
 
 **Q: Can I customize a file without losing changes on refresh?**
 A: Yes — when `/dev-kit:ci-setup --force` rewrites an `EXPECTED_PATHS` file, it does so verbatim from the template. Customizations live OUTSIDE that set (e.g., extra workflow files in `.github/workflows/`, additional Git hooks beyond `pre-push`). Files outside `EXPECTED_PATHS` are never touched.

@@ -1,8 +1,8 @@
 """ci_setup.py — Install dev-kit's reusable CI templates into a target project.
 
 Engine for the `/dev-kit:ci-setup` skill. Copies the canonical CI templates
-(from `templates/ci/`) into a target repo, writes the marker file
-`.dev-kit/ci-config.json`, and sets executable bits on shell scripts.
+(from `templates/ci/`) into a target repo and sets executable bits on shell
+scripts.
 
 Mirrors `lib/install.sh`'s conventions (mkdir -p + copy + summary), but:
 - Written in Python (cross-platform pathlib, no shell escaping on Windows).
@@ -20,12 +20,10 @@ import json
 import re
 import subprocess
 import os
-import re
 import shutil
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
@@ -71,26 +69,12 @@ EXECUTABLE_PATHS: tuple[str, ...] = (
     "hooks/lib/worktree-detect.sh",
 )
 
-MARKER_REL = ".dev-kit/ci-config.json"
-# Marker schema is content-only (no per-field version gate). Content is the
-# source of truth; _copy_template skips when bytes match.
-MARKER_SCHEMA_VERSION = "1.0.0"
-# Plugin release tag — kept ONLY as a back-compat alias for the marker field
-# `ci_setup_version`. The canonical plugin version lives at
-# `.claude-plugin/plugin.json:version` (restored from PR #31's removal in
-# feat/skill-versions). New code should read plugin_version(_PLUGIN_ROOT);
-# this constant is here so legacy test contracts that import the name still
-# resolve to the same value the marker carries.
-PLUGIN_CI_SETUP_VERSION = "0.3.0"
-
 # Per-skill semver (semver 2.0.0: X.Y.Z with optional `-prerelease`/`+build`).
-# Used by templates/ci/scripts/validate.py:validate_min_version to compare the
-# marker's `ci_setup_version` (mirror of plugin.json:version) against the
-# consumer's opt-in `min_version` floor. Self-contained — no `packaging` dep.
+# Used internally by `semver_lt()`. Self-contained — no `packaging` dep.
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 # Post-install checklist: rendered (opt-in via install_ci_config(print_checklist=True))
-# AFTER the marker is written. Each tuple is (number, command-block with notes).
+# AFTER the install completes. Each tuple is (number, command-block with notes).
 # Empty <OWNER>/<REPO> placeholder is filled at print time from
 # `git remote get-url origin` if a remote is configured; otherwise the literal
 # string is shown so the user can edit it.
@@ -118,7 +102,7 @@ class InstallReport:
 
     `created`/`overwritten`/`skipped` are lists of POSIX-style strings
     (forward slashes, relative to `target_dir`) for JSON-friendly output.
-    `marker_path` is an absolute Path. `elapsed_ms` is wall-clock duration.
+    `elapsed_ms` is wall-clock duration.
     `warnings` holds non-fatal findings from `lint_installed_workflows()`
     (e.g. a stale gate-tolerance pattern in a previously-installed
     workflow that the next `--force` refresh will replace).
@@ -129,7 +113,6 @@ class InstallReport:
     skipped: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
-    marker_path: str = ""
     elapsed_ms: int = 0
 
     @property
@@ -157,27 +140,6 @@ class ProbeResult:
 def _now_utc_iso() -> str:
     """ISO-8601 UTC timestamp, second precision."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _atomic_write_json(path: Path, data: dict) -> None:
-    """POSIX-atomic JSON write (mirrors `lib/atomic.atomic_write_json`).
-
-    Inline copy to avoid an import dependency on the plugin's own lib
-    (target projects install ONLY what's inside templates/ci/, not lib/*.py).
-    """
-    import json
-    import tempfile
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
-        os.replace(tmp, path)
-    except Exception:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
 
 
 def _copy_template(rel_path: str, target_dir: Path, *, force: bool) -> str:
@@ -366,50 +328,6 @@ def per_skill_drift(plugin_root: Path) -> dict:
     return result
 
 
-def _build_marker(min_version: str | None = None) -> dict:
-    """Build the `.dev-kit/ci-config.json` payload.
-
-    Args:
-        min_version: consumer's opt-in plugin-version floor. `None` →
-            the field is written as `"0.0.0"` (permissive default: every
-            released plugin satisfies a no-constraint floor). The explicit
-            argument prevents callers from accidentally clobbering a
-            consumer's declaration by omitting it.
-    """
-    return {
-        "schema_version": MARKER_SCHEMA_VERSION,
-        # Mirror of the canonical plugin version. Single source of truth
-        # is `.claude-plugin/plugin.json:version` (see `plugin_version()`).
-        # The legacy field name `ci_setup_version` is preserved so older
-        # scripts that print it (validate_marker) keep working.
-        "ci_setup_version": plugin_version(_PLUGIN_ROOT),
-        "installed_at": _now_utc_iso(),
-        "installed_by": "dev-kit:ci-setup",
-        "runners": ["ci.yml", "auto-fix-pr.yml", "review.yml"],
-        "scripts": [
-            "scripts/validate.py",
-            "scripts/test.sh",
-            "scripts/branch-policy.sh",
-            "scripts/ci-local.sh",
-        ],
-        "githooks": [".githooks/pre-push"],
-        "hooks": [
-            "hooks/worktree-guard.sh",
-            "hooks/task-detector.sh",
-            "hooks/session-start-check.sh",
-            "hooks/lib/worktree-detect.sh",
-            "hooks/hooks.json",
-        ],
-        "rules": [".claude/rules/git-workflow.md"],
-        "tests": ["tests/test_worktree_guard.py"],
-        # Consumer's opt-in plugin-version floor. `"0.0.0"` = any released
-        # plugin satisfies (permissive default; no behavior change for
-        # consumers who never edit the field). PR-gate comparison lives
-        # in templates/ci/scripts/validate.py:validate_min_version.
-        "min_version": min_version or "0.0.0",
-    }
-
-
 def install_ci_config(
     target_dir: Path,
     *,
@@ -417,11 +335,12 @@ def install_ci_config(
     print_checklist: bool = False,
     lint: bool = True,
 ) -> InstallReport:
-    """Install dev-kit's CI templates into `target_dir`. Idempotent + content-aware.
+    """Install dev-kit's CI templates into `target_dir`. Idempotent.
 
-    A no-op (all files skipped, marker reused) when the marker exists and every
-    EXPECTED_PATHS file is already in place. With `force=True`, all template
-    files are overwritten regardless.
+    A no-op (all EXPECTED_PATHS reported as `skipped`) when every
+    template file is already in place. With `force=True`, all template
+    files are overwritten regardless. There is no separate install
+    marker; idempotency comes from the file-presence check alone.
 
     Args:
         target_dir: absolute path to the target project root. Must exist
@@ -429,12 +348,12 @@ def install_ci_config(
         force: when True, overwrite existing target files matching
             EXPECTED_PATHS. Default False (skip + report).
         print_checklist: when True and the install succeeds (no errors),
-            print the post-install checklist after the marker is written.
+            print the post-install checklist after the copy loop.
             Default False to preserve existing test contracts.
 
     Returns:
-        InstallReport with created/overwritten/skipped/errors lists and the
-        path to the marker file (always written unless target is read-only).
+        InstallReport with created/overwritten/skipped/errors lists and
+        the wall-clock duration in `elapsed_ms`.
 
     Raises:
         FileNotFoundError: target_dir is missing or not a directory, OR a
@@ -454,19 +373,6 @@ def install_ci_config(
 
     report = InstallReport()
 
-    # Presence-based "already installed" detection: marker exists AND every
-    # template file is present ⇒ nothing to copy. Phase 1 of the skill body
-    # can still detect "already installed" via marker_path.
-    existing_marker = target / MARKER_REL
-    if existing_marker.exists() and not force:
-        if all((target / rel).exists() for rel in EXPECTED_PATHS):
-            report.skipped.extend(EXPECTED_PATHS)
-            report.marker_path = str(existing_marker)
-            report.elapsed_ms = int((time.monotonic() - started) * 1000)
-            if lint:
-                report.warnings.extend(lint_installed_workflows(target))
-            return report
-
     for rel in EXPECTED_PATHS:
         try:
             outcome = _copy_template(rel, target, force=force)
@@ -483,30 +389,8 @@ def install_ci_config(
     # Set executable bit on shell-style files + validate.py.
     _chmod_executable(EXECUTABLE_PATHS, target)
 
-    # Write marker (overwrites on force, always succeeds idempotently).
-    # Preserve the consumer's opt-in `min_version` floor so a
-    # `ci-setup --force` does NOT clobber a deliberate declaration. Read
-    # the existing marker (if any) just before the write; absent or
-    # unparseable → default to "0.0.0" (permissive — every released
-    # plugin satisfies it).
-    marker = target / MARKER_REL
-    preserved_min_version: str | None = None
-    if existing_marker.exists():
-        try:
-            existing_data = json.loads(existing_marker.read_text(encoding="utf-8"))
-            if isinstance(existing_data, dict):
-                raw = existing_data.get("min_version")
-                if isinstance(raw, str) and raw:
-                    preserved_min_version = raw
-        except (OSError, json.JSONDecodeError):
-            preserved_min_version = None
-    _atomic_write_json(marker, _build_marker(min_version=preserved_min_version))
-    report.marker_path = str(marker)
-
     # Lint pass on installed workflows -- catches stale gate patterns and
     # other known-bad shapes that local validate.py + ci-local.sh pass.
-    # Always runs on a fresh install; on a no-op idempotent re-install the
-    # skill body may opt out via the kwarg below.
     if lint:
         report.warnings.extend(lint_installed_workflows(target))
 
@@ -657,8 +541,7 @@ def _print_post_install_checklist(target_dir: Path) -> None:
             else:
                 print(f"  {n}. {line}")
     print()
-    print(f"Marker: {target_dir / MARKER_REL}")
-    print("Verify: bash scripts/ci-local.sh")
+    print(f"Verify: bash scripts/ci-local.sh")
 
 
 # Patterns of known-bad install artifacts that the lint pass surfaces.

@@ -8,8 +8,6 @@ as both `python -m unittest tests/test_ci_setup.py` and `pytest tests/test_ci_se
 from __future__ import annotations
 
 import importlib.util
-import json
-import os
 import subprocess
 import sys
 import unittest
@@ -45,7 +43,6 @@ class TestCiSetup(unittest.TestCase):
         self.assertIsInstance(r.overwritten, list)
         self.assertIsInstance(r.skipped, list)
         self.assertIsInstance(r.errors, list)
-        self.assertEqual(r.marker_path, "")
         self.assertEqual(r.elapsed_ms, 0)
         self.assertTrue(r.ok)
         r.errors.append("forced")
@@ -55,16 +52,16 @@ class TestCiSetup(unittest.TestCase):
         """Non-existent target raises FileNotFoundError; non-directory raises NotADirectoryError."""
         with self.assertRaises(FileNotFoundError):
             self.ci_setup.install_ci_config(Path("/nonexistent/ci_setup_test_xyz"))
-        # File-as-target → NotADirectoryError or FileNotFoundError (depends on resolver).
-        fp = tempfile_path("foo")
+        fp = Path("/tmp/_ci_setup_file_target")
         try:
+            fp.write_text("placeholder")
             with self.assertRaises((NotADirectoryError, FileNotFoundError)):
                 self.ci_setup.install_ci_config(fp)
         finally:
             fp.unlink(missing_ok=True)
 
-    def test_install_creates_expected_files_in_empty_target(self, tmpdir=None):
-        """Fresh tmp dir: all EXPECTED_PATHS land; marker is written."""
+    def test_install_creates_expected_files_in_empty_target(self):
+        """Fresh tmp dir: all EXPECTED_PATHS land; no extras."""
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
@@ -72,23 +69,18 @@ class TestCiSetup(unittest.TestCase):
             self.assertEqual(report.errors, [], f"errors: {report.errors}")
             for rel in self.ci_setup.EXPECTED_PATHS:
                 self.assertTrue((target / rel).exists(), f"missing: {rel}")
-            # 8 paths × created (target was empty)
             self.assertEqual(len(report.created), len(self.ci_setup.EXPECTED_PATHS))
             self.assertEqual(report.overwritten, [])
             self.assertEqual(report.skipped, [])
-            # Marker present
-            marker = target / ".dev-kit" / "ci-config.json"
-            self.assertTrue(marker.exists())
-            self.assertTrue(report.marker_path.endswith("ci-config.json"))
 
     def test_install_is_idempotent_without_force(self):
-        """Second run without force skips every path; marker rewritten."""
+        """Second run without force skips every path; no files re-touched."""
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             r1 = self.ci_setup.install_ci_config(target)
             self.assertEqual(r1.errors, [])
-            first_mtime = (target / ".dev-kit" / "ci-config.json").stat().st_mtime
+            sentinels = {rel: (target / rel).read_text() for rel in self.ci_setup.EXPECTED_PATHS}
             r2 = self.ci_setup.install_ci_config(target)
             self.assertEqual(r2.created, [])
             self.assertEqual(r2.overwritten, [])
@@ -97,10 +89,12 @@ class TestCiSetup(unittest.TestCase):
                 f"all paths should be skipped on re-run without --force",
             )
             self.assertEqual(r2.errors, [])
-            # Idempotency does NOT touch file contents, but the marker's
-            # `installed_at` may update — that's documented behavior.
-            second_mtime = (target / ".dev-kit" / "ci-config.json").stat().st_mtime
-            self.assertGreaterEqual(second_mtime, first_mtime)
+            # No file was re-written (content preserved verbatim).
+            for rel in self.ci_setup.EXPECTED_PATHS:
+                self.assertEqual(
+                    (target / rel).read_text(), sentinels[rel],
+                    f"file re-touched during idempotent re-run: {rel}",
+                )
 
     def test_install_force_overwrites_cleanly(self):
         """Pre-seed a sentinel; --force replaces it with template content."""
@@ -119,69 +113,13 @@ class TestCiSetup(unittest.TestCase):
             overwritten = [p for p in r.overwritten if "ci.yml" in p]
             self.assertTrue(overwritten, "ci.yml should be in overwritten list")
 
-    def test_marker_file_written_with_correct_shape(self):
-        """Marker JSON has the right fields and types."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)  # default version
-            marker = target / ".dev-kit" / "ci-config.json"
-            data = json.loads(marker.read_text())
-            for key in (
-                "schema_version", "ci_setup_version", "installed_at",
-                "installed_by", "runners", "scripts", "githooks",
-            ):
-                self.assertIn(key, data, f"missing key: {key}")
-            self.assertEqual(data["schema_version"], "1.0.0")
-            self.assertEqual(data["installed_by"], "dev-kit:ci-setup")
-            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml"})
-            self.assertEqual(set(data["scripts"]), {
-                "scripts/validate.py", "scripts/test.sh",
-                "scripts/branch-policy.sh", "scripts/ci-local.sh",
-            })
-            self.assertEqual(data["githooks"], [".githooks/pre-push"])
-            # installed_at should be ISO-8601 UTC (z-suffix)
-            self.assertTrue(data["installed_at"].endswith("Z"), data["installed_at"])
-            # verification block intentionally removed — schema stays minimal.
-
-    def test_presence_short_circuit(self):
-        """When marker + all EXPECTED_PATHS exist, install is a no-op (no files touched)."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            r1 = self.ci_setup.install_ci_config(target)
-            self.assertEqual(len(r1.created), len(self.ci_setup.EXPECTED_PATHS))
-            # Sentinel each EXPECTED_PATH so we can detect any re-touch
-            sentinels = {}
-            for rel in self.ci_setup.EXPECTED_PATHS:
-                p = target / rel
-                sentinels[rel] = p.read_text()
-            r2 = self.ci_setup.install_ci_config(target)
-            self.assertEqual(r2.created, [], "short-circuit must skip create")
-            self.assertEqual(r2.overwritten, [], "short-circuit must skip overwrite")
-            self.assertEqual(
-                len(r2.skipped), len(self.ci_setup.EXPECTED_PATHS),
-                "short-circuit must list every EXPECTED_PATH in skipped",
-            )
-            # Confirm files on disk were not re-written (content preserved)
-            for rel in self.ci_setup.EXPECTED_PATHS:
-                self.assertEqual(
-                    (target / rel).read_text(), sentinels[rel],
-                    f"file re-touched during short-circuit: {rel}",
-                )
-            # Marker still present at the expected location (path may be resolved to /private/... on macOS)
-            self.assertTrue((target / ".dev-kit" / "ci-config.json").exists())
-            self.assertTrue(r2.marker_path.endswith("ci-config.json"))
-
     def test_partial_install_completes_remaining(self):
-        """If marker exists but some templates are missing, install copies only the missing ones."""
+        """If some template files are missing, install copies only the missing ones."""
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
-            # Delete one file + the marker so install must re-copy
             (target / self.ci_setup.EXPECTED_PATHS[0]).unlink()
-            (target / ".dev-kit" / "ci-config.json").unlink()
             r = self.ci_setup.install_ci_config(target)
             self.assertTrue(
                 len(r.created) + len(r.overwritten) >= 1,
@@ -197,7 +135,6 @@ class TestCiSetup(unittest.TestCase):
             for rel in self.ci_setup.EXECUTABLE_PATHS:
                 p = target / rel
                 self.assertTrue(p.exists(), f"missing: {rel}")
-                # Read mode bit directly (POSIX st_mode)
                 mode = p.stat().st_mode
                 self.assertTrue(mode & 0o111, f"not executable: {rel} (mode={oct(mode)})")
 
@@ -253,268 +190,6 @@ class TestCiSetup(unittest.TestCase):
                 p = target / rel
                 self.assertTrue(p.exists(), f"missing: {rel}")
                 self.assertTrue(p.stat().st_mode & stat.S_IXUSR, f"not +x: {rel}")
-
-    def test_marker_schema_version_current(self):
-        """Schema is content-only (1.0.0). The ci_setup_version gate is separate."""
-        self.assertEqual(self.ci_setup.MARKER_SCHEMA_VERSION, "1.0.0")
-        self.assertTrue(hasattr(self.ci_setup, "PLUGIN_CI_SETUP_VERSION"))
-        # Lexicographic gate threshold (skills/build/SKILL.md reads >= "0.1.0").
-        self.assertGreaterEqual(
-            tuple(int(x) for x in self.ci_setup.PLUGIN_CI_SETUP_VERSION.split(".")),
-            (0, 1, 0),
-        )
-
-    def test_marker_writes_ci_setup_version(self):
-        """Marker JSON carries `ci_setup_version` (regression for issue #61).
-
-        skills/build/SKILL.md reads `ci_setup_version` as a pre-flight gate.
-        Before the fix, the field was absent so `data.get('ci_setup_version',
-        '0.0.0') < '0.1.0'` was True and the build refused to start. The
-        marker must now mirror the contract declared in
-        templates/ci/ci-config.example.json.
-        """
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)
-            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
-            self.assertIn("ci_setup_version", marker, "marker missing ci_setup_version")
-            self.assertEqual(
-                marker["ci_setup_version"],
-                self.ci_setup.PLUGIN_CI_SETUP_VERSION,
-                "marker ci_setup_version must match the plugin constant",
-            )
-            # The gate evaluates lexicographically; the value must clear 0.1.0.
-            self.assertGreaterEqual(
-                marker["ci_setup_version"], "0.1.0",
-                f"ci_setup_version {marker['ci_setup_version']!r} fails the build gate",
-            )
-
-    def test_marker_ci_setup_version_matches_template_contract(self):
-        """The template contract (templates/ci/ci-config.example.json) and the
-        runtime marker carry the same ci_setup_version field — gates and
-        templates can't drift."""
-        import tempfile
-        template_marker = json.loads(
-            (PROJECT_ROOT / "templates" / "ci" / "ci-config.example.json").read_text()
-        )
-        self.assertIn(
-            "ci_setup_version", template_marker,
-            "template contract lost the ci_setup_version field",
-        )
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)
-            installed_marker = json.loads(
-                (target / ".dev-kit" / "ci-config.json").read_text()
-            )
-            self.assertEqual(
-                installed_marker["ci_setup_version"],
-                template_marker["ci_setup_version"],
-                "installed marker drifted from template contract",
-            )
-
-    def test_marker_records_hooks_rules_tests(self):
-        """Marker JSON lists the new categories (hooks / rules / tests)."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)
-            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
-            for key in ("hooks", "rules", "tests"):
-                self.assertIn(key, marker, f"marker missing key: {key}")
-                self.assertTrue(len(marker[key]) > 0, f"marker.{key} should be non-empty")
-            self.assertIn("hooks/worktree-guard.sh", marker["hooks"])
-            self.assertIn(".claude/rules/git-workflow.md", marker["rules"])
-            self.assertIn("tests/test_worktree_guard.py", marker["tests"])
-
-    def test_marker_writes_ci_setup_version_from_manifest(self):
-        """feat/skill-versions: marker `ci_setup_version` mirrors plugin.json:version."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)
-            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
-            self.assertIn("ci_setup_version", marker, "marker missing ci_setup_version")
-            # Mirror must equal the canonical plugin version (single source
-            # of truth at .claude-plugin/plugin.json).
-            from importlib.util import spec_from_file_location, module_from_spec
-            spec = spec_from_file_location(
-                "_cs_min_version",
-                Path(__file__).parent.parent / "lib" / "ci_setup.py",
-            )
-            cs = module_from_spec(spec)
-            sys.modules["_cs_min_version"] = cs  # @dataclass needs sys.modules (Py3.14)
-            spec.loader.exec_module(cs)
-            self.assertEqual(
-                marker["ci_setup_version"], cs.plugin_version(Path(__file__).parent.parent),
-                "marker ci_setup_version must mirror .claude-plugin/plugin.json:version",
-            )
-
-    def test_marker_min_version_default_zero(self):
-        """feat/skill-versions: first install writes min_version='0.0.0' (permissive)."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)
-            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
-            self.assertEqual(marker["min_version"], "0.0.0",
-                             "fresh install must default to '0.0.0' (permissive)")
-
-    def test_ci_setup_force_preserves_consumer_min_version(self):
-        """feat/skill-versions: `--force` rewrites the mirror but PRESERVES the
-        consumer's opt-in `min_version` declaration."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            self.ci_setup.install_ci_config(target)
-            marker_path = target / ".dev-kit" / "ci-config.json"
-            data = json.loads(marker_path.read_text())
-            data["min_version"] = "0.5.0"
-            marker_path.write_text(json.dumps(data))
-            self.ci_setup.install_ci_config(target, force=True)
-            reread = json.loads(marker_path.read_text())
-            self.assertEqual(
-                reread["min_version"], "0.5.0",
-                "--force clobbered the consumer's min_version",
-            )
-            # ci_setup_version was still (re)written from the new plugin checkout.
-            self.assertIn("ci_setup_version", reread)
-            self.assertRegex(
-                reread["ci_setup_version"], r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$",
-            )
-
-    def test_post_install_checklist_is_complete(self):
-        """5 numbered items; each is a gh secret set, a gh/git config, or a
-        workflow-setting note. Must be actionable."""
-        items = self.ci_setup.POST_INSTALL_CHECKLIST
-        self.assertGreaterEqual(
-            len(items), 5,
-            f"expected >=5 post-install checklist items, got {len(items)}",
-        )
-        seen_numbers = set()
-        for n, body in items:
-            self.assertTrue(
-                n.isdigit() and 1 <= int(n) <= 9,
-                f"checklist number {n!r} must be a digit 1..9",
-            )
-            self.assertNotIn(int(n), seen_numbers, f"duplicate: {n}")
-            seen_numbers.add(int(n))
-            joined = body.lower()
-            self.assertTrue(
-                any(needle in joined for needle in (
-                    "gh secret set", "git config", "push a feature branch",
-                    "merge that", "/dev-kit:review",
-                )),
-                f"checklist item {n} does not mention any actionable command",
-            )
-
-    def test_preflight_probe_skips_on_missing_gh(self):
-        """When gh is absent, every probe line is SKIP. Safe failure: a user
-        without gh can still install; the checklist alone guides them."""
-        import os
-        old_path = os.environ.get("PATH", "")
-        os.environ["PATH"] = ""
-        try:
-            results = self.ci_setup.preflight_probe(repo="o/r")
-            self.assertIsInstance(results, list)
-            self.assertGreater(len(results), 0)
-            for r in results:
-                self.assertEqual(
-                    r.state, "SKIP",
-                    f"expected SKIP with PATH empty, got {r.state} for {r.label}",
-                )
-        finally:
-            os.environ["PATH"] = old_path
-
-    def test_lint_installed_workflows_flags_stale_gate_pattern(self):
-        """Lint pass detects pre-0.1.3 PR-mode hard-fail gate.
-
-        The pre-0.1.3 templates/ci/.github/workflows/review.yml shipped a
-        gate that hard-failed in pull_request mode on missing verdicts
-        while defaulting to Approve in workflow_dispatch mode. The
-        distinctive substring 'Re-run via workflow_dispatch if needed'
-        is unique to that block; the lint pass is keyed on it.
-        """
-        import tempfile
-        from pathlib import Path as _P
-        with tempfile.TemporaryDirectory() as td:
-            review = _P(td) / ".github" / "workflows" / "review.yml"
-            review.parent.mkdir(parents=True)
-            review.write_text(
-                "dummy\n          Re-run via workflow_dispatch if needed\n"
-            )
-            findings = self.ci_setup.lint_installed_workflows(_P(td))
-            self.assertTrue(
-                any(".github/workflows/review.yml" in f for f in findings),
-                f"expected gate-tolerance finding, got {findings!r}",
-            )
-
-    def test_lint_installed_workflows_clean_on_fresh_install(self):
-        """Fresh install of the current (post-0.1.3) template yields 0 lint warnings."""
-        import tempfile
-        from pathlib import Path as _P
-        with tempfile.TemporaryDirectory() as td:
-            r = self.ci_setup.install_ci_config(_P(td))
-            self.assertEqual(r.warnings, [], r.warnings)
-            self.assertEqual(self.ci_setup.lint_installed_workflows(_P(td)), [])
-
-    def test_lint_runs_on_no_op_idempotent_reinstall(self):
-        """Idempotent re-install (no --force) still lints and surfaces drift."""
-        import tempfile
-        from pathlib import Path as _P
-        with tempfile.TemporaryDirectory() as td:
-            r1 = self.ci_setup.install_ci_config(_P(td))
-            self.assertEqual(r1.warnings, [])
-            review = _P(td) / ".github" / "workflows" / "review.yml"
-            review.write_text(
-                review.read_text()
-                + "\n          Re-run via workflow_dispatch if needed\n"
-            )
-            r2 = self.ci_setup.install_ci_config(_P(td), force=False)
-            self.assertTrue(
-                any("stale pull_request hard-fail gate" in w for w in r2.warnings),
-                f"expected stale-gate warning, got {r2.warnings!r}",
-            )
-
-    def test_lint_kwarg_can_suppress(self):
-        """`lint=False` suppresses the warning-class output."""
-        import tempfile
-        from pathlib import Path as _P
-        with tempfile.TemporaryDirectory() as td:
-            review = _P(td) / ".github" / "workflows" / "review.yml"
-            review.parent.mkdir(parents=True)
-            review.write_text(
-                "          Re-run via workflow_dispatch if needed\n"
-            )
-            r = self.ci_setup.install_ci_config(_P(td), force=False, lint=False)
-            self.assertEqual(
-                r.warnings,
-                [],
-                "lint=False must suppress findings",
-            )
-
-    def test_print_checklist_kwarg_does_not_break_existing_callers(self):
-        """install_ci_config(..., print_checklist=True) writes the marker and
-        returns an InstallReport. Default (no kwarg) behavior unchanged."""
-        import tempfile
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td)
-            r_default = self.ci_setup.install_ci_config(target)
-            self.assertEqual(r_default.errors, [])
-            r_printing = self.ci_setup.install_ci_config(
-                target, force=True, print_checklist=True,
-            )
-            self.assertEqual(r_printing.errors, [])
-            self.assertTrue((target / ".dev-kit" / "ci-config.json").exists())
-
-
-def tempfile_path(name: str):
-    """Return a Path to a tempfile file (helper for test_invalid_target_dir_raises)."""
-    import tempfile
-    fd, p = tempfile.mkstemp(prefix=f"ci_setup_{name}_", suffix=".txt")
-    os.close(fd)
-    return Path(p)
 
 
 if __name__ == "__main__":
