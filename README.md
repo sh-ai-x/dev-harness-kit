@@ -365,7 +365,7 @@ This is a CLI, not a `/dev-kit:*` skill, because it operates on local files with
 
 Codex CLI's official plugin format ([openai/plugins](https://github.com/openai/plugins), the same one [`obra/superpowers`](https://github.com/obra/superpowers) ships) is a `.codex-plugin/plugin.json` manifest with a `"skills"` field pointing at a skills directory — no per-skill copying. dev-kit's manifest points `"skills"` straight at the existing `./skills/`, so all 42 canonical `skills/<name>/SKILL.md` files are exposed to Codex unchanged, with zero new files per skill and zero drift risk (there is nothing to keep in sync — it's the same directory, not a copy).
 
-Claude Code keeps reading `skills/` directly via `.claude-plugin/`, unaffected. See [`docs/design.md`](docs/design.md) for the full rationale, including why MiniMax needs no generated artifact at all — it's reached by pointing either harness's existing model config at MiniMax's Anthropic-/OpenAI-compatible endpoint.
+Claude Code keeps reading `skills/` directly via `.claude-plugin/`, unaffected. MiniMax needs no generated artifact at all — it's a model backend, not a harness, reached by pointing either harness's existing model config at MiniMax's Anthropic-/OpenAI-compatible endpoint.
 
 ## Skills by audience
 
