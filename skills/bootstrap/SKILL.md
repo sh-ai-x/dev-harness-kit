@@ -15,7 +15,7 @@ disable-model-invocation: false
 
 ## What it does
 
-Runs three deterministic sub-skills (`bootstrap-sanity`, `bootstrap-codebase-map`, `bootstrap-active-hooks`) and then writes the project SSOT. On a fresh repo, exactly three files land on disk: `CLAUDE.md`, `AGENTS.md`, and `.dev-kit/.active-hooks.json`. No sanity report file. No hand-off file. AGENTS.md is a 1-line pointer (`CLAUDE.md`) for CLIs that read AGENTS.md instead of CLAUDE.md.
+Runs three deterministic sub-skills (`bootstrap-sanity`, `bootstrap-codebase-map`, `bootstrap-active-hooks`) and then writes the project SSOT. On a fresh repo, exactly three files land on disk: `CLAUDE.md`, `AGENTS.md`, and `.dev-kit/.active-hooks.json`. No sanity report file. No hand-off file. AGENTS.md is a byte-identical full duplicate of CLAUDE.md (not a pointer — Codex-family CLIs read AGENTS.md directly and won't reliably follow a reference to another file).
 
 ## Iron Law (no exceptions)
 **0-arg default OK.** Only hidden flags allowed (`--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`).

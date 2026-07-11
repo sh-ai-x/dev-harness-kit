@@ -9,8 +9,12 @@ CLAUDE.md sections:
   §4 Hook Matrix (active-hooks.json SSOT, MUST-13)
   §5 Hand-off Pointer
 
-AGENTS.md: single-line pointer to CLAUDE.md for CLIs that read AGENTS.md
-instead of CLAUDE.md.
+AGENTS.md: full duplicate of CLAUDE.md content, byte-for-byte, for CLIs
+(Codex and other AGENTS.md-reading harnesses) that read AGENTS.md directly
+instead of CLAUDE.md. Not a pointer: Codex-family tools read AGENTS.md as
+their instruction set and won't reliably follow a reference to another
+file, so the complete SSOT content has to live in AGENTS.md itself (the
+same pattern obra/superpowers uses for its own AGENTS.md/CLAUDE.md pair).
 """
 from __future__ import annotations
 
@@ -80,20 +84,41 @@ def render_stub_section_3(project_root: Path) -> str:
     )
 
 
-def render_agents_md() -> str:
-    """Single-line AGENTS.md payload.
+def render_agents_md(
+    project_root: Path,
+    stage: str = "bootstrap",
+    full_map: bool = False,
+    iron_laws: Optional[List[str]] = None,
+    hook_matrix: Optional[str] = None,
+    hand_off_chain: Optional[str] = None,
+) -> str:
+    """AGENTS.md payload — byte-identical to CLAUDE.md.
 
-    AGENTS.md is the universal entry point that Codex / other CLIs read;
-    Claude Code reads CLAUDE.md directly. This file tells them to load
-    CLAUDE.md as the project SSOT.
+    AGENTS.md is the universal entry point that Codex / other CLIs read
+    directly, in place of CLAUDE.md, not in addition to it. A pointer file
+    doesn't work here: those tools don't reliably follow a reference to
+    another file, so the full SSOT content must live in AGENTS.md itself.
     """
-    return "CLAUDE.md\n"
+    return render_claude_md(
+        project_root,
+        stage=stage,
+        full_map=full_map,
+        iron_laws=iron_laws,
+        hook_matrix=hook_matrix,
+        hand_off_chain=hand_off_chain,
+    )
 
 
-def write_agents_md(project_root: Path) -> Path:
-    """Atomic write AGENTS.md. Idempotent."""
+def write_agents_md(project_root: Path, content: Optional[str] = None) -> Path:
+    """Atomic write AGENTS.md. Idempotent.
+
+    `content`, when given, is written as-is (the caller already rendered
+    it — see `write_project_md`, which shares one rendered string between
+    CLAUDE.md and AGENTS.md so the two never drift on stage/flags). Falls
+    back to a fresh `render_agents_md(project_root)` for standalone callers.
+    """
     path = project_root / "AGENTS.md"
-    atomic_write_text(path, render_agents_md())
+    atomic_write_text(path, content if content is not None else render_agents_md(project_root))
     return path
 
 
@@ -294,7 +319,7 @@ def write_project_md(project_root: Path, *, full_map: bool = False, stage: str =
     path = project_root / "CLAUDE.md"
     content = render_claude_md(project_root, stage=stage, full_map=full_map)
     atomic_write_text(path, content)
-    write_agents_md(project_root)
+    write_agents_md(project_root, content=content)
     if full_map:
         write_codebase_map_doc(project_root)
     return path
@@ -312,5 +337,4 @@ if __name__ == "__main__":
     print(f"wrote {p}")
     if args.full_claude_md:
         print(f"wrote {root / CODEBASE_MAP_DOC_REL}")
-    agents_p = write_agents_md(root)
-    print(f"wrote {agents_p}")
+    print(f"wrote {root / 'AGENTS.md'}")
