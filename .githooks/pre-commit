@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — sync .github/ci-review-provider.txt from local .env.
+#
+# Why: CI (GitHub-hosted runners) can never read your local .env directly —
+# it only ever sees what's checked out on the branch being pushed. This
+# hook makes .env the single source of truth anyway: it reads
+# CI_REVIEW_PROVIDER from the *main checkout's* .env (resolved via
+# --git-common-dir so it works from any worktree) and, if it differs from
+# the committed .github/ci-review-provider.txt, rewrites and stages that
+# file into the commit you're about to make. You only ever edit .env;
+# the tracked file follows automatically on your next commit.
+#
+# Activation: git config core.hooksPath .githooks (same as pre-push).
+
+set -eo pipefail
+
+MAIN_ROOT="$(dirname "$(git rev-parse --git-common-dir)")"
+ENV_FILE="$MAIN_ROOT/.env"
+PROVIDER_FILE=".github/ci-review-provider.txt"
+
+# Nothing to sync if either side is missing (e.g. not this project's layout).
+[ -f "$ENV_FILE" ] || exit 0
+[ -f "$PROVIDER_FILE" ] || exit 0
+
+desired="$(grep -E '^CI_REVIEW_PROVIDER=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+
+case "$desired" in
+    minimax|anthropic|deepseek)
+        current="$(tr -d '[:space:]' < "$PROVIDER_FILE")"
+        if [ "$desired" != "$current" ]; then
+            echo "$desired" > "$PROVIDER_FILE"
+            git add "$PROVIDER_FILE"
+            echo "[pre-commit] synced $PROVIDER_FILE -> $desired (from .env CI_REVIEW_PROVIDER)"
+        fi
+        ;;
+    "")
+        # CI_REVIEW_PROVIDER not set in .env — leave the tracked file alone.
+        ;;
+    *)
+        echo "[pre-commit] WARN: .env CI_REVIEW_PROVIDER='$desired' is not minimax/anthropic/deepseek; ignoring" >&2
+        ;;
+esac
+
+exit 0

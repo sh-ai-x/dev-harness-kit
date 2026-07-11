@@ -27,6 +27,13 @@ name: PR Review
 # `review_provider` input that overrides the file for a single manual run.
 # Each provider requires its matching secret to be configured:
 # `MINMAX_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
+#
+# CI (a GitHub-hosted runner) can never read your local .env — it only
+# ever sees what's on the branch it checks out. `.githooks/pre-commit`
+# bridges that gap: it reads `CI_REVIEW_PROVIDER` from the *main
+# checkout's* `.env` on every local commit and auto-syncs this file to
+# match, so `.env` stays the single source of truth you actually edit —
+# see `.env.example` for the `CI_REVIEW_PROVIDER` key.
 
 on:
   pull_request:
