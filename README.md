@@ -161,6 +161,7 @@ Full set: 42 skills. Invoke with `/<skill-name>` or `dev-kit:<skill-name>`.
 dev-harness-kit/
 ├── .claude-plugin/        # marketplace.json (source: url object) + plugin.json
 ├── skills/                # 42 skills, flat: skills/<skill-name>/SKILL.md
+├── .codex-plugin/         # plugin.json pointing Codex CLI at the same ./skills/ (no copy)
 ├── hooks/                 # 9 hook scripts (6 original + 3 worktree-rule) + lib/ + hooks.json
 ├── lib/                   # state_codec / active_hooks_codec / write_project_md / execute / methodology/ / ci_setup
 ├── bin/                   # devkit-refresh.sh (manual cache refresh, optional)
@@ -359,6 +360,12 @@ All 6 warning codes (`CACHE_HIT_LOW`, `READ_HEAVY`, `HEAVY_CONTEXT`, `MODEL_OVER
 ### Why a tool, not a skill
 
 This is a CLI, not a `/dev-kit:*` skill, because it operates on local files with no LLM call in the loop — wrapping it as a skill would force an unnecessary model round-trip for pure data transformation. Skills are reserved for steps where the model adds value (planning, design, review, eval). The loghooks that *produce* the input remain a skill (`/dev-kit:log`); the analyzer that *consumes* the output is a script.
+
+## Codex CLI compatibility (`.codex-plugin/plugin.json`)
+
+Codex CLI's official plugin format ([openai/plugins](https://github.com/openai/plugins), the same one [`obra/superpowers`](https://github.com/obra/superpowers) ships) is a `.codex-plugin/plugin.json` manifest with a `"skills"` field pointing at a skills directory — no per-skill copying. dev-kit's manifest points `"skills"` straight at the existing `./skills/`, so all 42 canonical `skills/<name>/SKILL.md` files are exposed to Codex unchanged, with zero new files per skill and zero drift risk (there is nothing to keep in sync — it's the same directory, not a copy).
+
+Claude Code keeps reading `skills/` directly via `.claude-plugin/`, unaffected. See [`docs/design.md`](docs/design.md) for the full rationale, including why MiniMax needs no generated artifact at all — it's reached by pointing either harness's existing model config at MiniMax's Anthropic-/OpenAI-compatible endpoint.
 
 ## Skills by audience
 

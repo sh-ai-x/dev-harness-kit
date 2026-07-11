@@ -1,0 +1,35 @@
+{
+  "name": "dev-kit",
+  "version": "0.3.3",
+  "description": "AI-native dev harness: 13 categories, 0-arg commands, A2A typed, Eval-Repair, Human-on-the-Loop.",
+  "author": {
+    "name": "sanghee",
+    "url": "https://github.com/sanghee"
+  },
+  "homepage": "https://github.com/sh-ai-x/dev-harness-kit",
+  "repository": "https://github.com/sh-ai-x/dev-harness-kit",
+  "license": "MIT",
+  "keywords": [
+    "ai-native",
+    "tdd",
+    "sdd",
+    "planning",
+    "review",
+    "ax",
+    "harness"
+  ],
+  "skills": "./skills/",
+  "hooks": {},
+  "interface": {
+    "displayName": "Dev Harness Kit",
+    "shortDescription": "42 skills for planning, TDD build, review, security, and release workflows",
+    "longDescription": "Use dev-kit to run bootstrap, plan, build, review, security, audit, and ship stages through a single skill set shared with Claude Code.",
+    "developerName": "sanghee",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ]
+  }
+}
