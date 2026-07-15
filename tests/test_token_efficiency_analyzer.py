@@ -243,6 +243,7 @@ class TestCostUsd(unittest.TestCase):
 class TestEvaluateWarnings(unittest.TestCase):
     def test_cache_hit_low_fires(self):
         s = _make_session(
+            session_id="sid-cache-low",
             input_tokens=10_000, cache_read_tokens=1_000,  # hit = 1/11 ~= 0.091
             model="claude-sonnet-5",
         )
@@ -254,10 +255,15 @@ class TestEvaluateWarnings(unittest.TestCase):
         self.assertEqual(low.reclaim_axis, "cache_miss")
         self.assertEqual(low.priority, 1)
         self.assertEqual(low.estimated_save_usd, 1.23)
+        # Evidence must name the actual hit ratio, not a generic paragraph.
+        self.assertEqual(low.session_id, "sid-cache-low")
+        self.assertIn("9%", low.evidence)
+        self.assertIn("85%", low.evidence)
 
     def test_read_heavy_fires_with_dup_read_attribution(self):
         # Repeatedly reading the same file should trigger READ_HEAVY.
         s = _make_session(
+            session_id="sid-read-heavy",
             input_tokens=1000, output_tokens=200,
             tool_counts={"Read": 10, "Bash": 1},
             read_files={"/repo/big.py": 9},
@@ -270,9 +276,13 @@ class TestEvaluateWarnings(unittest.TestCase):
         rh = next(w for w in warns if w.code == "READ_HEAVY")
         self.assertEqual(rh.reclaim_axis, "dup_read")
         self.assertEqual(rh.estimated_save_usd, 0.42)
+        # Evidence must name the actual offending file + count.
+        self.assertEqual(rh.session_id, "sid-read-heavy")
+        self.assertIn("/repo/big.py", rh.evidence)
+        self.assertIn("9x", rh.evidence)
 
     def test_model_overspec_only_for_opus_with_low_density(self):
-        s = _make_session(model="claude-opus-4-7",
+        s = _make_session(session_id="sid-overspec", model="claude-opus-4-7",
                           input_tokens=10_000, output_tokens=50, cache_read_tokens=0)
         sc = score_session(s)
         warns = evaluate_warnings(s, sc, reclaim_cache_miss=0.0, reclaim_dup_read=0.0, reclaim_downgrade=4.5)
@@ -281,9 +291,12 @@ class TestEvaluateWarnings(unittest.TestCase):
         mo = next(w for w in warns if w.code == "MODEL_OVERSPEC")
         self.assertEqual(mo.reclaim_axis, "model_downgrade")
         self.assertEqual(mo.estimated_save_usd, 4.5)
+        self.assertEqual(mo.session_id, "sid-overspec")
+        self.assertIn("opus", mo.evidence)
 
     def test_repeated_user_msg_fires(self):
         s = _make_session(
+            session_id="sid-repeated",
             user_texts=["please continue, fix the loop above"] * 3,
             model="claude-sonnet-5",
         )
@@ -291,6 +304,12 @@ class TestEvaluateWarnings(unittest.TestCase):
         warns = evaluate_warnings(s, sc)
         codes = [w.code for w in warns]
         self.assertIn("REPEATED_USER_MSG", codes)
+        rm = next(w for w in warns if w.code == "REPEATED_USER_MSG")
+        self.assertEqual(rm.session_id, "sid-repeated")
+        # Evidence cites the actual repeated text and its count, not a
+        # generic paragraph.
+        self.assertIn("please continue", rm.evidence)
+        self.assertIn("3", rm.evidence)
 
 
 class TestReclaimAxes(unittest.TestCase):
@@ -534,6 +553,16 @@ class TestJsonOutput(unittest.TestCase):
         self.assertIn("cost_gate", data)
         self.assertIn(data["cost_gate"]["status"], ("ok", "warn", "bad"))
         self.assertIsInstance(data["warnings"], list)
+        # Active/inactive split — all 6 fixtures run under a plain cwd with
+        # no .claude/worktrees/ segment, so worktree_state stamps "main"
+        # (active) for every one of them; none are merged/gone.
+        self.assertEqual(data["active_sessions"], 6)
+        self.assertEqual(data["inactive_sessions"], 0)
+        self.assertEqual(data["active_sessions"] + data["inactive_sessions"], data["sessions"])
+        # Each warning instance must carry per-session evidence, not just a code.
+        for w in data["warnings"]:
+            self.assertIn("evidence", w)
+            self.assertIsInstance(w["evidence"], str)
 
     def test_json_exit_code_3_on_bad_gate(self):
         rc = main([
@@ -1078,8 +1107,9 @@ class TestWorktreeAwareness(unittest.TestCase):
                 src = html_path.read_text()
                 self.assertIn("Cost by Worktree", src)
                 self.assertIn("<th>Worktree</th>", src)
-                # Scope the column count to the Sessions table only.
-                sessions_thead = src.split('<div class="section-title">Sessions', 1)[1].split("</thead>", 1)[0]
+                self.assertIn("Inactive Sessions", src)
+                # Scope the column count to the Active Sessions table only.
+                sessions_thead = src.split('<div class="section-title">Active Sessions', 1)[1].split("</thead>", 1)[0]
                 # 12 columns: Session, Branch, Worktree, Model, Started,
                 # Input, Output, Tools, Cache Hit, Cost, Score, Warnings.
                 # Count open <th...> tags (not <thead>) to skip the wrapper element.
@@ -1624,7 +1654,7 @@ class TestWorktreeStaleness(unittest.TestCase):
         for state_label in ("live", "merged", "gone", "main", "fresh"):
             self.assertIn(f">{state_label}<", panel)
 
-    def test_sessions_table_marks_stale_rows(self):
+    def test_sessions_split_into_active_and_inactive_tables(self):
         from collections import Counter
         from datetime import datetime, timezone
         from token_efficiency_analyzer import score_session
@@ -1644,11 +1674,11 @@ class TestWorktreeStaleness(unittest.TestCase):
             }
 
         stale_sessions = [
-            _s("stale-1", "prune-baseline",   "gone"),
-            _s("stale-2", "merged-feat",      "merged"),
-            _s("fresh-1", "feat-still-alive", "live"),     # NOT stale → no chip
-            _s("main-1",  "(main)",           "main"),     # NOT stale → no chip
-            _s("fresh-wt","fix/fresh-wt",     "fresh"),    # fresh is NOT a cleanup target → no chip
+            _s("stale-1", "prune-baseline",   "gone"),     # inactive
+            _s("stale-2", "merged-feat",      "merged"),   # inactive
+            _s("fresh-1", "feat-still-alive", "live"),     # active
+            _s("main-1",  "(main)",           "main"),     # active
+            _s("fresh-wt","fix/fresh-wt",     "fresh"),    # active
         ]
         scored = [(s, score_session(s)) for s in stale_sessions]
         empty_warns: list[list] = [[] for _ in scored]
@@ -1660,11 +1690,20 @@ class TestWorktreeStaleness(unittest.TestCase):
                        "model_downgrade": 0.0, "total": 0.0},
         )
 
-        # Two stale rows → exactly two stale chips. Live + main rows → zero chips.
-        sessions_block = html.split('<div class="section-title">Sessions', 1)[1].split("</table>", 1)[0]
-        chip_count = sessions_block.count("pill-stale")
-        self.assertEqual(chip_count, 2,
-                         f"expected exactly 2 stale chips, got {chip_count}")
+        active_block = html.split('<div class="section-title">Active Sessions', 1)[1] \
+                            .split('<div class="section-title">Inactive Sessions', 1)[0]
+        inactive_block = html.split('<div class="section-title">Inactive Sessions', 1)[1] \
+                             .split("</table>", 1)[0]
+
+        for sid in ("fresh-1", "main-1", "fresh-wt"):
+            self.assertIn(sid, active_block, f"{sid} should be in Active Sessions")
+            self.assertNotIn(sid, inactive_block, f"{sid} should not be in Inactive Sessions")
+        for sid in ("stale-1", "stale-2"):
+            self.assertIn(sid, inactive_block, f"{sid} should be in Inactive Sessions")
+            self.assertNotIn(sid, active_block, f"{sid} should not be in Active Sessions")
+
+        # Overview tile reflects the same split.
+        self.assertIn(">3<", html.split("Active Sessions</div>", 1)[1][:60])
 
     def test_stdout_summary_includes_stale_cost(self):
         """Drive main() with --no-include-worktree-logs to skip real git, then
@@ -1773,6 +1812,44 @@ class TestWorktreeStaleness(unittest.TestCase):
             # worktree row for "(main)" present with state="main"
             main_row = next(w for w in data["worktrees"] if w["name"] == "(main)")
             self.assertEqual(main_row["state"], "main")
+
+
+class TestRoiActionsSpecificity(unittest.TestCase):
+    """ROI Actions rows must name the offending session + concrete evidence,
+    not just a generic per-code paragraph (the ROI complaint this feature
+    fixes: "정확하게 해야할 일을 정확하게 집어주지 않는다")."""
+
+    def test_roi_item_names_session_and_evidence(self):
+        s = _make_session(
+            session_id="roi-target-sid",
+            input_tokens=10_000, cache_read_tokens=1_000,  # low cache hit -> CACHE_HIT_LOW
+            model="claude-sonnet-5",
+        )
+        sc = score_session(s)
+        warns = evaluate_warnings(s, sc, reclaim_cache_miss=3.50,
+                                  reclaim_dup_read=0.0, reclaim_downgrade=0.0)
+        html = render_dashboard(
+            repo="test-repo", days=30, sessions=[s], scored=[(s, sc)],
+            warnings_per_session=[warns],
+            estimated={"cache_miss": 3.50, "dup_read": 0.0,
+                       "model_downgrade": 0.0, "total": 3.50},
+        )
+        roi_block = html.split('<ol class="roi">', 1)[1].split("</ol>", 1)[0]
+        self.assertIn("roi-targ", roi_block)     # short session id (first 8 chars)
+        self.assertIn("cache hit", roi_block)    # concrete evidence, not boilerplate
+        self.assertIn("$3.50", roi_block)
+
+    def test_roi_empty_when_no_savings(self):
+        s = _make_session(session_id="clean-sid", input_tokens=100, cache_read_tokens=900)
+        sc = score_session(s)
+        html = render_dashboard(
+            repo="test-repo", days=30, sessions=[s], scored=[(s, sc)],
+            warnings_per_session=[[]],
+            estimated={"cache_miss": 0.0, "dup_read": 0.0,
+                       "model_downgrade": 0.0, "total": 0.0},
+        )
+        roi_block = html.split('<ol class="roi">', 1)[1].split("</ol>", 1)[0]
+        self.assertIn("No reclaimable savings", roi_block)
 
 
 if __name__ == "__main__":

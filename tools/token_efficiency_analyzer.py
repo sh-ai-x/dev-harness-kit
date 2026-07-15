@@ -102,6 +102,12 @@ DEFAULT_DUP_READ_TOKENS  = 2000   # heuristic: each duplicate Read = ~2K token w
 DEFAULT_COST_GATE_TOKENS = 200_000   # input + cache_read in one session
 DEFAULT_COST_GATE_USD    = 5.00      # dollar cost in one session
 
+#: Worktree states that mean "this session's branch is done" (merged into
+#: origin/main or the worktree dir is already gone). A session stamped with
+#: one of these states is bucketed as "Inactive" on the dashboard and counted
+#: into Stale Cost -- everything else (main/live/fresh/unknown) is "Active".
+STALE_WORKTREE_STATES = frozenset({"merged", "gone"})
+
 # Recommendation strings keyed by warning code. Rendered into the
 # "Recommended Optimizations" block in the dashboard.
 WARNING_RECOMMENDATIONS: dict[str, str] = {
@@ -977,6 +983,8 @@ class Warning:
     estimated_save_usd: float = 0.0   # populated by evaluate_warnings
     priority: int = 0                  # 1 = highest; set from reclaim axis
     reclaim_axis: str = ""             # cache_miss | dup_read | model_downgrade | ""
+    session_id: str = ""               # which session this instance fired on
+    evidence: str = ""                 # concrete number/file/text that drove the $ estimate
 
 
 def evaluate_warnings(s: dict, score: dict,
@@ -1008,6 +1016,8 @@ def evaluate_warnings(s: dict, score: dict,
             estimated_save_usd=round(reclaim_cache_miss, 2),
             priority=1,
             reclaim_axis="cache_miss",
+            session_id=s["session_id"],
+            evidence=f"cache hit {cache_hit:.0%} (target {DEFAULT_CACHE_HIT_TARGET:.0%})",
         ))
 
     # 2. Read tool cost >= 40% of total tool-imputed cost.
@@ -1022,6 +1032,11 @@ def evaluate_warnings(s: dict, score: dict,
     total_tool_cost = sum(tool_costs.values()) or 1.0
     read_share = tool_costs.get("Read", 0.0) / total_tool_cost
     if read_share >= 0.40 and s["tool_counts"].get("Read", 0) > 0:
+        if s["read_files"]:
+            top_file, top_n = max(s["read_files"].items(), key=lambda kv: kv[1])
+            read_evidence = f"'{top_file}' read {top_n}x"
+        else:
+            read_evidence = f"Read = {read_share:.0%} of tool cost"
         warnings.append(Warning(
             level="critical",
             code="READ_HEAVY",
@@ -1033,6 +1048,8 @@ def evaluate_warnings(s: dict, score: dict,
             estimated_save_usd=round(reclaim_dup_read, 2),
             priority=2,
             reclaim_axis="dup_read",
+            session_id=s["session_id"],
+            evidence=read_evidence,
         ))
 
     # 3. Context growth > 500K (one session accumulating a lot of input).
@@ -1048,6 +1065,8 @@ def evaluate_warnings(s: dict, score: dict,
             estimated_save_usd=round(reclaim_cache_miss, 2),
             priority=3,
             reclaim_axis="cache_miss",
+            session_id=s["session_id"],
+            evidence=f"{total_input:,} input tokens (> 500,000)",
         ))
 
     # 4. Opus on low-density simple work.
@@ -1063,6 +1082,8 @@ def evaluate_warnings(s: dict, score: dict,
             estimated_save_usd=round(reclaim_downgrade, 2),
             priority=4,
             reclaim_axis="model_downgrade",
+            session_id=s["session_id"],
+            evidence=f"opus + density {score['density']:.0f}/100 (< 20)",
         ))
 
     # 5. Cache writes high but reads < 2 per write on average.
@@ -1079,11 +1100,15 @@ def evaluate_warnings(s: dict, score: dict,
             estimated_save_usd=round(reclaim_cache_miss, 2),
             priority=2,
             reclaim_axis="cache_miss",
+            session_id=s["session_id"],
+            evidence=f"{writes:,} cache-write vs {s['cache_read_tokens']:,} cache-read tokens",
         ))
 
     # 6. Repeated user messages (same text appears >= 2 times).
-    repeats = [t for t, n in Counter(s["user_texts"]).items() if n >= 2 and len(t) > 5]
+    repeats = [(t, n) for t, n in Counter(s["user_texts"]).items() if n >= 2 and len(t) > 5]
     if repeats:
+        top_text, top_n = max(repeats, key=lambda tn: tn[1])
+        truncated = top_text[:50] + ("…" if len(top_text) > 50 else "")
         warnings.append(Warning(
             level="critical",
             code="REPEATED_USER_MSG",
@@ -1095,6 +1120,8 @@ def evaluate_warnings(s: dict, score: dict,
             estimated_save_usd=round(reclaim_cache_miss, 2),
             priority=3,
             reclaim_axis="cache_miss",
+            session_id=s["session_id"],
+            evidence=f"“{truncated}” × {top_n}",
         ))
 
     return warnings
@@ -1354,13 +1381,6 @@ tr:last-child td { border-bottom: none; }
 .pill-good { background: rgba(63,185,80,0.15); color: var(--good); }
 .pill-warn { background: rgba(210,153,34,0.15); color: var(--warn); }
 .pill-bad  { background: rgba(248,81,73,0.15); color: var(--bad); }
-.pill-stale {
-  background: rgba(210,153,34,0.08);
-  color: var(--warn);
-  outline: 1px solid rgba(210,153,34,0.55);
-  outline-offset: -1px;
-  font-weight: 600;
-}
 .bar { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 .warning {
@@ -1415,11 +1435,13 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; 
 .ttl-mix .ttl-name { color: var(--muted); }
 .ttl-mix .ttl-pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .roi { padding: 0; margin: 0; list-style: none; }
-.roi li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.roi li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; cursor: help; }
 .roi li:last-child { border-bottom: none; }
 .roi .rank { color: var(--muted); min-width: 22px; font-variant-numeric: tabular-nums; }
 .roi .save { color: var(--good); font-weight: 600; min-width: 80px; font-variant-numeric: tabular-nums; }
-.roi .code { min-width: 170px; }
+.roi .code { min-width: 150px; }
+.roi .sid { color: var(--muted); font-family: ui-monospace, monospace; min-width: 66px; }
+.roi .evidence { flex: 1; color: var(--text); }
 .optimize { padding: 0; margin: 0; list-style: none; }
 .optimize li { padding: 6px 0; font-size: 13px; line-height: 1.55; }
 .optimize li.do::before { content: "✓ "; color: var(--good); font-weight: 700; }
@@ -1454,7 +1476,7 @@ HTML_TEMPLATE = """<!doctype html>
 
   <div class="section-title">Overview</div>
   <div class="grid cols-5">
-    <div class="panel metric"><div class="label">Active Sessions</div><div class="value">{session_count}</div><div class="delta">{repos_named} distinct repo labels</div></div>
+    <div class="panel metric"><div class="label">Active Sessions</div><div class="value">{active_count}</div><div class="delta">{inactive_count} inactive · {repos_named} distinct repo labels</div></div>
     <div class="panel metric"><div class="label">Total Cost</div><div class="value">${total_cost:.2f}</div><div class="delta">{total_tokens:,} tokens processed</div></div>
     <div class="panel metric"><div class="label">Avg Score</div><div class="value">{avg_score:.1f}<span class="muted" style="font-size:14px">/100</span><span class="grade grade-{avg_grade}">{avg_grade}</span></div><div class="delta">cache {avg_cache:.0f} · density {avg_density:.0f} · redundancy {avg_redundancy:.0f} · economy {avg_economy:.0f}</div></div>
     <div class="panel metric"><div class="label">Cache Hit Ratio</div><div class="value">{avg_cache_hit:.0%}</div><div class="delta">cache_read / total_input</div></div>
@@ -1523,7 +1545,7 @@ HTML_TEMPLATE = """<!doctype html>
     </div>
   </div>
 
-  <div class="section-title">Sessions</div>
+  <div class="section-title">Active Sessions <span class="muted" style="font-weight:400;font-size:11px">(worktree state: main / live / fresh)</span></div>
   <div class="panel" style="overflow-x:auto">
     <table>
       <thead><tr>
@@ -1533,7 +1555,21 @@ HTML_TEMPLATE = """<!doctype html>
         <th style="text-align:right">Cache Hit</th><th style="text-align:right">Cost</th>
         <th style="text-align:right">Score</th><th>Warnings</th>
       </tr></thead>
-      <tbody>{session_rows}</tbody>
+      <tbody>{active_session_rows}</tbody>
+    </table>
+  </div>
+
+  <div class="section-title">Inactive Sessions <span class="muted" style="font-weight:400;font-size:11px">(worktree state: merged / gone — stale, safe to clean up)</span></div>
+  <div class="panel" style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>Session</th><th>Branch</th><th>Worktree</th><th>Model</th><th>Started</th>
+        <th style="text-align:right">Input</th><th style="text-align:right">Output</th>
+        <th style="text-align:right">Tools</th>
+        <th style="text-align:right">Cache Hit</th><th style="text-align:right">Cost</th>
+        <th style="text-align:right">Score</th><th>Warnings</th>
+      </tr></thead>
+      <tbody>{inactive_session_rows}</tbody>
     </table>
   </div>
 
@@ -2142,47 +2178,56 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
             f'<ul>{items}</ul></div>'
         )
 
-    # Session rows
-    session_rows_parts: list[str] = []
-    for idx, ((s, sc), cost) in enumerate(zip(scored, session_costs)):
-        hit = sc["cache_hit_ratio"]
-        started = s["first_ts"].strftime("%Y-%m-%d %H:%M") if s["first_ts"] else "—"
-        score = sc["total"]
-        grade = sc["grade"]
-        pill_cls = "pill-good" if score >= 75 else ("pill-warn" if score >= 50 else "pill-bad")
-        warns = warnings_per_session[idx]
-        total_tools = sum(s["tool_counts"].values())
-        warn_chips = " ".join(
-            f"<span class='pill {'pill-bad' if w.level=='critical' else 'pill-warn'}'>{html.escape(w.code)}</span>"
-            for w in warns
-        ) or "<span class='muted'>—</span>"
-        # Stale chip on the Worktree cell — surfaces worktree-pipeline rot
-        # directly on each affected session row.
-        wt_state = s.get("worktree_state", "")
-        stale_chip = (
-            "<span class='pill pill-stale'>stale</span>" if wt_state in ("merged", "gone") else ""
-        )
-        wt_cell = (
-            f"{stale_chip}{html.escape(s.get('worktree') or '—')}"
-            if stale_chip
-            else html.escape(s.get("worktree") or "—")
-        )
-        session_rows_parts.append(
-            f"<tr><td><code>{html.escape(s['session_id'][:8])}</code></td>"
-            f"<td>{html.escape(s.get('branch') or '—')}</td>"
-            f"<td>{wt_cell}</td>"
-            f"<td>{html.escape(s['model'] or '?')}</td>"
-            f"<td class='muted'>{html.escape(started)}</td>"
-            f"<td style='text-align:right'>{s['input_tokens']:,}</td>"
-            f"<td style='text-align:right'>{s['output_tokens']:,}</td>"
-            f"<td style='text-align:right'>{total_tools:,}</td>"
-            f"<td style='text-align:right'>{hit:.0%}</td>"
-            f"<td style='text-align:right'>${cost:.2f}</td>"
-            f"<td style='text-align:right'><span class='pill {pill_cls}'>{score:.0f}</span>"
-            f"<span class='grade grade-{grade}'>{grade}</span></td>"
-            f"<td>{warn_chips}</td></tr>"
-        )
-    session_rows_html = "\n".join(session_rows_parts) or "<tr><td colspan='12' class='muted'>No sessions.</td></tr>"
+    # Session rows — split into Active (main/live/fresh) vs Inactive
+    # (merged/gone, i.e. the branch's work is done) so stale work stops
+    # crowding the same table as sessions still worth acting on. The
+    # Worktree cell reuses _worktree_state_pill (already built for the
+    # Cost by Worktree panel above) instead of a redundant boolean chip.
+    def _session_rows_html(pairs: list[tuple[tuple[dict, dict], list["Warning"]]]) -> str:
+        parts: list[str] = []
+        for (s, sc), warns in pairs:
+            cost = _session_cost(s)
+            hit = sc["cache_hit_ratio"]
+            started = s["first_ts"].strftime("%Y-%m-%d %H:%M") if s["first_ts"] else "—"
+            score = sc["total"]
+            grade = sc["grade"]
+            pill_cls = "pill-good" if score >= 75 else ("pill-warn" if score >= 50 else "pill-bad")
+            total_tools = sum(s["tool_counts"].values())
+            warn_chips = " ".join(
+                f"<span class='pill {'pill-bad' if w.level=='critical' else 'pill-warn'}'>{html.escape(w.code)}</span>"
+                for w in warns
+            ) or "<span class='muted'>—</span>"
+            wt_state = s.get("worktree_state", "unknown")
+            wt_cell = f"{html.escape(s.get('worktree') or '—')} {_worktree_state_pill(wt_state)}"
+            parts.append(
+                f"<tr><td><code>{html.escape(s['session_id'][:8])}</code></td>"
+                f"<td>{html.escape(s.get('branch') or '—')}</td>"
+                f"<td>{wt_cell}</td>"
+                f"<td>{html.escape(s['model'] or '?')}</td>"
+                f"<td class='muted'>{html.escape(started)}</td>"
+                f"<td style='text-align:right'>{s['input_tokens']:,}</td>"
+                f"<td style='text-align:right'>{s['output_tokens']:,}</td>"
+                f"<td style='text-align:right'>{total_tools:,}</td>"
+                f"<td style='text-align:right'>{hit:.0%}</td>"
+                f"<td style='text-align:right'>${cost:.2f}</td>"
+                f"<td style='text-align:right'><span class='pill {pill_cls}'>{score:.0f}</span>"
+                f"<span class='grade grade-{grade}'>{grade}</span></td>"
+                f"<td>{warn_chips}</td></tr>"
+            )
+        return "\n".join(parts) or "<tr><td colspan='12' class='muted'>No sessions.</td></tr>"
+
+    active_pairs = [
+        (sw, warns) for sw, warns in zip(scored, warnings_per_session)
+        if sw[0].get("worktree_state") not in STALE_WORKTREE_STATES
+    ]
+    inactive_pairs = [
+        (sw, warns) for sw, warns in zip(scored, warnings_per_session)
+        if sw[0].get("worktree_state") in STALE_WORKTREE_STATES
+    ]
+    active_count = len(active_pairs)
+    inactive_count = len(inactive_pairs)
+    active_session_rows_html = _session_rows_html(active_pairs)
+    inactive_session_rows_html = _session_rows_html(inactive_pairs)
 
     # Transcript Index — one row per worktree, linking to its sidecar index
     # page (which lazily lists that worktree's sessions). Mirrors the Cost by
@@ -2224,20 +2269,28 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
             warn_blocks.append(f'<div class="{css}">{html.escape(w.message)}</div>')
     warnings_html = "\n".join(warn_blocks) or '<div class="muted">No anti-patterns detected.</div>'
 
-    # ROI Actions ranked by $ save
-    roi_candidates: list[tuple[float, str, str, int]] = []   # (save, code, msg, priority)
+    # ROI Actions ranked by $ save — one row per (session, warning) instance,
+    # not a generic per-code paragraph. Each row names the exact session and
+    # the concrete number/file/text that drove the estimate (w.evidence),
+    # so "what do I actually do" is answerable without opening the session.
+    # The full recommendation text rides along as a hover `title` (no JS
+    # needed) for anyone who wants the longer explanation.
+    roi_candidates: list[tuple[float, str, str, str, int]] = []   # (save, code, session_id, evidence, priority)
     for warns in warnings_per_session:
         for w in warns:
             if w.estimated_save_usd > 0:
-                roi_candidates.append((w.estimated_save_usd, w.code, w.message, w.priority))
+                roi_candidates.append((w.estimated_save_usd, w.code, w.session_id, w.evidence, w.priority))
     roi_candidates.sort(key=lambda x: -x[0])
     if roi_candidates:
         roi_items = "".join(
-            f"<li><span class='rank'>#{i+1}</span>"
+            f"<li title='{html.escape(WARNING_RECOMMENDATIONS.get(code, ''))}'>"
+            f"<span class='rank'>#{i+1}</span>"
             f"<span class='save'>${save:.2f}</span>"
             f"<span class='code'>{html.escape(code)}</span>"
-            f"<span class='muted'>(priority P{prio})</span></li>"
-            for i, (save, code, _msg, prio) in enumerate(roi_candidates[:20])
+            f"<span class='sid'><code>{html.escape(sid[:8]) if sid else '—'}</code></span>"
+            f"<span class='evidence'>{html.escape(evidence) if evidence else '—'}</span>"
+            f"<span class='muted'>(P{prio})</span></li>"
+            for i, (save, code, sid, evidence, prio) in enumerate(roi_candidates[:20])
         )
     else:
         roi_items = '<li class="muted">No reclaimable savings detected — cache hit and tool usage are within targets.</li>'
@@ -2257,7 +2310,7 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
     subtitle_parts = [
         html.escape(repo),
         f"last {days} days",
-        f"{len(scored)} active sessions",
+        f"{len(scored)} sessions ({active_count} active · {inactive_count} inactive)",
         f"generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
     ]
     if worktree_filter:
@@ -2269,6 +2322,8 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
         days=days,
         session_count=len(scored),
         repos_named=len({s["repo"] for s, _ in scored}),
+        active_count=active_count,
+        inactive_count=inactive_count,
         total_cost=total_cost,
         total_tokens=total_tokens,
         avg_score=avg_score,
@@ -2298,7 +2353,8 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
         ttl_miss_pct=ttl_miss_pct,
         ttl_middle_html=ttl_middle_html,
         ttl_caveat=html.escape(CACHE_TTL_CAVEAT),
-        session_rows=session_rows_html,
+        active_session_rows=active_session_rows_html,
+        inactive_session_rows=inactive_session_rows_html,
         transcript_index_rows=transcript_index_rows,
         warnings_html=warnings_html,
         estimated_total=estimated["total"],
@@ -2449,7 +2505,6 @@ def main(argv: list[str] | None = None) -> int:
     # Stale-cost aggregate — sessions whose worktree was merged into
     # origin/main or whose dir was already removed (gauge the spend left
     # behind by stale-but-still-on-disk worktrees).
-    stale_states = {"merged", "gone"}
     stale_cost = sum(
         cost_usd(
             s["model"],
@@ -2461,9 +2516,15 @@ def main(argv: list[str] | None = None) -> int:
             cache_read_tokens=s["cache_read_tokens"],
         )
         for s in selected
-        if s.get("worktree_state") in stale_states
+        if s.get("worktree_state") in STALE_WORKTREE_STATES
     )
     stale_pct = (stale_cost / total_cost) if total_cost > 0 else 0.0
+
+    # Active/Inactive session split — mirrors the dashboard's two Sessions
+    # tables. "Inactive" = worktree already merged into origin/main or gone
+    # from disk (the branch's work is done); everything else is "Active".
+    inactive_count = sum(1 for s in selected if s.get("worktree_state") in STALE_WORKTREE_STATES)
+    active_count = len(selected) - inactive_count
 
     if args.json:
         out = {
@@ -2475,6 +2536,8 @@ def main(argv: list[str] | None = None) -> int:
             "days": args.days,
             "files_scanned": len(files),
             "sessions": len(selected),
+            "active_sessions": active_count,
+            "inactive_sessions": inactive_count,
             "total_cost_usd": round(total_cost, 4),
             "stale_cost_usd": round(stale_cost, 4),
             "stale_pct": round(stale_pct, 4),
@@ -2495,6 +2558,7 @@ def main(argv: list[str] | None = None) -> int:
                     "estimated_save_usd": w.estimated_save_usd,
                     "reclaim_axis": w.reclaim_axis,
                     "priority": w.priority,
+                    "evidence": w.evidence,
                     "session_id": s["session_id"],
                     "branch": s.get("branch", ""),
                     "worktree": s.get("worktree", ""),
