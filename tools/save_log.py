@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 _CODEX_CONV_EVENTS = ("user_message", "agent_message")
 _CODEX_SYSTEM_PREFIXES = ("<permissions", "<environment_context", "<user_instructions")
@@ -33,6 +34,78 @@ def _sanitize_branch(name: str) -> str:
     if not cleaned:
         return "detached"
     return cleaned[:120]
+
+
+def find_worktree_for_cwd(cwd: str, main_root: str) -> str | None:
+    """Return the worktree directory path if ``cwd`` is inside a registered
+    worktree of ``main_root``; otherwise ``None``.
+
+    A worktree checkout has a ``.git`` *file* (not directory) containing
+    ``gitdir: <main>/.git/worktrees/<name>``. Walking up from ``cwd`` until we
+    find such a marker gives the worktree root. Cheap and robust — no
+    subprocess, no ``git`` CLI calls, safe to invoke on every save_log() call.
+
+    Returns ``None`` for the main checkout itself, any unrelated directory, or
+    when ``cwd``/``main_root`` are falsy.
+    """
+    if not cwd or not main_root:
+        return None
+    try:
+        p = Path(cwd).resolve()
+    except OSError:
+        return None
+    main_root_resolved = Path(main_root).resolve()
+    main_worktrees_dir = (main_root_resolved / ".git" / "worktrees").resolve()
+    while True:
+        git_path = p / ".git"
+        if git_path.is_file():
+            try:
+                content = git_path.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                return None
+            if not content.startswith("gitdir: "):
+                return None
+            gitdir_raw = content[len("gitdir: "):].strip()
+            gitdir = Path(gitdir_raw) if os.path.isabs(gitdir_raw) else (p / gitdir_raw).resolve()
+            try:
+                gitdir.relative_to(main_worktrees_dir)
+                return str(p)
+            except ValueError:
+                return None
+        if p.parent == p:
+            return None
+        p = p.parent
+
+
+def find_main_repo_root(cwd: str) -> str | None:
+    """Return the canonical main-checkout path for ``cwd``, or ``None``.
+
+    A session started inside a worktree has its ``.git`` lives at
+    ``<main>/.git/worktrees/<name>/`` while the **shared** ``.git`` stays in
+    the main checkout. ``git rev-parse --git-common-dir`` returns that shared
+    path; its parent is the main repo root where every session transcript
+    should land — regardless of which checkout the user is running in. Falls
+    back to ``None`` when ``cwd`` is not inside a git repo or git is
+    unavailable; the caller then writes to ``cwd`` (preserving the legacy
+    behavior of test fixtures and bare repos).
+
+    Never raises — a logging helper must not break the participant's session.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if out.returncode != 0:
+            return None
+        common = out.stdout.strip()
+        if not common:
+            return None
+        common_path = common if os.path.isabs(common) else os.path.normpath(os.path.join(cwd, common))
+        parent = os.path.dirname(common_path)
+        return parent if parent and os.path.isdir(parent) else None
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
 
 
 def detect_branch(cwd: str) -> str:
@@ -245,28 +318,42 @@ def main() -> int:
     if safe_session in ("", ".", ".."):
         safe_session = "session"
     branch = detect_branch(cwd)
-    dest_dir = os.path.join(cwd, "logs", args.tool, branch)
-    dest = os.path.join(dest_dir, f"{safe_session}.jsonl")
+    main_root = find_main_repo_root(cwd) or cwd
+    worktree_dir = find_worktree_for_cwd(cwd, main_root) if main_root != cwd else None
 
-    # Save only conversation lines; fall back to a verbatim copy on any doubt.
+    # Read transcript once, reuse for both writes.
     try:
-        os.makedirs(dest_dir, exist_ok=True)
         with open(transcript_path, encoding="utf-8", errors="replace") as fh:
             raw = fh.read()
-        slim = slim_transcript(raw, args.tool)
-        if slim is None:
-            shutil.copyfile(transcript_path, dest)
-        else:
-            with open(dest, "w", encoding="utf-8") as out:
-                out.write(slim)
-    except Exception as exc:  # noqa: BLE001 - non-fatal
-        print(f"save_log: trim failed, copying verbatim: {exc}", file=sys.stderr)
-        try:
-            os.makedirs(dest_dir, exist_ok=True)
-            shutil.copyfile(transcript_path, dest)
-        except Exception as exc2:  # noqa: BLE001 - non-fatal
-            print(f"save_log: copy failed: {exc2}", file=sys.stderr)
+    except OSError as exc:
+        print(f"save_log: cannot read transcript: {exc}", file=sys.stderr)
+        return 0
+    slim = slim_transcript(raw, args.tool)
+    content_bytes = slim.encode("utf-8") if slim is not None else None
 
+    def _write(dest_dir: str) -> None:
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"{safe_session}.jsonl")
+        try:
+            if content_bytes is None:
+                shutil.copyfile(transcript_path, dest)
+            else:
+                with open(dest, "wb") as out:
+                    out.write(content_bytes)
+        except OSError as exc:  # noqa: BLE001 - non-fatal
+            print(f"save_log: write failed for {dest}: {exc}", file=sys.stderr)
+
+    # Primary write: the main checkout's logs/<tool>/<branch>/. Every
+    # session — main or worktree — converges here so the analyzer has
+    # one canonical location to scan.
+    _write(os.path.join(main_root, "logs", args.tool, branch))
+    # Secondary write: the worktree's own logs/<tool>/<branch>/ when the
+    # session actually started in a worktree. Lets the analyzer's
+    # worktree_from_path() bucket the session under the right worktree
+    # name. Without this, every worktree session falls back to (main)
+    # attribution via the cwd field.
+    if worktree_dir and os.path.realpath(worktree_dir) != os.path.realpath(main_root):
+        _write(os.path.join(worktree_dir, "logs", args.tool, branch))
     return 0
 
 
