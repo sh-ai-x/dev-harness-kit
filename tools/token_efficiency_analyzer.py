@@ -799,7 +799,15 @@ def aggregate_session(path: Path) -> dict | None:
                 except json.JSONDecodeError:
                     continue
 
-                ts = parse_iso(rec.get("timestamp") or "")
+                # codex puts timestamp inside the payload — not at the
+                # record top level. Harvest that too when the top-level
+                # field is empty so filter_sessions(date_window) works.
+                _ts_raw = rec.get("timestamp")
+                if not _ts_raw:
+                    _rc_payload = rec.get("payload")
+                    if isinstance(_rc_payload, dict):
+                        _ts_raw = _rc_payload.get("timestamp")
+                ts = parse_iso(_ts_raw or "")
                 if ts is not None:
                     if first_ts is None or ts < first_ts:
                         first_ts = ts
@@ -809,7 +817,15 @@ def aggregate_session(path: Path) -> dict | None:
                 if session_id is None:
                     session_id = rec.get("sessionId") or rec.get("session_id") or path.stem
                 if not repo:
-                    repo = repo_from_cwd(rec.get("cwd"))
+                    # codex rollouts put cwd at session_meta.payload.cwd or
+                    # turn_context.payload.cwd — NOT at the record top
+                    # level. Harvest from those shapes too.
+                    _rcwd = rec.get("cwd")
+                    if not _rcwd:
+                        _rc_payload = rec.get("payload")
+                        if isinstance(_rc_payload, dict):
+                            _rcwd = _rc_payload.get("cwd")
+                    repo = repo_from_cwd(_rcwd)
                 gb = rec.get("gitBranch")
                 if isinstance(gb, str) and gb.strip():
                     branch_counts[gb.strip()] += 1
@@ -846,6 +862,51 @@ def aggregate_session(path: Path) -> dict | None:
                                 if fp:
                                     read_files[fp] += 1
 
+                elif rec_type == "turn_context":
+                    # codex: model lives on the per-turn context line.
+                    tc_payload = rec.get("payload") or {}
+                    if isinstance(tc_payload, dict):
+                        m = tc_payload.get("model")
+                        if isinstance(m, str) and m:
+                            models[m] += 1
+                elif rec_type == "event_msg":
+                    # codex: emit `token_count` (cumulative total_token_usage)
+                    # and `user_message` events. We overwrite (not accumulate)
+                    # the token snapshot, because each `token_count` event is a
+                    # monotonically-growing cumulative figure, not a delta.
+                    em_payload = rec.get("payload") or {}
+                    if isinstance(em_payload, dict):
+                        ptype = em_payload.get("type")
+                        if ptype == "token_count":
+                            info = em_payload.get("info") or {}
+                            if isinstance(info, dict):
+                                tot = info.get("total_token_usage") or {}
+                                if isinstance(tot, dict):
+                                    in_raw = int(tot.get("input_tokens") or 0)
+                                    cached = int(tot.get("cached_input_tokens") or 0)
+                                    out_raw = int(tot.get("output_tokens") or 0)
+                                    reason = int(tot.get("reasoning_output_tokens") or 0)
+                                    input_tokens = max(in_raw - cached, 0)
+                                    cache_read_tokens = cached
+                                    output_tokens = out_raw + reason
+                                    cache_write_tokens = 0
+                        elif ptype == "user_message":
+                            msg_text = em_payload.get("message")
+                            if isinstance(msg_text, str) and msg_text.strip():
+                                user_texts.append(msg_text.strip())
+                elif rec_type == "response_item":
+                    # codex tool calls: function_call + custom_tool_call.
+                    ri_payload = rec.get("payload") or {}
+                    if isinstance(ri_payload, dict):
+                        rtype = ri_payload.get("type")
+                        if rtype in ("function_call", "custom_tool_call"):
+                            name = ri_payload.get("name") or "?"
+                            tool_counts[name] += 1
+                            if name == "Read":
+                                inp = ri_payload.get("input") or {}
+                                fp = inp.get("file_path") or inp.get("path") or ""
+                                if fp:
+                                    read_files[fp] += 1
                 elif rec_type == "user":
                     c = msg.get("content")
                     if isinstance(c, str):
@@ -1735,6 +1796,20 @@ def _sid_file(sid: str) -> str:
     return re.sub(r"[^\w.\-]", "_", sid or "session") + ".html"
 
 
+def _is_zero_turn_session(s: dict) -> bool:
+    """True iff a session has no assistant-turn signal.
+
+    Zero-turn = zero in+out tokens AND zero tool calls. Sessions the user
+    started and abandoned before the model replied (a2914f3e / b72bba75 —
+    3 + 1 user turns, 0 assistant turns) hit this case. They carry zero
+    signal for cost scoring and clutter the Sessions table, so we drop
+    them. They remain in the Transcript Index for traceability.
+    """
+    in_out = int(s.get("input_tokens", 0)) + int(s.get("output_tokens", 0))
+    tools = sum(s.get("tool_counts", {}).values())
+    return in_out == 0 and tools == 0
+
+
 def _session_cost(s: dict) -> float:
     """USD cost for one aggregated session (same inputs as the dashboard panels)."""
     return cost_usd(
@@ -2272,13 +2347,18 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
             )
         return "\n".join(parts) or "<tr><td colspan='12' class='muted'>No sessions.</td></tr>"
 
+    # Zero-turn sessions (user started, never got a reply) carry no signal
+    # and clutter both panels. Filter them out at render time, but keep
+    # them in `scored` so the Transcript Index stays complete.
     active_pairs = [
         (sw, warns) for sw, warns in zip(scored, warnings_per_session)
         if sw[0].get("worktree_state") not in STALE_WORKTREE_STATES
+        and not _is_zero_turn_session(sw[0])
     ]
     inactive_pairs = [
         (sw, warns) for sw, warns in zip(scored, warnings_per_session)
         if sw[0].get("worktree_state") in STALE_WORKTREE_STATES
+        and not _is_zero_turn_session(sw[0])
     ]
     active_count = len(active_pairs)
     inactive_count = len(inactive_pairs)

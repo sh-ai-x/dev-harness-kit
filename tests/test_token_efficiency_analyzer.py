@@ -2043,3 +2043,224 @@ class TestRoiActionsSpecificity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCodexSessionParsing(unittest.TestCase):
+    """_aggregate_session parses codex event_msg/turn_context/response_item shapes.
+
+    The actual codex schema carries:
+      - ``turn_context.payload.model`` → per-turn model
+      - ``event_msg`` with ``payload.type == "token_count"`` and
+        ``payload.info.total_token_usage.{input_tokens,cached_input_tokens,
+        output_tokens,reasoning_output_tokens}`` → cumulative per-session totals
+      - ``response_item`` with ``payload.type == "function_call"`` →
+        ``payload.name`` populates ``tool_counts``
+      - ``event_msg`` with ``payload.type == "user_message"`` →
+        ``payload.message`` populates ``user_texts``
+
+    These tests pin each branch independently.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="analyzer-codex-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, True)
+
+    def _write_codex(self, sid: str, records: list[dict], *,
+                     subdir: str = "main") -> Path:
+        d = self.tmpdir / "logs" / "codex" / subdir
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{sid}.jsonl"
+        with p.open("w", encoding="utf-8") as fh:
+            for r in records:
+                fh.write(json.dumps(r) + "\n")
+        return p
+
+    def test_turn_context_populates_model(self) -> None:
+        p = self._write_codex("sid-turn", [
+            {"type": "turn_context", "payload": {"model": "gpt-5.6-luna"},
+             "timestamp": "2026-07-15T10:00:00.000Z",
+             "cwd": "/tmp/fix-repo"},
+        ])
+        s = aggregate_session(p)
+        self.assertEqual(s["model"], "gpt-5.6-luna")
+
+    def test_event_msg_token_count_overwrites_with_final_snapshot(self) -> None:
+        """codex emits incremental ``token_count`` snapshots; we keep the final."""
+        p = self._write_codex("sid-tokens", [
+            {"type": "event_msg", "payload": {"type": "token_count",
+                "info": {"total_token_usage": {
+                    "input_tokens": 100, "cached_input_tokens": 20,
+                    "output_tokens": 10, "reasoning_output_tokens": 2,
+                    "total_tokens": 132}}}},
+            {"type": "event_msg", "payload": {"type": "token_count",
+                "info": {"total_token_usage": {
+                    "input_tokens": 500, "cached_input_tokens": 400,
+                    "output_tokens": 50, "reasoning_output_tokens": 20,
+                    "total_tokens": 570}}}},
+        ])
+        s = aggregate_session(p)
+        # Final snapshot wins (cumulative figure, not a delta).
+        self.assertEqual(s["input_tokens"], 500 - 400)        # non-cached input
+        self.assertEqual(s["cache_read_tokens"], 400)
+        self.assertEqual(s["output_tokens"], 50 + 20)          # codex bills reasoning as output
+        self.assertEqual(s["cache_write_tokens"], 0)
+
+    def test_event_msg_user_message_lands_in_user_texts(self) -> None:
+        p = self._write_codex("sid-umsg", [
+            {"type": "event_msg", "payload": {"type": "user_message",
+                                              "message": "hello codex"}},
+            {"type": "event_msg", "payload": {"type": "user_message",
+                                              "message": "  trim me  "}},
+            {"type": "event_msg", "payload": {"type": "user_message",
+                                              "message": ""}},  # dropped
+        ])
+        s = aggregate_session(p)
+        self.assertEqual(s["user_texts"], ["hello codex", "trim me"])
+
+    def test_response_item_function_call_populates_tool_counts(self) -> None:
+        p = self._write_codex("sid-tool", [
+            {"type": "response_item", "payload": {"type": "function_call",
+                "name": "Read", "input": {"file_path": "/x/y"}}},
+            {"type": "response_item", "payload": {"type": "custom_tool_call",
+                "name": "shell_cmd"}},
+            {"type": "response_item", "payload": {"type": "function_call_output",
+                "output": "huge blob — ignored"}},  # explicitly dropped
+        ])
+        s = aggregate_session(p)
+        self.assertEqual(s["tool_counts"]["Read"], 1)
+        self.assertEqual(s["tool_counts"]["shell_cmd"], 1)
+        # Outputs are not tool calls, so total stays 2.
+        self.assertEqual(sum(s["tool_counts"].values()), 2)
+        # Read populates read_files too.
+        self.assertIn("/x/y", s["read_files"])
+
+
+class TestZeroTurnSessionSuppressed(unittest.TestCase):
+    """Zero-turn sessions (user only, no assistant reply) must NOT render in
+    either Active or Inactive Sessions table rows. Transcript Index may still
+    list them for traceability.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="analyzer-zt-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, True)
+
+    def _write_claude(self, sid: str, *, n_user_turns: int) -> Path:
+        d = self.tmpdir / "logs" / "claude-code" / "main"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{sid}.jsonl"
+        with p.open("w", encoding="utf-8") as fh:
+            for i in range(n_user_turns):
+                fh.write(json.dumps({
+                    "type": "user",
+                    "sessionId": sid,
+                    "cwd": "/Users/sanghee/dev/dev-harness-kit",
+                    "timestamp": f"2026-07-09T10:0{i}:00.000Z",
+                    "gitBranch": "main",
+                    "message": {"role": "user",
+                                "content": f"user turn {i}"},
+                }) + "\n")
+        return p
+
+    def test_zero_turn_session_dropped_from_active_panel(self) -> None:
+        # Use the public main() entrypoint.
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+
+        sid_active = "a2914f3e-cf19-4421-a1fb-7f9b81cc92e8"  # active worktree
+        sid_inactive = "b72bba75-3406-4841-8fdb-b3f86985bae7"  # stale
+        self._write_claude(sid_active, n_user_turns=3)
+        self._write_claude(sid_inactive, n_user_turns=1)
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            old_argv = sys.argv
+            sys.argv = ["analyzer", "--repo", "dev-harness-kit",
+                        "--days", "30", "--logs-dir", str(self.tmpdir / "logs"),
+                        "--out", str(self.tmpdir / "dash.html")]
+            try:
+                rc = main()
+            finally:
+                sys.argv = old_argv
+            self.assertEqual(rc, 0)
+            html = (self.tmpdir / "dash.html").read_text()
+
+        # Both session ids must be excluded from BOTH Active AND Inactive table
+        # bodies (they appear in section titles and the Transcript Index, but
+        # those are not score-coded rows).
+        active_body = html.split("Active Sessions", 1)[1].split("Inactive Sessions", 1)[0]
+        inactive_body = html.split("Inactive Sessions", 1)[1].split("Transcript Index", 1)[0]
+        for sid in (sid_active, sid_inactive):
+            self.assertNotIn(sid[:8], active_body,
+                f"{sid[:8]} should not appear in Active Sessions table")
+            self.assertNotIn(sid[:8], inactive_body,
+                f"{sid[:8]} should not appear in Inactive Sessions table")
+
+        # ... but the Transcript Index (which iterates `scored`, not the
+        # filtered pairs) DOES list their worktree rows. The worktree stub
+        # is "(main)" (no .worktrees/ ancestor), so we only assert the html
+        # renders at all without error.
+
+    def test_is_zero_turn_helper_unit(self) -> None:
+        from token_efficiency_analyzer import _is_zero_turn_session
+        self.assertTrue(_is_zero_turn_session({
+            "input_tokens": 0, "output_tokens": 0,
+            "tool_counts": Counter(),
+        }))
+        self.assertFalse(_is_zero_turn_session({
+            "input_tokens": 100, "output_tokens": 0,
+            "tool_counts": Counter(),
+        }))
+        self.assertFalse(_is_zero_turn_session({
+            "input_tokens": 0, "output_tokens": 0,
+            "tool_counts": Counter({"Read": 1}),
+        }))
+
+
+class TestCwdHarvest(unittest.TestCase):
+    """codex rollouts carry cwd inside ``payload.cwd`` (session_meta + turn_context)
+    — NOT at the record top level. The aggregator must harvest from both shapes
+    so the repo filter resolves against the user's project, not the filename.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="analyzer-cwd-"))
+        self.addCleanup(shutil.rmtree, self.tmpdir, True)
+
+    def _write(self, sid: str, records: list[dict]) -> Path:
+        d = self.tmpdir / "logs" / "codex" / "main"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{sid}.jsonl"
+        with p.open("w", encoding="utf-8") as fh:
+            for r in records:
+                fh.write(json.dumps(r) + "\n")
+        return p
+
+    def test_repo_from_payload_cwd(self) -> None:
+        p = self._write("sid-cwd", [
+            {"type": "session_meta", "payload": {
+                "session_id": "sid-cwd",
+                "cwd": "/Users/sanghee/dev/dev-harness-kit",
+            }},
+        ])
+        s = aggregate_session(p)
+        self.assertEqual(s["repo"], "dev-harness-kit")
+
+    def test_filter_sessions_keeps_payload_cwd(self) -> None:
+        """End-to-end: codex rollout with cwd only on payload survives
+        filter_sessions(repo='dev-harness-kit', days=30)."""
+        from token_efficiency_analyzer import filter_sessions
+        p = self._write("sid-payload-cwd", [
+            {"type": "session_meta", "payload": {
+                "session_id": "sid-payload-cwd",
+                "cwd": "/Users/sanghee/dev/dev-harness-kit",
+                "timestamp": "2026-07-15T10:00:00Z",
+            }},
+            # A model so the session has signal.
+            {"type": "turn_context", "payload": {"model": "gpt-5.6-luna",
+                "cwd": "/Users/sanghee/dev/dev-harness-kit"},
+                "timestamp": "2026-07-15T10:00:01Z"},
+        ])
+        s = aggregate_session(p)
+        self.assertEqual(s["repo"], "dev-harness-kit")
+        kept = filter_sessions([s], "dev-harness-kit", 30)
+        self.assertEqual(len(kept), 1)
