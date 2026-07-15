@@ -1,7 +1,7 @@
 ---
 name: babysit-pr
 category: ship
-description: 0-arg PR babysitter. Polls `gh pr checks`, fetches failing run logs, applies minimal fixes, commits + pushes, and re-iterates until review verdict = Approve and all required checks pass. Hard cap on iterations to prevent infinite loops.
+description: 0-arg PR babysitter. Polls `gh pr checks`, fetches failing run logs, applies minimal fixes, commits + pushes, and re-iterates until review verdict = Approve and all required checks pass. On MERGED, removes the local worktree + local branch + upstream branch + remote-tracking ref so the next session starts clean. Hard cap on iterations to prevent infinite loops.
 when_to_use: |
   - User types /dev-kit:babysit-pr
   - PR is open on current branch and CI is red / review requested changes
@@ -51,7 +51,24 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call)
   2. TERMINATE  — if REVIEW_VERDICT == "APPROVED"
                     AND every check.conclusion ∈ {success, skipped, neutral}
-                    → print "✅ PR #<n> approved — done" + iterate count
+                    → CONFIRM_MERGE — `gh pr view $PR_NUMBER --json state,mergedAt -q`
+                        if `state != MERGED`: print "approve + checks green but PR not
+                        merged (still draft? admin-only?). exiting 0 — human merges."
+                        → exit 0
+                    → CLEANUP — best-effort, idempotent, non-fatal:
+                        1. local worktree → `git worktree remove` the dir this session
+                           lives in (skip silently if `ExitWorktree` would error: another
+                           live session owns it, or it was already removed).
+                        2. local branch → `git branch -D $BRANCH` (force: squash-merge
+                           leaves no ancestry, so `-d` refuses — see issue loop during
+                           PR #187 babysit; `-D` is safe after `git diff origin/main HEAD`
+                           is empty). Refuse silently if cwd is detached.
+                        3. remote branch → `git push origin --delete $BRANCH`. Refuse
+                           silently on 403 (branch protection / fork / offline).
+                        4. remote-tracking ref → `git branch -dr origin/$BRANCH`.
+                    → print "✅ PR #<n> approved, merged, and cleaned up — done"
+                      + iterate count + 4-line summary of cleanup actions taken
+                      (or "no-op" with reason for any skipped step)
                     → exit 0
   3. CLASSIFY   — bucket blockers into:
                     A) CI failing      (check.conclusion == "failure")
