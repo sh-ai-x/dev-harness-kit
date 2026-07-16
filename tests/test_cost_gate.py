@@ -339,25 +339,36 @@ class TestHookScriptRemoved(unittest.TestCase):
 
 
 # ============================================================================
-# 9. Isolation guarantee — no import of token_efficiency_analyzer
+# 9. Isolation guarantee — lib/cost_gate.py and tools/cost_gate_status.py
+#    must NOT import tools/token_efficiency_analyzer.py. As of 2026-07-17
+#    both subsystems do legitimately share ``lib/llm_pricing.py`` (the new
+#    SSOT pricing loader); the import-direction guard is the one we still
+#    assert — cost-gate must not depend on the dashboard module directly.
 # ============================================================================
 
 class TestIsolation(unittest.TestCase):
+    def _has_import_statement(self, text: str, module: str) -> bool:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("import ", "from ")) and module in stripped:
+                return True
+        return False
+
     def test_lib_cost_gate_does_not_import_token_analyzer(self):
         path = LIB / "cost_gate.py"
         if not path.exists():
             self.skipTest("cost_gate.py not found")
         text = path.read_text(encoding="utf-8")
-        self.assertNotIn("token_efficiency_analyzer", text,
-                         "lib/cost_gate.py must not import token_efficiency_analyzer")
+        self.assertFalse(self._has_import_statement(text, "token_efficiency_analyzer"),
+                         "lib/cost_gate.py must not import tools/token_efficiency_analyzer")
 
     def test_tools_cost_gate_status_does_not_import_token_analyzer(self):
         path = TOOLS / "cost_gate_status.py"
         if not path.exists():
             self.skipTest("cost_gate_status.py not found")
         text = path.read_text(encoding="utf-8")
-        self.assertNotIn("token_efficiency_analyzer", text,
-                         "tools/cost_gate_status.py must not import token_efficiency_analyzer")
+        self.assertFalse(self._has_import_statement(text, "token_efficiency_analyzer"),
+                         "tools/cost_gate_status.py must not import tools/token_efficiency_analyzer")
 
 
 if __name__ == "__main__":

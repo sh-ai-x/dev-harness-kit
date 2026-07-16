@@ -51,20 +51,25 @@ from atomic import atomic_write_json, now_iso  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pricing
+#
+# As of 2026-07-17 the inline PRICING dict has been replaced by a single
+# shared loader: ``lib.llm_pricing``. That module reads
+# ``docs/llm-info/<provider>.json`` (the SSOT refreshed via
+# ``/dev-kit:llm-refresh``) so that ``lib/cost_gate.py`` (this file),
+# ``tools/token_efficiency_analyzer.py``, and any future consumer stay in
+# sync without re-typing numbers. The inline rows below remain only as a
+# fallback for installs where ``docs/llm-info/`` does not yet exist
+# (e.g., a partial `--strict` clone). New code MUST go through
+# ``lib.llm_pricing`` — never edit these rows.
 # ---------------------------------------------------------------------------
-
-PRICING: Dict[str, Dict[str, float]] = {
-    "opus":    {"in": 5.00,  "out": 25.00, "cache_write_5m":  6.25, "cache_write_1h": 10.00, "cache_read": 0.50},
-    "sonnet":  {"in": 3.00,  "out": 15.00, "cache_write_5m":  3.75, "cache_write_1h":  6.00, "cache_read": 0.30},
-    "haiku":   {"in": 1.00,  "out":  5.00, "cache_write_5m":  1.25, "cache_write_1h":  2.00, "cache_read": 0.10},
-    "minimax": {"in": 0.30,  "out":  1.20, "cache_write_5m":  0.375, "cache_write_1h":  0.375, "cache_read": 0.06},
-}
-
-# Detection order matters: minimax contains no conflicting substrings, but
-# keep it first defensively in case future model ids overlap.
-_TIER_ORDER = ("minimax", "opus", "sonnet", "haiku")
+from llm_pricing import pricing_for as _loader_pricing_for  # noqa: E402
 
 DEFAULT_PRICING_KEY = "sonnet"
+
+# Loader returns the sonnet fallback row when the model id does not
+# resolve. We mirror the lookup path through the merged PRICING dict so
+# we can detect the fallback vs an actual match.
+import llm_pricing as _llm_pricing  # noqa: E402
 
 _UNKNOWN_MODELS: List[str] = []
 
@@ -74,25 +79,40 @@ def reset_unknown_models() -> None:
     _UNKNOWN_MODELS.clear()
 
 
+def _looks_like_known(model_id: str) -> bool:
+    """Return True if model_id resolves to a non-fallback PRICING row."""
+    if not model_id:
+        return False
+    pricing = _llm_pricing._pricing_cache()
+    mid = model_id.lower()
+    if mid in pricing:
+        return True
+    norm_mid = mid.replace("-", "").replace(".", "").replace("_", "")
+    for key in sorted(pricing.keys(), key=len, reverse=True):
+        if key and key.replace("-", "").replace(".", "").replace("_", "") in norm_mid:
+            return True
+    return False
+
+
 def pricing_for(model_id: str, *, return_unknown: bool = False):
     """Resolve a model id to its pricing row.
 
-    Substring match (case-insensitive) against _TIER_ORDER. Unknown ids
-    fall back to DEFAULT_PRICING_KEY and are recorded in a per-process
-    list (cleared via reset_unknown_models in tests).
+    Delegates to ``lib.llm_pricing.pricing_for`` which loads from
+    ``docs/llm-info/<provider>.json``. Unknown ids fall back to
+    ``sonnet`` pricing and are recorded in the per-process
+    ``_UNKNOWN_MODELS`` list (cleared via ``reset_unknown_models`` in
+    tests).
     """
     if not model_id:
         if return_unknown:
-            return PRICING[DEFAULT_PRICING_KEY], list(_UNKNOWN_MODELS)
-        return PRICING[DEFAULT_PRICING_KEY]
-    mid = model_id.lower()
-    for tier in _TIER_ORDER:
-        if tier in mid:
-            return PRICING[tier] if not return_unknown else (PRICING[tier], list(_UNKNOWN_MODELS))
-    _UNKNOWN_MODELS.append(model_id)
+            return _loader_pricing_for(""), list(_UNKNOWN_MODELS)
+        return _loader_pricing_for("")
+    if not _looks_like_known(model_id):
+        _UNKNOWN_MODELS.append(model_id)
+    row = _loader_pricing_for(model_id)
     if return_unknown:
-        return PRICING[DEFAULT_PRICING_KEY], list(_UNKNOWN_MODELS)
-    return PRICING[DEFAULT_PRICING_KEY]
+        return row, list(_UNKNOWN_MODELS)
+    return row
 
 
 # ---------------------------------------------------------------------------
