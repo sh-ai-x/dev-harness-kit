@@ -45,11 +45,12 @@ class TestSSOTLoader(unittest.TestCase):
 
     def test_loader_reads_claude_opus_4_8_at_documented_rate(self):
         # Cross-check against the verified value in docs/llm-info/claude.json.
+        # All JSON values are now USD-denominated (MiniMax pre-converted);
+        # loader must pass them through unchanged.
         claude = json.loads(CLAUDE_JSON.read_text(encoding="utf-8"))
         opus_json = next(m for m in claude["models"] if m["id"] == "claude-opus-4-8")
-        expected_in = opus_json["input_price_per_mtok"] / llm_pricing._currency_multiplier("USD")
         self.assertIn("claude-opus-4-8", self.pricing)
-        self.assertAlmostEqual(self.pricing["claude-opus-4-8"]["in"], expected_in, places=4)
+        self.assertAlmostEqual(self.pricing["claude-opus-4-8"]["in"], opus_json["input_price_per_mtok"], places=4)
         self.assertAlmostEqual(self.pricing["claude-opus-4-8"]["out"], 25.00, places=4)
 
     def test_loader_reads_gpt_5_5_pro_at_documented_rate(self):
@@ -60,13 +61,12 @@ class TestSSOTLoader(unittest.TestCase):
         self.assertAlmostEqual(self.pricing["gpt-5.5-pro"]["in"], pro_json["input_price_per_mtok"], places=4)
         self.assertAlmostEqual(self.pricing["gpt-5.5-pro"]["out"], pro_json["output_price_per_mtok"], places=4)
 
-    def test_minimax_loader_converts_cny_to_usd(self):
-        # MiniMax publishes in CNY; loader must convert to USD so the
-        # cost_usd math returns dollar amounts. JSON rows keep their
-        # original mixed-case id; the matcher lowercases for lookup.
+    def test_minimax_loader_loads_usd_rows(self):
+        # MiniMax values are pre-converted from CNY to USD upstream; loader
+        # passes them through unchanged. JSON rows keep their original
+        # mixed-case id; the matcher lowercases for lookup.
         minimax_keys = [k for k in self.pricing if k.lower().startswith("minimax")]
-        self.assertGreater(len(minimax_keys), 0,
-                           "no MiniMax rows loaded (CNY->USD conversion may be broken)")
+        self.assertGreater(len(minimax_keys), 0, "no MiniMax rows loaded")
         for k in minimax_keys:
             self.assertLess(self.pricing[k]["in"], 5.0,
                             f"{k}: MiniMax rate looks unconverted (should be < $5/MTok USD)")

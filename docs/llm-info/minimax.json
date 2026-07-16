@@ -3,52 +3,52 @@
   "label": "MiniMax",
   "source_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo.md",
   "fetched_at": "2026-07-17T03:30:00+0900",
-  "currency": "CNY",
+  "currency": "USD",
   "models": [
     {
       "id": "MiniMax-M3",
-      "display_name": "MiniMax-M3 (≤512k context, standard tier)",
+      "display_name": "MiniMax-M3 (<=512k context, standard tier)",
       "context_window": 512000,
-      "input_price_per_mtok": 2.10,
-      "output_price_per_mtok": 8.40,
+      "input_price_per_mtok": 0.30,
+      "output_price_per_mtok": 1.20,
       "deprecated": false,
-      "notes": "Standard tier. Priority tier: 3.15 / 12.60. >512k band: 4.20 / 16.80 (standard) and 6.30 / 25.20 (priority)."
+      "notes": "Standard tier. Priority tier: 0.45 / 1.80. >512k band: 0.60 / 2.40 (standard) and 0.90 / 3.60 (priority). Originally 2.10 / 8.40 CNY per Mtok at FX 7.00."
     },
     {
       "id": "MiniMax-M2.7",
       "display_name": "MiniMax-M2.7",
       "context_window": 245000,
-      "input_price_per_mtok": 2.10,
-      "output_price_per_mtok": 8.40,
+      "input_price_per_mtok": 0.30,
+      "output_price_per_mtok": 1.20,
       "deprecated": false,
-      "notes": "Standard tier. Highspeed variant: 4.20 / 16.80."
+      "notes": "Standard tier. Highspeed variant: 0.60 / 2.40. Originally 2.10 / 8.40 CNY per Mtok at FX 7.00."
     },
     {
       "id": "MiniMax-M2.5",
       "display_name": "MiniMax-M2.5",
       "context_window": 245000,
-      "input_price_per_mtok": 2.10,
-      "output_price_per_mtok": 8.40,
+      "input_price_per_mtok": 0.30,
+      "output_price_per_mtok": 1.20,
       "deprecated": false,
-      "notes": "Standard tier. Highspeed variant: 4.20 / 16.80."
+      "notes": "Standard tier. Highspeed variant: 0.60 / 2.40. Originally 2.10 / 8.40 CNY per Mtok at FX 7.00."
     },
     {
       "id": "MiniMax-M2.1",
       "display_name": "MiniMax-M2.1",
       "context_window": 245000,
-      "input_price_per_mtok": 2.10,
-      "output_price_per_mtok": 8.40,
+      "input_price_per_mtok": 0.30,
+      "output_price_per_mtok": 1.20,
       "deprecated": false,
-      "notes": "Standard tier. Highspeed variant: 4.20 / 16.80."
+      "notes": "Standard tier. Highspeed variant: 0.60 / 2.40. Originally 2.10 / 8.40 CNY per Mtok at FX 7.00."
     },
     {
       "id": "MiniMax-M2",
       "display_name": "MiniMax-M2",
       "context_window": 245000,
-      "input_price_per_mtok": 2.10,
-      "output_price_per_mtok": 8.40,
+      "input_price_per_mtok": 0.30,
+      "output_price_per_mtok": 1.20,
       "deprecated": false,
-      "notes": "Standard tier only; no highspeed tier per vendor page."
+      "notes": "Standard tier only; no highspeed tier per vendor page. Originally 2.10 / 8.40 CNY per Mtok at FX 7.00."
     }
   ],
   "plans": []
