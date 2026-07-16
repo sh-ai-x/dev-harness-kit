@@ -9,31 +9,40 @@ name: PR Review
 #   Changes Requested  (any major in either)                              → failure
 #   Blocked            (any critical in either)                           → failure
 #
-# Empty-verdict gate: for pull_request events, missing verdict = exit 1
-# (strict). For workflow_dispatch, missing verdict = warn + exit 0
-# (manual override allowed).
+# Empty-verdict gate (0.1.3+): missing verdict defaults to Approve with
+# ::warning:: in BOTH pull_request and workflow_dispatch modes. The
+# human gate (REVIEW_REQUIRED / CHANGES_REQUESTED) is what blocks merge.
+#
+# Why `pull_request` (not `pull_request_target`):
+#   `anthropics/claude-code-action@v1` does an OIDC token exchange by
+#   default. With `pull_request_target` the exchanged token is rejected
+#   with 401 Invalid OIDC token in any consumer repo that does not have
+#   OIDC trust configured at the org/repo level. `pull_request` issues
+#   a token the action's federation endpoint accepts, so the agent runs
+#   and posts a verdict.
+#
+#   Trade-off: on `pull_request`, the action's workflow-validation gate
+#   skips runs when the workflow file itself is modified on the PR head.
+#   The first PR that ADDS `.github/workflows/review.yml` is the obvious
+#   example; the verdict comes back empty, the severity gate defaults to
+#   Approve + ::warning::, and the human review state is what actually
+#   blocks merge. Normal PRs (not touching the workflow file) get a real
+#   agent review.
+#
+#   The dev-harness-kit repo's own review.yml has always used
+#   `pull_request` for this reason. The consumer template previously
+#   used `pull_request_target` to attempt reviews on workflow-modifying
+#   PRs, at the cost of breaking consumer repos without OIDC trust.
+#
+# Fork safety: `pull_request` runs in PR-head context (untrusted code
+# from forks), but fork PRs still receive NO repo secrets (only
+# GITHUB_TOKEN). The fork-safety guard
+#   github.event.pull_request.head.repo.full_name == github.repository
+# skips fork PRs BEFORE any step executes. workflow_dispatch is exempt
+# (manual operator action).
 #
 # Secret name `MINMAX_API_KEY` is preserved from prior workflow — do not
 # rename (would break existing repo secret config).
-#
-# Provider selection (pull_request events): controlled by the git-tracked
-# file `.github/ci-review-provider.txt` (one of `minimax` / `anthropic` /
-# `deepseek` on its own line, defaults to `minimax` if the file is missing
-# or empty). This is a plain local file — edit it, commit, push, and the
-# very next PR-triggered run picks it up. No GitHub Settings UI, no
-# workflow_dispatch, no automatic fallback chain to reason about: whatever
-# is committed on the PR's branch (checked out by `actions/checkout` below)
-# is what runs. workflow_dispatch still accepts an explicit
-# `review_provider` input that overrides the file for a single manual run.
-# Each provider requires its matching secret to be configured:
-# `MINMAX_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
-#
-# CI (a GitHub-hosted runner) can never read your local .env — it only
-# ever sees what's on the branch it checks out. `.githooks/pre-commit`
-# bridges that gap: it reads `CI_REVIEW_PROVIDER` from the *main
-# checkout's* `.env` on every local commit and auto-syncs this file to
-# match, so `.env` stays the single source of truth you actually edit —
-# see `.env.example` for the `CI_REVIEW_PROVIDER` key.
 
 on:
   pull_request:
@@ -41,35 +50,39 @@ on:
   workflow_dispatch:
     inputs:
       review_provider:
-        description: "Provider for this run (default: .github/ci-review-provider.txt, else minimax)"
+        description: "Provider for this run (default: minimax)"
         required: false
-        default: ""
+        default: "minimax"
         type: choice
         options:
-          - ""
           - minimax
           - anthropic
-          - deepseek
       pr_number:
         description: "PR number to review"
         required: false
         type: string
 
+# Cancel superseded re-runs on the same PR (e.g. force-push mid-review).
+# workflow_dispatch runs are independent and use a separate group.
+concurrency:
+  group: review-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   review:
+    # Fork-safety guard: skip silently for fork PRs (fork PRs have no
+    # access to MINMAX_API_KEY / DEV_KIT_GITHUB_TOKEN, so we don't even
+    # run the install step on them). workflow_dispatch is exempt -- the
+    # operator is trusted.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     name: /dev-kit:review (3-dim)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Skip on bump-PRs (title is `chore(release): bump dev-kit to vX.Y.Z`).
-    # The bump content is version-bump.yml-generated and is auto-merged by
-    # `peter-evans/enable-pull-request-automerge`. Running /dev-kit:review
-    # on it would only confirm "plugin.json version bumped by 0.0.1" — no
-    # reviewable change. Replaces the previous `[skip ci]` literal that
-    # globally suppressed ALL workflows on the bump commit (which broke
-    # the round-trip — see version-bump.yml).
-    if: "!startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')"
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
+      agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
     permissions:
       contents: read
       pull-requests: write
@@ -77,19 +90,51 @@ jobs:
       id-token: write
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
+      # Used by the consumer-install branch of the install step below when
+      # the dev-harness-kit source is private. Optional for self-install.
+      DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
+          # Checkout PR head sha. With `pull_request`, the action defaults
+          # to the PR head ref, but we pin the explicit sha so the agent
+          # reads the exact files in the diff.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - name: Install dev-kit plugin from local checkout
+      - name: Install dev-kit plugin
         run: |
           mkdir -p ~/.claude/plugins/marketplaces
-          ln -sfn "$GITHUB_WORKSPACE" ~/.claude/plugins/marketplaces/dev-kit
-          # verify the symlink + manifest exist
+          # Self-aware install: if the checkout IS the dev-kit plugin
+          # (has the manifest + required skills), symlink it.
+          # Otherwise (consumer repo via ci-setup), clone the source.
+          # When the source is private, the consumer must provision a
+          # fine-grained PAT with contents:read on sh-ai-x/dev-harness-kit
+          # as a repo secret named DEV_KIT_GITHUB_TOKEN.
+          if [ -f "$GITHUB_WORKSPACE/.claude-plugin/plugin.json" ] \
+             && [ -d "$GITHUB_WORKSPACE/skills/review" ] \
+             && [ -d "$GITHUB_WORKSPACE/skills/security" ]; then
+            ln -sfn "$GITHUB_WORKSPACE" ~/.claude/plugins/marketplaces/dev-kit
+            echo "::notice::dev-kit self-install: symlinked $GITHUB_WORKSPACE"
+          else
+            if [ -z "$DEV_KIT_GITHUB_TOKEN" ]; then
+              echo "::error::DEV_KIT_GITHUB_TOKEN secret is required for consumer-install."
+              echo "  sh-ai-x/dev-harness-kit is private; provision a fine-grained"
+              echo "  PAT with contents:read on sh-ai-x/dev-harness-kit and set it"
+              echo "  as a repo secret named DEV_KIT_GITHUB_TOKEN in this repo's"
+              echo "  Settings → Secrets and variables → Actions."
+              exit 1
+            fi
+            echo "::notice::dev-kit consumer-install: cloning sh-ai-x/dev-harness-kit via DEV_KIT_GITHUB_TOKEN"
+            git clone --depth 1 \
+              "https://x-access-token:${DEV_KIT_GITHUB_TOKEN}@github.com/sh-ai-x/dev-harness-kit.git" \
+              ~/.claude/plugins/marketplaces/dev-kit
+          fi
+          # Always verify the install succeeded (catches both paths).
           test -f ~/.claude/plugins/marketplaces/dev-kit/.claude-plugin/plugin.json
           test -d ~/.claude/plugins/marketplaces/dev-kit/skills/review
-          echo "dev-kit plugin symlinked: $(readlink ~/.claude/plugins/marketplaces/dev-kit)"
+          test -d ~/.claude/plugins/marketplaces/dev-kit/skills/security
+          echo "dev-kit plugin installed: $(readlink ~/.claude/plugins/marketplaces/dev-kit || echo 'real')"
 
       - name: Resolve PR + provider
         id: provider
@@ -97,14 +142,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            provider="${{ github.event.inputs.review_provider }}"
+            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            provider="$(tr -d '[:space:]' < .github/ci-review-provider.txt 2>/dev/null || true)"
+            echo "provider=minimax" >> "$GITHUB_OUTPUT"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "provider=${provider:-minimax}" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:review via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
@@ -119,22 +163,36 @@ jobs:
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
         uses: anthropics/claude-code-action@v1
         with:
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
-            /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+            Load the /dev-kit:review skill from $HOME/.claude/plugins/marketplaces/dev-kit/skills/review/SKILL.md
+            (use the Read tool). Follow its protocol. After analysis, post the
+            Layer-2 summary as a single PR comment via:
+              gh pr comment "${{ steps.provider.outputs.pr_number }}" --body "..."
+
+            The body MUST begin with a single line of exactly one of:
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>" so trailing prose that echoes this example
+            won't accidentally satisfy the gate.)
 
             Render the standard two-layer output (PR summary at top, per-finding
             inline comments). The summary MUST begin with a single line exactly
             of the form:
 
-              **Verdict:** Approve
-              **Verdict:** Changes Requested
-              **Verdict:** Blocked
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>".)
 
             Map verdict strictly to severity (do NOT inflate):
-              - 🔴 critical ≥ 1          → **Verdict:** Blocked
-              - 🟠 major  ≥ 1, 🔴 = 0    → **Verdict:** Changes Requested
-              - no 🔴, no 🟠             → **Verdict:** Approve
+              - 🔴 critical ≥ 1          → Verdict: Blocked
+              - 🟠 major  ≥ 1, 🔴 = 0    → Verdict: Changes Requested
+              - no 🔴, no 🟠             → Verdict: Approve
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -143,42 +201,72 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
-            /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+            Load the /dev-kit:review skill from $HOME/.claude/plugins/marketplaces/dev-kit/skills/review/SKILL.md
+            (use the Read tool). Follow its protocol. After analysis, post the
+            Layer-2 summary as a single PR comment via:
+              gh pr comment "${{ steps.provider.outputs.pr_number }}" --body "..."
 
-            Render the standard two-layer output. The summary MUST begin with:
+            The body MUST begin with a single line of exactly one of:
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>" so trailing prose that echoes this example
+            won't accidentally satisfy the gate.)
 
-              **Verdict:** Approve
-              **Verdict:** Changes Requested
-              **Verdict:** Blocked
+            Render the standard two-layer output. The summary MUST begin
+            with a single line exactly of the form:
+
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>".)
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
-      - name: Run /dev-kit:review via DeepSeek
-        if: steps.provider.outputs.provider == 'deepseek'
-        # DeepSeek channel: env-only, same pattern as MiniMax above.
+      - name: Detect bootstrap-PR fallback
+        id: fallback
+        if: always()
         env:
-          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
-          ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
-          ANTHROPIC_MODEL: 'deepseek-v4-pro'
-          ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash'
-          ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro'
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash'
-        uses: anthropics/claude-code-action@v1
-        with:
-          track_progress: ${{ github.event_name == 'pull_request' }}
-          prompt: |
-            /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # anthropics/claude-code-action@v1 skips when the PR head's
+          # .github/workflows/*.yml differs from the default branch.
+          workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
+            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
+          if [ -n "$workflow_files" ]; then
+            listed=$(echo "$workflow_files" | paste -sd, -)
+            echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
+            echo "needs_fallback=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_fallback=false" >> "$GITHUB_OUTPUT"
+          fi
 
-            Render the standard two-layer output. The summary MUST begin with:
-
-              **Verdict:** Approve
-              **Verdict:** Changes Requested
-              **Verdict:** Blocked
-          claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+      - name: Post fallback verdict comment (review)
+        if: steps.fallback.outputs.needs_fallback == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "Verdict: Approve"
+            echo
+            echo "LLM review (3-dim) skipped -- workflow validation guard"
+            echo
+            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo
+            echo "Action required: manual review of the workflow changes by a maintainer before merge."
+          } | gh pr comment "$PR_NUMBER" --body-file -
 
       - name: Extract review verdict
         id: extract_verdict
@@ -188,25 +276,49 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           set -uo pipefail
-          # Most recent claude[bot] comment that contains a **Verdict:** line.
-          # In track_progress mode the action updates ONE comment per job, so
-          # "most recent" = this job's comment.
+          if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
+            echo "review_verdict=Approve (fallback: PR modifies workflow files)"
+            echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            # Issue #219 Bug 2: in the fallback branch, the agent never ran —
+            # claude-code-action@v1's workflow-validation guard refused it.
+            # The hardcoded agent_ran=true previously masked the skip as a
+            # silent pass, defeating the gate's agent_ran=false → exit 1
+            # hard-fail. Report the real state so the gate can surface the
+            # bootstrap-PR remediation message.
+            echo "agent_ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
             --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-            | grep -E '\*\*Verdict:\*\*' | tail -1 \
-            | grep -oE '\*\*Verdict:\*\*\s*(Approve|Blocked|Changes Requested)' \
-            | awk '{print $NF}' || true)"
-          echo "review_verdict=${verdict:-<none>}"
+            | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' | tail -1 \
+            | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
+            | sed -E 's/.*Verdict:[[:space:]]*//' || true)"
+          # Issue #212-C1-fix: detect anthropics/claude-code-action@v1 skip.
+          # A 0 claude-count means the action skipped (workflow validation);
+          # `agent_ran=false` tells the gate to hard-fail with the
+          # bootstrap-PR remediation message — the previous tolerance
+          # silently masked this as Approve.
+          claude_count=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length')
+          agent_ran="false"
+          if [ "$claude_count" -gt 0 ]; then
+            agent_ran="true"
+          fi
+          echo "review_verdict=${verdict:-<none>}  claude_comments=${claude_count}  agent_ran=${agent_ran}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
   security:
+    # See review-job comment above; same fork-safety contract.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     name: /dev-kit:security (10-dim OWASP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Skip on bump-PRs — same rationale as `review:` above.
-    if: "!startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')"
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
+      agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
     permissions:
       contents: read
       pull-requests: write
@@ -214,18 +326,49 @@ jobs:
       id-token: write
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
+      DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
+          # Checkout PR head sha. With `pull_request`, the action defaults
+          # to the PR head ref, but we pin the explicit sha so the agent
+          # reads the exact files in the diff.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - name: Install dev-kit plugin from local checkout
+      - name: Install dev-kit plugin
         run: |
           mkdir -p ~/.claude/plugins/marketplaces
-          ln -sfn "$GITHUB_WORKSPACE" ~/.claude/plugins/marketplaces/dev-kit
+          # Self-aware install: if the checkout IS the dev-kit plugin
+          # (has the manifest + required skills), symlink it.
+          # Otherwise (consumer repo via ci-setup), clone the source.
+          # When the source is private, the consumer must provision a
+          # fine-grained PAT with contents:read on sh-ai-x/dev-harness-kit
+          # as a repo secret named DEV_KIT_GITHUB_TOKEN.
+          if [ -f "$GITHUB_WORKSPACE/.claude-plugin/plugin.json" ] \
+             && [ -d "$GITHUB_WORKSPACE/skills/review" ] \
+             && [ -d "$GITHUB_WORKSPACE/skills/security" ]; then
+            ln -sfn "$GITHUB_WORKSPACE" ~/.claude/plugins/marketplaces/dev-kit
+            echo "::notice::dev-kit self-install: symlinked $GITHUB_WORKSPACE"
+          else
+            if [ -z "$DEV_KIT_GITHUB_TOKEN" ]; then
+              echo "::error::DEV_KIT_GITHUB_TOKEN secret is required for consumer-install."
+              echo "  sh-ai-x/dev-harness-kit is private; provision a fine-grained"
+              echo "  PAT with contents:read on sh-ai-x/dev-harness-kit and set it"
+              echo "  as a repo secret named DEV_KIT_GITHUB_TOKEN in this repo's"
+              echo "  Settings → Secrets and variables → Actions."
+              exit 1
+            fi
+            echo "::notice::dev-kit consumer-install: cloning sh-ai-x/dev-harness-kit via DEV_KIT_GITHUB_TOKEN"
+            git clone --depth 1 \
+              "https://x-access-token:${DEV_KIT_GITHUB_TOKEN}@github.com/sh-ai-x/dev-harness-kit.git" \
+              ~/.claude/plugins/marketplaces/dev-kit
+          fi
+          # Always verify the install succeeded (catches both paths).
           test -f ~/.claude/plugins/marketplaces/dev-kit/.claude-plugin/plugin.json
+          test -d ~/.claude/plugins/marketplaces/dev-kit/skills/review
           test -d ~/.claude/plugins/marketplaces/dev-kit/skills/security
-          echo "dev-kit plugin symlinked: $(readlink ~/.claude/plugins/marketplaces/dev-kit)"
+          echo "dev-kit plugin installed: $(readlink ~/.claude/plugins/marketplaces/dev-kit || echo 'real')"
 
       - name: Resolve PR + provider
         id: provider
@@ -233,14 +376,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            provider="${{ github.event.inputs.review_provider }}"
+            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            provider="$(tr -d '[:space:]' < .github/ci-review-provider.txt 2>/dev/null || true)"
+            echo "provider=minimax" >> "$GITHUB_OUTPUT"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "provider=${provider:-minimax}" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:security via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
@@ -254,21 +396,35 @@ jobs:
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
         uses: anthropics/claude-code-action@v1
         with:
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
-            /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+            Load the /dev-kit:security skill from $HOME/.claude/plugins/marketplaces/dev-kit/skills/security/SKILL.md
+            (use the Read tool). Follow its protocol. After analysis, post the
+            security summary as a single PR comment via:
+              gh pr comment "${{ steps.provider.outputs.pr_number }}" --body "..."
+
+            The body MUST begin with a single line of exactly one of:
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>" so trailing prose that echoes this example
+            won't accidentally satisfy the gate.)
 
             Render the security summary (per-category breakdown table + Verdict).
             The summary MUST begin with a single line exactly of the form:
 
-              **Verdict:** Approve
-              **Verdict:** Changes Requested
-              **Verdict:** Blocked
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>".)
 
             Map verdict per spec:
-              - 🔴 critical ≥ 1          → **Verdict:** Blocked
-              - 🟠 major  ≥ 1, 🔴 = 0    → **Verdict:** Changes Requested
-              - no 🔴, no 🟠             → **Verdict:** Approve
+              - 🔴 critical ≥ 1          → Verdict: Blocked
+              - 🟠 major  ≥ 1, 🔴 = 0    → Verdict: Changes Requested
+              - no 🔴, no 🟠             → Verdict: Approve
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -277,41 +433,72 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
-            /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+            Load the /dev-kit:security skill from $HOME/.claude/plugins/marketplaces/dev-kit/skills/security/SKILL.md
+            (use the Read tool). Follow its protocol. After analysis, post the
+            security summary as a single PR comment via:
+              gh pr comment "${{ steps.provider.outputs.pr_number }}" --body "..."
 
-            Render the security summary. The summary MUST begin with:
+            The body MUST begin with a single line of exactly one of:
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>" so trailing prose that echoes this example
+            won't accidentally satisfy the gate.)
 
-              **Verdict:** Approve
-              **Verdict:** Changes Requested
-              **Verdict:** Blocked
+            Render the security summary. The summary MUST begin with a single
+            line exactly of the form:
+
+              Verdict: Approve
+              Verdict: Changes Requested
+              Verdict: Blocked
+
+            (Do not use the bold-wrapped form here; the gate's regex parses
+            only "Verdict: <value>".)
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
-      - name: Run /dev-kit:security via DeepSeek
-        if: steps.provider.outputs.provider == 'deepseek'
+      - name: Detect bootstrap-PR fallback
+        id: fallback
+        if: always()
         env:
-          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
-          ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
-          ANTHROPIC_MODEL: 'deepseek-v4-pro'
-          ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash'
-          ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro'
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash'
-        uses: anthropics/claude-code-action@v1
-        with:
-          track_progress: ${{ github.event_name == 'pull_request' }}
-          prompt: |
-            /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # anthropics/claude-code-action@v1 skips when the PR head's
+          # .github/workflows/*.yml differs from the default branch.
+          workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
+            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
+          if [ -n "$workflow_files" ]; then
+            listed=$(echo "$workflow_files" | paste -sd, -)
+            echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
+            echo "needs_fallback=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_fallback=false" >> "$GITHUB_OUTPUT"
+          fi
 
-            Render the security summary. The summary MUST begin with:
-
-              **Verdict:** Approve
-              **Verdict:** Changes Requested
-              **Verdict:** Blocked
-          claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+      - name: Post fallback verdict comment (security)
+        if: steps.fallback.outputs.needs_fallback == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "Verdict: Approve"
+            echo
+            echo "LLM security (10-dim OWASP) skipped -- workflow validation guard"
+            echo
+            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo
+            echo "Action required: manual review of the workflow changes by a maintainer before merge."
+          } | gh pr comment "$PR_NUMBER" --body-file -
 
       - name: Extract security verdict
         id: extract_verdict
@@ -321,39 +508,59 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           set -uo pipefail
-          # Most recent claude[bot] comment that contains a **Verdict:** line.
-          # In track_progress mode the action updates ONE comment per job, so
-          # "most recent" = this job's comment (review job's older comments
-          # come before security's in chronological order, so we still want
-          # the latest = security's).
+          if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
+            echo "security_verdict=Approve (fallback: PR modifies workflow files)"
+            echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            # Issue #219 Bug 2: same defect as the review extract step —
+            # report agent_ran=false so the severity gate can hard-fail
+            # with the bootstrap-PR remediation message.
+            echo "agent_ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
             --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-            | grep -E '\*\*Verdict:\*\*' | tail -1 \
-            | grep -oE '\*\*Verdict:\*\*\s*(Approve|Blocked|Changes Requested)' \
-            | awk '{print $NF}' || true)"
-          echo "security_verdict=${verdict:-<none>}"
+            | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' | tail -1 \
+            | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
+            | sed -E 's/.*Verdict:[[:space:]]*//' || true)"
+          # Issue #212-C1-fix: same skip-detector as review extract. A 0
+          # claude-count means anthropics/claude-code-action@v1 skipped due
+          # to workflow validation; agent_ran=false tells the gate to
+          # hard-fail with the bootstrap-PR remediation message.
+          claude_count=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length')
+          agent_ran="false"
+          if [ "$claude_count" -gt 0 ]; then
+            agent_ran="true"
+          fi
+          echo "security_verdict=${verdict:-<none>}  claude_comments=${claude_count}  agent_ran=${agent_ran}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
   gate:
+    # Severity gate: same fork-safety guard. Pull from job outputs --
+    # the if: always() needs to stay so the gate runs even when agents
+    # were skipped, so we AND it with the fork check.
+    if: |
+      always() && (
+        github.event_name == 'workflow_dispatch' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     name: severity gate (review + security)
     runs-on: ubuntu-latest
     needs: [review, security]
-    # Skip on bump-PRs: `review` and `security` are skipped via their own
-    # `if:` filters above; `needs: [review, security]` with `if: always()`
-    # would still cause gate to run. Mirror the skip here so the entire
-    # job chain is silenced in one logical place for bump PRs. The `if:`
-    # is wrapped in `always() && ...` so the gate still runs on partial
-    # upstream failures for non-bump PRs.
-    if: |
-      always() &&
-      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
-    # No permissions: gate only needs `gh api` (read) for verdict extraction
-    # and does NOT auto-approve. Actual PR approval is the human's job.
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
       EVENT_NAME: ${{ github.event_name }}
     steps:
+      - name: Checkout (for gh CLI git discovery)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Combined verdict gate
         run: |
           # Read verdicts directly from each job's outputs (set by the
@@ -361,19 +568,89 @@ jobs:
           # This is robust: no fragile comment-body matching required.
           R="${{ needs.review.outputs.verdict }}"
           S="${{ needs.security.outputs.verdict }}"
+          # agent_ran: false when anthropics/claude-code-action@v1 SKIPPED
+          # the run due to workflow-validation. Set by the 'Extract <skill>
+          # verdict' post-step based on whether any claude-prefixed comment
+          # exists on the PR. The action skips silently on PRs that touch
+          # .github/workflows/* (and on bootstrap-PRs that add the file).
+          R_AGENT="${{ needs.review.outputs.agent_ran }}"
+          S_AGENT="${{ needs.security.outputs.agent_ran }}"
+          # Job-level results: success | failure | cancelled | skipped.
+          # Issue #212-C1: if the upstream agent job FAILED, the empty
+          # verdict is "agent never ran" (e.g. DEV_KIT_GITHUB_TOKEN missing,
+          # action rate-limit, install error), NOT "agent ran and gave
+          # no severity". Distinct failure mode → distinct gate behavior:
+          # hard-fail (exit 1) so the install problem surfaces instead of
+          # being papered over by the Approve default.
+          R_RESULT="${{ needs.review.result }}"
+          S_RESULT="${{ needs.security.result }}"
           EVENT="$EVENT_NAME"
-          echo "review=$R  security=$S"
+          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT)"
+          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT)"
 
-          # Tolerate missing verdicts in BOTH event modes. The previous
-          # strict pull_request branch hard-failed on empty R or S, which
-          # broke any PR whose agent skipped (workflow-validation skip on
+          # Issue #212-C1-fix: anthropics/claude-code-action@v1 exits 0 with
+          # a "workflow validation skip" warning when the PR's head differs
+          # from the default branch under .github/workflows/*. Result is
+          # "success" (the action's exit-0 mask), but the agent never ran —
+          # `agent_ran=false` is the unambiguous signal. Defaulting to
+          # Approve on empty verdict in this case masked the skip as a
+          # silent pass (the bootstrap-PR / PR-modifies-workflow scenario).
+          # Hard-fail with a remediation message so the user knows to merge
+          # the workflow change first and re-push from a clean branch.
+          if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
+            {
+              echo "::error::review+security gate: AI agent was skipped"
+              echo "  review.agent_ran=$R_AGENT verdict=$R"
+              echo "  security.agent_ran=$S_AGENT verdict=$S"
+              echo
+              echo "  anthropics/claude-code-action@v1 refused to run on this PR."
+              echo "  The action refuses any PR whose head differs from the"
+              echo "  default branch under .github/workflows/*. Result is"
+              echo "  success (exit-0), but no claude[bot] comment was posted"
+              echo "  -- the 'Approve' verdict in the gate was the empty-verdict"
+              echo "  tolerance, NOT an actual AI review."
+              echo
+              echo "  Fix:"
+              echo "    1. Merge this PR's workflow changes to main first."
+              echo "    2. Re-open or sync from the updated default branch."
+              echo "    3. Future PRs (without workflow modifications) will run"
+              echo "       the agent normally and post real verdicts + inline"
+              echo "       comments."
+            } >&2
+            exit 1
+          fi
+
+          # Hard-fail gate if EITHER upstream job actually failed (not
+          # skipped/cancelled). An empty verdict + failure result is the
+          # canonical "install is broken" signature from issue #212.
+          if [ "$R_RESULT" = "failure" ] || [ "$S_RESULT" = "failure" ]; then
+            {
+              echo "::error::review+security gate: upstream agent job failed"
+              echo "  review.result=$R_RESULT verdict=$R"
+              echo "  security.result=$S_RESULT verdict=$S"
+              echo
+              echo "  This means the /dev-kit:* agent never produced a verdict,"
+              echo "  most often because one of:"
+              echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
+              echo "    - MINMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
+              echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
+              echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+              echo
+              echo "  The severity gate does NOT default to Approve on failure"
+              echo "  (that would mask install bugs -- issue #212-C1)."
+            } >&2
+            exit 1
+          fi
+
+          # Tolerate missing verdicts in BOTH event modes WHEN the upstream
+          # job actually succeeded / was skipped (workflow-validation skip on
           # the very PR that ADDS .github/workflows/review.yml, action
-          # rate-limit, transient network error). The fix: default to
-          # Approve + ::warning:: in both modes so the human gate
+          # rate-limit masked by success, transient network error). The
+          # fix: default to Approve + ::warning:: so the human gate
           # (REVIEW_REQUIRED / CHANGES_REQUESTED on the PR) is what
           # actually blocks merge, not a single missing agent verdict.
-          [ -z "$R" ] && { echo "::warning::review verdict missing (event=$EVENT); defaulting to Approve"; R="Approve"; }
-          [ -z "$S" ] && { echo "::warning::security verdict missing (event=$EVENT); defaulting to Approve"; S="Approve"; }
+          [ -z "$R" ] && { echo "::warning::review verdict missing (event=$EVENT, result=$R_RESULT); defaulting to Approve"; R="Approve"; }
+          [ -z "$S" ] && { echo "::warning::security verdict missing (event=$EVENT, result=$S_RESULT); defaulting to Approve"; S="Approve"; }
 
           # worst-of wins
           rank() { case "$1" in Blocked) echo 2 ;; "Changes"*) echo 1 ;; Approve) echo 0 ;; *) echo 99 ;; esac; }
@@ -395,4 +672,30 @@ jobs:
             Approve) exit 0 ;;
             "Changes"*) echo "::error::Changes Requested (review=$R security=$S)"; exit 1 ;;
             Blocked) echo "::error::Blocked (review=$R security=$S)"; exit 1 ;;
+            *) echo "::error::Unparseable verdict '$worst' (review=$R security=$S)"; exit 1 ;;
           esac
+
+      - name: Auto-approve on Approve verdict
+        if: success() && github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Only auto-approve on Approve (lowest severity — no 🔴 critical,
+          # no 🟠 major). Fail-open: if the API rejects (GitHub's default
+          # GITHUB_TOKEN cannot approve PRs), log a warning. Set APPROVE_TOKEN
+          # secret to a PAT with 'repo' scope for real auto-approval.
+          R="${{ needs.review.outputs.verdict }}"
+          S="${{ needs.security.outputs.verdict }}"
+          rank() { case "$1" in Blocked) echo 2 ;; "Changes"*) echo 1 ;; Approve) echo 0 ;; *) echo 99 ;; esac; }
+          r=$(rank "$R"); s=$(rank "$S")
+          worst=$([ "$r" -ge "$s" ] && echo "$R" || echo "$S")
+          if [ "$worst" = "Approve" ]; then
+            echo "Verdict is Approve — attempting auto-approve."
+            TOKEN="${APPROVE_TOKEN:-$GH_TOKEN}"
+            gh pr review "$PR_NUMBER" --approve \
+              --body "Auto-approved by /dev-kit:review + /dev-kit:security: lowest severity (no 🔴 critical, no 🟠 major)." \
+              || echo "::warning::gh pr review --approve rejected. Set APPROVE_TOKEN secret to a PAT for real auto-approval; verdict itself was Approve."
+          else
+            echo "Verdict is '$worst' -- not auto-approving."
+          fi

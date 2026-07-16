@@ -44,12 +44,13 @@ from atomic import atomic_write_json
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _TEMPLATES_ROOT = _PLUGIN_ROOT / "templates" / "ci"
 _HOOKS_ROOT = _PLUGIN_ROOT / "hooks"  # single source of truth for hook files
+_TESTS_ROOT = _PLUGIN_ROOT / "tests"  # single source of truth for installed tests
 
 # Files installed into the target repo, relative to `target_dir`.
 # Order is preserved in reports (workflows first, then scripts, then
 # worktree-rule files). Adding a path here also requires the corresponding
-# source under templates/ci/ OR hooks/ (worktree-rule files live in the
-# latter — see `_resolve_template_source`).
+# source under templates/ci/ OR one of the plugin-root trees (hooks/, tests/,
+# rules/) — see `_resolve_template_source`.
 EXPECTED_PATHS: tuple[str, ...] = (
     # CI workflows + scripts
     ".github/workflows/ci.yml",
@@ -313,6 +314,15 @@ def _resolve_template_source(rel_path: str) -> Path:
         candidate = _HOOKS_ROOT / rel_path[len("hooks/"):]
         if not candidate.exists():
             raise FileNotFoundError(f"hook source missing: {candidate}")
+        return candidate
+    # Test files: read from the plugin-root tests/ tree (single source of
+    # truth). A parallel templates/ci/tests/ tree was previously maintained
+    # and silently drifted from the canonical tests/ (see
+    # `tests/test_templates_single_source.py` for the regression pin).
+    if rel_path.startswith("tests/"):
+        candidate = _TESTS_ROOT / rel_path[len("tests/"):]
+        if not candidate.exists():
+            raise FileNotFoundError(f"test source missing: {candidate}")
         return candidate
     # Canonical shared rules live at plugin-root rules/. They are installed
     # under .claude/rules/ in consumer repos because Claude Code discovers
