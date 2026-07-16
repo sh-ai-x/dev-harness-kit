@@ -1,0 +1,10 @@
+interface:
+  display_name: "LLM Refresh"
+  short_description: "Refresh vendor pricing & model registry from official sources"
+  default_prompt: |
+    Run `python3 skills/llm-refresh/scripts/refresh.py` to refresh
+    docs/llm-info/<provider>.json files from Claude, Codex, MiniMax, and
+    DeepSeek official pricing pages. Print the diff and never silently
+    overwrite. Use `--check` to preview and `--provider <id>` to refresh a
+    single provider. Exit 1 means a diff was detected; exit 2 means
+    fetch or parse failed.
