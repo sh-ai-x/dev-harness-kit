@@ -41,8 +41,13 @@ name: PR Review
 # skips fork PRs BEFORE any step executes. workflow_dispatch is exempt
 # (manual operator action).
 #
-# Secret name `MINMAX_API_KEY` is preserved from prior workflow — do not
-# rename (would break existing repo secret config).
+# Secret name `MINIMAX_API_KEY` (provider = `minimax`). Earlier workflow
+# iterations used the typo'd `MINMAX_API_KEY`; both the workflow references
+# and the matching repo secret must use the same name, so this PR renames
+# the workflow side AND requires the repo secret to be renamed in lock-step
+# via:
+#   gh secret delete MINMAX_API_KEY
+#   gh secret set   MINIMAX_API_KEY --body "<new value>"
 
 on:
   pull_request:
@@ -71,7 +76,7 @@ concurrency:
 jobs:
   review:
     # Fork-safety guard: skip silently for fork PRs (fork PRs have no
-    # access to MINMAX_API_KEY / DEV_KIT_GITHUB_TOKEN, so we don't even
+    # access to MINIMAX_API_KEY / DEV_KIT_GITHUB_TOKEN, so we don't even
     # run the install step on them). workflow_dispatch is exempt -- the
     # operator is trusted.
     if: |
@@ -155,8 +160,8 @@ jobs:
         # MiniMax channel: env-only (no with.anthropic_api_key to avoid mixed auth).
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.MINMAX_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINMAX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
@@ -388,8 +393,8 @@ jobs:
         if: steps.provider.outputs.provider == 'minimax'
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.MINMAX_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINMAX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
@@ -632,7 +637,7 @@ jobs:
               echo "  This means the /dev-kit:* agent never produced a verdict,"
               echo "  most often because one of:"
               echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
-              echo "    - MINMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
+              echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
               echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
               echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
               echo

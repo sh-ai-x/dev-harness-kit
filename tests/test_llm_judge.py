@@ -29,7 +29,7 @@ class TestLlmJudge(unittest.TestCase):
         with patch.dict(os.environ, {
             "JUDGE_PROVIDER": "",
             "JUDGE_MODEL": "",
-            "MINMAX_API_KEY": "",
+            "MINIMAX_API_KEY": "",
         }, clear=True):
             cfg = llm_judge.load_config(Path(tempfile.mkdtemp()))
             self.assertEqual(cfg["provider"], "minimax")

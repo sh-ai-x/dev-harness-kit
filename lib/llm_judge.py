@@ -78,7 +78,7 @@ def load_config(project_root: Path) -> Dict[str, str]:
                     env[k.strip()] = v.strip().strip('"').strip("'")
 
     provider = _env_get(env, "JUDGE_PROVIDER", "minimax")
-    api_key_var = "MINMAX_API_KEY" if provider == "minimax" else "ANTHROPIC_API_KEY"
+    api_key_var = "MINIMAX_API_KEY" if provider == "minimax" else "ANTHROPIC_API_KEY"
     return {
         "provider": provider,
         "model": _env_get(env, "JUDGE_MODEL", "MiniMax-M3[1m]"),
