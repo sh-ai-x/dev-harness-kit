@@ -1,34 +1,28 @@
 {
   "provider": "deepseek",
   "label": "DeepSeek",
-  "source_url": "https://platform.deepseek.com/api-docs/pricing",
+  "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
   "fetched_at": "2026-07-17T03:30:00+0900",
   "currency": "USD",
   "models": [
     {
-      "id": "deepseek-chat",
-      "display_name": "DeepSeek-V3 Chat",
-      "context_window": 64000,
-      "input_price_per_mtok": 0.27,
-      "output_price_per_mtok": 1.10,
+      "id": "deepseek-v4-flash",
+      "display_name": "DeepSeek-V4-Flash",
+      "context_window": 1000000,
+      "input_price_per_mtok": 0.14,
+      "output_price_per_mtok": 0.28,
       "deprecated": false,
-      "notes": ""
+      "notes": "Cache hit: $0.0028 / MTok. Max output 384k. Non-thinking mode only."
     },
     {
-      "id": "deepseek-reasoner",
-      "display_name": "DeepSeek-R1 Reasoner",
-      "context_window": 64000,
-      "input_price_per_mtok": 0.55,
-      "output_price_per_mtok": 2.19,
+      "id": "deepseek-v4-pro",
+      "display_name": "DeepSeek-V4-Pro",
+      "context_window": 1000000,
+      "input_price_per_mtok": 0.435,
+      "output_price_per_mtok": 0.87,
       "deprecated": false,
-      "notes": "Reasoning model; higher pricing reflects chain-of-thought tokens"
+      "notes": "Cache hit: $0.003625 / MTok. Max output 384k. Supports both thinking and non-thinking modes (default = thinking)."
     }
   ],
-  "plans": [
-    {
-      "name": "Pay-as-you-go",
-      "price_per_month_usd": 0.00,
-      "includes": "API key + per-token billing; volume discount above 1B tokens/mo"
-    }
-  ]
+  "plans": []
 }

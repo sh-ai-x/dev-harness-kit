@@ -1,36 +1,63 @@
 {
   "provider": "claude",
   "label": "Anthropic Claude",
-  "source_url": "https://www.anthropic.com/pricing",
+  "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
   "fetched_at": "2026-07-17T03:30:00+0900",
   "currency": "USD",
   "models": [
     {
+      "id": "claude-fable-5",
+      "display_name": "Claude Fable 5",
+      "context_window": 1000000,
+      "input_price_per_mtok": 10.00,
+      "output_price_per_mtok": 50.00,
+      "deprecated": false,
+      "notes": "1M context at standard pricing; new tokenizer (~30% more tokens for same text). Batch: $5 / $25."
+    },
+    {
+      "id": "claude-mythos-5",
+      "display_name": "Claude Mythos 5",
+      "context_window": 1000000,
+      "input_price_per_mtok": 10.00,
+      "output_price_per_mtok": 50.00,
+      "deprecated": false,
+      "notes": "Limited availability. 1M context at standard pricing."
+    },
+    {
       "id": "claude-opus-4-8",
       "display_name": "Claude Opus 4.8",
-      "context_window": 200000,
-      "input_price_per_mtok": 15.00,
-      "output_price_per_mtok": 75.00,
+      "context_window": 1000000,
+      "input_price_per_mtok": 5.00,
+      "output_price_per_mtok": 25.00,
       "deprecated": false,
-      "notes": ""
+      "notes": "Current top-of-line Opus. 1M context at standard pricing. Fast-mode premium: $10 / $50 (deprecated on 4.7 only)."
     },
     {
       "id": "claude-sonnet-5",
       "display_name": "Claude Sonnet 5",
-      "context_window": 200000,
+      "context_window": 1000000,
       "input_price_per_mtok": 3.00,
       "output_price_per_mtok": 15.00,
       "deprecated": false,
-      "notes": ""
+      "notes": "Standard pricing effective 2026-09-01 ($3/$15); introductory $2/$10 runs through 2026-08-31. 1M context."
     },
     {
       "id": "claude-haiku-4-5",
       "display_name": "Claude Haiku 4.5",
       "context_window": 200000,
-      "input_price_per_mtok": 0.80,
-      "output_price_per_mtok": 4.00,
+      "input_price_per_mtok": 1.00,
+      "output_price_per_mtok": 5.00,
       "deprecated": false,
-      "notes": ""
+      "notes": "Cheapest active Claude. Batch: $0.50 / $2.50."
+    },
+    {
+      "id": "claude-opus-4-1",
+      "display_name": "Claude Opus 4.1",
+      "context_window": 200000,
+      "input_price_per_mtok": 15.00,
+      "output_price_per_mtok": 75.00,
+      "deprecated": true,
+      "notes": "Deprecated per vendor deprecation page; kept for one cycle so consumers can see the migration target."
     }
   ],
   "plans": [
@@ -42,12 +69,27 @@
     {
       "name": "Pro",
       "price_per_month_usd": 20.00,
-      "includes": "5x Free usage, Claude Code on web/desktop, file uploads"
+      "includes": "5x Free usage, Claude Code on web/desktop, file uploads; $17/mo on annual plan"
     },
     {
       "name": "Max",
       "price_per_month_usd": 100.00,
-      "includes": "20x Free usage, priority access at peak, early feature access"
+      "includes": "From $100/mo; 20x Free usage, priority access at peak"
+    },
+    {
+      "name": "Team Standard",
+      "price_per_month_usd": 25.00,
+      "includes": "$20/mo on annual billing; standard Claude Code seats"
+    },
+    {
+      "name": "Team Premium",
+      "price_per_month_usd": 125.00,
+      "includes": "$100/mo on annual billing; premium Claude Code seats"
+    },
+    {
+      "name": "Enterprise",
+      "price_per_month_usd": 20.00,
+      "includes": "$20/seat + usage at API rates"
     }
   ]
 }
