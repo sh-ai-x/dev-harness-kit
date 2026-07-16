@@ -1,34 +1,38 @@
 {
   "schema_version": "1.0.0",
-  "description": "Provider registry for /dev-kit:llm-refresh. Each entry's `parser` selects the parser in skills/llm-refresh/scripts/refresh.py; `url` is the official public pricing page.",
+  "description": "Provider registry for /dev-kit:llm-refresh. URLs verified against each vendor's official docs page during initial bootstrap (2026-07-17). `parser` selects the parser in skills/llm-refresh/scripts/refresh.py.",
   "providers": [
     {
       "id": "claude",
       "label": "Anthropic Claude",
-      "url": "https://www.anthropic.com/pricing",
+      "url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "parser": "anthropic_html",
-      "currency": "USD"
+      "currency": "USD",
+      "note": "Anthropic redirects anthropic.com/pricing → claude.com/pricing (consumer); API token pricing lives on platform.claude.com."
     },
     {
       "id": "codex",
       "label": "OpenAI Codex / API",
-      "url": "https://openai.com/api/pricing/",
+      "url": "https://developers.openai.com/api/docs/pricing",
       "parser": "openai_html",
-      "currency": "USD"
+      "currency": "USD",
+      "note": "platform.openai.com/docs/pricing redirects here. ChatGPT consumer-plan pricing (Plus/Pro/Team) is at chatgpt.com/pricing and is out of scope for the API registry."
     },
     {
       "id": "minimax",
       "label": "MiniMax",
-      "url": "https://platform.minimaxi.com/document/price",
-      "parser": "minimax_html",
-      "currency": "USD"
+      "url": "https://platform.minimaxi.com/docs/guides/pricing-paygo.md",
+      "parser": "minimax_md",
+      "currency": "CNY",
+      "note": "MiniMax publishes LLM token pricing only on the docs/guides pages; the /document/price page is the voice-resource-package tier (TTS) and is NOT the LLM registry."
     },
     {
       "id": "deepseek",
       "label": "DeepSeek",
-      "url": "https://platform.deepseek.com/api-docs/pricing",
+      "url": "https://api-docs.deepseek.com/quick_start/pricing",
       "parser": "deepseek_html",
-      "currency": "USD"
+      "currency": "USD",
+      "note": "Docusaurus site; one comparison table per page. Cache-hit/cache-miss both listed."
     }
   ]
 }
