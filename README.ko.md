@@ -137,16 +137,29 @@ nvm install 22 && nvm use 22
 
 ### Claude Code
 
+`dev-kit` 마켓플레이스 엔트리는 `main`을 가리키므로, 머지마다 마켓플레이스
+카탈로그가 핀 버전을 자동 범프합니다. 가장 깔끔한 경로는:
+
 ```bash
-# 권장: 마켓플레이스 클론을 pull하고 버전 캐시로 rsync.
-# `claude plugin`이 실패하는 Claude Code 세션 내부에서도 동작합니다(아래 참고).
+# 권장: 마켓플레이스에서 최신 핀 버전을 가져옵니다.
+# 모든 셸에서 동작하며, Claude Code 세션 내부에서도 업데이터 경로가
+# 위의 CLI 버그를 우회합니다(아래 "Node 호환성" 참조).
+claude plugin update dev-kit
+```
+
+이마저 실패하면(주로 Claude Code 세션 내부에서 번들 CLI가 Node `TypeError`를
+던지는 경우), 메인테넌스 스크립트가 `git pull` + `rsync`로 같은 작업을
+수행합니다:
+
+```bash
+# 최후 수단: 마켓플레이스 클론을 pull하고 버전 캐시로 rsync.
 bin/devkit-refresh.sh
 bin/devkit-refresh.sh --dry-run    # 변경 사항 미리 보기
+```
 
-# 대안: 내장 업데이터 (Node 22 필요)
-claude plugin update dev-kit
+스크립트도 사용할 수 없으면 직접 캐시를 새로고침할 수 있습니다:
 
-# 최후 수단: 캐시를 직접 새로고침
+```bash
 cd ~/.claude/plugins/marketplaces/dev-kit && git pull origin main --ff-only
 rsync -a --delete --exclude=.git \
   ~/.claude/plugins/marketplaces/dev-kit/ \

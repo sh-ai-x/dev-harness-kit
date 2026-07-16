@@ -140,20 +140,24 @@ A marketplace install loads a cached copy at
 
 ### Claude Code
 
+The `dev-kit` marketplace entry points at `main`, so after each merge the
+marketplace catalog auto-bumps the pinned version. The cleanest path is:
+
 ```bash
-# Preferred: pull the marketplace clone + rsync into the versioned cache.
-# Works from inside a Claude Code session, where `claude plugin` throws (see note).
+# Preferred: pull the latest pinned version from the marketplace.
+# Works from any shell — and from inside a Claude Code session, where the
+# updater path bypasses the CLI bug (see "Node compatibility" above).
+claude plugin update dev-kit
+```
+
+If that fails (most commonly because you're inside a Claude Code session and
+the bundled CLI throws the Node `TypeError`), the maintenance script does the
+same job with raw `git pull` + `rsync`:
+
+```bash
+# Escape hatch: pull the marketplace clone + rsync into the versioned cache.
 bin/devkit-refresh.sh
 bin/devkit-refresh.sh --dry-run    # show what would change first
-
-# Alternative: the built-in updater (requires Node 22)
-claude plugin update dev-kit
-
-# Escape hatch: refresh the cache by hand
-cd ~/.claude/plugins/marketplaces/dev-kit && git pull origin main --ff-only
-rsync -a --delete --exclude=.git \
-  ~/.claude/plugins/marketplaces/dev-kit/ \
-  ~/.claude/plugins/cache/dev-kit/dev-kit/<version>/
 ```
 
 > **Why `devkit-refresh.sh` exists:** `claude plugin install --force` and
@@ -163,6 +167,15 @@ rsync -a --delete --exclude=.git \
 > reads the cache version from `plugin.json` (falling back to the marketplace
 > clone's short SHA if the field is absent) and preserves executable bits on
 > shipped hook/template scripts.
+
+If even that is unavailable, you can refresh the cache by hand:
+
+```bash
+cd ~/.claude/plugins/marketplaces/dev-kit && git pull origin main --ff-only
+rsync -a --delete --exclude=.git \
+  ~/.claude/plugins/marketplaces/dev-kit/ \
+  ~/.claude/plugins/cache/dev-kit/dev-kit/<version>/
+```
 
 ### Codex
 
