@@ -94,16 +94,16 @@ LEGACY_FALLBACK: Dict[str, Dict[str, float]] = {
 LEGACY_DEFAULT_KEY = "sonnet"
 
 # ---------------------------------------------------------------------------
-# Currency conversion (CNY → USD).
+# Currency handling
 #
-# Sourced from docs/llm-info/sources.json:notes ("MiniMax publishes in CNY")
-# and the official Anthropic note that Claude/OpenAI/DeepSeek all publish
-# in USD. The rate is a fixed constant per session — a daily live FX poll
-# is out of scope (see Iron Law #2: anything that bills tokens must come
-# from a cited, dated source; a polled FX rate silently drifts).
-# Update this constant via a PR that also updates docs/llm-info/README.md.
+# As of 2026-07-17 every docs/llm-info/<id>.json file declares
+# `"currency": "USD"`. The MiniMax file used to publish in CNY but the
+# values are now pre-converted upstream (the conversion rate of 7.00 is
+# captured in the per-row `notes` string for reproducibility), so the
+# loader does NO FX at runtime. If a future vendor publishes in a
+# non-USD currency, update the loader here AND in docs/llm-info/README.md.
 # ---------------------------------------------------------------------------
-CNY_PER_USD = 7.00
+SUPPORTED_CURRENCIES = ("USD",)
 
 
 # ---------------------------------------------------------------------------
@@ -182,12 +182,21 @@ def find_sources_json(start: Optional[Path] = None) -> Optional[Path]:
 # Loader
 # ---------------------------------------------------------------------------
 
-def _currency_multiplier(currency: str) -> float:
-    if currency == "USD":
-        return 1.0
-    if currency == "CNY":
-        return 1.0 / CNY_PER_USD
-    raise ValueError(f"unrecognized currency: {currency!r} (CNY/USD only at this time)")
+def _validate_currency(currency: str) -> None:
+    """Reject non-USD up front; the loader expects USD-denominated rows.
+
+    MiniMax values used to be CNY at FX 7.00; those were converted
+    upstream and committed as USD so the loader has zero FX risk. Any
+    regression here means docs/llm-info/sources.json or one of the
+    per-provider files needs re-conversion. See
+    `rules/token-pricing.md` for the conversion provenance.
+    """
+    if currency not in SUPPORTED_CURRENCIES:
+        raise ValueError(
+            f"unsupported currency {currency!r}; expected one of "
+            f"{SUPPORTED_CURRENCIES}. Convert in docs/llm-info/<id>.json "
+            "before committing (see rules/token-pricing.md)."
+        )
 
 
 def _deepseek_cache_read(model: Dict[str, Any]) -> Optional[float]:
@@ -201,9 +210,9 @@ def _deepseek_cache_read(model: Dict[str, Any]) -> Optional[float]:
 
 def _row_for_model(model: Dict[str, Any], provider_id: str, currency: str) -> Dict[str, float]:
     cache_constants = _PROVIDER_CACHE.get(provider_id, _PROVIDER_CACHE["codex"])
-    fx = _currency_multiplier(currency)
-    base_in = float(model["input_price_per_mtok"]) * fx
-    out = float(model["output_price_per_mtok"]) * fx
+    _validate_currency(currency)
+    base_in = float(model["input_price_per_mtok"])
+    out = float(model["output_price_per_mtok"])
 
     # Cache read: prefer an explicit value when present (DeepSeek).
     cache_read: Optional[float] = None

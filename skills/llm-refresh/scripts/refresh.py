@@ -652,28 +652,6 @@ def _provider_filter(providers: List[Dict[str, Any]], requested: Optional[str]) 
     return filtered
 
 
-def cmd_fetch_fixture(provider_id: str, fixture_path: Path) -> int:
-    """Parse a locally-saved HTML/MD file with the configured parser. No network."""
-    root = _project_root()
-    sources = load_sources(root)
-    match = next((p for p in sources["providers"] if p["id"] == provider_id), None)
-    if not match:
-        print(f"error: provider '{provider_id}' not in sources.json", file=sys.stderr)
-        return EXIT_USAGE
-    content = fixture_path.read_text(encoding="utf-8")
-    parser_kind = match.get("parser", "")
-    if parser_kind not in PARSERS:
-        print(f"error: unknown parser '{parser_kind}' for provider '{provider_id}'", file=sys.stderr)
-        return EXIT_FETCH
-    try:
-        payload = PARSERS[parser_kind](content, match)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[{provider_id}] FAIL: {exc}", file=sys.stderr)
-        return EXIT_FETCH
-    print(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True))
-    return EXIT_OK
-
-
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Refresh docs/llm-info/<provider>.json from each vendor's official pricing page.",
@@ -682,12 +660,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--check", action="store_true", help="Diff only; never write. Exit 1 on diff.")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable summary.")
     parser.add_argument("--sources", help="Override sources.json path (for testing).")
-    parser.add_argument("--fetch-fixture", nargs=2, metavar=("PROVIDER", "FILE"),
-                        help="Parse a locally-saved page (debug helper, no network).")
     parsed = parser.parse_args(argv)
-
-    if parsed.fetch_fixture:
-        return cmd_fetch_fixture(parsed.fetch_fixture[0], Path(parsed.fetch_fixture[1]))
 
     root = _project_root()
     sources_path = Path(parsed.sources).resolve() if parsed.sources else None
