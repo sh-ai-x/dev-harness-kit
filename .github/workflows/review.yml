@@ -13,8 +13,13 @@ name: PR Review
 # (strict). For workflow_dispatch, missing verdict = warn + exit 0
 # (manual override allowed).
 #
-# Secret name `MINMAX_API_KEY` is preserved from prior workflow — do not
-# rename (would break existing repo secret config).
+# Secret name `MINIMAX_API_KEY` (provider = `minimax`). Earlier workflow
+# iterations used the typo'd `MINMAX_API_KEY`; both the workflow references
+# and the matching repo secret must use the same name, so this PR renames
+# the workflow side AND requires the repo secret to be renamed in lock-step
+# via:
+#   gh secret delete MINMAX_API_KEY
+#   gh secret set   MINIMAX_API_KEY --body "<new value>"
 #
 # Provider selection (pull_request events): controlled by the git-tracked
 # file `.github/ci-review-provider.txt` (one of `minimax` / `anthropic` /
@@ -26,7 +31,7 @@ name: PR Review
 # is what runs. workflow_dispatch still accepts an explicit
 # `review_provider` input that overrides the file for a single manual run.
 # Each provider requires its matching secret to be configured:
-# `MINMAX_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
+# `MINIMAX_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
 #
 # CI (a GitHub-hosted runner) can never read your local .env — it only
 # ever sees what's on the branch it checks out. `.githooks/pre-commit`
@@ -111,8 +116,8 @@ jobs:
         # MiniMax channel: env-only (no with.anthropic_api_key to avoid mixed auth).
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.MINMAX_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINMAX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
@@ -246,8 +251,8 @@ jobs:
         if: steps.provider.outputs.provider == 'minimax'
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.MINMAX_API_KEY }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINMAX_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
           ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
