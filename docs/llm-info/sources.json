@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Provider registry for /dev-kit:llm-refresh. Each entry's `parser` selects the parser in skills/llm-refresh/scripts/refresh.py; `url` is the official public pricing page.",
+  "providers": [
+    {
+      "id": "claude",
+      "label": "Anthropic Claude",
+      "url": "https://www.anthropic.com/pricing",
+      "parser": "anthropic_html",
+      "currency": "USD"
+    },
+    {
+      "id": "codex",
+      "label": "OpenAI Codex / API",
+      "url": "https://openai.com/api/pricing/",
+      "parser": "openai_html",
+      "currency": "USD"
+    },
+    {
+      "id": "minimax",
+      "label": "MiniMax",
+      "url": "https://platform.minimaxi.com/document/price",
+      "parser": "minimax_html",
+      "currency": "USD"
+    },
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "url": "https://platform.deepseek.com/api-docs/pricing",
+      "parser": "deepseek_html",
+      "currency": "USD"
+    }
+  ]
+}

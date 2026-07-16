@@ -1,0 +1,53 @@
+{
+  "provider": "codex",
+  "label": "OpenAI Codex / API",
+  "source_url": "https://openai.com/api/pricing/",
+  "fetched_at": "2026-07-17T03:30:00+0900",
+  "currency": "USD",
+  "models": [
+    {
+      "id": "gpt-5",
+      "display_name": "GPT-5",
+      "context_window": 400000,
+      "input_price_per_mtok": 1.25,
+      "output_price_per_mtok": 10.00,
+      "deprecated": false,
+      "notes": ""
+    },
+    {
+      "id": "gpt-5-mini",
+      "display_name": "GPT-5 mini",
+      "context_window": 400000,
+      "input_price_per_mtok": 0.25,
+      "output_price_per_mtok": 2.00,
+      "deprecated": false,
+      "notes": ""
+    },
+    {
+      "id": "o4-mini",
+      "display_name": "o4-mini",
+      "context_window": 200000,
+      "input_price_per_mtok": 1.10,
+      "output_price_per_mtok": 4.40,
+      "deprecated": false,
+      "notes": "Reasoning model"
+    }
+  ],
+  "plans": [
+    {
+      "name": "ChatGPT Free",
+      "price_per_month_usd": 0.00,
+      "includes": "Limited Codex CLI in IDE; rate-limited API key on signup"
+    },
+    {
+      "name": "ChatGPT Plus",
+      "price_per_month_usd": 20.00,
+      "includes": "Codex CLI on web + IDE; higher API rate limits"
+    },
+    {
+      "name": "ChatGPT Pro",
+      "price_per_month_usd": 200.00,
+      "includes": "Unlimited Codex, o3-pro access, priority compute"
+    }
+  ]
+}

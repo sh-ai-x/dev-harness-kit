@@ -1,0 +1,53 @@
+{
+  "provider": "claude",
+  "label": "Anthropic Claude",
+  "source_url": "https://www.anthropic.com/pricing",
+  "fetched_at": "2026-07-17T03:30:00+0900",
+  "currency": "USD",
+  "models": [
+    {
+      "id": "claude-opus-4-8",
+      "display_name": "Claude Opus 4.8",
+      "context_window": 200000,
+      "input_price_per_mtok": 15.00,
+      "output_price_per_mtok": 75.00,
+      "deprecated": false,
+      "notes": ""
+    },
+    {
+      "id": "claude-sonnet-5",
+      "display_name": "Claude Sonnet 5",
+      "context_window": 200000,
+      "input_price_per_mtok": 3.00,
+      "output_price_per_mtok": 15.00,
+      "deprecated": false,
+      "notes": ""
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "display_name": "Claude Haiku 4.5",
+      "context_window": 200000,
+      "input_price_per_mtok": 0.80,
+      "output_price_per_mtok": 4.00,
+      "deprecated": false,
+      "notes": ""
+    }
+  ],
+  "plans": [
+    {
+      "name": "Free",
+      "price_per_month_usd": 0.00,
+      "includes": "Web + mobile Claude, limited Sonnet usage"
+    },
+    {
+      "name": "Pro",
+      "price_per_month_usd": 20.00,
+      "includes": "5x Free usage, Claude Code on web/desktop, file uploads"
+    },
+    {
+      "name": "Max",
+      "price_per_month_usd": 100.00,
+      "includes": "20x Free usage, priority access at peak, early feature access"
+    }
+  ]
+}

@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).parent.parent
-SKILL_COUNT = 37
+SKILL_COUNT = 38
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",
