@@ -1,0 +1,34 @@
+{
+  "provider": "deepseek",
+  "label": "DeepSeek",
+  "source_url": "https://platform.deepseek.com/api-docs/pricing",
+  "fetched_at": "2026-07-17T03:30:00+0900",
+  "currency": "USD",
+  "models": [
+    {
+      "id": "deepseek-chat",
+      "display_name": "DeepSeek-V3 Chat",
+      "context_window": 64000,
+      "input_price_per_mtok": 0.27,
+      "output_price_per_mtok": 1.10,
+      "deprecated": false,
+      "notes": ""
+    },
+    {
+      "id": "deepseek-reasoner",
+      "display_name": "DeepSeek-R1 Reasoner",
+      "context_window": 64000,
+      "input_price_per_mtok": 0.55,
+      "output_price_per_mtok": 2.19,
+      "deprecated": false,
+      "notes": "Reasoning model; higher pricing reflects chain-of-thought tokens"
+    }
+  ],
+  "plans": [
+    {
+      "name": "Pay-as-you-go",
+      "price_per_month_usd": 0.00,
+      "includes": "API key + per-token billing; volume discount above 1B tokens/mo"
+    }
+  ]
+}
