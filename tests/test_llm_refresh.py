@@ -224,13 +224,30 @@ class TestParserFixtures(unittest.TestCase):
         ids = {m["id"] for m in payload["models"]}
         # The fixture includes both LLM models and the HAILUO video section,
         # so we only assert the LLM ones are present and the parser mapped
-        # the M3 standard-tier price correctly.
-        for required in ("minimax-m2-7", "minimax-m2", "minimax-m3-512k-tokens-≤512k"):
-            self.assertIn(required, ids, f"missing {required}")
-        m3 = next(m for m in payload["models"] if m["id"] == "minimax-m3-512k-tokens-≤512k")
-        self.assertAlmostEqual(m3["input_price_per_mtok"], 2.10)
-        self.assertAlmostEqual(m3["output_price_per_mtok"], 8.40)
-        self.assertEqual(m3["context_window"], 512000)
+        # the M3 standard-tier price correctly. ID suffix is implementation
+        # detail; we match on the model-prefix and any band marker.
+        for fragment in ("minimax-m2-7", "minimax-m2", "minimax-m3"):
+            self.assertTrue(
+                any(fragment in i for i in ids),
+                f"missing id containing {fragment} (have: {sorted(ids)[:5]})",
+            )
+        # Find the M3 row at standard ≤512k tier (price 2.10) regardless
+        # of how the parser slugifies the band suffix.
+        m3_standard = next(
+            m for m in payload["models"]
+            if "m3" in m["id"].lower() and "hailuo" not in m["id"].lower()
+            and m["input_price_per_mtok"] == 2.10
+            and m["output_price_per_mtok"] == 8.40
+        )
+        self.assertEqual(m3_standard["context_window"], 512000)
+        # Priority tier exists separately and costs 1.5x.
+        m3_priority = [
+            m for m in payload["models"]
+            if "m3" in m["id"].lower()
+            and "priority" in m.get("notes", "").lower()
+        ]
+        self.assertGreater(len(m3_priority), 0,
+                           "expected at least one priority-tier M3 row")
 
 
 class TestRefreshScript(unittest.TestCase):
