@@ -738,3 +738,4 @@ MIT
 🚀 **Active development. Ongoing: per-skill drift audit, slop-detector (multi-tier scan), eval case expansion, template refresh.**
 
 See [`docs/STAGES.md`](docs/STAGES.md), [`docs/NAMING.md`](docs/NAMING.md), [`CHANGELOG.md`](CHANGELOG.md).
+// 2026-07-16: smoke test - verify LLM review runs on non-workflow-edit PR
