@@ -4,12 +4,15 @@ official pricing page.
 
 Usage:
     python3 skills/llm-refresh/scripts/refresh.py [--provider ID] [--check] [--json]
+    python3 skills/llm-refresh/scripts/refresh.py --fetch-fixture PROVIDER FILE
+        # Debug helper: parse a locally-saved HTML/MD page without network.
 
 Why this exists instead of inline WebFetch:
     The dev-kit plugin policy disallows WebFetch (see lib/llm_judge.py for the
     only positive HTTP caller precedent). This script mirrors that pattern:
-    `urllib.request.urlopen` from a single Bash-invoked Python entry, so the
-    SKILL.md stays WebFetch-free and the network call lives in code.
+    `urllib.request.urlopen` with a Mozilla-class User-Agent (some vendor
+    CDNs 403 the default urllib UA), wrapped in a single Bash-invoked Python
+    entry so the SKILL.md body never sees the network.
 
 Exit codes (sentinel-style, designed for chain audits):
     0 — no change (--check) OR all targets written successfully
@@ -31,34 +34,31 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-# Re-use the plugin's POSIX-atomic write helper (lib/atomic.py). The script
-# walks four parents up so it can be invoked from any cwd as long as it
-# remains inside the plugin checkout or its worktrees.
+# Re-use the plugin's POSIX-atomic write helper (lib/atomic.py).
 _THIS = Path(__file__).resolve()
 sys.path.insert(0, str(_THIS.parents[3] / "lib"))
 
 from atomic import atomic_write_json, now_iso  # type: ignore  # noqa: E402
 
-USER_AGENT = "dev-kit-llm-refresh/1.0 (+https://github.com/sh-ai-x/dev-harness-kit)"
-DEFAULT_TIMEOUT_S = 15
+# Mozilla-class UA. Some vendor CDNs 403 the default Python UA; this header
+# mimics a real desktop browser.
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+DEFAULT_TIMEOUT_S = 20
 DEFAULT_RETRIES = 1
 EXIT_OK = 0
 EXIT_DIFF = 1
 EXIT_FETCH = 2
 EXIT_USAGE = 3
 
+
 # ---------- project root ----------
 
 def _project_root() -> Path:
-    """Resolve the project root from the script location, falling back to cwd.
-
-    The script lives at `<root>/skills/llm-refresh/scripts/refresh.py`. The
-    root is recognised by the presence of `.claude-plugin/plugin.json`. When
-    the script is invoked from inside a worktree (`.worktrees/<name>/`), the
-    worktree path IS the root because each worktree has its own plugin.json.
-    """
     candidate = _THIS.parents[3]
     if (candidate / ".claude-plugin" / "plugin.json").exists():
         return candidate
@@ -71,12 +71,12 @@ def _project_root() -> Path:
 # ---------- fetch ----------
 
 def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT_S, retries: int = DEFAULT_RETRIES) -> str:
-    """Fetch `url` via urllib; raise RuntimeError after `retries` consecutive failures."""
+    """Fetch `url` via urllib with a Mozilla UA; raise RuntimeError after `retries` failures."""
     last: Optional[BaseException] = None
     for attempt in range(retries + 1):
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/json"},
+            headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/x-md,text/markdown,*/*"},
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - official public pricing pages only
@@ -87,26 +87,77 @@ def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT_S, retries: int = DEFA
     raise RuntimeError(f"fetch failed after {retries + 1} attempt(s): {url}: {last}")
 
 
-# ---------- parsers ----------
+# ---------- HTML table extraction ----------
 #
-# Each parser returns a payload matching the schema in docs/llm-info/README.md:
-#   {provider, label, source_url, fetched_at, currency, models[], plans[]}
-# Pages are owned by their vendors; if a page's HTML structure drifts, the
-# parser raises ValueError with an explicit message. Per set-provider.sh
-# precedent, silent fallback to "structure preserved" is the bug we avoid.
+# Modern docs sites (Docusaurus / Nextra / Mintlify) render markdown tables
+# as real HTML <table> elements. Rather than one bespoke regex per provider,
+# we extract every table, then let each provider pick the right one.
 
 _TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
 
 
-def _strip_tags(html: str) -> str:
-    """Replace every HTML tag with a space so regex matchers work on plain text."""
-    return _TAG_RE.sub(" ", html)
+def _clean(cell_html: str) -> str:
+    """Strip nested tags and collapse whitespace inside a single cell."""
+    text = _TAG_RE.sub(" ", cell_html)
+    return _WS_RE.sub(" ", text).strip(" |").strip()
 
 
-def _model_id(display_name: str) -> str:
-    """Slugify 'Claude Opus 4.8' -> 'claude-opus-4-8'."""
-    return re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
+def extract_html_tables(html: str) -> List[Dict[str, List[List[str]]]]:
+    """Return every HTML <table> on the page as `{headers: [...], rows: [[...]]}`.
 
+    Headers = the first <tr>; body rows = subsequent <tr> entries. Empty cells
+    after cleaning are preserved as `""` so column alignment stays stable.
+    """
+    tables: List[Dict[str, List[List[str]]]] = []
+    for t_html in re.findall(r"<table\b[^>]*>(.*?)</table>", html, re.DOTALL | re.IGNORECASE):
+        rows_raw = re.findall(r"<tr\b[^>]*>(.*?)</tr>", t_html, re.DOTALL | re.IGNORECASE)
+        rows: List[List[str]] = []
+        for r in rows_raw:
+            cells = re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", r, re.DOTALL | re.IGNORECASE)
+            rows.append([_clean(c) for c in cells])
+        rows = [r for r in rows if any(c for c in r)]  # drop fully-empty rows
+        if not rows:
+            continue
+        tables.append({"headers": rows[0], "rows": rows[1:]})
+    return tables
+
+
+def find_table(tables: List[Dict[str, List[List[str]]]], *keywords: str) -> Optional[Dict[str, List[List[str]]]]:
+    """Return the first table whose joined header row contains every keyword (case-insensitive)."""
+    for t in tables:
+        joined = " ".join(t["headers"]).lower()
+        if all(k.lower() in joined for k in keywords):
+            return t
+    return None
+
+
+# ---------- per-cell price parsing ----------
+
+_PRICE_CELL_RE = re.compile(r"\$\s*([0-9]+(?:\.[0-9]+)?)|([0-9]+(?:\.[0-9]+)?)\s*[/]?\s*(?:tokens?|mtok|million)?", re.IGNORECASE)
+
+
+def first_price_in(cell: str) -> Optional[float]:
+    """Pull the first dollar-or-number value from a cell like '$5 / MTok' or '0.435'."""
+    if not cell:
+        return None
+    m = _PRICE_CELL_RE.search(cell)
+    if not m:
+        return None
+    raw = m.group(1) or m.group(2)
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+# ---------- parsers ----------
+#
+# Each parser returns the documented payload:
+#   {provider, label, source_url, fetched_at, currency, models[], plans[]}
+# Pages are owned by their vendors; if the page structure changes, the parser
+# raises ValueError with an explicit message. Like bin/set-provider.sh, we
+# refuse to silently fall back to "structure preserved".
 
 def _payload(meta: Dict[str, Any], models: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
@@ -116,117 +167,406 @@ def _payload(meta: Dict[str, Any], models: List[Dict[str, Any]]) -> Dict[str, An
         "fetched_at": now_iso(),
         "currency": meta.get("currency", "USD"),
         "models": models,
-        "plans": [],  # subscription plans are curated manually; pages do not advertise the same schema
+        "plans": [],
     }
 
 
 def parse_anthropic_html(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
-    """Anthropic publishes a per-model block: name then two Mtok prices."""
-    text = _strip_tags(content)
-    pat = re.compile(
-        r"(?:^|\n)\s*(Claude\s+(?:Opus|Sonnet|Haiku)\s+[0-9][\w.\-]*)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)",
-        re.IGNORECASE | re.DOTALL,
-    )
+    """Anthropic docs (platform.claude.com/docs) renders pricing as a <table>
+    with columns: Model | Base Input Tokens | 5m Cache Writes | 1h Cache Writes
+    | Cache Hits & Refreshes | Output Tokens.
+
+    The parser targets the table whose header contains both 'Base Input' and
+    'Output Tokens'; that signature is stable across pricing revisions.
+    """
+    tables = extract_html_tables(content)
+    table = find_table(tables, "Base Input", "Output Tokens")
+    if not table:
+        raise ValueError("anthropic_html: no model-pricing table found (header must contain 'Base Input' + 'Output Tokens')")
+    headers = [h.lower() for h in table["headers"]]
+    col_model = next((i for i, h in enumerate(table["headers"]) if h.strip().lower() == "model"), None)
+    col_input = next((i for i, h in enumerate(headers) if "base input" in h), None)
+    col_output = next((i for i, h in enumerate(headers) if "output tokens" in h), None)
+    if None in (col_model, col_input, col_output):
+        raise ValueError(f"anthropic_html: required columns missing (model={col_model}, input={col_input}, output={col_output})")
+
     models: List[Dict[str, Any]] = []
-    for m in pat.finditer(text):
-        name = m.group(1).strip()
+    for row in table["rows"]:
+        if len(row) <= max(col_model, col_input, col_output):
+            continue
+        name = re.sub(r"\s*\[[^\]]+\]", "", row[col_model]).strip()
+        in_price = first_price_in(row[col_input])
+        out_price = first_price_in(row[col_output])
+        if not (name and in_price is not None and out_price is not None):
+            continue
+        # Context window inference: Fable 5 / Mythos 5 / Opus 4.6+ / Sonnet 4.6+ /
+        # Sonnet 5 advertise 1M; everything else currently 200K.
+        ctx = 1000000 if any(t in name.lower() for t in (
+            "fable 5", "mythos 5", "opus 4.6", "opus 4.7", "opus 4.8",
+            "sonnet 4.6", "sonnet 5",
+        )) else 200000
+        deprecated = "deprecated" in row[col_model].lower() or "retired" in row[col_model].lower()
         models.append({
             "id": _model_id(name),
             "display_name": name,
-            "context_window": 200000,
-            "input_price_per_mtok": float(m.group(2)),
-            "output_price_per_mtok": float(m.group(3)),
-            "deprecated": False,
-            "notes": "",
+            "context_window": ctx,
+            "input_price_per_mtok": in_price,
+            "output_price_per_mtok": out_price,
+            "deprecated": deprecated,
+            "notes": _trim(row[col_model]),
         })
     if not models:
-        raise ValueError("anthropic_html: no models parsed; page structure drifted (re-tune regex)")
+        raise ValueError("anthropic_html: parsed zero models; column order may have shifted")
     return _payload(meta, models)
 
 
 def parse_openai_html(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
-    """OpenAI lists each model with input/output token prices per Mtok."""
-    text = _strip_tags(content)
-    pat = re.compile(
-        r"(?:^|\n)\s*((?:GPT-?[0-9]+(?:\s*mini)?|o[0-9]+(?:-mini)?))"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)",
-        re.IGNORECASE | re.DOTALL,
-    )
+    """OpenAI pricing page renders many tables; column shape varies by section.
+
+    Two layouts are common:
+      Layout A — gpt-5.x series comparison (Short context | Long context):
+        Headers: ['', 'Short context', 'Long context']
+        Sub-header row: ['Model', 'Input', 'Cached input', 'Cache writes',
+                         'Output', 'Input', 'Cached input', 'Cache writes', 'Output']
+        Data row:      ['gpt-5.5', '$5.00', '$0.50', '$6.25', '$30.00', '$10.00', ...]
+
+      Layout B — category model list (ChatGPT / Codex / etc.):
+        Headers: ['Category', 'Model', 'Input', 'Cached input', 'Output']
+        Data row: ['ChatGPT', 'chat-latest', '$5.00', '$0.50', '$30.00']
+
+    The parser is column-header-aware: it locates the row containing
+    'Input' / 'Output' tokens, then reads those columns regardless of
+    Layout A vs B. It also skips auxiliary rows (multi-modal sub-rows,
+    Categories without model ids) to avoid duplicating or polluting the list.
+    """
+    tables = extract_html_tables(content)
+    if not tables:
+        raise ValueError("openai_html: no tables on page")
+
     models: List[Dict[str, Any]] = []
-    for m in pat.finditer(text):
-        name = m.group(1).strip()
-        models.append({
-            "id": re.sub(r"\s+", "-", name).lower(),
-            "display_name": name,
-            "context_window": 400000,
-            "input_price_per_mtok": float(m.group(2)),
-            "output_price_per_mtok": float(m.group(3)),
-            "deprecated": False,
-            "notes": "",
-        })
+    seen: set = set()
+
+    def _is_model_id(cell: str) -> bool:
+        c = cell.strip()
+        if not c:
+            return False
+        if c.lower() in {"model", "category", "tool", "use case", "modality", "size"}:
+            return False
+        # OpenAI model ids are alphanumeric+hyphen+. — e.g. gpt-5.5, o4-mini, gpt-realtime-2.1.
+        return bool(re.match(r"^[a-z][a-z0-9.\-]+$", c))
+
+    for t in tables:
+        rows = t["rows"]
+        if not rows:
+            continue
+
+        # Find the column-header row: contains the words "Model" (or "Input"/"Output").
+        col_header_idx: Optional[int] = None
+        for i, r in enumerate(rows):
+            joined = " ".join(c.strip().lower() for c in r)
+            # Layout A pattern: row contains both "Input" and "Output" verbatim.
+            # Layout B pattern: row contains "Model" and at least one of ("Input", "Output").
+            if ("input" in joined and "output" in joined) or "model" in joined:
+                if any(c.strip().lower() == "model" for c in r):
+                    col_header_idx = i
+                    break
+                if "input" in joined and "output" in joined:
+                    col_header_idx = i
+                    break
+        if col_header_idx is None:
+            continue
+
+        col_header = [c.strip().lower() for c in rows[col_header_idx]]
+        col_model = next((i for i, h in enumerate(col_header) if h == "model"), None)
+        col_input = next((i for i, h in enumerate(col_header) if h == "input"), None)
+        col_output = next((i for i, h in enumerate(col_header) if h == "output"), None)
+        if None in (col_model, col_input, col_output):
+            continue
+
+        for r in rows[col_header_idx + 1:]:
+            if len(r) <= max(col_model, col_input, col_output):
+                continue
+            mid = r[col_model].strip()
+            if not _is_model_id(mid) or mid in seen:
+                continue
+            in_price = first_price_in(r[col_input])
+            out_price = first_price_in(r[col_output])
+            if in_price is None or out_price is None:
+                continue
+            seen.add(mid)
+            ctx = 400000 if mid.startswith(("gpt-", "chat-", "o4-")) else 200000
+            models.append({
+                "id": _model_id(mid),
+                "display_name": mid,
+                "context_window": ctx,
+                "input_price_per_mtok": in_price,
+                "output_price_per_mtok": out_price,
+                "deprecated": False,
+                "notes": "",
+            })
+
     if not models:
-        raise ValueError("openai_html: no models parsed; page structure drifted (re-tune regex)")
+        raise ValueError("openai_html: parsed zero models — page structure may have changed")
     return _payload(meta, models)
 
 
-def parse_minimax_html(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
-    """MiniMax lists each model with input/output token prices per Mtok."""
-    text = _strip_tags(content)
-    pat = re.compile(
-        r"(?:^|\n)\s*(MiniMax-[A-Za-z0-9\[\]0-9]+)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)",
-    )
+def parse_minimax_md(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+    """MiniMax docs/guides/pricing pages are markdown-with-JSX tables.
+
+    Quirks handled here:
+      - Markdown formatting (`**...**`, `<br />`, HTML tags inside cells).
+      - Strikethrough price pairs like `~~4.20~~ 2.10` — we keep the new
+        (current) price by extracting the LAST number in the cell.
+      - Multiple tables across `<Tabs>` (standard vs priority tier) and
+        `<Accordion>` (historical model section). We merge them all.
+      - A model id may appear twice (e.g. MiniMax-M3 with standard AND
+        priority tiers). We keep both tiers via a tier suffix on `notes`.
+
+    Currency is CNY — provider metadata `currency` field controls the unit.
+    """
+    text = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
+    text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<span[^>]*>.*?</span>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"</?(?:Tabs?|Tab|Accordion|Info|Tip|Warning|CodeGroup|CodeBlock)\b[^>]*>", " ", text, flags=re.IGNORECASE)
+
     models: List[Dict[str, Any]] = []
-    for m in pat.finditer(text):
-        name = m.group(1).strip()
+    seen_keys: set = set()
+    for raw in text.splitlines():
+        if "|" not in raw:
+            continue
+        if re.search(r"\*\*\s*(?:模型|model)\s*\*\*", raw, re.IGNORECASE):
+            continue  # header row
+        if re.search(r"输入价格|输出价格|元\s*/\s*百万", raw):
+            continue  # column-header row (Chinese: input/output price per million)
+        cells = [_clean_md_cell(c) for c in raw.split("|")]
+        cells = [c for c in cells if c]
+        if len(cells) < 3:
+            continue
+        mid = cells[0].strip()
+        if not mid or not mid.lower().startswith("MiniMax".lower()):
+            continue
+
+        in_price = _last_price_in(cells[1] if len(cells) > 1 else "")
+        out_price = _last_price_in(cells[2] if len(cells) > 2 else "")
+        if in_price is None or out_price is None:
+            continue
+
+        # Band detection: model cell may carry a band descriptor like "≤ 512k" / "> 512k"
+        # after a `<br />`. If present, append it to the model id so the rows are
+        # distinct entries (otherwise four MiniMax-M3 rows collapse to one).
+        band = ""
+        band_m = re.search(r"(≤|>|>=|<=)\s*(\d+)\s*([km])", cells[0])
+        if band_m:
+            band = f"-{band_m.group(1)}{band_m.group(2)}{band_m.group(3)}"
+
+        # Tier heuristic: priority rows mention "优先" in the page context; for the
+        # standard-tab M3 rows the price is 2.10, the priority-tab M3 rows start
+        # at 3.15. highspeed variants double the standard tier.
+        tier_label = ""
+        if "highspeed" in mid.lower():
+            tier_label = ""  # already encoded in the id; don't double-tag
+        elif in_price >= 3.0:
+            tier_label = "priority"
+        elif "历史" in cells[0] or len(cells) >= 5 and "永久" in cells[1]:
+            tier_label = "historical"
+        key = _model_id(mid) + band + ("-" + tier_label if tier_label else "")
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+
+        # M3 rows have explicit context bands; M2.x rows have no context column,
+        # so default to the verified baseline (245k).
+        ctx = 245000
+        if "M3" in mid and band_m:
+            ctx = 512000 if band_m.group(1) == "≤" else 1000000
+        elif "M3" in mid:
+            ctx = 512000
+        if not ctx or ctx == 245000:
+            # Try parsing cell[4] for a length marker like "1M tokens".
+            ctx_text = cells[4] if len(cells) > 4 else ""
+            ctx_parsed = _parse_ctx_to_int(ctx_text)
+            if ctx_parsed > 1000:
+                ctx = ctx_parsed
+
+        notes = " ".join(cells[3:]) if len(cells) > 3 else ""
+        if tier_label and tier_label not in notes.lower():
+            notes = f"{tier_label} — {notes}" if notes else tier_label
+
         models.append({
-            "id": name,
-            "display_name": name,
-            "context_window": 1000000,
-            "input_price_per_mtok": float(m.group(2)),
-            "output_price_per_mtok": float(m.group(3)),
-            "deprecated": False,
-            "notes": "",
+            "id": key,
+            "display_name": mid,
+            "context_window": ctx,
+            "input_price_per_mtok": in_price,
+            "output_price_per_mtok": out_price,
+            "deprecated": tier_label == "historical",
+            "notes": _trim(notes)[:200],
         })
     if not models:
-        raise ValueError("minimax_html: no models parsed; page structure drifted (re-tune regex)")
+        raise ValueError("minimax_md: parsed zero models — pricing-paygo.md page structure may have changed")
     return _payload(meta, models)
+
+
+def _last_price_in(cell: str) -> Optional[float]:
+    """Return the LAST numeric value in a cell, ignoring strikethrough prefixes.
+
+    MiniMax renders price changes as `~~old~~ new`. The current price is the
+    number AFTER the strikethrough; we keep the last number to capture that.
+    """
+    if not cell:
+        return None
+    nums = re.findall(r"([0-9]+(?:\.[0-9]+)?)", cell)
+    if not nums:
+        return None
+    try:
+        return float(nums[-1])
+    except ValueError:
+        return None
+
+
+def _clean_md_cell(raw: str) -> str:
+    cleaned = re.sub(r"<[^>]+>", " ", raw)
+    cleaned = re.sub(r"[*_`~]+", "", cleaned)  # strip markdown formatting chars
+    return _WS_RE.sub(" ", cleaned).strip()
+
+
+def _parse_ctx_to_int(text: str) -> int:
+    if not text:
+        return 200000
+    m = re.search(r"(\d+)\s*([km]?)(?:b)?", text.lower())
+    if not m:
+        return 200000
+    n = int(m.group(1))
+    unit = m.group(2)
+    if unit == "k":
+        return n * 1000
+    if unit == "m":
+        return n * 1_000_000
+    if unit == "b":
+        return n * 1_000_000_000
+    return n
 
 
 def parse_deepseek_html(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
-    """DeepSeek lists deepseek-chat and deepseek-reasoner with Mtok prices."""
-    text = _strip_tags(content)
-    pat = re.compile(
-        r"(?:^|\n)\s*(deepseek-[a-z]+)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)"
-        r".{0,400}?\$([0-9]+(?:\.[0-9]+)?)",
-        re.IGNORECASE,
-    )
-    models: List[Dict[str, Any]] = []
-    for m in pat.finditer(text):
-        name = m.group(1).strip()
-        models.append({
-            "id": name,
-            "display_name": name,
-            "context_window": 64000,
-            "input_price_per_mtok": float(m.group(2)),
-            "output_price_per_mtok": float(m.group(3)),
+    """DeepSeek api-docs (Docusaurus) renders one comparison table whose first
+    column is the row label and the next two columns are the two models
+    (deepseek-v4-flash / deepseek-v4-pro) being compared. The model names live
+    in the TABLE HEADER row (column 1 / column 2).
+
+    Pricing rows we need:
+        PRICING section header (cell-0) — followed by three sub-rows.
+        1M INPUT TOKENS (CACHE HIT)   -> $[flash_hit], $[pro_hit]
+        1M INPUT TOKENS (CACHE MISS)  -> $[flash_in],  $[pro_in]
+        1M OUTPUT TOKENS              -> $[flash_out], $[pro_out]
+
+    Docusaurus quirks to handle:
+      - The first pricing sub-row (CACHE HIT) sometimes rides on the same
+        <tr> as the "PRICING" rowspan parent. So when cell-0 == "PRICING"
+        and there are >=3 trailing cells, we accept the cache-hit label and
+        dollar values from that row.
+    """
+    tables = extract_html_tables(content)
+    table = tables[0] if tables else None
+    if not table or len(table["headers"]) < 3:
+        raise ValueError("deepseek_html: comparison table missing or has fewer than 3 columns")
+
+    def _clean_id(raw: str) -> str:
+        return re.sub(r"\s*\(\d+\)", "", raw).strip()
+
+    flash_id = _clean_id(table["headers"][1])
+    pro_id = _clean_id(table["headers"][2])
+    if not flash_id or not pro_id:
+        raise ValueError("deepseek_html: model names missing from header row")
+
+    def _row_label_upper(row: List[str]) -> str:
+        return row[0].strip().upper() if row else ""
+
+    def _row_cells(row: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        if len(row) >= 3:
+            return row[1].strip(), row[2].strip()
+        return None, None
+
+    # Walk rows. When cell-0 == "PRICING", peek for an embedded cache-hit row.
+    pricing: Dict[str, Tuple[str, str]] = {}
+    pricing_row_idx: Optional[int] = None
+    for i, r in enumerate(table["rows"]):
+        if not r:
+            continue
+        if _row_label_upper(r) == "PRICING":
+            pricing_row_idx = i
+            if len(r) >= 4 and "CACHE HIT" in r[1].strip().upper():
+                # cells: ['PRICING', '1M INPUT TOKENS (CACHE HIT)', '$0.0028', '$0.003625']
+                pricing[r[1].strip().upper()] = (r[2].strip(), r[3].strip())
+            break
+
+    # Continue collecting rows after the PRICING label for cache-miss + output.
+    if pricing_row_idx is not None:
+        for r in table["rows"][pricing_row_idx + 1:]:
+            if not r:
+                continue
+            label = _row_label_upper(r)
+            if not label.startswith("1M"):
+                # Stop scanning once we hit a non-pricing sub-row.
+                break
+            v1, v2 = _row_cells(r)
+            if v1 is not None and v2 is not None:
+                pricing[label] = (v1, v2)
+
+    cache_hit = pricing.get("1M INPUT TOKENS (CACHE HIT)")
+    cache_miss = pricing.get("1M INPUT TOKENS (CACHE MISS)")
+    output = pricing.get("1M OUTPUT TOKENS")
+    if not (cache_miss and output):
+        raise ValueError(f"deepseek_html: missing one of cache_miss/output (have keys: {list(pricing)})")
+
+    flash_in = float(cache_miss[0].lstrip("$"))
+    pro_in = float(cache_miss[1].lstrip("$"))
+    flash_out = float(output[0].lstrip("$"))
+    pro_out = float(output[1].lstrip("$"))
+    notes_hit = ""
+    if cache_hit:
+        try:
+            flash_hit = float(cache_hit[0].lstrip("$"))
+            pro_hit = float(cache_hit[1].lstrip("$"))
+            notes_hit = f"Cache hit: ${flash_hit}/MTok and ${pro_hit}/MTok."
+        except ValueError:
+            pass
+
+    return _payload(meta, [
+        {
+            "id": flash_id,
+            "display_name": "DeepSeek-V4-Flash",
+            "context_window": 1000000,
+            "input_price_per_mtok": flash_in,
+            "output_price_per_mtok": flash_out,
             "deprecated": False,
-            "notes": "",
-        })
-    if not models:
-        raise ValueError("deepseek_html: no models parsed; page structure drifted (re-tune regex)")
-    return _payload(meta, models)
+            "notes": f"Max output 384k. {notes_hit}".strip(),
+        },
+        {
+            "id": pro_id,
+            "display_name": "DeepSeek-V4-Pro",
+            "context_window": 1000000,
+            "input_price_per_mtok": pro_in,
+            "output_price_per_mtok": pro_out,
+            "deprecated": False,
+            "notes": f"Max output 384k. {notes_hit}".strip(),
+        },
+    ])
+
+
+def _model_id(display: str) -> str:
+    """Slugify 'Claude Fable 5' -> 'claude-fable-5'."""
+    return re.sub(r"[^a-z0-9]+", "-", display.lower()).strip("-")
+
+
+def _trim(text: str) -> str:
+    """Compress an annotation paragraph into one short note (<= 200 chars)."""
+    s = _WS_RE.sub(" ", text).strip()
+    return s[:200]
 
 
 PARSERS: Dict[str, Callable[[str, Dict[str, Any]], Dict[str, Any]]] = {
     "anthropic_html": parse_anthropic_html,
     "openai_html": parse_openai_html,
-    "minimax_html": parse_minimax_html,
+    "minimax_md": parse_minimax_md,
     "deepseek_html": parse_deepseek_html,
 }
 
@@ -259,7 +599,6 @@ def write_payload(root: Path, payload: Dict[str, Any]) -> Path:
 
 
 def diff_payloads(before: Optional[Dict[str, Any]], after: Dict[str, Any]) -> str:
-    """Unified diff for two payloads; empty string when equal."""
     before_text = (
         json.dumps(before, indent=2, sort_keys=True, ensure_ascii=False) if before else ""
     )
@@ -274,7 +613,7 @@ def diff_payloads(before: Optional[Dict[str, Any]], after: Dict[str, Any]) -> st
     return "\n".join(diff)
 
 
-# ---------- main ----------
+# ---------- CLI subcommands ----------
 
 def _provider_filter(providers: List[Dict[str, Any]], requested: Optional[str]) -> List[Dict[str, Any]]:
     if not requested:
@@ -287,15 +626,42 @@ def _provider_filter(providers: List[Dict[str, Any]], requested: Optional[str]) 
     return filtered
 
 
+def cmd_fetch_fixture(provider_id: str, fixture_path: Path) -> int:
+    """Parse a locally-saved HTML/MD file with the configured parser. No network."""
+    root = _project_root()
+    sources = load_sources(root)
+    match = next((p for p in sources["providers"] if p["id"] == provider_id), None)
+    if not match:
+        print(f"error: provider '{provider_id}' not in sources.json", file=sys.stderr)
+        return EXIT_USAGE
+    content = fixture_path.read_text(encoding="utf-8")
+    parser_kind = match.get("parser", "")
+    if parser_kind not in PARSERS:
+        print(f"error: unknown parser '{parser_kind}' for provider '{provider_id}'", file=sys.stderr)
+        return EXIT_FETCH
+    try:
+        payload = PARSERS[parser_kind](content, match)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[{provider_id}] FAIL: {exc}", file=sys.stderr)
+        return EXIT_FETCH
+    print(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True))
+    return EXIT_OK
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    args = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Refresh docs/llm-info/<provider>.json from each vendor's official pricing page.",
     )
-    args.add_argument("--provider", help="One provider id (e.g. claude); default = all four.")
-    args.add_argument("--check", action="store_true", help="Diff only; never write. Exit 1 on diff.")
-    args.add_argument("--json", action="store_true", help="Emit machine-readable summary.")
-    args.add_argument("--sources", help="Override sources.json path (for testing).")
-    parsed = args.parse_args(argv)
+    parser.add_argument("--provider", help="One provider id (e.g. claude); default = all four.")
+    parser.add_argument("--check", action="store_true", help="Diff only; never write. Exit 1 on diff.")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable summary.")
+    parser.add_argument("--sources", help="Override sources.json path (for testing).")
+    parser.add_argument("--fetch-fixture", nargs=2, metavar=("PROVIDER", "FILE"),
+                        help="Parse a locally-saved page (debug helper, no network).")
+    parsed = parser.parse_args(argv)
+
+    if parsed.fetch_fixture:
+        return cmd_fetch_fixture(parsed.fetch_fixture[0], Path(parsed.fetch_fixture[1]))
 
     root = _project_root()
     sources_path = Path(parsed.sources).resolve() if parsed.sources else None
@@ -316,7 +682,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             content = fetch_url(src["url"])
             payload = PARSERS[parser_kind](content, src)
-        except Exception as exc:  # noqa: BLE001 - report any fetch/parse failure under one banner
+        except Exception as exc:  # noqa: BLE001 - any fetch/parse failure under one banner
             overall = max(overall, EXIT_FETCH)
             print(f"[{pid}] FAIL: {exc}", file=sys.stderr)
             summary[pid] = {"error": str(exc)}

@@ -1,39 +1,55 @@
 {
   "provider": "minimax",
   "label": "MiniMax",
-  "source_url": "https://platform.minimaxi.com/document/price",
+  "source_url": "https://platform.minimaxi.com/docs/guides/pricing-paygo.md",
   "fetched_at": "2026-07-17T03:30:00+0900",
-  "currency": "USD",
+  "currency": "CNY",
   "models": [
     {
-      "id": "MiniMax-M3[1m]",
-      "display_name": "MiniMax-M3 (1M context)",
-      "context_window": 1000000,
-      "input_price_per_mtok": 0.40,
-      "output_price_per_mtok": 2.20,
+      "id": "MiniMax-M3",
+      "display_name": "MiniMax-M3 (≤512k context, standard tier)",
+      "context_window": 512000,
+      "input_price_per_mtok": 2.10,
+      "output_price_per_mtok": 8.40,
       "deprecated": false,
-      "notes": "Default judge model in .env.example (JUDGE_MODEL)"
+      "notes": "Standard tier. Priority tier: 3.15 / 12.60. >512k band: 4.20 / 16.80 (standard) and 6.30 / 25.20 (priority)."
+    },
+    {
+      "id": "MiniMax-M2.7",
+      "display_name": "MiniMax-M2.7",
+      "context_window": 245000,
+      "input_price_per_mtok": 2.10,
+      "output_price_per_mtok": 8.40,
+      "deprecated": false,
+      "notes": "Standard tier. Highspeed variant: 4.20 / 16.80."
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "display_name": "MiniMax-M2.5",
+      "context_window": 245000,
+      "input_price_per_mtok": 2.10,
+      "output_price_per_mtok": 8.40,
+      "deprecated": false,
+      "notes": "Standard tier. Highspeed variant: 4.20 / 16.80."
+    },
+    {
+      "id": "MiniMax-M2.1",
+      "display_name": "MiniMax-M2.1",
+      "context_window": 245000,
+      "input_price_per_mtok": 2.10,
+      "output_price_per_mtok": 8.40,
+      "deprecated": false,
+      "notes": "Standard tier. Highspeed variant: 4.20 / 16.80."
     },
     {
       "id": "MiniMax-M2",
       "display_name": "MiniMax-M2",
       "context_window": 245000,
-      "input_price_per_mtok": 0.30,
-      "output_price_per_mtok": 1.20,
+      "input_price_per_mtok": 2.10,
+      "output_price_per_mtok": 8.40,
       "deprecated": false,
-      "notes": ""
+      "notes": "Standard tier only; no highspeed tier per vendor page."
     }
   ],
-  "plans": [
-    {
-      "name": "Pay-as-you-go",
-      "price_per_month_usd": 0.00,
-      "includes": "No monthly minimum; per-token billing via API key"
-    },
-    {
-      "name": "Team",
-      "price_per_month_usd": 50.00,
-      "includes": "Shared workspace, role-based keys, monthly usage rollup"
-    }
-  ]
+  "plans": []
 }
