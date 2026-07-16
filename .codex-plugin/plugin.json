@@ -1,6 +1,6 @@
 {
   "name": "dev-kit",
-  "version": "0.3.56",
+  "version": "0.3.57",
   "description": "AI-native dev harness: 13 categories, 0-arg commands, A2A typed, Eval-Repair, Human-on-the-Loop.",
   "author": {
     "name": "sanghee",
