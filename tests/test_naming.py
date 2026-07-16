@@ -76,6 +76,8 @@ class TestNaming(unittest.TestCase):
                 name = d.name
                 if name in {"bootstrap", "plan", "design", "build", "review", "security", "audit", "shortcuts", "ship"}:
                     continue  # category names themselves
+                if name in {"__pycache__", ".git", ".worktrees", ".dev-kit"}:
+                    continue  # ephemeral / dev artifacts not part of the skill layout
                 if not KEBAB_RE.match(name):
                     violations.append(str(d.relative_to(PROJECT_ROOT)))
         self.assertEqual(violations, [], f"Non-kebab-case dirs: {violations}")
