@@ -23,8 +23,8 @@
       "label": "MiniMax",
       "url": "https://platform.minimaxi.com/docs/guides/pricing-paygo.md",
       "parser": "minimax_md",
-      "currency": "CNY",
-      "note": "MiniMax publishes LLM token pricing only on the docs/guides pages; the /document/price page is the voice-resource-package tier (TTS) and is NOT the LLM registry."
+      "currency": "USD",
+      "note": "MiniMax publishes LLM token pricing only on the docs/guides pages; the /document/price page is the voice-resource-package tier (TTS) and is NOT the LLM registry. Prices in docs/llm-info/minimax.json are converted from CNY to USD at FX 7.00 per Mtok."
     },
     {
       "id": "deepseek",
