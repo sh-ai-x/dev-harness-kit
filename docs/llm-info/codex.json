@@ -1,53 +1,83 @@
 {
   "provider": "codex",
   "label": "OpenAI Codex / API",
-  "source_url": "https://openai.com/api/pricing/",
+  "source_url": "https://developers.openai.com/api/docs/pricing",
   "fetched_at": "2026-07-17T03:30:00+0900",
   "currency": "USD",
   "models": [
     {
-      "id": "gpt-5",
-      "display_name": "GPT-5",
+      "id": "gpt-5.5",
+      "display_name": "GPT-5.5",
       "context_window": 400000,
-      "input_price_per_mtok": 1.25,
-      "output_price_per_mtok": 10.00,
+      "input_price_per_mtok": 5.00,
+      "output_price_per_mtok": 30.00,
+      "deprecated": false,
+      "notes": "Top-of-line general model"
+    },
+    {
+      "id": "gpt-5.5-pro",
+      "display_name": "GPT-5.5 Pro",
+      "context_window": 400000,
+      "input_price_per_mtok": 30.00,
+      "output_price_per_mtok": 180.00,
+      "deprecated": false,
+      "notes": "Reasoning-flagship tier"
+    },
+    {
+      "id": "gpt-5.4",
+      "display_name": "GPT-5.4",
+      "context_window": 400000,
+      "input_price_per_mtok": 2.50,
+      "output_price_per_mtok": 15.00,
       "deprecated": false,
       "notes": ""
     },
     {
-      "id": "gpt-5-mini",
-      "display_name": "GPT-5 mini",
+      "id": "gpt-5.4-mini",
+      "display_name": "GPT-5.4 mini",
       "context_window": 400000,
-      "input_price_per_mtok": 0.25,
-      "output_price_per_mtok": 2.00,
+      "input_price_per_mtok": 0.75,
+      "output_price_per_mtok": 4.50,
       "deprecated": false,
       "notes": ""
     },
     {
-      "id": "o4-mini",
-      "display_name": "o4-mini",
+      "id": "gpt-5.4-nano",
+      "display_name": "GPT-5.4 nano",
+      "context_window": 400000,
+      "input_price_per_mtok": 0.20,
+      "output_price_per_mtok": 1.25,
+      "deprecated": false,
+      "notes": "Cheapest active OpenAI general model"
+    },
+    {
+      "id": "gpt-5.3-codex",
+      "display_name": "GPT-5.3 Codex",
+      "context_window": 400000,
+      "input_price_per_mtok": 1.75,
+      "output_price_per_mtok": 14.00,
+      "deprecated": false,
+      "notes": "Codex-CLI optimized"
+    },
+    {
+      "id": "o4-mini-2025-04-16",
+      "display_name": "o4-mini (2025-04-16)",
       "context_window": 200000,
-      "input_price_per_mtok": 1.10,
-      "output_price_per_mtok": 4.40,
+      "input_price_per_mtok": 4.00,
+      "output_price_per_mtok": 16.00,
       "deprecated": false,
-      "notes": "Reasoning model"
+      "notes": "Reasoning model snapshot"
+    },
+    {
+      "id": "o3-deep-research",
+      "display_name": "o3 Deep Research",
+      "context_window": 200000,
+      "input_price_per_mtok": 5.00,
+      "output_price_per_mtok": 20.00,
+      "deprecated": false,
+      "notes": "Deep-research agent pricing"
     }
   ],
-  "plans": [
-    {
-      "name": "ChatGPT Free",
-      "price_per_month_usd": 0.00,
-      "includes": "Limited Codex CLI in IDE; rate-limited API key on signup"
-    },
-    {
-      "name": "ChatGPT Plus",
-      "price_per_month_usd": 20.00,
-      "includes": "Codex CLI on web + IDE; higher API rate limits"
-    },
-    {
-      "name": "ChatGPT Pro",
-      "price_per_month_usd": 200.00,
-      "includes": "Unlimited Codex, o3-pro access, priority compute"
-    }
-  ]
+  "plans": [],
+  "plans_note": "ChatGPT consumer-plan pricing (Plus/Pro/Team) is at chatgpt.com/pricing; the API docs page does not list subscription tiers. Refresh of plans requires a second pass with that consumer URL — out of scope for v1 of this registry."
 }
