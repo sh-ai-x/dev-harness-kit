@@ -313,8 +313,8 @@ def parse_openai_html(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
 def parse_minimax_md(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
     """MiniMax docs/guides/pricing pages are markdown-with-JSX tables.
 
-    Quirks handled here:
-      - Markdown formatting (`**...**`, `<br />`, HTML tags inside cells).
+    Quirks handled here (shape-based detection — no language-dependent
+    header matching):
       - Strikethrough price pairs like `~~4.20~~ 2.10` — we keep the new
         (current) price by extracting the LAST number in the cell.
       - Multiple tables across `<Tabs>` (standard vs priority tier) and
@@ -322,28 +322,60 @@ def parse_minimax_md(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
       - A model id may appear twice (e.g. MiniMax-M3 with standard AND
         priority tiers). We keep both tiers via a tier suffix on `notes`.
 
-    Currency is CNY — provider metadata `currency` field controls the unit.
+    Currency is CNY — provider metadata `currency` field controls the
+    unit. The fixture at
+    ``skills/llm-refresh/tests/fixtures/minimax_pricing.md`` is the
+    English-translated oracle; when refreshing against the live
+    page, only the column-header text differs.
     """
-    text = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
-    text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    # Pass 1: walk the raw content and tag each line with the section
+    # it belongs to. Sections are detected from JSX component markers
+    # captured BEFORE the JSX tags are stripped, so we keep the
+    # semantic boundary information that the parser needs.
+    raw_lines = content.splitlines()
+    section_for_line: List[str] = ["standard"] * len(raw_lines)
+    current = "standard"
+    for i, line in enumerate(raw_lines):
+        # `<Tab title="Standard">` and `<Tab title="Priority*">` are
+        # captured here. JSX regex below keeps the *content* of titles.
+        m = re.search(r'<Tab\s+title="([^"]+)"', line)
+        if m:
+            title = m.group(1).strip().rstrip("*").lower()
+            if "priority" in title:
+                current = "priority"
+            elif "standard" in title:
+                current = "standard"
+        if "Historical Models" in line or "historical" in line.lower():
+            # The accordion tag stays in the line, but we want the
+            # section label regardless.
+            if "<Accordion" in line or re.search(r"<Accordion[^>]*title=.historical.", line, re.IGNORECASE):
+                current = "historical"
+        section_for_line[i] = current
+
+    # Strip JSX (but keep the title text we already captured — replacing
+    # `<Tab title="Standard">` with `## Standard`-style markers is not
+    # needed; section info was captured above). Per-line stripping is
+    # intentional: a regex with DOTALL on multi-line input would collapse
+    # newlines and break the line-index alignment used below.
+    text = "\n".join(
+        re.sub(r"</?(?:Tabs?|Tab|Accordion|Info|Tip|Warning|CodeGroup|CodeBlock)\b[^>]*>", " ", ln)
+        for ln in re.sub(r"<br\s*/?>", " ", content, flags=re.IGNORECASE).splitlines()
+    )
     text = re.sub(r"<span[^>]*>.*?</span>", " ", text, flags=re.IGNORECASE | re.DOTALL)
-    text = re.sub(r"</?(?:Tabs?|Tab|Accordion|Info|Tip|Warning|CodeGroup|CodeBlock)\b[^>]*>", " ", text, flags=re.IGNORECASE)
 
     models: List[Dict[str, Any]] = []
     seen_keys: set = set()
-    for raw in text.splitlines():
+    for idx, raw in enumerate(text.splitlines()):
         if "|" not in raw:
             continue
-        if re.search(r"\*\*\s*(?:模型|model)\s*\*\*", raw, re.IGNORECASE):
-            continue  # header row
-        if re.search(r"输入价格|输出价格|元\s*/\s*百万", raw):
-            continue  # column-header row (Chinese: input/output price per million)
+
         cells = [_clean_md_cell(c) for c in raw.split("|")]
         cells = [c for c in cells if c]
         if len(cells) < 3:
             continue
+
         mid = cells[0].strip()
-        if not mid or not mid.lower().startswith("MiniMax".lower()):
+        if not mid.lower().startswith("MiniMax".lower()):
             continue
 
         in_price = _last_price_in(cells[1] if len(cells) > 1 else "")
@@ -351,38 +383,30 @@ def parse_minimax_md(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
         if in_price is None or out_price is None:
             continue
 
-        # Band detection: model cell may carry a band descriptor like "≤ 512k" / "> 512k"
-        # after a `<br />`. If present, append it to the model id so the rows are
-        # distinct entries (otherwise four MiniMax-M3 rows collapse to one).
         band = ""
         band_m = re.search(r"(≤|>|>=|<=)\s*(\d+)\s*([km])", cells[0])
         if band_m:
             band = f"-{band_m.group(1)}{band_m.group(2)}{band_m.group(3)}"
 
-        # Tier heuristic: priority rows mention "优先" in the page context; for the
-        # standard-tab M3 rows the price is 2.10, the priority-tab M3 rows start
-        # at 3.15. highspeed variants double the standard tier.
-        tier_label = ""
-        if "highspeed" in mid.lower():
-            tier_label = ""  # already encoded in the id; don't double-tag
-        elif in_price >= 3.0:
+        section = section_for_line[idx] if idx < len(section_for_line) else "standard"
+        suffix = "highspeed" if "highspeed" in mid.lower() else ""
+        if section == "priority" and not suffix:
             tier_label = "priority"
-        elif "历史" in cells[0] or len(cells) >= 5 and "永久" in cells[1]:
+        elif section == "historical" and not suffix:
             tier_label = "historical"
-        key = _model_id(mid) + band + ("-" + tier_label if tier_label else "")
+        else:
+            tier_label = ""
+        key = _model_id(mid) + band + (("-" + tier_label) if tier_label else "")
         if key in seen_keys:
             continue
         seen_keys.add(key)
 
-        # M3 rows have explicit context bands; M2.x rows have no context column,
-        # so default to the verified baseline (245k).
         ctx = 245000
         if "M3" in mid and band_m:
             ctx = 512000 if band_m.group(1) == "≤" else 1000000
         elif "M3" in mid:
             ctx = 512000
         if not ctx or ctx == 245000:
-            # Try parsing cell[4] for a length marker like "1M tokens".
             ctx_text = cells[4] if len(cells) > 4 else ""
             ctx_parsed = _parse_ctx_to_int(ctx_text)
             if ctx_parsed > 1000:
@@ -391,6 +415,8 @@ def parse_minimax_md(content: str, meta: Dict[str, Any]) -> Dict[str, Any]:
         notes = " ".join(cells[3:]) if len(cells) > 3 else ""
         if tier_label and tier_label not in notes.lower():
             notes = f"{tier_label} — {notes}" if notes else tier_label
+        if suffix and suffix not in notes.lower():
+            notes = f"{notes} ({suffix})" if notes else suffix
 
         models.append({
             "id": key,
