@@ -279,6 +279,7 @@ jobs:
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
             echo "review_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            echo "verdict_source=needs-fallback-bootstrap-pr" >> "$GITHUB_OUTPUT"
             # Issue #219 Bug 2: in the fallback branch, the agent never ran —
             # claude-code-action@v1's workflow-validation guard refused it.
             # The hardcoded agent_ran=true previously masked the skip as a
@@ -288,24 +289,51 @@ jobs:
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-            | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' | tail -1 \
-            | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
-            | sed -E 's/.*Verdict:[[:space:]]*//' || true)"
-          # Issue #212-C1-fix: detect anthropics/claude-code-action@v1 skip.
-          # A 0 claude-count means the action skipped (workflow validation);
-          # `agent_ran=false` tells the gate to hard-fail with the
-          # bootstrap-PR remediation message — the previous tolerance
-          # silently masked this as Approve.
-          claude_count=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length')
-          agent_ran="false"
-          if [ "$claude_count" -gt 0 ]; then
-            agent_ran="true"
+          # Issue #244 root-cause fix: read the verdict from the agent's
+          # actual output file (claude-execution-output.json) instead of
+          # grepping PR comments. The comment-grep fallback was the source
+          # of deterministic gate flapping on boilerplate-web PR #18: the
+          # `grep | tail -1` picked up a stale "Verdict: Changes Requested"
+          # from the previous push, defeating the severity gate's own
+          # "default to Approve on empty verdict" tolerance.
+          AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
+          if [ ! -f "$AGENT_OUTPUT" ]; then
+            AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
-          echo "review_verdict=${verdict:-<none>}  claude_comments=${claude_count}  agent_ran=${agent_ran}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          file_verdict=""
+          if [ -f "$AGENT_OUTPUT" ]; then
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
+          fi
+          if [ -n "$file_verdict" ]; then
+            verdict="$file_verdict"
+            verdict_source="agent-output-file"
+            agent_ran="true"
+          else
+            # ROOT-CAUSE FIX: when the agent's output file is missing or
+            # extract-verdict.py returns nothing, default to Approve +
+            # warning instead of grepping PR comments. Matches the
+            # severity gate's existing contract: empty verdict is valid;
+            # the human gate (REVIEW_REQUIRED / CHANGES_REQUESTED on the
+            # PR) is what actually blocks merge.
+            if [ -f "$AGENT_OUTPUT" ]; then
+              echo "::warning::review verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-empty-file"
+              agent_ran="true"
+            else
+              # No agent output file. The bootstrap-PR remediation
+              # (needs_fallback=true) is handled by the early-return
+              # branch above; if we got here without a fallback, the
+              # action silently skipped. Default to Approve + warning.
+              echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-no-file"
+              agent_ran="false"
+            fi
+          fi
+          echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
   security:
@@ -511,29 +539,45 @@ jobs:
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
             echo "security_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            echo "verdict_source=needs-fallback-bootstrap-pr" >> "$GITHUB_OUTPUT"
             # Issue #219 Bug 2: same defect as the review extract step —
             # report agent_ran=false so the severity gate can hard-fail
             # with the bootstrap-PR remediation message.
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-            | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' | tail -1 \
-            | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
-            | sed -E 's/.*Verdict:[[:space:]]*//' || true)"
-          # Issue #212-C1-fix: same skip-detector as review extract. A 0
-          # claude-count means anthropics/claude-code-action@v1 skipped due
-          # to workflow validation; agent_ran=false tells the gate to
-          # hard-fail with the bootstrap-PR remediation message.
-          claude_count=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length')
-          agent_ran="false"
-          if [ "$claude_count" -gt 0 ]; then
-            agent_ran="true"
+          # Issue #244 root-cause fix: same as the review extract step —
+          # read from the agent's output file, never grep PR comments.
+          AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
+          if [ ! -f "$AGENT_OUTPUT" ]; then
+            AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
-          echo "security_verdict=${verdict:-<none>}  claude_comments=${claude_count}  agent_ran=${agent_ran}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          file_verdict=""
+          if [ -f "$AGENT_OUTPUT" ]; then
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
+          fi
+          if [ -n "$file_verdict" ]; then
+            verdict="$file_verdict"
+            verdict_source="agent-output-file"
+            agent_ran="true"
+          else
+            # Same root-cause fix as the review job: default to Approve +
+            # warning on empty verdict, never grep PR comments.
+            if [ -f "$AGENT_OUTPUT" ]; then
+              echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-empty-file"
+              agent_ran="true"
+            else
+              echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-no-file"
+              agent_ran="false"
+            fi
+          fi
+          echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
   gate:

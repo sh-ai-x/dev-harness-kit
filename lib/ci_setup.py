@@ -69,6 +69,12 @@ EXPECTED_PATHS: tuple[str, ...] = (
     "scripts/test.sh",
     "scripts/branch-policy.sh",
     "scripts/ci-local.sh",
+    # Verdict extractor (issue #244, boilerplate-web PR #17/#19): reads
+    # anthropics/claude-code-action@v1's claude-execution-output.json so
+    # the review/security post-steps don't grep PR comments (which would
+    # resurrect stale "Verdict: Changes Requested" comments from prior
+    # pushes and re-introduce deterministic gate flapping).
+    "scripts/extract-verdict.py",
     # Worktree-rule enforcement (every task = new worktree + subagent handoff
     # + new branch). Source is canonical rules/; destination remains
     # .claude/rules/ for Claude Code discovery.
@@ -81,6 +87,7 @@ EXPECTED_PATHS: tuple[str, ...] = (
     ".claude/rules/git-workflow.md",
     "tests/test_worktree_guard.py",
     "tests/test_review_yml_isolation.py",
+    "tests/test_extract_verdict.py",
     # Runtime-artifact gitignore fragment (issue #202). Installed via a
     # marked-block merge so consumer-owned lines outside the block are
     # preserved across --force refreshes.
@@ -93,6 +100,7 @@ EXECUTABLE_PATHS: tuple[str, ...] = (
     "scripts/test.sh",
     "scripts/branch-policy.sh",
     "scripts/ci-local.sh",
+    "scripts/extract-verdict.py",
     "scripts/validate.py",
     "hooks/worktree-guard.sh",
     "hooks/task-detector.sh",
