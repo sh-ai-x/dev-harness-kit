@@ -60,6 +60,15 @@ FRESH_WORKTREE_MAX_AGE_SECONDS = 3600
 # Claude/Codex sessions remain visible after the migration.
 WORKTREE_ROOT_NAMES = (".worktrees", ".claude/worktrees", ".codex/worktrees")
 
+#: String fragment that distinguishes a log path captured from inside a
+#: worktree (``<main>/.claude/worktrees/<wt>/logs/...``) from one
+#: captured at the main checkout. Used to short-circuit
+#: ``classify_all_worktrees`` when no worktree log was actually
+#: discovered — saving a ``git worktree list`` subprocess call per
+#: invocation on slow shared CI filesystems.
+WORKTREE_MARKER_FRAGMENT = "/.claude/worktrees/"
+WORKTREE_MARKER_FRAGMENT_LEGACY = "/.worktrees/"
+
 #: Hard cap on how deep ``_walk_all_worktree_logs`` recurses into nested
 #: worktree roots. The production case is a single layer (sessions captured
 #: from inside any worktree-roots worktree). Depth 2 covers the test
@@ -2601,8 +2610,17 @@ def main(argv: list[str] | None = None) -> int:
     # Worktree classification (per project canonical/legacy worktree dir, vs
     # `git worktree list` + ancestor-of-origin/main check). Skipped when
     # --no-include-worktree-logs is in effect to avoid surprising git walks.
+    # Also skipped when no worktree log was discovered: classifying
+    # zero-log worktrees is wasted subprocess cost on slow CI runners.
+    has_worktree_logs = any(
+        (WORKTREE_MARKER_FRAGMENT in str(p)
+         or WORKTREE_MARKER_FRAGMENT_LEGACY in str(p))
+        for p in files
+    )
     wt_meta: dict[str, dict] = (
-        classify_all_worktrees(repo_root) if repo_root is not None else {}
+        classify_all_worktrees(repo_root)
+        if repo_root is not None and has_worktree_logs
+        else {"(main)": {"state": "main"}}
     )
 
     sessions: list[dict] = []
