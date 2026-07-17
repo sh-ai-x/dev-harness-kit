@@ -162,20 +162,38 @@ def _project_root() -> Path:
 
 
 def find_sources_json(start: Optional[Path] = None) -> Optional[Path]:
-    """Locate ``docs/llm-info/sources.json`` walking upward from `start`."""
+    """Locate ``docs/llm-info/sources.json`` walking upward from `start`.
+
+    Walks at most ``_MAX_WALK_DEPTH`` (4) levels up from the starting dir.
+    In production the analyzer is invoked from inside the dev-kit
+    checkout, where the SSOT is ``<checkout>/docs/llm-info/sources.json``
+    — within 2–3 levels. Bounding the walk prevents a long cascade of
+    ``stat`` calls on a fresh CI tmpdir where the chain is obviously
+    empty (the analyzer subprocess on a ``/tmp/capture-cov-XXX`` cwd
+    walked 4–5 levels of dead tmpfs paths and timed out the parent
+    test's 30-second subprocess budget on slow shared runners).
+    """
     cur = (start or Path.cwd()).resolve()
-    root = cur.anchor
-    while cur != root:
+    for _ in range(_MAX_WALK_DEPTH):
         cand = cur / "docs" / "llm-info" / "sources.json"
         if cand.exists():
             return cand
-        # One more attempt: the file is in lib/llm_pricing.py's co-located
-        # dev-kit source checkout.
         cand2 = cur / ".dev-kit" / "llm-info" / "sources.json"
         if cand2.exists():
             return cand2
-        cur = cur.parent
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
     return None
+
+
+#: Hard cap on the upward walk in ``find_sources_json``. Production
+#: callers run from inside the dev-kit checkout, where the SSOT lives
+#: at most 2–3 parents up; bounding at 4 covers dev / stage / test
+#: layouts and stops the walk from reaching ``/`` on every analyzer
+#: invocation in a tmpfs CI tmpdir.
+_MAX_WALK_DEPTH = 4
 
 
 # ---------------------------------------------------------------------------
