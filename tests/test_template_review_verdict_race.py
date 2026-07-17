@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""test_template_review_verdict_race.py — Regression tests for issue #104.
+"""test_template_review_verdict_race.py — Regression tests for issues #104 + #244.
 
-Pins the two consumer-template verdict-extraction bugs that triggered
-`head -1` returning stale first-round verdicts on re-review + the gate
-hard-failing on missing verdicts. Also pins the gate-time-extract root
-cause fix.
+Pins the consumer-template verdict-extraction contract. Originally for
+issue #104 (head -1 / -tail / missing-verdict hard-fail); extended for
+issue #244 (port boilerplate-web PR #17/#19: read from agent output
+file, NEVER grep PR comments).
 
 Bugs verified:
 1. templates/ci/.github/workflows/review.yml review + security extract
-   steps MUST use `tail -1` (most recent comment), not `head -1`.
+   steps MUST call scripts/extract-verdict.py (primary source) and MUST
+   NOT grep PR comments. The previous `tail -1` comment-grep was the
+   root cause of the deterministic gate flap on boilerplate-web PR #18:
+   it could resurrect a stale "Verdict: Changes Requested" from the
+   previous push (issue #244).
 2. The Combined verdict gate MUST default missing R or S to Approve with
    ::warning:: (project's own .github/workflows/review.yml already does
    this; the template must mirror).
@@ -27,50 +31,110 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 TEMPLATE_PATH = REPO_ROOT / "templates" / "ci" / ".github" / "workflows" / "review.yml"
+EXTRACT_VERDICT_SCRIPT = (
+    REPO_ROOT / "templates" / "ci" / "scripts" / "extract-verdict.py"
+)
 LOCAL_PATH = REPO_ROOT / ".github" / "workflows" / "review.yml"
 
 
 class TestTemplateVerdictExtractionOrdering(unittest.TestCase):
-    """Pins bug 1: extract_verdict steps use tail -1, not head -1.
+    """Pins the post-#244 contract: extract step uses extract-verdict.py,
+    NEVER the comment-grep fallback.
 
-    `gh api .../comments` returns comments in chronological order
-    (oldest first). `head -1` always picks the oldest verdict, so on a
-    re-review round the gate still sees the first-round verdict even
-    after a fresh LLM verdict was posted. Fix: tail -1.
+    The previous bug-1 pin enforced `tail -1` on PR comments. That was
+    the source of deterministic gate flapping on every push that touched
+    a PR with prior review runs (boilerplate-web PR #18 repro). Issue
+    #244 replaces the comment-grep with scripts/extract-verdict.py
+    (parses the agent's actual transcript file). This test now pins
+    the new contract.
     """
 
     def setUp(self):
         self.text = TEMPLATE_PATH.read_text()
 
-    def _count_occurrences(self, pattern: str) -> int:
-        return len(re.findall(pattern, self.text))
-
-    def test_review_job_extract_uses_tail(self):
-        """The review job's `Extract review verdict` step uses tail -1."""
-        # Find the block between 'review:' and the next 'security:' top-level
-        # key. The extract block within it must use tail -1.
+    def _job_body(self, job_name: str) -> str:
         m = re.search(
-            r"^  review:\n(?P<body>.*?)(?=^  [a-z_]+:\n|\Z)",
+            rf"^  {job_name}:\n(?P<body>.*?)(?=^  [a-z_]+:\n|\Z)",
             self.text,
             flags=re.MULTILINE | re.DOTALL,
         )
-        self.assertIsNotNone(m, "review: job block not found in template")
-        body = m.group("body")
-        self.assertIn("tail -1", body, "review extract step must use `tail -1`")
-        # head -1 must NOT appear in the review job's extract pipeline
-        self.assertNotIn("head -1", body, "review extract still uses `head -1`")
+        self.assertIsNotNone(m, f"{job_name}: job block not found in template")
+        return m.group("body")
 
-    def test_security_job_extract_uses_tail(self):
-        """The security job's `Extract security verdict` step uses tail -1."""
-        m = re.search(
-            r"^  security:\n(?P<body>.*?)(?=^  [a-z_]+:\n|\Z)",
-            self.text,
-            flags=re.MULTILINE | re.DOTALL,
+    def test_review_job_extract_uses_script(self):
+        """The review job's extract step MUST call scripts/extract-verdict.py.
+
+        The script path is relative to the consumer-repo root (matches
+        templates/ci/scripts/extract-verdict.py source after ci-setup
+        install). Using the absolute source path under templates/ would
+        break consumer repos.
+        """
+        body = self._job_body("review")
+        self.assertIn(
+            "scripts/extract-verdict.py",
+            body,
+            "review extract step must call scripts/extract-verdict.py "
+            "(issue #244 primary verdict source)",
         )
-        self.assertIsNotNone(m, "security: job block not found in template")
-        body = m.group("body")
-        self.assertIn("tail -1", body, "security extract step must use `tail -1`")
-        self.assertNotIn("head -1", body, "security extract still uses `head -1`")
+        # The comment-grep fallback MUST be gone. `gh api .../comments`
+        # in the extract pipeline was the source of the stale-verdict
+        # flap; the new contract is "read from agent output file".
+        self.assertNotIn(
+            "/issues/${PR_NUMBER}/comments",
+            body,
+            "review extract step still greps PR comments (issue #244 "
+            "root-cause: comment-grep fallback resurrects stale verdicts)",
+        )
+
+    def test_security_job_extract_uses_script(self):
+        """The security job's extract step MUST call scripts/extract-verdict.py."""
+        body = self._job_body("security")
+        self.assertIn(
+            "scripts/extract-verdict.py",
+            body,
+            "security extract step must call scripts/extract-verdict.py "
+            "(issue #244 primary verdict source)",
+        )
+        self.assertNotIn(
+            "/issues/${PR_NUMBER}/comments",
+            body,
+            "security extract step still greps PR comments (issue #244 "
+            "root-cause: comment-grep fallback resurrects stale verdicts)",
+        )
+
+    def test_extract_verdict_script_is_installed(self):
+        """The script the workflow depends on MUST exist in templates/ci/scripts/.
+
+        Otherwise `ci-setup` won't ship it to consumer repos and the
+        workflow will error with `[Errno 2] No such file or directory`
+        — the original bug-1 from boilerplate-web PR #17.
+        """
+        self.assertTrue(
+            EXTRACT_VERDICT_SCRIPT.exists(),
+            f"templates/ci/scripts/extract-verdict.py missing at "
+            f"{EXTRACT_VERDICT_SCRIPT}; the review.yml workflow depends "
+            f"on this script (issue #244)",
+        )
+
+    def test_review_and_security_extract_use_verdict_source_label(self):
+        """Both extract steps MUST emit a `verdict_source` output.
+
+        Distinguishes the four states the gate can encounter:
+          - agent-output-file              (extract-verdict.py returned a verdict)
+          - default-approve-empty-file     (file exists, no parseable verdict)
+          - default-approve-no-file        (action silently skipped)
+          - needs-fallback-bootstrap-pr    (needs_fallback=true early-return)
+
+        Diagnostic label — pinned to prevent silent regressions of the
+        comment-grep fallback that motivated issue #244.
+        """
+        for job in ("review", "security"):
+            body = self._job_body(job)
+            self.assertIn(
+                "verdict_source=",
+                body,
+                f"{job} extract step must emit verdict_source output (issue #244)",
+            )
 
 
 def _extract_gate_bash(text: str) -> str:
