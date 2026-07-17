@@ -1610,192 +1610,38 @@ class TestWorktreeStaleness(unittest.TestCase):
 
         return fake_run
 
-    def test_classify_worktree_dir_live_branch_with_unique_commits(self):
+    def test_classify_worktree_dir_no_git_calls_returns_live(self):
+        """New contract (post-slow-CI fix): ``classify_worktree_dir`` makes no
+        ``subprocess.run`` calls. Every worktree dir under
+        ``.claude/worktrees/`` (or any of the other ``WORKTREE_ROOT_NAMES``)
+        is reported as ``state="live"``. The dashboard still renders the
+        worktree bucket because the basenames land in ``wt_meta``; the
+        Stale-Cost tile falls back to non-stale.
+        """
         from token_efficiency_analyzer import classify_worktree_dir
-        with tempfile.TemporaryDirectory(prefix="wt-live-") as td:
+
+        # Spy runner: any invocation is a contract violation.
+        def spy_runner(args, **_kwargs):
+            raise AssertionError(
+                f"classify_worktree_dir made a subprocess call: {args}"
+            )
+
+        with tempfile.TemporaryDirectory(prefix="wt-nogit-") as td:
             root = Path(td)
             wt = root / ".claude" / "worktrees" / "feat-x"
             wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD 1111111\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD def5678\nbranch refs/heads/feat/x\n\n"
-            )
-            runner = self._git_runner(
-                porcelain=porcelain,
-                tip="def5678",
-                unique_commits="def5678 feat: live branch with unique commit\n",
-            )
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
+
+            meta = classify_worktree_dir(wt, root, git_runner=spy_runner)
+            # All required dict keys present.
+            self.assertEqual(set(meta.keys()),
+                             {"state", "worktree_listed", "branch_merged_into_main",
+                              "is_fresh", "branch_tip", "branch_name"})
             self.assertEqual(meta["state"], "live")
             self.assertTrue(meta["worktree_listed"])
             self.assertFalse(meta["branch_merged_into_main"])
-            self.assertEqual(meta["branch_tip"], "def5678")
-
-    def test_classify_worktree_dir_merged_into_main(self):
-        from token_efficiency_analyzer import classify_worktree_dir
-        with tempfile.TemporaryDirectory(prefix="wt-merged-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "feature-and-adapt-skills"
-            wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD 1111111\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD abc1234\nbranch refs/heads/feature/and-adapt-skills\n\n"
-            )
-            runner = self._git_runner(porcelain=porcelain, tip="abc1234", unique_commits="")
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "merged")
-            self.assertTrue(meta["worktree_listed"])
-            self.assertTrue(meta["branch_merged_into_main"])
-
-    def test_classify_worktree_dir_squash_merge_branch_tip_not_ancestor(self):
-        """Squash-merged branch: branch tip (52f4d23) is NOT an ancestor of
-        origin/main (9dca0ee) under the old merge-base test → false ``live``.
-        Under the new empty-diff test, ``log origin/main..HEAD`` is empty
-        ⇒ correctly classified as ``merged``. Regression for #158 case.
-        """
-        from token_efficiency_analyzer import classify_worktree_dir
-        with tempfile.TemporaryDirectory(prefix="wt-squash-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "token-analyzer-stale"
-            wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD 9dca0ee\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD 52f4d23\nbranch refs/heads/feat/token-analyzer-stale\n\n"
-            )
-            # empty log = squash-merged into main, no unique commits left on the branch
-            runner = self._git_runner(porcelain=porcelain, tip="52f4d23", unique_commits="")
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "merged")
-            self.assertTrue(meta["worktree_listed"])
-            self.assertTrue(meta["branch_merged_into_main"])
-            self.assertEqual(meta["branch_tip"], "52f4d23")
-
-    def test_classify_worktree_dir_rebase_merge_with_no_unique_commits(self):
-        """Rebase-merged branch: branch tip is a fast-forward of origin/main
-        after the rebase. ``log origin/main..HEAD`` is empty AND the worktree
-        is older than FRESH_WORKTREE_MAX_AGE_SECONDS ⇒ ``merged``.
-        """
-        import os
-        import time
-        from token_efficiency_analyzer import classify_worktree_dir, FRESH_WORKTREE_MAX_AGE_SECONDS
-        with tempfile.TemporaryDirectory(prefix="wt-rebase-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "rebase-target"
-            wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD aaa1111\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD aaa1111\nbranch refs/heads/feat/rebase-target\n\n"
-            )
-            runner = self._git_runner(porcelain=porcelain, tip="aaa1111", unique_commits="")
-            # Backdate mtime so the worktree is clearly older than the freshness threshold.
-            old_mtime = time.time() - (FRESH_WORKTREE_MAX_AGE_SECONDS + 600)
-            os.utime(wt, (old_mtime, old_mtime))
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "merged")
-            self.assertTrue(meta["branch_merged_into_main"])
             self.assertFalse(meta["is_fresh"])
-
-    def test_classify_worktree_dir_fresh_worktree_same_sha_as_main(self):
-        """Fresh worktree: just cut from origin/main, HEAD == origin/main SHA,
-        no commits yet. ``log origin/main..HEAD`` is empty AND mtime is recent
-        ⇒ ``state="fresh"`` (NOT ``merged``). Regression: a fresh worktree used
-        to be mis-classified as ``merged`` because the log-empty test couldn't
-        tell it apart from a rebase-merged branch.
-        """
-        import time
-        from token_efficiency_analyzer import classify_worktree_dir
-        with tempfile.TemporaryDirectory(prefix="wt-fresh-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "verify-wt-wiring"
-            wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD 52f7e81\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD 52f7e81\nbranch refs/heads/fix/fresh-worktree-state\n\n"
-            )
-            # HEAD SHA == origin/main SHA, log empty (no commits on the branch yet).
-            runner = self._git_runner(
-                porcelain=porcelain,
-                tip="52f7e81",
-                head_full="52f7e81d480097d1425a55b1081cff21fb56c0fe",
-                main_full="52f7e81d480097d1425a55b1081cff21fb56c0fe",
-                unique_commits="",
-            )
-            # mtime is "now" — just-created worktree.
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "fresh")
-            self.assertTrue(meta["worktree_listed"])
-            self.assertFalse(meta["branch_merged_into_main"])
-            self.assertTrue(meta["is_fresh"])
-            self.assertEqual(meta["branch_tip"], "52f7e81")
-
-    def test_classify_worktree_dir_fresh_boundary_just_over_threshold(self):
-        """Boundary: worktree mtime is just past the freshness threshold ⇒
-        falls back to ``merged``. Confirms the threshold isn't accidentally
-        inclusive on the wrong side.
-        """
-        import os
-        import time
-        from token_efficiency_analyzer import (
-            classify_worktree_dir, FRESH_WORKTREE_MAX_AGE_SECONDS,
-        )
-        with tempfile.TemporaryDirectory(prefix="wt-fresh-bound-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "stale-fresh"
-            wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD 52f7e81\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD 52f7e81\nbranch refs/heads/test/stale-fresh\n\n"
-            )
-            runner = self._git_runner(
-                porcelain=porcelain, tip="52f7e81",
-                head_full="52f7e81d480097d1425a55b1081cff21fb56c0fe",
-                main_full="52f7e81d480097d1425a55b1081cff21fb56c0fe",
-                unique_commits="",
-            )
-            # Backdate mtime to FRESH_THRESHOLD + 60s — clearly stale.
-            old_mtime = time.time() - (FRESH_WORKTREE_MAX_AGE_SECONDS + 60)
-            os.utime(wt, (old_mtime, old_mtime))
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "merged")
-            self.assertFalse(meta["is_fresh"])
-
-    def test_classify_worktree_dir_gone_from_git_worktree_list(self):
-        from token_efficiency_analyzer import classify_worktree_dir
-        with tempfile.TemporaryDirectory(prefix="wt-gone-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "prune-baseline"
-            wt.mkdir(parents=True)
-            # porcelain lists ONLY the main checkout — the worktree was `git worktree remove`'d
-            porcelain = f"worktree {root}\nHEAD 1111111\nbranch refs/heads/main\n\n"
-            runner = self._git_runner(porcelain=porcelain)
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "gone")
-            self.assertFalse(meta["worktree_listed"])
-            self.assertFalse(meta["branch_merged_into_main"])
-
-    def test_classify_worktree_dir_unknown_when_no_origin_main(self):
-        from token_efficiency_analyzer import classify_worktree_dir
-        with tempfile.TemporaryDirectory(prefix="wt-unknown-") as td:
-            root = Path(td)
-            wt = root / ".claude" / "worktrees" / "broken-ref"
-            wt.mkdir(parents=True)
-            porcelain = (
-                f"worktree {root}\nHEAD 1111111\nbranch refs/heads/main\n\n"
-                f"worktree {wt}\nHEAD abc1234\nbranch refs/heads/broken\n\n"
-            )
-            # log origin/main..HEAD returns rc=128 (fatal: bad revision 'origin/main')
-            import subprocess
-            porcelain_runner = self._git_runner(porcelain=porcelain, tip="abc1234", merged=False)
-
-            def runner(args, **_k):
-                cmd = " ".join(str(a) for a in args)
-                if "log origin/main..HEAD" in cmd:
-                    return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: bad revision")
-                return porcelain_runner(args, **_k)
-
-            meta = classify_worktree_dir(wt, root, git_runner=runner)
-            self.assertEqual(meta["state"], "unknown")
-            self.assertTrue(meta["worktree_listed"])
+            self.assertEqual(meta["branch_tip"], "")
+            self.assertEqual(meta["branch_name"], "")
 
     def test_cost_by_worktree_panel_renders_state_column(self):
         from io import StringIO

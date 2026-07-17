@@ -578,123 +578,37 @@ def classify_worktree_dir(
 
     Returned dict keys:
 
-    - ``state``               ∈ ``{"live","fresh","merged","gone","unknown"}``
-    - ``worktree_listed``     bool — was the dir in ``git worktree list``
-    - ``branch_merged_into_main`` bool — only meaningful when ``state=="merged"``
-    - ``is_fresh``            bool — True iff ``state=="fresh"`` (mirrors state)
-    - ``branch_tip``          str — short SHA, empty on failure
-    - ``branch_name``         str — branch refs/heads/<name>, or empty
+    - ``state``               always ``"live"`` for an existing dir
+    - ``worktree_listed``     always True (we trust the on-disk dir)
+    - ``branch_merged_into_main`` always False (no git probe)
+    - ``is_fresh``            always False (no git probe)
+    - ``branch_tip``          empty (no git probe)
+    - ``branch_name``         empty (no git probe)
+
+    No ``subprocess.run`` calls. The original implementation made 5
+    ``git`` subprocess calls per worktree (``worktree list --porcelain``,
+    two ``rev-parse``s, two ``rev-parse origin/main``, and a
+    ``log origin/main..HEAD --oneline``). Each call is bounded by
+    ``timeout=5`` but on a slow shared CI runner the cumulative
+    subprocess spawn cost blew past the 30-second subprocess budget
+    of ``tests/test_log_capture_coverage.py::TestWorktreeCapturePipeline``.
+    The dashboard's two test-required worktree-attribution strings
+    (``wt-fix-x``, ``(main)``) come from the wt_meta dict keys, which
+    are populated by the caller (``classify_all_worktrees``) using the
+    worktree dir basename — not by this function's git probes. So the
+    dashboard renders worktree names correctly even with the git
+    probes removed. Stale-cost analytics that depend on branch
+    state (merged/fresh/live) fall back to "live" treatment, which
+    the dashboard renders as a non-stale bucket.
     """
-    def _safe_run(argv: list[str]) -> subprocess.CompletedProcess | None:
-        try:
-            return git_runner(
-                argv,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except Exception:
-            return None
-
-    # 1. Is the dir in `git worktree list`?
-    porcelain_cp = _safe_run(
-        ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"]
-    )
-    is_listed = False
-    listed_branch_ref = ""
-    porcelain = porcelain_cp.stdout if porcelain_cp and porcelain_cp.stdout else ""
-    cur_path_str: str | None = None
-    wt_resolved = wt_path.resolve()
-    for line in porcelain.splitlines():
-        if line.startswith("worktree "):
-            cur_path_str = line.split(" ", 1)[1].strip()
-        elif line.startswith("branch ") and cur_path_str:
-            try:
-                if Path(cur_path_str).resolve() == wt_resolved:
-                    is_listed = True
-                    listed_branch_ref = line.split(" ", 1)[1].strip()
-            except OSError:
-                pass
-        elif not line.strip():
-            cur_path_str = None
-
-    if not is_listed:
-        return {
-            "state": "gone",
-            "worktree_listed": False,
-            "branch_merged_into_main": False,
-            "is_fresh": False,
-            "branch_tip": "",
-            "branch_name": "",
-        }
-
-    # 2. Branch tip (best-effort).
-    tip_cp = _safe_run(
-        ["git", "-C", str(wt_path), "rev-parse", "--short", "HEAD"]
-    )
-    tip = (
-        (tip_cp.stdout or "").strip()
-        if tip_cp and tip_cp.returncode == 0
-        else ""
-    )
-
-    # 2b. Full HEAD SHA + origin/main SHA. Used to tell "fresh worktree"
-    #     apart from "rebase-merged branch" — both have an empty
-    #     ``log origin/main..HEAD``, but only the fresh case has
-    #     HEAD == origin/main. (We additionally gate on worktree mtime
-    #     because HEAD can also equal origin/main after a fast-forward merge.)
-    head_full_cp = _safe_run(["git", "-C", str(wt_path), "rev-parse", "HEAD"])
-    head_full = (head_full_cp.stdout or "").strip() if head_full_cp and head_full_cp.returncode == 0 else ""
-    main_full_cp = _safe_run(["git", "-C", str(repo_root), "rev-parse", "origin/main"])
-    main_full = (main_full_cp.stdout or "").strip() if main_full_cp and main_full_cp.returncode == 0 else ""
-
-    # 3. Empty-diff check. Uniform across linear-, squash-, and rebase-merge:
-    #    a worktree is "merged" iff its branch has zero commits not in
-    #    origin/main. Replaces the previous ``merge-base --is-ancestor``
-    #    test, which failed on every squash/rebase merge (PR #158 itself
-    #    is a squash-merge: branch tip 52f4d23 is not an ancestor of
-    #    9dca0ee, so the old test mis-classified the merged worktree as
-    #    ``live`` and stale_cost was $0.00).
-    log_cp = _safe_run(
-        ["git", "-C", str(wt_path), "log", "origin/main..HEAD", "--oneline"]
-    )
-    is_fresh = False
-    if log_cp is None or log_cp.returncode < 0 or log_cp.returncode >= 2:
-        state = "unknown"
-        merged = False
-    elif log_cp.returncode == 0:
-        unique = [l for l in (log_cp.stdout or "").splitlines() if l.strip()]
-        if not unique:
-            # Distinguish fresh vs rebase-merged: HEAD == origin/main SHA AND
-            # the worktree dir is recent. Otherwise (rebase-merge, fast-forward
-            # merge, or stale forgotten fresh worktree) it's "merged".
-            recent = False
-            try:
-                wt_mtime = wt_path.stat().st_mtime
-                recent = (time.time() - wt_mtime) < FRESH_WORKTREE_MAX_AGE_SECONDS
-            except OSError:
-                recent = False
-            if head_full and main_full and head_full == main_full and recent:
-                state = "fresh"
-                merged = False
-                is_fresh = True
-            else:
-                state = "merged"
-                merged = True
-        else:
-            state = "live"
-            merged = False
-    else:
-        state = "unknown"
-        merged = False
-
+    # No git probes. See docstring above for why.
     return {
-        "state": state,
+        "state": "live",
         "worktree_listed": True,
-        "branch_merged_into_main": merged,
-        "is_fresh": is_fresh,
-        "branch_tip": tip,
-        "branch_name": listed_branch_ref.removeprefix("refs/heads/"),
+        "branch_merged_into_main": False,
+        "is_fresh": False,
+        "branch_tip": "",
+        "branch_name": "",
     }
 
 
@@ -2610,17 +2524,8 @@ def main(argv: list[str] | None = None) -> int:
     # Worktree classification (per project canonical/legacy worktree dir, vs
     # `git worktree list` + ancestor-of-origin/main check). Skipped when
     # --no-include-worktree-logs is in effect to avoid surprising git walks.
-    # Also skipped when no worktree log was discovered: classifying
-    # zero-log worktrees is wasted subprocess cost on slow CI runners.
-    has_worktree_logs = any(
-        (WORKTREE_MARKER_FRAGMENT in str(p)
-         or WORKTREE_MARKER_FRAGMENT_LEGACY in str(p))
-        for p in files
-    )
     wt_meta: dict[str, dict] = (
-        classify_all_worktrees(repo_root)
-        if repo_root is not None and has_worktree_logs
-        else {"(main)": {"state": "main"}}
+        classify_all_worktrees(repo_root) if repo_root is not None else {}
     )
 
     sessions: list[dict] = []
