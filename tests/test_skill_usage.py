@@ -193,6 +193,67 @@ class TestSkillNameExtraction(unittest.TestCase):
             Path(path).unlink()
 
 
+class TestNormalizeUsageRecord(unittest.TestCase):
+    """The Codex wire shape wraps several fields under ``payload.*``
+    while leaving ``attributionSkill`` at the top level. The pre-refactor
+    aggregator only read top-level ``timestamp`` / ``cwd`` so any record
+    whose timestamp lived under ``payload`` was silently dropped as
+    undated -- the skill showed up as a delete candidate even though it
+    was used. The normalizer must resolve both layers."""
+
+    def test_top_level_fields(self):
+        rec = {"attributionSkill": "dev-kit:foo",
+               "timestamp": "2026-07-15T10:00:00.000Z",
+               "cwd": "/repo/x"}
+        norm = skill_usage._normalize_usage_record(rec)
+        self.assertEqual(norm.skill, "dev-kit:foo")
+        self.assertEqual(norm.cwd, "/repo/x")
+        self.assertEqual(norm.ts_str, "2026-07-15T10:00:00.000Z")
+        self.assertIsNotNone(norm.ts)
+
+    def test_extracts_nested_timestamp(self):
+        """Codex shape: ``attributionSkill`` at top level, but
+        ``timestamp`` / ``cwd`` nested under ``payload``."""
+        rec = {"attributionSkill": "dev-kit:foo",
+               "payload": {"timestamp": "2026-07-15T10:00:00.000Z",
+                           "cwd": "/repo/x"}}
+        norm = skill_usage._normalize_usage_record(rec)
+        self.assertEqual(norm.skill, "dev-kit:foo")
+        self.assertEqual(norm.cwd, "/repo/x")
+        self.assertEqual(norm.ts_str, "2026-07-15T10:00:00.000Z")
+        self.assertIsNotNone(norm.ts)
+
+    def test_codex_nested_record_aggregates(self):
+        """End-to-end: a Codex record with nested timestamp contributes
+        to the aggregate (was dropped as undated before the refactor)."""
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+            fh.write(json.dumps({
+                "attributionSkill": "dev-kit:nested",
+                "payload": {"timestamp": "2026-07-15T10:00:00.000Z",
+                            "cwd": "/repo/x"}
+            }) + "\n")
+            path = fh.name
+        try:
+            agg = skill_usage.aggregate_skill_usage(path, window_days=30)
+            self.assertIn("dev-kit:nested", agg)
+            self.assertEqual(agg["dev-kit:nested"]["turns"], 1)
+        finally:
+            Path(path).unlink()
+
+    def test_non_string_skill_ignored(self):
+        rec = {"attributionSkill": 42,
+               "timestamp": "2026-07-15T10:00:00.000Z"}
+        norm = skill_usage._normalize_usage_record(rec)
+        self.assertEqual(norm.skill, "")
+
+    def test_missing_payload_uses_top_level(self):
+        rec = {"timestamp": "2026-07-15T10:00:00.000Z",
+               "cwd": "/repo/x"}
+        norm = skill_usage._normalize_usage_record(rec)
+        self.assertEqual(norm.cwd, "/repo/x")
+        self.assertEqual(norm.ts_str, "2026-07-15T10:00:00.000Z")
+
+
 class TestPrintTable(unittest.TestCase):
     def test_print_table_renders_columns(self):
         agg = {

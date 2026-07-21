@@ -1030,6 +1030,82 @@ class TestCorrelateNodesToChains(unittest.TestCase):
         self.assertEqual(nodes[1].turn_count, 0)
 
 
+class TestConcurrentSpawnCorrelation(unittest.TestCase):
+    """Concurrent subagent spawns reorder sidechain records in the wire
+    log so the encounter index no longer maps spawn N to chain N. The
+    correlation step must match each spawn to the chain whose head text
+    names that spawn, not the chain that happens to arrive Nth.
+
+    Reproducer: parent transcript spawns Explore + Plan as two parallel
+    ``Agent`` ``tool_use`` blocks. The two sidechains then interleave --
+    Plan's head (``s2a``) lands first, then Explore's head (``s1a``),
+    then alternating child records. The legacy position-by-index
+    correlation would assign the 3-turn Plan chain to the Explore node
+    and the 2-turn Explore chain to the Plan node (turn counts swap).
+    """
+
+    def _write_log(self, lines):
+        fh = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
+        fh.write("\n".join(lines) + "\n")
+        fh.close()
+        self.addCleanup(lambda: Path(fh.name).unlink(missing_ok=True))
+        return Path(fh.name)
+
+    def test_concurrent_spawn_keeps_per_agent_turn_counts(self):
+        records = [
+            # parent prompt
+            {"type": "user", "isSidechain": False, "uuid": "u1",
+             "message": {"role": "user",
+                         "content": [{"type": "text",
+                                      "text": "build the thing with two helpers"}]}},
+            # parent assistant: spawns Explore + Plan in encounter order
+            {"type": "assistant", "isSidechain": False, "uuid": "a1",
+             "message": {"role": "assistant", "content": [
+                 {"type": "tool_use", "id": "call_A", "name": "Agent",
+                  "input": {"subagent_type": "Explore",
+                            "description": "scan the API layer",
+                            "prompt": "look at all handlers"}},
+                 {"type": "tool_use", "id": "call_B", "name": "Agent",
+                  "input": {"subagent_type": "Plan",
+                            "description": "design the migration",
+                            "prompt": "produce a step plan"}},
+             ]}},
+            # sidechains INTERLEAVED (concurrent spawns)
+            {"type": "user", "isSidechain": True, "uuid": "s2a",
+             "parentUuid": None,
+             "message": {"role": "user",
+                         "content": [{"type": "text",
+                                      "text": "design the migration"}]}},
+            {"type": "user", "isSidechain": True, "uuid": "s1a",
+             "parentUuid": None,
+             "message": {"role": "user",
+                         "content": [{"type": "text",
+                                      "text": "scan the API layer"}]}},
+            {"type": "assistant", "isSidechain": True, "uuid": "s2b",
+             "parentUuid": "s2a",
+             "message": {"role": "assistant",
+                         "content": [{"type": "text", "text": "step 1..."}]}},
+            {"type": "assistant", "isSidechain": True, "uuid": "s1b",
+             "parentUuid": "s1a",
+             "message": {"role": "assistant",
+                         "content": [{"type": "text", "text": "found 3 handlers"}]}},
+            {"type": "assistant", "isSidechain": True, "uuid": "s2c",
+             "parentUuid": "s2b",
+             "message": {"role": "assistant",
+                         "content": [{"type": "text", "text": "step 2..."}]}},
+        ]
+        path = self._write_log([json.dumps(r) for r in records])
+        g = sm.build_agent_graph(path)
+        self.assertEqual(len(g.nodes), 2)
+        # Order in g.nodes matches encounter order in the parent transcript
+        # (Explore first, Plan second). Each node must keep its OWN turn
+        # count, not the count of whichever chain happens to be at that
+        # index in the file.
+        by_desc = {n.description: n for n in g.nodes}
+        self.assertEqual(by_desc["scan the API layer"].turn_count, 2)
+        self.assertEqual(by_desc["design the migration"].turn_count, 3)
+
+
 class TestModeValidation(unittest.TestCase):
     """main() rejects conflicting mode flags with a clear error and
     exit code 2. The legacy precedence path silently picked one
@@ -1086,6 +1162,20 @@ class TestModeValidation(unittest.TestCase):
         # helper flag like --dry-run.
         rc, _, _ = self._run("--cli-setup", "--dry-run")
         self.assertNotEqual(rc, 2)
+
+    def test_resume_picker_setup_are_mutually_exclusive(self):
+        """Operator-mode family: --print-resume-command / --picker /
+        --cli-setup each route the program to a distinct handler.
+        argparse must reject any two as a usage error (exit 2) rather
+        than letting one silently override the other."""
+        for combo in (("--print-resume-command", "--picker"),
+                      ("--print-resume-command", "--cli-setup"),
+                      ("--picker", "--cli-setup")):
+            with self.subTest(combo=combo):
+                rc, _, err = self._run(*combo)
+                self.assertEqual(rc, 2,
+                                 f"{combo} should reject with exit 2; "
+                                 f"got rc={rc}, stderr={err!r}")
 
 
 if __name__ == "__main__":
