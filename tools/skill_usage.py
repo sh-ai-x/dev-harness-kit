@@ -36,6 +36,7 @@ import argparse
 import datetime as _dt
 import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -233,6 +234,63 @@ def _flatten_block_list(items) -> Iterable[dict]:
         yield blk
 
 
+@dataclass
+class NormalizedUsage:
+    """One record's worth of skill-usage signals, resolved across the
+    Claude-Code and Codex wire shapes so the aggregator can iterate over
+    a uniform sequence.
+
+    Codex wraps several fields under ``payload.*`` while leaving
+    ``attributionSkill`` at the top level. Reading only the top level
+    (pre-refactor behavior) dropped records whose ``timestamp`` lived
+    under ``payload`` -- silently undercounting used skills as deletion
+    candidates. The normalizer walks both layers so a record contributes
+    regardless of where its timestamp sits.
+    """
+
+    ts_str: str = ""
+    ts: _dt.datetime | None = None
+    cwd: str = ""
+    skill: str = ""
+    skill_invocations: list[str] = field(default_factory=list)
+
+
+def _normalize_usage_record(record: dict) -> NormalizedUsage:
+    """Resolve top-level vs ``payload.*`` fields into a uniform
+    :class:`NormalizedUsage`. The aggregator consumes only this shape;
+    nothing else in the file needs to know about Codex payload nesting."""
+    payload = record.get("payload") if isinstance(record, dict) else None
+    payload_dict = payload if isinstance(payload, dict) else None
+
+    ts_str = record.get("timestamp") or ""
+    if not ts_str and payload_dict is not None:
+        ts_str = payload_dict.get("timestamp") or ""
+
+    cwd = record.get("cwd") or ""
+    if not cwd and payload_dict is not None:
+        cwd = payload_dict.get("cwd") or ""
+
+    skill = record.get("attributionSkill")
+    skill = skill if isinstance(skill, str) and skill else ""
+
+    invocations: list[str] = []
+    for blk in _iter_tool_uses(record):
+        if blk.get("name") != "Skill":
+            continue
+        inp = blk.get("input") or {}
+        name = inp.get("skill")
+        if isinstance(name, str) and name:
+            invocations.append(name)
+
+    return NormalizedUsage(
+        ts_str=ts_str,
+        ts=_parse_iso(ts_str) if ts_str else None,
+        cwd=cwd,
+        skill=skill,
+        skill_invocations=invocations,
+    )
+
+
 def aggregate_skill_usage(logs_glob: str,
                           window_days: int | None = 30,
                           *,
@@ -248,7 +306,12 @@ def aggregate_skill_usage(logs_glob: str,
 
     Malformed lines and lines missing a timestamp are silently dropped
     -- the analyzer is read-only over captured logs and must never raise
-    on a single bad record.
+    on a single bad record. Decoding + shape normalization is delegated
+    to :func:`_normalize_usage_record` so the inner loop only sees
+    uniform :class:`NormalizedUsage` values regardless of whether the
+    record came from Claude-Code (top-level ``timestamp`` /
+    ``message.content``) or Codex (``payload.timestamp`` /
+    ``payload.tool_uses``).
     """
     now = now or _dt.datetime.now(_dt.timezone.utc)
     cutoff: _dt.datetime | None = None
@@ -272,45 +335,32 @@ def aggregate_skill_usage(logs_glob: str,
                 except json.JSONDecodeError:
                     continue
 
-                cwd = obj.get("cwd") or ""
-                if cwd_prefix and not _cwd_matches(cwd, cwd_prefix):
-                    continue
+                norm = _normalize_usage_record(obj)
 
-                ts_str = obj.get("timestamp") or ""
-                ts = _parse_iso(ts_str)
-                if not _within_window(ts, cutoff):
+                if cwd_prefix and not _cwd_matches(norm.cwd, cwd_prefix):
+                    continue
+                if not _within_window(norm.ts, cutoff):
                     continue
 
                 # ---- attributionSkill -> turns (depth / work done) ----
-                skill_name = obj.get("attributionSkill")
-                if isinstance(skill_name, str) and skill_name:
-                    rec = _ensure_skill(skills, skill_name,
+                if norm.skill:
+                    rec = _ensure_skill(skills, norm.skill,
                                         include_per_cwd=include_per_cwd)
                     rec["turns"] += 1
-                    _bump_last_seen(rec, ts_str)
+                    _bump_last_seen(rec, norm.ts_str)
                     if include_per_cwd:
-                        _bump_cwd(rec, cwd, turns=1, invocations=0,
-                                  ts_str=ts_str)
+                        _bump_cwd(rec, norm.cwd, turns=1, invocations=0,
+                                  ts_str=norm.ts_str)
 
                 # ---- Skill tool_use -> invocations (explicit kicks) ----
-                # Walk every tool_use block the record carries, regardless
-                # of whether it came from Claude-Code (message.content) or
-                # Codex (payload.*). The normalizer flattens both shapes
-                # so the per-block filter below stays single-purpose.
-                for blk in _iter_tool_uses(obj):
-                    if blk.get("name") != "Skill":
-                        continue
-                    inp = blk.get("input") or {}
-                    name = inp.get("skill")
-                    if not isinstance(name, str) or not name:
-                        continue
+                for name in norm.skill_invocations:
                     rec = _ensure_skill(skills, name,
                                         include_per_cwd=include_per_cwd)
                     rec["invocations"] += 1
-                    _bump_last_seen(rec, ts_str)
+                    _bump_last_seen(rec, norm.ts_str)
                     if include_per_cwd:
-                        _bump_cwd(rec, cwd, turns=0, invocations=1,
-                                  ts_str=ts_str)
+                        _bump_cwd(rec, norm.cwd, turns=0, invocations=1,
+                                  ts_str=norm.ts_str)
         finally:
             fh.close()
 
