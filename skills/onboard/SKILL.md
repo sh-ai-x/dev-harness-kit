@@ -20,6 +20,12 @@ disable-model-invocation: false
 4. Auto PR (hand-off attached)
 5. Capture eval baseline (add user signature to golden set)
 
+> Note: when the new member is the only owner (single-operator repo),
+> `/dev-kit:babysit-pr` waits for human review by default; they can
+> pass `--operator-is-only-human --rationale "<text>"` to opt out and
+> auto-merge their own green PRs (the bypass is refused if CODEOWNERS
+> or the collaborators API lists any alternate owner).
+
 ## Output
 
 - `.dev-kit/onboarding-<username>.md` (progress guide)
