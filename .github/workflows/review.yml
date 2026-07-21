@@ -146,6 +146,15 @@ jobs:
               - 🔴 critical ≥ 1          → **Verdict:** Blocked
               - 🟠 major  ≥ 1, 🔴 = 0    → **Verdict:** Changes Requested
               - no 🔴, no 🟠             → **Verdict:** Approve
+
+            The Verdict line is MANDATORY — never leave it blank and never use
+            placeholder text such as "TBD" / "unknown" / "pending" / "Requested".
+            If your execution encounters errors mid-way (API failures, timeouts,
+            tool errors), you MUST still post a final summary comment containing
+            one of the three valid Verdict lines above. Default to
+            `**Verdict:** Blocked` with a one-line error explanation when the
+            review cannot complete in full — a blank or malformed Verdict causes
+            the severity gate to mis-classify this PR and silently bypass review.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -163,6 +172,11 @@ jobs:
               **Verdict:** Approve
               **Verdict:** Changes Requested
               **Verdict:** Blocked
+
+            The Verdict line is MANDATORY — never leave it blank or use placeholder
+            text. If execution fails mid-way, still post a final comment with
+            `**Verdict:** Blocked` and a brief error note so the severity gate can
+            classify the PR correctly.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -188,6 +202,11 @@ jobs:
               **Verdict:** Approve
               **Verdict:** Changes Requested
               **Verdict:** Blocked
+
+            The Verdict line is MANDATORY — never leave it blank or use placeholder
+            text. If execution fails mid-way, still post a final comment with
+            `**Verdict:** Blocked` and a brief error note so the severity gate can
+            classify the PR correctly.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -285,6 +304,16 @@ jobs:
               - 🔴 critical ≥ 1          → **Verdict:** Blocked
               - 🟠 major  ≥ 1, 🔴 = 0    → **Verdict:** Changes Requested
               - no 🔴, no 🟠             → **Verdict:** Approve
+
+            The Verdict line is MANDATORY — never leave it blank and never use
+            placeholder text such as "TBD" / "unknown" / "pending" / "Requested".
+            If your execution encounters errors mid-way (API failures, timeouts,
+            tool errors), you MUST still post a final summary comment containing
+            one of the three valid Verdict lines above. Default to
+            `**Verdict:** Blocked` with a one-line error explanation when the
+            security scan cannot complete in full — a blank or malformed Verdict
+            causes the severity gate to mis-classify this PR and silently bypass
+            review.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -302,6 +331,11 @@ jobs:
               **Verdict:** Approve
               **Verdict:** Changes Requested
               **Verdict:** Blocked
+
+            The Verdict line is MANDATORY — never leave it blank or use placeholder
+            text. If execution fails mid-way, still post a final comment with
+            `**Verdict:** Blocked` and a brief error note so the severity gate can
+            classify the PR correctly.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -326,6 +360,11 @@ jobs:
               **Verdict:** Approve
               **Verdict:** Changes Requested
               **Verdict:** Blocked
+
+            The Verdict line is MANDATORY — never leave it blank or use placeholder
+            text. If execution fails mid-way, still post a final comment with
+            `**Verdict:** Blocked` and a brief error note so the severity gate can
+            classify the PR correctly.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
