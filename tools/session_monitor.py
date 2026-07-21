@@ -353,18 +353,17 @@ def _enrich_branches_from_worktrees(sessions: list[Session],
 def build_agent_graph(path: Path) -> AgentGraph:
     """Stream one session's jsonl into a parent -> sub-agent graph.
 
-    Composes three pure steps (decoding, edge collection, correlation)
-    so each layer can be tested in isolation:
+    Orchestrator only; the four pure steps are tested in isolation:
 
     1. :func:`_decode_transcript` -- reads + parses jsonl records,
        skipping blank / malformed lines with a narrow exception set.
-    2. :func:`_collect_spawn_nodes` -- walks assistant ``Agent``
+    2. :func:`_extract_root_prompt` -- first ``user`` text, truncated.
+    3. :func:`_collect_spawn_nodes` -- walks assistant ``Agent``
        ``tool_use`` blocks in encounter order.
-    3. :func:`_collect_sidechain_chains` -- groups ``isSidechain``
-       lines by walking ``parentUuid`` links.
-    4. :func:`_correlate_nodes_to_chains` -- pairs spawn nodes to
-       chains positionally (the wire log does not carry the parent
-       tool_use id into the sidechain).
+    4. :func:`_collect_sidechain_chains` + :func:`_correlate_nodes_to_chains`
+       -- group ``isSidechain`` lines and pair each to the spawn whose
+       ``description`` matches the chain head (falls back to encounter
+       index when no description is present).
 
     Codex logs have no sidechains and yield an empty node list.
     """
@@ -372,12 +371,11 @@ def build_agent_graph(path: Path) -> AgentGraph:
         return AgentGraph(session_id=Path(path).stem,
                           root_user_prompt="", nodes=[])
     records = list(_decode_transcript(path))
-    root_prompt = _extract_root_prompt(records)
     nodes = _collect_spawn_nodes(records)
-    chains = _collect_sidechain_chains(records)
-    _correlate_nodes_to_chains(nodes, chains)
+    _correlate_nodes_to_chains(nodes, _collect_sidechain_chains(records))
     return AgentGraph(session_id=Path(path).stem,
-                      root_user_prompt=root_prompt, nodes=nodes)
+                      root_user_prompt=_extract_root_prompt(records),
+                      nodes=nodes)
 
 
 def _decode_transcript(path: Path) -> Iterable[dict]:
@@ -450,9 +448,17 @@ def _collect_spawn_nodes(records: list[dict]) -> list[AgentNode]:
 
 def _collect_sidechain_chains(records: list[dict]) -> list[tuple[str, dict]]:
     """Group ``isSidechain`` records into chains by walking ``parentUuid``
-    links. Returns ``[(chain_id, {"turns": int, "last_ts": dt}), ...]``
-    in encounter order. Orphan records (``parentUuid`` pointing at
-    nothing) seed a new chain."""
+    links. Returns ``[(chain_id, {"turns": int, "last_ts": dt,
+    "first_user_text": str}), ...]`` in encounter order. Orphan records
+    (``parentUuid`` pointing at nothing) seed a new chain.
+
+    ``first_user_text`` captures the chain head's user text so the
+    correlation step can match spawns to chains by ``description`` -- the
+    stable identity that survives concurrent spawn reordering in the
+    wire log (Plan-sidechain's first record can land before
+    Explore-sidechain's first record, which scrambles the encounter
+    index but not the chain-head text).
+    """
     chains: dict[str, dict] = {}
     order: list[str] = []
     uuid_to_root: dict[str, str] = {}
@@ -465,7 +471,8 @@ def _collect_sidechain_chains(records: list[dict]) -> list[tuple[str, dict]]:
         if root is None:
             root = uuid or f"chain-{len(order)}"
             order.append(root)
-            chains[root] = {"turns": 0, "last_ts": None}
+            chains[root] = {"turns": 0, "last_ts": None,
+                            "first_user_text": ""}
         if uuid:
             uuid_to_root[uuid] = root
         chains[root]["turns"] += 1
@@ -473,18 +480,52 @@ def _collect_sidechain_chains(records: list[dict]) -> list[tuple[str, dict]]:
         cur = chains[root]["last_ts"]
         if ts and (cur is None or ts > cur):
             chains[root]["last_ts"] = ts
+        if not chains[root]["first_user_text"] and obj.get("type") == "user":
+            text = _first_user_text(obj.get("message") or {})
+            if text:
+                chains[root]["first_user_text"] = text
     return [(cid, chains[cid]) for cid in order]
 
 
 def _correlate_nodes_to_chains(nodes: list[AgentNode],
                                chains: list[tuple[str, dict]]) -> None:
-    """Attach each chain's ``turns`` + ``last_ts`` to the spawn node at
-    the same index. Chains with no matching spawn are dropped; spawns
-    with no matching chain keep ``turn_count=0``. Mutates ``nodes`` in
-    place; returns nothing."""
+    """Attach each chain's ``turns`` + ``last_ts`` to the spawn node it
+    belongs to.
+
+    Strategy: when at least one spawn carries a ``description``, match
+    each node to the chain whose head text contains that description.
+    The chain head is the user prompt the parent sent to the subagent,
+    so the description (which the parent ``Agent`` ``tool_use`` echoes
+    back) is a stable identity even when concurrent sidechains
+    interleave and the encounter index would swap turn counts between
+    agents. Falls back to position-by-index when no description match
+    is found -- preserves legacy behaviour for transcripts without
+    ``description`` fields. Mutates ``nodes`` in place."""
+    if not chains:
+        return
+    chain_user_texts = [meta.get("first_user_text", "") for _, meta in chains]
+    used: set[int] = set()
+    matched_any = False
+    for node in nodes:
+        if not node.description:
+            continue
+        for j, ct in enumerate(chain_user_texts):
+            if j in used or not ct:
+                continue
+            if node.description in ct:
+                _, meta = chains[j]
+                node.turn_count = meta.get("turns", 0) or 0
+                node.last_ts = meta.get("last_ts")
+                used.add(j)
+                matched_any = True
+                break
+    if matched_any:
+        return
+    # Legacy fallback: pair by encounter index for transcripts that
+    # carry no ``description`` field.
     for i, node in enumerate(nodes):
         if i < len(chains):
-            _cid, meta = chains[i]
+            _, meta = chains[i]
             node.turn_count = meta.get("turns", 0) or 0
             node.last_ts = meta.get("last_ts")
 
@@ -1222,14 +1263,31 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="filter sessions to this repo name substring")
     p.add_argument("--days", type=int, default=30,
                    help="only sessions active within N days (default 30)")
+    # Data-mode family: --list / --json each route the program to a
+    # distinct data-emit handler. Combined sets are caught by
+    # ``_validate_modes`` (which also re-checks --print-resume-command
+    # since it is registered in the operator-mode group) so the caller
+    # sees a clear conflict error rather than a silent precedence drop.
     p.add_argument("--list", action="store_true",
                    help="print a plain listing instead of the picker")
     p.add_argument("--json", action="store_true",
                    help="emit machine-readable JSON (used by the "
                         "/dev-kit:session-monitor skill's AskUserQuestion flow)")
-    p.add_argument("--print-resume-command", action="store_true",
-                   help="print the cwd + argv that would be exec'd on Enter, "
-                        "then exit (no picker, no exec)")
+    # Operator-mode family: --print-resume-command / --picker / --cli-setup
+    # each route the program to a distinct handler. argparse rejects any
+    # combination as a usage error (exit 2) before main() runs, so the
+    # conflict surfaces immediately instead of via silent precedence.
+    op = p.add_mutually_exclusive_group()
+    op.add_argument("--print-resume-command", action="store_true",
+                    help="print the cwd + argv that would be exec'd on Enter, "
+                         "then exit (no picker, no exec)")
+    op.add_argument("--picker", action="store_true",
+                    help="explicit picker intent: require the interactive "
+                         "picker; error out (instead of silently degrading "
+                         "to --list) when not on a TTY")
+    op.add_argument("--cli-setup", action="store_true",
+                    help="install a `session-monitor` shell alias into your rc "
+                         "(~/.zshrc or ~/.bashrc; idempotent), then exit")
     p.add_argument("--skill-usage", action="store_true",
                    help="attach a per-worktree top-skills line (and a "
                         "global top-10 panel) using logs/*.jsonl turn + "
@@ -1241,9 +1299,6 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="substring filter (case-insensitive) across "
                         "session_id, branch, model, source, log_path, "
                         "worktree, status; empty = show all")
-    p.add_argument("--cli-setup", action="store_true",
-                   help="install a `session-monitor` shell alias into your rc "
-                        "(~/.zshrc or ~/.bashrc; idempotent), then exit")
     p.add_argument("--dry-run", action="store_true",
                    help="with --cli-setup, print the alias block without "
                         "writing to the rc file")
@@ -1251,17 +1306,18 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def _validate_modes(args) -> list[str]:
-    """Return the active mode flags, or raise SystemExit(2) when more
-    than one is set.
+    """Return the active data-mode flags, or raise SystemExit(2) when
+    more than one is set.
 
-    Modes are mutually exclusive at the CLI layer: ``--list``,
-    ``--json``, ``--print-resume-command``, and ``--cli-setup`` each
-    route the program to a distinct handler. The legacy code let
+    Data modes (``--list`` / ``--json`` / ``--print-resume-command``)
+    each route the program to a distinct handler. The legacy code let
     precedence silently pick the first match (e.g. ``--list --json``
     would print the listing and ignore ``--json``); the explicit
     conflict detector surfaces the misuse so callers can fix the
-    invocation. ``--cli-setup`` short-circuits via its own early
-    handler and is excluded from the data-mode conflict check.
+    invocation. The operator-mode family (``--cli-setup`` / ``--picker``
+    / ``--print-resume-command``) is enforced by argparse's
+    ``add_mutually_exclusive_group`` and surfaces as a usage error
+    before main() runs.
     """
     data_modes = ("list", "json", "print_resume_command")
     active = [name for name in data_modes if getattr(args, name)]
@@ -1327,6 +1383,11 @@ def main(argv=None) -> int:
         return 0
 
     if not sys.stdout.isatty() or not sys.stdin.isatty():
+        if args.picker:
+            # Explicit picker intent refuses the silent --list fallback.
+            print("[session-monitor] --picker requires a TTY; "
+                  "use --list or --json to preview.", file=sys.stderr)
+            return 1
         print("[session-monitor] not a TTY -- run this in a real terminal, "
               "or use --list to preview.", file=sys.stderr)
         print_plain_listing(model, logs_dir)
