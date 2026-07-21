@@ -31,18 +31,14 @@ to preview inside a conversation.
 """
 from __future__ import annotations
 
-import argparse
 import json
-import os
-import select
 import subprocess
 import sys
-import termios
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Iterable
 
 # When run as ``python3 tools/session_monitor.py`` the script's own dir is
 # already ``sys.path[0]``; the explicit insert also covers ``import
@@ -51,12 +47,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skill_usage  # noqa: E402  (path set up above)
 import token_efficiency_analyzer as tea  # noqa: E402  (path set up above)
 
-# A session with no running process is still "LIVE" if its most recent turn
-# landed within this window -- the Stop/SessionEnd hooks fire per turn, so a
-# fresh last_ts means the CLI is very likely still open.
-RECENCY_WINDOW_SECONDS = 180
 
-
+# Forward declarations: the dataclasses (Status / Session / AgentNode /
+# AgentGraph / WorktreeInfo) are referenced by the sibling-module
+# imports below, so they are hoisted above the imports. They stay
+# here even after the rest of the module is loaded -- the load order
+# in Python is "execute imports, then run remaining top-level code",
+# and the sibling modules only need to resolve names that are
+# already defined by the time they look them up.
 class Status(Enum):
     LIVE = "live"
     IDLE = "idle"
@@ -130,8 +128,89 @@ class WorktreeInfo:
     dirname: str
     state: str
     path: Path | None
-    sessions: list[Session]
+    sessions: list  # type: ignore[type-arg]  # list[Session] forward-ref
     last_commit_subject: str | None = None
+
+
+# Three concerns used to live inline: the interactive arrow-key picker
+# (termios + ANSI), the --cli-setup alias installer, the JSON +
+# eval-handshake emitter, and the shared format primitives. Re-import
+# them here so the public surface (sm.pick_session, sm.install_cli_alias,
+# sm.print_json, sm._column_header, ...) stays importable from a single
+# namespace.
+from session_monitor_alias import (  # noqa: E402
+    _CLI_BEGIN,
+    _CLI_END,
+    CLI_ALIAS_NAME,
+    _alias_block,
+    _render_rc,
+    _shell_rc,
+    _strip_managed_block,
+    install_cli_alias,
+)
+from session_monitor_cli import (  # noqa: E402
+    _validate_modes,
+    main,
+    parse_args,
+)
+from session_monitor_format import (  # noqa: E402
+    _GLYPH,
+    STATE_SECTIONS,
+    _column_header,
+    _commit_cell,
+    _per_worktree_top_skills,
+    _rel_time,
+    _src_tag,
+    group_by_state,
+)
+from session_monitor_picker import (  # noqa: E402
+    _ANSI,
+    _STATUS_COLOR,
+    _move_selectable,
+    _read_key,
+    _render_picker,
+    _selectable_indices,
+    _terminal_size,
+    build_rows,
+    pick_session,
+)
+from session_monitor_render import (  # noqa: E402
+    EVAL_AXES,
+    build_eval_handshake,
+    print_json,
+)
+
+# Public re-exports. Tests import these via ``sm.X``; ruff treats
+# re-exports listed in __all__ as intentional and skips the F401
+# "unused import" check on them.
+__all__ = [
+    # dataclasses
+    "Status", "Session", "AgentNode", "AgentGraph", "WorktreeInfo",
+    # constants
+    "RECENCY_WINDOW_SECONDS",
+    # alias install
+    "CLI_ALIAS_NAME", "_CLI_BEGIN", "_CLI_END",
+    "_alias_block", "_render_rc", "_shell_rc", "_strip_managed_block",
+    "install_cli_alias",
+    # format primitives (shared with picker + render)
+    "STATE_SECTIONS", "group_by_state",
+    "_GLYPH", "_rel_time", "_src_tag",
+    "_column_header", "_commit_cell", "_per_worktree_top_skills",
+    # picker
+    "_ANSI", "_STATUS_COLOR",
+    "build_rows", "_selectable_indices", "_move_selectable",
+    "_terminal_size", "_render_picker", "_read_key",
+    "pick_session",
+    # render
+    "EVAL_AXES", "build_eval_handshake", "print_json",
+    # CLI
+    "parse_args", "_validate_modes", "main",
+]
+
+# A session with no running process is still "LIVE" if its most recent turn
+# landed within this window -- the Stop/SessionEnd hooks fire per turn, so a
+# fresh last_ts means the CLI is very likely still open.
+RECENCY_WINDOW_SECONDS = 180
 
 
 
@@ -690,89 +769,7 @@ def _session_matches(s: Session, w: WorktreeInfo, pat: str) -> bool:
 # Section labels for the structured listing. Order = display order, which
 # also encodes priority (live work first, archived work last). Keep in sync
 # with the bucket names emitted by ``group_by_state``.
-STATE_SECTIONS = ("live", "merged", "gone", "unknown")
-
-
-def group_by_state(model: list[WorktreeInfo]) -> list[tuple[str, list[WorktreeInfo]]]:
-    """Group worktrees into state sections for the structured listing.
-
-    Returns ``[(section_label, [WorktreeInfo...]), ...]`` in the fixed
-    order ``live -> merged -> gone -> unknown``. Sections with no
-    worktrees are omitted. Within a section the input ordering is
-    preserved (callers like ``group_by_worktree`` already sort by
-    recency, so this composes)."""
-    buckets: dict[str, list[WorktreeInfo]] = {k: [] for k in STATE_SECTIONS}
-    for w in model:
-        buckets.setdefault(w.state, []).append(w)
-    return [(k, buckets[k]) for k in STATE_SECTIONS if buckets[k]]
-
-
-# --------------------------------------------------------------------------
-# Rendering helpers
-# --------------------------------------------------------------------------
-_GLYPH = {Status.LIVE: "●", Status.IDLE: "○", Status.STALE: "⌀"}
-
-
-def _rel_time(ts: datetime | None, now: datetime | None = None) -> str:
-    if ts is None:
-        return "never"
-    now = now or datetime.now(timezone.utc)
-    try:
-        secs = (now - ts).total_seconds()
-    except Exception:
-        return "?"
-    if secs < 0:
-        secs = 0
-    if secs < 90:
-        return f"{int(secs)}s ago"
-    if secs < 5400:
-        return f"{int(secs // 60)}m ago"
-    if secs < 172800:
-        return f"{int(secs // 3600)}h ago"
-    return f"{int(secs // 86400)}d ago"
-
-
-def _src_tag(source: str) -> str:
-    return "cx" if source == "codex" else "cc"
-
-
-def _column_header(indent: str) -> str:
-    """Column-label line aligned to the STATUS/SRC/ID/MODEL/BRANCH/AGE/COMMIT
-    fields shared by ``print_plain_listing`` and the inline picker.
-
-    Field widths mirror the data rows exactly: STATUS covers glyph + status
-    word (8), SRC (3), ID (9), MODEL (15), BRANCH (23), AGE right-justified
-    (9), COMMIT (40, truncated). ``indent`` differs per view (4 spaces for
-    ``--list``, 2 for the picker) but every column after it lines up."""
-    return (f"{indent}{'STATUS':<8}{'SRC':<4}{'ID':<9}"
-            f"{'MODEL':<15}{'BRANCH':<23}{'AGE':>9}  {'COMMIT':<40}")
-
-
-def _commit_cell(subject: str | None) -> str:
-    """Single-cell commit subject, 40-char truncated, '?' when absent."""
-    if not subject:
-        return "?"
-    return subject[:40].ljust(40)
-
-
-def _per_worktree_top_skills(agg: dict, top_n: int = 3) -> str:
-    """Format the top-N skills whose ``cwd`` falls under this worktree.
-
-    Empty string when the worktree has no path or no skill lines land
-    under it. Output is the form ``skill:turns inv:invocations`` pairs
-    for grep-friendly column alignment, e.g.
-    ``dev-kit:inspect:3 inv:0 dev-kit:feat-fix:2 inv:2``.
-    """
-    if not agg:
-        return ""
-    rows = sorted(
-        agg.items(),
-        key=lambda kv: (-kv[1].get("turns", 0), -kv[1].get("invocations", 0), kv[0]),
-    )[:top_n]
-    parts = []
-    for name, rec in rows:
-        parts.append(f"{name}:{rec.get('turns', 0)} inv:{rec.get('invocations', 0)}")
-    return "  ".join(parts)
+# (Re-exported from session_monitor_format.)
 
 
 def print_plain_listing(model: list[WorktreeInfo], logs_dir: Path,
@@ -822,598 +819,21 @@ def print_plain_listing(model: list[WorktreeInfo], logs_dir: Path,
         print(skill_usage.format_table(skill_usage_agg, top=10))
 
 
-def print_json(model: list[WorktreeInfo], logs_dir: Path,
-               *, skill_usage_agg: dict | None = None,
-               skill_top_n: int = 5) -> None:
-    """Machine-readable JSON for the skill-driven AskUserQuestion picker.
-
-    Carries the full session_id, worktree abs path, and log path so the
-    skill can synthesize the exact ``cd <wt> && claude --resume <sid>``
-    command without re-running the tool. Stable shape: top-level keys
-    ``logs_dir``, ``generated_at``, ``total_sessions``, ``live_sessions``,
-    ``worktrees`` (list of worktree records with ``sessions`` list nested).
-
-    The ``eval_handshake`` block carries the per-session log paths the
-    ``--session-log`` judge consumes. The monitor only emits the
-    handshake — it never invokes the LLM judge itself.
-    """
-    now = datetime.now(timezone.utc)
-    payload = {
-        "logs_dir": str(logs_dir),
-        "generated_at": now.isoformat(),
-        "total_sessions": sum(len(w.sessions) for w in model),
-        "live_sessions": sum(1 for w in model for s in w.sessions
-                             if s.status is Status.LIVE),
-        "worktrees": [
-            {
-                "name": w.dirname,
-                "state": w.state,
-                "path": str(w.path) if w.path else None,
-                "last_commit_subject": w.last_commit_subject,
-                "has_live": any(s.status is Status.LIVE for s in w.sessions),
-                "skill_usage": _per_worktree_top_skills(
-                    skill_usage.filter_by_cwd_prefix(
-                        skill_usage_agg, str(w.path))
-                    if (skill_usage_agg and w.path is not None) else {},
-                    top_n=skill_top_n) or None,
-                "sessions": [
-                    {
-                        "session_id": s.session_id,
-                        "source": s.source,
-                        "branch": s.branch,
-                        "model": s.model,
-                        "status": s.status.value,
-                        "last_ts": s.last_ts.isoformat() if s.last_ts else None,
-                        "last_rel": _rel_time(s.last_ts, now),
-                        "pids": list(s.pids),
-                        "subagent_count": s.subagent_count,
-                        "log_path": s.log_path,
-                    }
-                    for s in w.sessions
-                ],
-            }
-            for w in model
-        ],
-        "skill_usage_total": (skill_usage_agg or {}),
-        "eval_handshake": build_eval_handshake(model),
-    }
-    print(json.dumps(payload, indent=2, sort_keys=False))
-
-
-EVAL_AXES: tuple = (
-    "intent_alignment", "ambiguity_unresolved", "repeated_mistakes",
-    "rule_adherence", "inefficiency", "structural_improvement",
-    "over_engineering", "thoroughness",
-)
-"""The 8 axes the --session-log judge consumes (eval_runner.SESSION_AXES).
-
-Mirrored here so tools/session_monitor.py can advertise the contract in
-its JSON handshake without importing lib/ (which would pull in the LLM
-judge deps). Keep in sync with eval/prompts/judge-session.md."""
-
-
-def build_eval_handshake(model: list[WorktreeInfo]) -> Dict:
-    """Per-session payload for the /dev-kit:eval `--session-log` judge.
-
-    The monitor never calls the judge itself — it surfaces the contract
-    (axes + per-session log path) so an external script can pipe
-    ``--session-log <log_path>`` into ``lib/eval_runner.py`` for any
-    session in the model. ``opt_in=True`` flags the user that the
-    judge is never auto-invoked.
-    """
-    sessions: List[Dict] = []
-    for w in model:
-        for s in w.sessions:
-            if not s.log_path:
-                continue
-            sessions.append({
-                "session_id": s.session_id,
-                "worktree": w.dirname,
-                "source": s.source,
-                "log_path": s.log_path,
-                "judge_command": (
-                    f"python3 lib/eval_runner.py --project-root . "
-                    f"--session-log {s.log_path}"
-                ),
-                "axes": list(EVAL_AXES),
-            })
-    return {
-        "opt_in": True,
-        "axes": list(EVAL_AXES),
-        "sessions": sessions,
-        "notes": (
-            "Pass --session-log <log_path> to lib/eval_runner.py to "
-            "judge a session on the 8-axis rubric. NEVER auto-invoked; "
-            "the monitor only emits this handshake."
-        ),
-    }
-
-
-# --------------------------------------------------------------------------
-# Inline picker (termios + ANSI)
-# --------------------------------------------------------------------------
-_ANSI = {
-    "reset":      "\x1b[0m",
-    "bold":       "\x1b[1m",
-    "dim":        "\x1b[2m",
-    "reverse":    "\x1b[7m",
-    "hide_cur":   "\x1b[?25l",
-    "show_cur":   "\x1b[?25h",
-    "home":       "\x1b[H",
-    "clear_eol":  "\x1b[K",
-    "green":      "\x1b[32m",
-    "yellow":     "\x1b[33m",
-    "red":        "\x1b[31m",
-    "cyan":       "\x1b[36m",
-}
-
-_STATUS_COLOR = {
-    Status.LIVE: "green",
-    Status.IDLE: "yellow",
-    Status.STALE: "red",
-}
-
-
-def build_rows(model: list[WorktreeInfo], *,
-               now: datetime | None = None) -> list[dict]:
-    """Flatten a worktree model into header + session rows for the picker.
-
-    Pure function -- testable without a TTY. Emits three row kinds:
-
-    - ``"section"`` — top-level bucket label ("LIVE", "MERGED", ...) with
-      no ``session`` key; not selectable.
-    - ``"header"``  — per-worktree title with state + commit subject; not
-      selectable.
-    - ``"columns"`` — column-label row beneath each header; not selectable.
-    - ``"session"`` — selectable row carrying a ``Session`` payload.
-
-    The picker only lands its cursor on session rows (see
-    ``_move_selectable``).
-    """
-    now = now or datetime.now(timezone.utc)
-    rows: list[dict] = []
-    sections = group_by_state(model)
-    for label, wts in sections:
-        section_total = sum(len(w.sessions) for w in wts)
-        rows.append({
-            "kind": "section",
-            "text": (f"── {label.upper()}  ({len(wts)} worktrees, "
-                     f"{section_total} sessions) " + "─" * 30),
-        })
-        for w in wts:
-            tag = f"  last: \"{w.last_commit_subject}\"" if w.last_commit_subject else ""
-            rows.append({
-                "kind": "header",
-                "text": (f"  ▸ {w.dirname}  [{w.state}]  "
-                         f"({len(w.sessions)} sessions){tag}"),
-            })
-            rows.append({"kind": "columns", "text": _column_header("  ")})
-            for s in w.sessions:
-                sub = f" +{s.subagent_count}agt" if s.subagent_count else ""
-                rows.append({
-                    "kind": "session",
-                    "text": (f"  {_GLYPH[s.status]} {s.status.value:5} "
-                             f"{_src_tag(s.source):<3} "
-                             f"{s.session_id[:8]} {s.model[:14]:14} "
-                             f"{s.branch[:22]:22} "
-                             f"{_rel_time(s.last_ts, now):>9}  "
-                             f"{_commit_cell(w.last_commit_subject)}{sub}"),
-                    "session": s,
-                })
-    return rows
-
-
-def _selectable_indices(rows: list[dict]) -> list[int]:
-    return [i for i, r in enumerate(rows) if r["kind"] == "session"]
-
-
-def _move_selectable(rows: list[dict], cursor: int, delta: int) -> int:
-    """Move the cursor by ``delta`` session rows, never landing on a header."""
-    sel = _selectable_indices(rows)
-    if not sel:
-        return cursor
-    if cursor in sel:
-        pos = sel.index(cursor)
-    else:
-        # cursor was on a header; land on the nearest selectable row
-        pos = len(sel)
-        for j, idx in enumerate(sel):
-            if idx >= cursor:
-                pos = j
-                break
-    target = max(0, min(pos + delta, len(sel) - 1))
-    return sel[target]
-
-
-def _terminal_size(fallback: tuple[int, int] = (80, 24)) -> tuple[int, int]:
-    try:
-        return os.get_terminal_size(0)
-    except OSError:
-        return fallback
-
-
-def _render_picker(out, rows: list[dict], cursor: int, scroll: int,
-                   max_x: int, max_y: int) -> None:
-    """Write the picker frame to ``out`` (one full redraw per call).
-
-    Layout: 1 header line + body + 1 footer line. ``max_x`` and ``max_y``
-    are the caller's terminal size in columns / rows; this function does
-    not query the terminal itself so the same call can be unit-tested.
-    """
-    body_h = max(1, max_y - 2)
-    sess_total = sum(1 for r in rows if r["kind"] == "session")
-    wt_total = sum(1 for r in rows if r["kind"] == "header")
-    head = (f" session-monitor  {sess_total} sessions / {wt_total} worktrees ")
-
-    out.write(_ANSI["home"] + _ANSI["hide_cur"])
-    out.write(_ANSI["bold"] + _ANSI["cyan"] + head.ljust(max_x) + _ANSI["reset"] + "\n")
-
-    visible_end = min(scroll + body_h, len(rows))
-    for i in range(scroll, visible_end):
-        r = rows[i]
-        text = r["text"][: max_x - 1]
-        if r["kind"] in ("section", "header", "columns"):
-            out.write(_ANSI["dim"] + text.ljust(max_x) + _ANSI["reset"] + "\n")
-            continue
-        color = _STATUS_COLOR.get(r["session"].status)
-        prefix = _ANSI[color] if color else ""
-        if i == cursor:
-            out.write(_ANSI["reverse"] + prefix + text.ljust(max_x)
-                      + _ANSI["reset"] + "\n")
-        else:
-            out.write(prefix + text.ljust(max_x) + _ANSI["reset"] + "\n")
-
-    # pad any unused body lines so the footer ends up on the last row
-    for _ in range(body_h - (visible_end - scroll)):
-        out.write(_ANSI["clear_eol"] + "\n")
-
-    footer = " ↑↓ / j k move   Enter resume   q / Esc / Ctrl-C quit "
-    out.write(_ANSI["reverse"] + footer.ljust(max_x) + _ANSI["reset"])
-    out.flush()
-
-
-def _read_key(timeout: float = 0.5) -> bytes:
-    """Read one logical keypress from stdin, with timeout.
-
-    Resolves ``ESC [ A/B`` into single bytes ``b"\\x1b[A"`` /
-    ``b"\\x1b[B"`` so the caller can match arrow keys directly. A lone
-    ``ESC`` (no follow-up byte within 50 ms) is returned as-is.
-    """
-    rlist, _, _ = select.select([0], [], [], timeout)
-    if not rlist:
-        return b""
-    b = os.read(0, 1)
-    if b != b"\x1b":
-        return b
-    # ESC pressed -- peek for a follow-up byte
-    rlist, _, _ = select.select([0], [], [], 0.05)
-    if not rlist:
-        return b"\x1b"  # lone ESC
-    nxt = os.read(0, 1)
-    if nxt != b"[":
-        return b"\x1b" + nxt
-    rlist, _, _ = select.select([0], [], [], 0.05)
-    if not rlist:
-        return b"\x1b["
-    return b"\x1b[" + os.read(0, 1)
-
-
-def pick_session(model: list[WorktreeInfo]) -> Session | None:
-    """Run the inline arrow-key picker. Returns the selected Session, or
-    None if the user quit (``q`` / ``Esc`` / ``Ctrl-C``). Always restores
-    the original ``termios`` state on exit, even on exception.
-    """
-    rows = build_rows(model)
-    selectable = _selectable_indices(rows)
-    if not selectable:
-        return None
-
-    cursor = selectable[0]
-    scroll = 0
-
-    try:
-        saved = termios.tcgetattr(0)
-    except termios.error:
-        saved = None
-
-    try:
-        if saved is not None:
-            attrs = termios.tcgetattr(0)
-            # Disable canonical mode + echo, but keep ISIG so Ctrl-C
-            # still raises KeyboardInterrupt (which the outer try/except
-            # catches and turns into a clean None return).
-            attrs[3] &= ~(termios.ICANON | termios.ECHO)
-            termios.tcsetattr(0, termios.TCSAFLUSH, attrs)
-
-        while True:
-            max_x, max_y = _terminal_size()
-            # leave 1 row for the prompt below the body if it shrinks
-            max_y = max(5, max_y)
-            _render_picker(sys.stdout, rows, cursor, scroll, max_x, max_y)
-
-            key = _read_key(0.5)
-            if not key:
-                continue
-
-            if key in (b"\r", b"\n"):
-                return rows[cursor]["session"]
-            if key == b"\x1b":
-                return None
-            if key == b"\x1b[A" or key in (b"k", b"K"):
-                cursor = _move_selectable(rows, cursor, -1)
-            elif key == b"\x1b[B" or key in (b"j", b"J"):
-                cursor = _move_selectable(rows, cursor, +1)
-            elif key in (b"q", b"Q"):
-                return None
-            # ignore everything else (Tab, function keys, etc.)
-
-            body_h = max(1, max_y - 2)
-            if cursor < scroll:
-                scroll = cursor
-            elif cursor >= scroll + body_h:
-                scroll = cursor - body_h + 1
-
-    except KeyboardInterrupt:
-        return None
-    finally:
-        if saved is not None:
-            try:
-                termios.tcsetattr(0, termios.TCSAFLUSH, saved)
-            except termios.error:
-                pass
-        # Show cursor again and drop the picker frame so the resumed CLI
-        # starts on a clean line.
-        sys.stdout.write(_ANSI["show_cur"] + "\n")
-        sys.stdout.flush()
-
-
-# --------------------------------------------------------------------------
-# CLI alias setup (--cli-setup)
-# --------------------------------------------------------------------------
-CLI_ALIAS_NAME = "session-monitor"
-_CLI_BEGIN = "# >>> dev-harness-kit session-monitor alias >>>"
-_CLI_END = "# <<< dev-harness-kit session-monitor alias <<<"
-
-
-def _shell_rc(env=None) -> Path:
-    """Best-effort user rc file for the current login shell: ``~/.zshrc``
-    for zsh, ``~/.bashrc`` for bash, else ``~/.profile``."""
-    env = env if env is not None else os.environ
-    shell = env.get("SHELL", "")
-    home = Path.home()
-    if "zsh" in shell:
-        return home / ".zshrc"
-    if "bash" in shell:
-        return home / ".bashrc"
-    return home / ".profile"
-
-
-def _alias_block(script_path: Path, python_exe: str) -> str:
-    """The managed rc block (marker-wrapped) defining the alias."""
-    return (f"{_CLI_BEGIN}\n"
-            f"alias {CLI_ALIAS_NAME}='{python_exe} {script_path}'\n"
-            f"{_CLI_END}")
-
-
-def _strip_managed_block(text: str) -> str:
-    """Remove any prior managed alias block plus trailing blank lines so
-    re-running ``--cli-setup`` never duplicates or drifts."""
-    out: list[str] = []
-    skipping = False
-    for line in text.splitlines():
-        if line.strip() == _CLI_BEGIN:
-            skipping = True
-            continue
-        if skipping:
-            if line.strip() == _CLI_END:
-                skipping = False
-            continue
-        out.append(line)
-    while out and out[-1].strip() == "":
-        out.pop()
-    return "\n".join(out)
-
-
-def _render_rc(existing: str, block: str) -> str:
-    """Pure: rc contents with the managed block appended, replacing any
-    prior copy. Idempotent -- feeding its own output back yields the same
-    string. Always ends with a single trailing newline."""
-    base = _strip_managed_block(existing)
-    if base:
-        return f"{base}\n\n{block}\n"
-    return f"{block}\n"
-
-
-def install_cli_alias(*, script_path: Path | None = None,
-                      python_exe: str | None = None,
-                      rc: Path | None = None,
-                      dry_run: bool = False) -> int:
-    """Install (or refresh) the ``session-monitor`` shell alias in the
-    user's rc file. Idempotent via marker-wrapped managed block."""
-    script_path = script_path or Path(__file__).resolve()
-    python_exe = python_exe or sys.executable or "python3"
-    rc = rc or _shell_rc()
-    block = _alias_block(script_path, python_exe)
-
-    if dry_run:
-        print(f"[session-monitor] would write to {rc}:\n")
-        print(block)
-        print(f"\n[session-monitor] then activate with:  source {rc}")
-        return 0
-
-    existing = rc.read_text() if rc.exists() else ""
-    verb = "refreshed" if _CLI_BEGIN in existing else "installed"
-    rc.write_text(_render_rc(existing, block))
-    print(f"[session-monitor] {verb} '{CLI_ALIAS_NAME}' alias in {rc}")
-    print(f"  alias {CLI_ALIAS_NAME}='{python_exe} {script_path}'")
-    print(f"[session-monitor] activate now:  source {rc}")
-    return 0
+# EVAL_AXES + build_eval_handshake live in session_monitor_render; the
+# re-import at the top of this module keeps ``sm.EVAL_AXES`` /
+# ``sm.build_eval_handshake`` importable for callers that do not want to
+# add the render module to their import path.
+# (Re-exported from session_monitor_render.)
 
 
 # --------------------------------------------------------------------------
 # Entrypoint
 # --------------------------------------------------------------------------
-def parse_args(argv=None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Inline arrow-key picker over Claude Code + Codex sessions "
-                    "with worktree-aware resume.")
-    p.add_argument("--logs-dir", default="",
-                   help="logs root (default: <main-repo>/logs)")
-    p.add_argument("--repo", default="",
-                   help="filter sessions to this repo name substring")
-    p.add_argument("--days", type=int, default=30,
-                   help="only sessions active within N days (default 30)")
-    # Data-mode family: --list / --json each route the program to a
-    # distinct data-emit handler. Combined sets are caught by
-    # ``_validate_modes`` (which also re-checks --print-resume-command
-    # since it is registered in the operator-mode group) so the caller
-    # sees a clear conflict error rather than a silent precedence drop.
-    p.add_argument("--list", action="store_true",
-                   help="print a plain listing instead of the picker")
-    p.add_argument("--json", action="store_true",
-                   help="emit machine-readable JSON (used by the "
-                        "/dev-kit:session-monitor skill's AskUserQuestion flow)")
-    # Operator-mode family: --print-resume-command / --picker / --cli-setup
-    # each route the program to a distinct handler. argparse rejects any
-    # combination as a usage error (exit 2) before main() runs, so the
-    # conflict surfaces immediately instead of via silent precedence.
-    op = p.add_mutually_exclusive_group()
-    op.add_argument("--print-resume-command", action="store_true",
-                    help="print the cwd + argv that would be exec'd on Enter, "
-                         "then exit (no picker, no exec)")
-    op.add_argument("--picker", action="store_true",
-                    help="explicit picker intent: require the interactive "
-                         "picker; error out (instead of silently degrading "
-                         "to --list) when not on a TTY")
-    op.add_argument("--cli-setup", action="store_true",
-                    help="install a `session-monitor` shell alias into your rc "
-                         "(~/.zshrc or ~/.bashrc; idempotent), then exit")
-    p.add_argument("--skill-usage", action="store_true",
-                   help="attach a per-worktree top-skills line (and a "
-                        "global top-10 panel) using logs/*.jsonl turn + "
-                        "Skill tool_use counts")
-    p.add_argument("--skill-days", type=int, default=30,
-                   help="window (days) for --skill-usage aggregation "
-                        "(default 30; pass 0 to disable)")
-    p.add_argument("--filter", metavar="PATTERN", default="",
-                   help="substring filter (case-insensitive) across "
-                        "session_id, branch, model, source, log_path, "
-                        "worktree, status; empty = show all")
-    p.add_argument("--dry-run", action="store_true",
-                   help="with --cli-setup, print the alias block without "
-                        "writing to the rc file")
-    return p.parse_args(argv)
-
-
-def _validate_modes(args) -> list[str]:
-    """Return the active data-mode flags, or raise SystemExit(2) when
-    more than one is set.
-
-    Data modes (``--list`` / ``--json`` / ``--print-resume-command``)
-    each route the program to a distinct handler. The legacy code let
-    precedence silently pick the first match (e.g. ``--list --json``
-    would print the listing and ignore ``--json``); the explicit
-    conflict detector surfaces the misuse so callers can fix the
-    invocation. The operator-mode family (``--cli-setup`` / ``--picker``
-    / ``--print-resume-command``) is enforced by argparse's
-    ``add_mutually_exclusive_group`` and surfaces as a usage error
-    before main() runs.
-    """
-    data_modes = ("list", "json", "print_resume_command")
-    active = [name for name in data_modes if getattr(args, name)]
-    if len(active) > 1:
-        flags = ", ".join(f"--{n.replace('_', '-')}" for n in active)
-        print(f"[session-monitor] conflicting mode flags: {flags}. "
-              f"Pick exactly one.", file=sys.stderr)
-        raise SystemExit(2)
-    return active
-
-
-def main(argv=None) -> int:
-    args = parse_args(argv)
-
-    if args.cli_setup:
-        return install_cli_alias(dry_run=args.dry_run)
-
-    repo_root = discover_repo_root()
-    logs_dir = Path(args.logs_dir) if args.logs_dir else repo_root / "logs"
-
-    model = build_model(repo_root, logs_dir, args.repo, args.days)
-
-    if args.filter:
-        before = sum(len(w.sessions) for w in model)
-        model = filter_model(model, args.filter)
-        after = sum(len(w.sessions) for w in model)
-        if before and not after:
-            print(f"[session-monitor] --filter {args.filter!r} matched "
-                  f"0 of {before} sessions", file=sys.stderr)
-
-    skill_agg = None
-    if args.skill_usage:
-        window = None if args.skill_days == 0 else args.skill_days
-        skill_agg = skill_usage.aggregate_skill_usage(
-            str(logs_dir / '**' / '*.jsonl'), window,
-            include_per_cwd=True)
-
-    _validate_modes(args)
-
-    if args.list:
-        print_plain_listing(model, logs_dir, skill_usage_agg=skill_agg)
-        return 0
-
-    if args.json:
-        print_json(model, logs_dir, skill_usage_agg=skill_agg)
-        return 0
-
-    if args.print_resume_command:
-        first = next((s for w in model for s in w.sessions), None)
-        if first is None:
-            print("[session-monitor] no sessions to resume")
-            return 0
-        cwd, argv, warning = build_resume(first.agg, repo_root, first.wt_path)
-        if warning:
-            print(f"[session-monitor] {warning}", file=sys.stderr)
-        print(f"cd {cwd} && {' '.join(argv)}")
-        return 0
-
-    total = sum(len(w.sessions) for w in model)
-    if total == 0:
-        print(f"[session-monitor] no sessions found under {logs_dir}")
-        print("  run /dev-kit:log setup && /dev-kit:log on to start capturing.")
-        return 0
-
-    if not sys.stdout.isatty() or not sys.stdin.isatty():
-        if args.picker:
-            # Explicit picker intent refuses the silent --list fallback.
-            print("[session-monitor] --picker requires a TTY; "
-                  "use --list or --json to preview.", file=sys.stderr)
-            return 1
-        print("[session-monitor] not a TTY -- run this in a real terminal, "
-              "or use --list to preview.", file=sys.stderr)
-        print_plain_listing(model, logs_dir)
-        return 0
-
-    sel = pick_session(model)
-    if sel is None:
-        return 0
-
-    cwd, resume_argv, warning = build_resume(sel.agg, repo_root, sel.wt_path)
-    if warning:
-        print(f"[session-monitor] {warning}", file=sys.stderr)
-    try:
-        os.chdir(cwd)
-        os.execvp(resume_argv[0], resume_argv)
-    except FileNotFoundError:
-        print(f"[session-monitor] '{resume_argv[0]}' not on PATH. Run manually:\n"
-              f"  cd {cwd} && {' '.join(resume_argv)}", file=sys.stderr)
-        return 127
-    except OSError as exc:
-        # Covers ``chdir`` failure (worktree deleted between model build and
-        # exec) and any other exec-time OS error.
-        print(f"[session-monitor] cannot exec: {exc}. Run manually:\n"
-              f"  cd {cwd} && {' '.join(resume_argv)}", file=sys.stderr)
-        return 1
-    return 0  # unreachable after execvp
+# parse_args / _validate_modes / main live in session_monitor_cli; the
+# re-import at the top of this module keeps the legacy ``sm.parse_args``
+# / ``sm.main`` / ``sm._validate_modes`` call sites working without
+# changing the script's ``__main__`` guard.
+# (Re-exported from session_monitor_cli.)
 
 
 if __name__ == "__main__":
