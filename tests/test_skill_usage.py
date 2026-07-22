@@ -225,16 +225,22 @@ class TestNormalizeUsageRecord(unittest.TestCase):
 
     def test_codex_nested_record_aggregates(self):
         """End-to-end: a Codex record with nested timestamp contributes
-        to the aggregate (was dropped as undated before the refactor)."""
+        to the aggregate (was dropped as undated before the refactor).
+
+        The timestamp is built relative to ``_REF_NOW`` (windowed-fixture
+        reference time) instead of a fixed calendar date so the test
+        stays in the 30-day window regardless of when it runs.
+        """
+        ts = (_REF_NOW - _dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
             fh.write(json.dumps({
                 "attributionSkill": "dev-kit:nested",
-                "payload": {"timestamp": "2026-07-15T10:00:00.000Z",
-                            "cwd": "/repo/x"}
+                "payload": {"timestamp": ts, "cwd": "/repo/x"}
             }) + "\n")
             path = fh.name
         try:
-            agg = skill_usage.aggregate_skill_usage(path, window_days=30)
+            agg = skill_usage.aggregate_skill_usage(path, window_days=30,
+                                                    now=_REF_NOW)
             self.assertIn("dev-kit:nested", agg)
             self.assertEqual(agg["dev-kit:nested"]["turns"], 1)
         finally:

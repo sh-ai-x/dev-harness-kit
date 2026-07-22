@@ -26,17 +26,18 @@ from datetime import datetime, timezone
 # When imported as ``session_monitor.picker`` from the parent module,
 # the parent has already inserted ``tools/`` on sys.path; when run
 # standalone for tests, this is a no-op since the import is by name only.
-from session_monitor import (  # noqa: E402  (parent module path set by host)
+# Dataclasses come from session_monitor_types to keep the load order safe
+# under `python3 tools/session_monitor.py --help` (no top-level
+# session_monitor module yet under the __main__ entrypoint).
+from session_monitor_format import (  # noqa: E402
     _GLYPH,
-    Session,
-    Status,
-    WorktreeInfo,
     _column_header,
     _commit_cell,
     _rel_time,
     _src_tag,
     group_by_state,
 )
+from session_monitor_types import Session, Status, WorktreeInfo  # noqa: E402
 
 _ANSI = {
     "reset":      "\x1b[0m",

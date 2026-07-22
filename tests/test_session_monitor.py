@@ -1178,5 +1178,61 @@ class TestModeValidation(unittest.TestCase):
                                  f"got rc={rc}, stderr={err!r}")
 
 
+class TestScriptEntrypoint(unittest.TestCase):
+    """Smoke-test the documented `python3 tools/session_monitor.py` invocation.
+
+    The earlier sibling-module split introduced an absolute back-edge
+    (``from session_monitor import ...``) that fired only when the file was
+    loaded as ``__main__`` -- no top-level ``session_monitor`` module yet,
+    so the sibling import started a second copy of the parent and
+    re-entered before argparse ran. The existing test suite masked this
+    because ``tests/test_session_monitor.py`` does
+    ``sys.path.insert(0, tools/)`` and imports the module under the
+    ``session_monitor`` name, which short-circuits the cycle.
+
+    These tests execute the script as a subprocess (no sys.path tricks,
+    no test-suite import aliasing) so the load graph is identical to what
+    a user sees when they type ``python3 tools/session_monitor.py --help``
+    on the command line.
+    """
+
+    SCRIPT = PROJECT_ROOT / "tools" / "session_monitor.py"
+
+    def _run_script(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.SCRIPT), *args],
+            capture_output=True, text=True, timeout=timeout,
+        )
+
+    def test_help_exits_zero(self) -> None:
+        """`python3 tools/session_monitor.py --help` parses + exits 0."""
+        cp = self._run_script("--help")
+        self.assertEqual(cp.returncode, 0,
+                         f"--help should exit 0; got {cp.returncode}\n"
+                         f"stderr: {cp.stderr}\nstdout: {cp.stdout[:500]}")
+        # argparse help output mentions the program name and a couple of
+        # the documented flags; assert both so a regression in either the
+        # parser wiring or the import order surfaces here.
+        self.assertIn("session_monitor.py", cp.stdout)
+        self.assertIn("--picker", cp.stdout)
+        self.assertIn("--print-resume-command", cp.stdout)
+
+    def test_imports_do_not_recurse(self) -> None:
+        """Subprocess import-count guard: a clean `--help` only loads
+        ``session_monitor`` once, even though four siblings reference it.
+
+        The regression that prompted the cycle fix was a second copy of
+        ``tools/session_monitor.py`` triggered by sibling imports during
+        the first copy's load. Counting subprocess invocations inside the
+        child is awkward, so this test instead asserts the simpler signal
+        that argparse succeeds (which only happens if no ImportError
+        fired mid-load) and that the script doesn't print to stderr.
+        """
+        cp = self._run_script("--help")
+        self.assertEqual(cp.returncode, 0)
+        self.assertEqual(cp.stderr, "",
+                         f"clean --help must not write to stderr; got: {cp.stderr}")
+
+
 if __name__ == "__main__":
     unittest.main()

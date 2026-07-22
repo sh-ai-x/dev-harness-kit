@@ -23,12 +23,14 @@ from pathlib import Path
 from typing import Dict, List
 
 import skill_usage  # noqa: E402  (tools/ on sys.path from parent)
-from session_monitor import (  # noqa: E402
-    Status,
-    WorktreeInfo,
+
+# Status / WorktreeInfo come from session_monitor_types (zero project-internal
+# imports) to keep the load order safe under `python3 tools/session_monitor.py`.
+from session_monitor_format import (  # noqa: E402
     _per_worktree_top_skills,
     _rel_time,
 )
+from session_monitor_types import Status, WorktreeInfo  # noqa: E402
 
 EVAL_AXES: tuple = (
     "intent_alignment", "ambiguity_unresolved", "repeated_mistakes",

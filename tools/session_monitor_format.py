@@ -6,6 +6,12 @@ primitives are shared between the inline picker
 emitters, so they live in their own module to avoid a circular
 import between the picker and the main module.
 
+Imports ``Status`` / ``WorktreeInfo`` from ``session_monitor_types`` (NOT
+``session_monitor``) so the cycle that fires under
+``python3 tools/session_monitor.py --help`` (where the parent is loaded
+as ``__main__`` and has no top-level ``session_monitor`` module yet)
+cannot re-enter this module mid-load.
+
 Public surface (re-exported by ``tools/session_monitor.py``):
 - ``STATE_SECTIONS``, ``group_by_state``
 - ``_GLYPH``, ``_rel_time``, ``_src_tag``
@@ -16,7 +22,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from session_monitor import Status, WorktreeInfo  # noqa: E402
+from session_monitor_types import Status, WorktreeInfo  # noqa: E402
 
 # Section labels for the structured listing. Order = display order,
 # which also encodes priority (live work first, archived work last).

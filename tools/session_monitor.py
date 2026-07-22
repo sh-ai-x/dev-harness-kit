@@ -34,9 +34,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 from typing import Iterable
 
@@ -46,91 +44,6 @@ from typing import Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skill_usage  # noqa: E402  (path set up above)
 import token_efficiency_analyzer as tea  # noqa: E402  (path set up above)
-
-
-# Forward declarations: the dataclasses (Status / Session / AgentNode /
-# AgentGraph / WorktreeInfo) are referenced by the sibling-module
-# imports below, so they are hoisted above the imports. They stay
-# here even after the rest of the module is loaded -- the load order
-# in Python is "execute imports, then run remaining top-level code",
-# and the sibling modules only need to resolve names that are
-# already defined by the time they look them up.
-class Status(Enum):
-    LIVE = "live"
-    IDLE = "idle"
-    STALE = "stale"
-
-
-@dataclass
-class Session:
-    agg: dict
-    worktree_state: str
-    status: Status
-    pids: list[int] = field(default_factory=list)
-    wt_path: Path | None = None
-
-    @property
-    def session_id(self) -> str:
-        return self.agg.get("session_id", "")
-
-    @property
-    def source(self) -> str:
-        return self.agg.get("source", "claude-code")
-
-    @property
-    def worktree(self) -> str:
-        return self.agg.get("worktree") or "(unknown)"
-
-    @property
-    def branch(self) -> str:
-        return self.agg.get("branch") or ""
-
-    @property
-    def model(self) -> str:
-        return self.agg.get("model") or "?"
-
-    @property
-    def last_ts(self):
-        return self.agg.get("last_ts")
-
-    @property
-    def subagent_count(self) -> int:
-        tc = self.agg.get("tool_counts") or {}
-        try:
-            return int(tc.get("Agent", 0))
-        except Exception:
-            return 0
-
-    @property
-    def log_path(self) -> str:
-        return self.agg.get("log_path", "")
-
-
-@dataclass
-class AgentNode:
-    tool_use_id: str = ""
-    subagent_type: str = ""
-    description: str = ""
-    prompt_excerpt: str = ""
-    turn_count: int = 0
-    last_ts: datetime | None = None
-
-
-@dataclass
-class AgentGraph:
-    session_id: str
-    root_user_prompt: str
-    nodes: list[AgentNode]
-
-
-@dataclass
-class WorktreeInfo:
-    dirname: str
-    state: str
-    path: Path | None
-    sessions: list  # type: ignore[type-arg]  # list[Session] forward-ref
-    last_commit_subject: str | None = None
-
 
 # Three concerns used to live inline: the interactive arrow-key picker
 # (termios + ANSI), the --cli-setup alias installer, the JSON +
@@ -178,6 +91,19 @@ from session_monitor_render import (  # noqa: E402
     EVAL_AXES,
     build_eval_handshake,
     print_json,
+)
+
+# Dataclasses live in session_monitor_types to break the import cycle that
+# would otherwise fire when this file is loaded as ``__main__`` (no top-level
+# ``session_monitor`` module yet). The siblings (format / picker / render)
+# import these names from session_monitor_types, which has zero project-
+# internal imports and therefore cannot re-enter this module mid-load.
+from session_monitor_types import (  # noqa: E402
+    AgentGraph,
+    AgentNode,
+    Session,
+    Status,
+    WorktreeInfo,
 )
 
 # Public re-exports. Tests import these via ``sm.X``; ruff treats
