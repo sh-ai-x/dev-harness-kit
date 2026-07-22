@@ -212,7 +212,7 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                     --operator-is-only-human, defer to the bypass
                     helper BEFORE entering the regular CLASSIFY loop:
 
-                      import sys, subprocess
+                      import sys, os, subprocess
                       from pathlib import Path
                       sys.path.insert(0, str(
                           Path(__file__).resolve().parents[2] / "lib"))
@@ -233,12 +233,48 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                           check=True,
                           capture_output=True, text=True).stdout.strip()
                       codeowners_path = ".github/CODEOWNERS"
-                      collaborators = subprocess.run(
+
+                      # Resolve owner/name from $GITHUB_REPOSITORY or
+                      # `gh repo view`. Python f-strings do NOT
+                      # substitute shell-style $REPO_OWNER -- use the
+                      # explicit Python variables (owner_full split
+                      # into owner/name) so the API call resolves to
+                      # a real path. Missing env + gh-down would
+                      # raise here, which is the desired fail-loud
+                      # behavior (the older broken wiring would have
+                      # produced a literal /repos/$REPO_OWNER/... URL
+                      # that 404'd silently into an empty collaborators
+                      # list -- the exact fail-open the security
+                      # review flagged).
+                      repo_full = os.environ.get("GITHUB_REPOSITORY", "")
+                      if not repo_full:
+                          repo_full = subprocess.run(
+                              ["gh", "repo", "view", "--json",
+                               "nameWithOwner", "-q", ".nameWithOwner"],
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
+                      repo_owner, repo_name = repo_full.split("/", 1)
+
+                      # The collaborators API call uses check=True so
+                      # a non-zero exit (404, rate limit, permission)
+                      # raises; the orchestrator treats the failure
+                      # as collaborator_lookup_ok=False and refuses
+                      # the bypass with EXIT_OWNERSHIP_UNKNOWN. Empty
+                      # stdout on a successful call counts as an
+                      # empty collaborator list (combined with the
+                      # positive-ownership check, refuses on empty
+                      # CODEOWNERS).
+                      collaborator_proc = subprocess.run(
                           ["gh", "api",
-                           f"/repos/$REPO_OWNER/$REPO_NAME/"
+                           f"/repos/{repo_owner}/{repo_name}/"
                            "collaborators?per_page=100",
                            "-q", ".[].login"],
-                          capture_output=True, text=True).stdout.splitlines()
+                          capture_output=True, text=True)
+                      collaborator_lookup_ok = (
+                          collaborator_proc.returncode == 0)
+                      collaborators = (
+                          collaborator_proc.stdout.splitlines() or [])
+
                       pr_number = int(subprocess.run(
                           ["gh", "pr", "view", "--json", "number",
                            "-q", ".number"],
@@ -249,6 +285,7 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                           operator_handle=operator,
                           codeowners_path=codeowners_path,
                           collaborator_handles=collaborators,
+                          collaborator_lookup_ok=collaborator_lookup_ok,
                           pr_number=pr_number,
                           now_iso=subprocess.run(
                               ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"],
@@ -262,16 +299,31 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                     rest of the algorithm and print the bypass
                     message + exit 0.
                     If the helper returned EXIT_MULTI_OWNER (1) and
-                    printed "alternate owner(s) found" or "could not
-                    read CODEOWNERS" or "operator ... not listed in
-                    CODEOWNERS", the bypass was refused -- print the
-                    helper's stdout and EXIT 0 to fall back to the
-                    human-gate path (REVIEW_REQUIRED -> waiting for
-                    human review). The PR cannot be auto-merged; do
-                    not retry.
+                    printed "alternate owner(s) found", the bypass
+                    was refused -- print the helper's stdout and
+                    EXIT 0 to fall back to the human-gate path
+                    (REVIEW_REQUIRED -> waiting for human review).
+                    The PR cannot be auto-merged; do not retry.
+                    If the helper returned EXIT_OWNERSHIP_UNKNOWN
+                    (4) and printed "could not read CODEOWNERS" or
+                    "operator ... not listed in CODEOWNERS" or
+                    "the collaborators API call did not return a
+                    confirmed success", the bypass was refused for a
+                    *security-sensitive* reason (unknown ownership) --
+                    print the helper's stdout and EXIT 0 to fall back
+                    to the human-gate path. The PR cannot be
+                    auto-merged; the operator should investigate
+                    the missing ownership signal before retrying.
                     If the helper returned EXIT_RATIONALE_REQUIRED
                     (2), print the helper's stderr and EXIT 2 so the
                     operator adds a non-empty --rationale and retries.
+                    If the helper returned EXIT_MERGE_FAILED (3) the
+                    bypass was approved, the audit comment was
+                    posted, but `gh pr merge --auto --squash` failed
+                    (protected branch, stale HEAD, etc.) -- print
+                    the helper's stderr and EXIT 1 so CI surfaces
+                    the partial state. The operator must re-trigger
+                    the bypass once the merge-state issue is fixed.
                     If no --operator-is-only-human was passed,
                     continue to step 1 (default human-gate path).
 
@@ -289,8 +341,15 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                           sys.exit(0)
                       elif rc == bpc.EXIT_MULTI_OWNER:
                           sys.exit(0)   # human-gate fallback
+                      elif rc == bpc.EXIT_OWNERSHIP_UNKNOWN:
+                          sys.exit(0)   # human-gate fallback
                       elif rc == bpc.EXIT_RATIONALE_REQUIRED:
                           sys.exit(2)
+                      elif rc == bpc.EXIT_MERGE_FAILED:
+                          sys.exit(1)   # audit comment posted but
+                                           # merge scheduling failed --
+                                           # distinct from a successful
+                                           # refusal; surface to CI
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call)
   2. TERMINATE  — if REVIEW_VERDICT == "APPROVED"
                     AND every check.conclusion ∈ {success, skipped, neutral}
@@ -416,7 +475,7 @@ The canonical wiring (executed at the top of every `/dev-kit:babysit-pr`
 invocation, after the §Lock file protocol):
 
 ```python
-import sys
+import sys, os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
@@ -436,7 +495,7 @@ operator = subprocess.run(
     capture_output=True, text=True).stdout.strip()
 codeowners_path = Path(".github/CODEOWNERS")
 
-# Resolve $REPO_OWNER / $REPO_NAME from the GitHub Actions env
+# Resolve owner/name from the GitHub Actions env
 # (`GITHUB_REPOSITORY` is "owner/name") or fall back to `gh repo view`
 # so this block works both inside CI and from a local shell. Hard-fail
 # loudly if neither resolves -- the older wiring referenced undefined
@@ -448,11 +507,20 @@ if not repo_full:
         check=True, capture_output=True, text=True).stdout.strip()
 repo_owner, repo_name = repo_full.split("/", 1)
 
-collaborators = subprocess.run(
+# The collaborators API call uses `check=True` so a non-zero exit
+# (404, rate limit, permission error) raises. The orchestrator
+# treats a confirmed non-zero as `collaborator_lookup_ok=False`
+# and refuses the bypass with EXIT_OWNERSHIP_UNKNOWN. Empty
+# stdout on a successful call is treated as `lookup_ok=True`
+# with an empty collaborators list (and combined with the
+# positive-ownership check below, refuses on empty CODEOWNERS).
+collaborator_proc = subprocess.run(
     ["gh", "api",
      f"/repos/{repo_owner}/{repo_name}/collaborators?per_page=100",
      "-q", ".[].login"],
-    capture_output=True, text=True).stdout.splitlines() or []
+    capture_output=True, text=True)
+collaborator_lookup_ok = collaborator_proc.returncode == 0
+collaborators = collaborator_proc.stdout.splitlines() or []
 pr_number = int(subprocess.run(
     ["gh", "pr", "view", "--json", "number", "-q", ".number"],
     capture_output=True, text=True).stdout.strip())
@@ -462,18 +530,28 @@ rc = bpc.run_babysit_once(
     operator_handle=operator,
     codeowners_path=codeowners_path,
     collaborator_handles=collaborators,
+    collaborator_lookup_ok=collaborator_lookup_ok,
     pr_number=pr_number,
 )
-# Map the helper's three exit codes to the orchestrator's contract:
-#   EXIT_OK (0)              -> 0  (bypass approved, exit normally)
-#   EXIT_MULTI_OWNER (1)     -> 0  (fall back to human-gate per
-#                                §Algorithm step 3D; the skill's own
-#                                refusal printed above is enough -- the
-#                                bypass refused itself, no need to
-#                                surface an additional failure to CI)
-#   EXIT_RATIONALE_REQUIRED (2) -> 2  (operator must add a non-empty
-#                                --rationale and retry)
-if rc == bpc.EXIT_MULTI_OWNER:
+# Map the helper's exit codes to the orchestrator's contract:
+#   EXIT_OK (0)                 -> 0  (bypass approved)
+#   EXIT_MULTI_OWNER (1)        -> 0  (alternate owners found;
+#                                    human-gate per §Algorithm step 3D)
+#   EXIT_RATIONALE_REQUIRED (2)  -> 2  (operator must add --rationale)
+#   EXIT_OWNERSHIP_UNKNOWN (4)  -> 0  (collaborator/CODEOWNERS
+#                                    could not be confirmed; the
+#                                    bypass refused itself, the
+#                                    helper printed the reason; the
+#                                    fallback path is the human-gate)
+#   EXIT_MERGE_FAILED (3)       -> 1  (audit comment posted but
+#                                    `gh pr merge --auto --squash`
+#                                    failed -- this is a real failure
+#                                    that needs operator attention,
+#                                    not a successful refusal. Distinct
+#                                    exit so CI surfaces the partial
+#                                    state instead of looking like a
+#                                    successful bypass refusal)
+if rc in (bpc.EXIT_OK, bpc.EXIT_MULTI_OWNER, bpc.EXIT_OWNERSHIP_UNKNOWN):
     sys.exit(0)
 sys.exit(rc)
 ```

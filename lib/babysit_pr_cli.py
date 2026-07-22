@@ -45,6 +45,8 @@ PathLike = str | Path
 EXIT_OK: int = 0
 EXIT_MULTI_OWNER: int = 1
 EXIT_RATIONALE_REQUIRED: int = 2
+EXIT_MERGE_FAILED: int = 3
+EXIT_OWNERSHIP_UNKNOWN: int = 4
 
 # Placeholder for `now_iso` when the caller does not pin one. The real
 # skill passes its own ISO-8601 stamp so the audit comment is
@@ -267,6 +269,7 @@ def run_babysit_once(
     operator_handle: str,
     codeowners_path: PathLike,
     collaborator_handles: Iterable[str],
+    collaborator_lookup_ok: bool,
     pr_number: int,
     now_iso: str = DEFAULT_NOW_ISO,
 ) -> int:
@@ -275,14 +278,22 @@ def run_babysit_once(
     The flow:
 
       1. Parse argv. No flag -> human-gate hand-off (legacy behavior).
-      2. Flag set -> require non-empty rationale; read CODEOWNERS;
-         collect alternates.
-      3. If any alternate exists OR the ownership sources could not be
-         read -> print the alternates (or the IO failure) + remediation
-         pointer and return `EXIT_MULTI_OWNER`. Fail-closed: an outage
-         or permission glitch MUST NOT authorize the bypass.
-      4. Otherwise post the audit comment and schedule
-         `gh pr merge --auto --squash`; return `EXIT_OK`.
+      2. Flag set -> require non-empty rationale; verify the
+         collaborators API succeeded; read CODEOWNERS.
+      3. If any alternate exists OR the CODEOWNERS file could not be
+         read OR the collaborators lookup failed -> print the
+         alternates (or the IO/API failure) + remediation pointer
+         and return the appropriate failure exit code. Fail-closed:
+         any outage or glitch MUST NOT authorize the bypass.
+      4. Positive-ownership confirmation: the operator must appear
+         in the parsed CODEOWNERS list. An empty / unrelated
+         CODEOWNERS refuses the bypass.
+      5. Otherwise post the audit comment and schedule
+         `gh pr merge --auto --squash`; return `EXIT_OK`. A merge
+         scheduling failure (after the audit comment is posted)
+         returns `EXIT_MERGE_FAILED` so the wrapper surfaces a
+         distinct non-zero exit instead of reporting the partial
+         state as a successful refusal.
 
     The function never touches `gh` itself; the four `_post_*` / `_run_*`
     / `_write_*` shims are the only external surface. Tests replace the
@@ -310,14 +321,32 @@ def run_babysit_once(
         )
         return EXIT_RATIONALE_REQUIRED
 
+    # Collaborators lookup must succeed before the bypass authorizes
+    # anything. An outage, 404, rate limit, permission failure, or
+    # empty page must NOT be interpreted as 'no alternates known' --
+    # that was the previous fail-open behaviour. The skill runs
+    # `gh api ... -q .[].login` with check=True and reports the
+    # status here. Missing the positive signal requires refusing.
+    if not collaborator_lookup_ok:
+        _write_stdout(
+            "Refusing --operator-is-only-human: the collaborators API "
+            "call did not return a confirmed success (outage, 404, "
+            "rate limit, permission, or empty stdout). Without "
+            "positive confirmation of who has push access, the bypass "
+            "refuses to authorize auto-merge. Falling back to the "
+            "human-gate path (REVIEW_REQUIRED -> waiting for human "
+            "review)."
+        )
+        return EXIT_OWNERSHIP_UNKNOWN
+
     # Fail-closed: an unreadable CODEOWNERS file is treated as evidence
     # of *unknown* ownership, which the bypass must NOT authorize. The
     # previous behaviour swallowed the IO error and returned `[]`, which
     # the caller could interpret as "no alternate owners" and authorize
     # the auto-merge -- that was a security-sensitive bypass. Now any
     # OSError (missing file, permission denied, is-a-directory, encoding
-    # error) refuses the bypass with `EXIT_MULTI_OWNER` and prints the
-    # underlying error so the operator can fix the IO and retry.
+    # error) refuses the bypass with `EXIT_OWNERSHIP_UNKNOWN` and prints
+    # the underlying error so the operator can fix the IO and retry.
     try:
         codeowners = parse_codeowners(codeowners_path)
     except OSError as exc:
@@ -329,7 +358,7 @@ def run_babysit_once(
             "Falling back to the human-gate path (REVIEW_REQUIRED -> "
             "waiting for human review)."
         )
-        return EXIT_MULTI_OWNER
+        return EXIT_OWNERSHIP_UNKNOWN
     has_alternate, alternates = has_alternate_owners(
         operator_handle=operator_handle,
         codeowner_handles=codeowners,
@@ -353,12 +382,11 @@ def run_babysit_once(
 
     # Positive-ownership confirmation: even with no alternates found,
     # the operator must be explicitly listed in CODEOWNERS for the
-    # bypass to authorize. An empty CODEOWNERS + empty collaborators
-    # list is *unknown* ownership, not *single* ownership -- the two
-    # cases are not equivalent. Refusing absent-operator closes the
-    # gap where an outage on the collaborators endpoint (or an empty
-    # but readable CODEOWNERS file) could otherwise authorize the
-    # auto-merge during a multi-operator incident.
+    # bypass to authorize. An empty CODEOWNERS + collaborators-ok list
+    # is *unknown* ownership, not *single* ownership -- the two cases
+    # are not equivalent. Refusing absent-operator closes the gap
+    # where a multi-operator repo with an accidentally-narrow
+    # CODEOWNERS could otherwise authorize the auto-merge.
     op_normalized = operator_handle.lstrip("@")
     if op_normalized not in codeowners:
         _write_stdout(
@@ -369,7 +397,7 @@ def run_babysit_once(
             "authorize auto-merge. Falling back to the human-gate "
             "path (REVIEW_REQUIRED -> waiting for human review)."
         )
-        return EXIT_MULTI_OWNER
+        return EXIT_OWNERSHIP_UNKNOWN
 
     # Single-operator: post the audit comment + schedule auto-merge.
     body = format_bot_approve_comment(
@@ -384,18 +412,20 @@ def run_babysit_once(
         # `check=True` on the merge subprocess raises
         # CalledProcessError on failure (protected branch, stale HEAD,
         # merge-queue state, etc.). The audit comment is already
-        # posted at this point, so the operator sees the partial
-        # trail. Convert the crash to EXIT_MULTI_OWNER so the
-        # orchestrator falls back to the human-gate path without
-        # surfacing an unhandled traceback.
+        # posted at this point. Use EXIT_MERGE_FAILED (distinct from
+        # EXIT_MULTI_OWNER) so the wrapper preserves a non-zero exit
+        # and the operator can distinguish "bypass refused, no audit
+        # comment" from "bypass approved, audit comment posted, merge
+        # scheduling failed". The audit comment remains in the PR
+        # thread for the audit trail.
         _write_stderr(
             f"gh pr merge --auto --squash failed after the audit "
             f"comment was posted ({exc!r}). The /bot-approve comment "
-            f"remains in the PR thread for the audit trail. Falling "
-            f"back to the human-gate path; re-investigate the merge "
-            f"failure manually."
+            f"remains in the PR thread for the audit trail. The "
+            f"bypass side effect is INCOMPLETE -- re-investigate the "
+            f"merge failure manually and re-trigger the bypass."
         )
-        return EXIT_MULTI_OWNER
+        return EXIT_MERGE_FAILED
     _write_stdout(
         f"Single-operator bypass approved. "
         f"Audit comment posted; gh pr merge --auto --squash scheduled for PR #{pr_number}."

@@ -15,7 +15,7 @@ Pins the contract for the `--operator-is-only-human` opt-out (issue #324):
     T7: capture group with @org/team-name -> "org/team-name"
     T8: dedup across multiple rules
     T9: email handles are ignored (CODEOWNERS user@domain format)
-    T10 (run_babysit_once): missing CODEOWNERS -> EXIT_MULTI_OWNER with
+    T10 (run_babysit_once): missing CODEOWNERS -> EXIT_OWNERSHIP_UNKNOWN with
          "could not read CODEOWNERS" -- the bypass refuses to authorize
          auto-merge when ownership cannot be confirmed
 
@@ -301,6 +301,7 @@ class TestRunBabysitOnce(unittest.TestCase):
                 operator_handle="sh-ai-x",
                 codeowners_path=self.codeowners,
                 collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
                 pr_number=42,
             )
         self.assertEqual(rc, bpc.EXIT_OK)
@@ -321,6 +322,7 @@ class TestRunBabysitOnce(unittest.TestCase):
                 operator_handle="sh-ai-x",
                 codeowners_path=self.codeowners,
                 collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
                 pr_number=42,
                 now_iso="2026-07-21T12:00:00Z",
             )
@@ -337,6 +339,111 @@ class TestRunBabysitOnce(unittest.TestCase):
         self.assertEqual(merge_pr, "42")
         self.assertEqual(merge_argv, ["pr", "merge", "42", "--auto", "--squash"])
 
+    def test_collaborator_lookup_failure_refuses_with_distinct_exit(self) -> None:
+        """Fail-closed on the collaborators endpoint.
+
+        The collaborators API call can fail (404, rate limit,
+        permission error, empty stdout). When the skill reports
+        collaborator_lookup_ok=False, the bypass refuses with
+        EXIT_OWNERSHIP_UNKNOWN -- distinct from EXIT_MULTI_OWNER so
+        the wrapper can distinguish 'no alternates found' from
+        'endpoint unreachable / unknown ownership'.
+        """
+        captured = _CliResult()
+        argv = ["--operator-is-only-human", "--rationale",
+                "must refuse on collaborator outage"]
+        p_stdout, p_stderr, p_comment, p_merge = self._patch_io(captured)
+        with p_stdout, p_stderr, p_comment, p_merge:
+            rc = bpc.run_babysit_once(
+                argv=argv,
+                operator_handle="sh-ai-x",
+                codeowners_path=self.codeowners,
+                collaborator_handles=[],   # even if empty, lookup_ok=False refuses
+                collaborator_lookup_ok=False,
+                pr_number=42,
+            )
+        self.assertEqual(rc, bpc.EXIT_OWNERSHIP_UNKNOWN,
+                         "collaborator outage must refuse with "
+                         "EXIT_OWNERSHIP_UNKNOWN")
+        out = captured.stdout.getvalue()
+        self.assertIn("did not return a confirmed success", out)
+        self.assertIn("human-gate", out)
+        # No comment, no merge -- unknown ownership never authorizes.
+        self.assertEqual(captured.commented, [])
+        self.assertEqual(captured.merged, [])
+
+    def test_invalid_utf8_codeowners_fails_closed(self) -> None:
+        """Invalid-UTF-8 CODEOWNERS must refuse the bypass, not
+        raise UnicodeDecodeError out of the orchestrator.
+
+        `parse_codeowners` reads the file with encoding='utf-8' which
+        raises UnicodeDecodeError on invalid bytes. The helper
+        converts that to OSError so the orchestrator's fail-closed
+        handler catches it. Without this test, the UnicodeDecodeError
+        would escape and crash the skill body.
+        """
+        captured = _CliResult()
+        invalid = self.tmp / "BAD_UTF8"
+        invalid.write_bytes(b"*  @sh-ai-x\n\xff\xfe invalid bytes")
+        argv = ["--operator-is-only-human", "--rationale",
+                "must refuse on invalid UTF-8 CODEOWNERS"]
+        p_stdout, p_stderr, p_comment, p_merge = self._patch_io(captured)
+        with p_stdout, p_stderr, p_comment, p_merge:
+            rc = bpc.run_babysit_once(
+                argv=argv,
+                operator_handle="sh-ai-x",
+                codeowners_path=invalid,
+                collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
+                pr_number=42,
+            )
+        self.assertEqual(rc, bpc.EXIT_OWNERSHIP_UNKNOWN,
+                         "invalid UTF-8 CODEOWNERS must refuse the "
+                         "bypass with EXIT_OWNERSHIP_UNKNOWN")
+        out = captured.stdout.getvalue()
+        self.assertIn("could not read CODEOWNERS", out)
+        self.assertEqual(captured.commented, [])
+        self.assertEqual(captured.merged, [])
+
+    def test_merge_failure_returns_distinct_exit_code(self) -> None:
+        """When the audit comment posts but gh pr merge fails
+        (protected branch, stale HEAD, etc.), the helper returns
+        EXIT_MERGE_FAILED -- distinct from EXIT_MULTI_OWNER so the
+        wrapper can preserve a non-zero exit and the operator can
+        tell 'bypass refused' from 'bypass approved, scheduling
+        failed'.
+        """
+        captured = _CliResult()
+
+        # Override _run_pr_merge to raise CalledProcessError after
+        # the audit comment is posted.
+        class _MergeFails(RuntimeError):
+            pass
+
+        def _raise(*_a, **_kw):
+            raise _MergeFails("Command failed with exit 1: protected branch")
+
+        p_stdout = patch.object(bpc, "_write_stdout", lambda s: None)
+        p_stderr = patch.object(bpc, "_write_stderr", lambda s: None)
+        p_comment = patch.object(bpc, "_post_pr_comment", lambda n, body: captured.commented.append((n, body)))
+        p_merge = patch.object(bpc, "_run_pr_merge", _raise)
+        with p_stdout, p_stderr, p_comment, p_merge:
+            rc = bpc.run_babysit_once(
+                argv=["--operator-is-only-human", "--rationale",
+                      "merge will fail"],
+                operator_handle="sh-ai-x",
+                codeowners_path=self.codeowners,
+                collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
+                pr_number=42,
+            )
+        self.assertEqual(rc, bpc.EXIT_MERGE_FAILED,
+                         "merge failure must use EXIT_MERGE_FAILED, "
+                         "not EXIT_MULTI_OWNER")
+        # Audit comment was posted before the merge raised.
+        self.assertEqual(len(captured.commented), 1)
+        self.assertEqual(captured.merged, [])
+
     def test_flag_with_multiple_owners_refuses(self) -> None:
         captured = _CliResult()
         multi = _write_codeowners(self.tmp, "*  @sh-ai-x @alice\n")
@@ -348,6 +455,7 @@ class TestRunBabysitOnce(unittest.TestCase):
                 operator_handle="sh-ai-x",
                 codeowners_path=multi,
                 collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
                 pr_number=42,
             )
         self.assertEqual(rc, bpc.EXIT_MULTI_OWNER)
@@ -380,10 +488,12 @@ class TestRunBabysitOnce(unittest.TestCase):
                 argv=argv,
                 operator_handle="sh-ai-x",
                 codeowners_path=empty,  # empty but readable
-                collaborator_handles=[],  # endpoint down / empty
+                collaborator_handles=[],  # endpoint succeeded, empty list
+                collaborator_lookup_ok=True,  # positive signal that
+                                              # the lookup succeeded
                 pr_number=42,
             )
-        self.assertEqual(rc, bpc.EXIT_MULTI_OWNER,
+        self.assertEqual(rc, bpc.EXIT_OWNERSHIP_UNKNOWN,
                          "operator absent from CODEOWNERS + empty "
                          "collaborators must refuse the bypass")
         out = captured.stdout.getvalue()
@@ -412,9 +522,10 @@ class TestRunBabysitOnce(unittest.TestCase):
                 operator_handle="sh-ai-x",
                 codeowners_path=empty,
                 collaborator_handles=[],
+                collaborator_lookup_ok=False,
                 pr_number=42,
             )
-        self.assertEqual(rc, bpc.EXIT_MULTI_OWNER,
+        self.assertEqual(rc, bpc.EXIT_OWNERSHIP_UNKNOWN,
                          "empty CODEOWNERS + empty collaborators "
                          "must refuse the bypass")
         self.assertEqual(captured.commented, [])
@@ -439,9 +550,10 @@ class TestRunBabysitOnce(unittest.TestCase):
                 operator_handle="sh-ai-x",
                 codeowners_path=self.tmp / "absent",  # never created
                 collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
                 pr_number=42,
             )
-        self.assertEqual(rc, bpc.EXIT_MULTI_OWNER,
+        self.assertEqual(rc, bpc.EXIT_OWNERSHIP_UNKNOWN,
                          "missing CODEOWNERS must refuse the bypass")
         out = captured.stdout.getvalue()
         self.assertIn("could not read CODEOWNERS", out)
@@ -463,6 +575,7 @@ class TestRunBabysitOnce(unittest.TestCase):
                 operator_handle="sh-ai-x",
                 codeowners_path=self.codeowners,
                 collaborator_handles=["sh-ai-x"],
+                collaborator_lookup_ok=True,
                 pr_number=42,
             )
         self.assertEqual(rc, bpc.EXIT_RATIONALE_REQUIRED)
