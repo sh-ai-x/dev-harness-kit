@@ -178,7 +178,17 @@ def parse_codeowners(path: PathLike) -> list[str]:
     p = Path(path)
     # No `try/except` here -- let any OSError propagate. The orchestrator
     # catches it and refuses the bypass.
-    text = p.read_text(encoding="utf-8")
+    #
+    # `encoding="utf-8"` raises UnicodeDecodeError on invalid bytes
+    # instead of silently substituting replacement characters.
+    # UnicodeDecodeError is NOT an OSError subclass, so without the
+    # explicit except below it would escape the orchestrator's fail-
+    # closed handler. Treat it the same as an IO failure so the
+    # bypass refuses on malformed CODEOWNERS too.
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise OSError(f"CODEOWNERS at {path} is not valid UTF-8: {exc}") from exc
 
     handles: set[str] = set()
     for raw_line in text.splitlines():

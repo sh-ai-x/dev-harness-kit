@@ -274,6 +274,23 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                     operator adds a non-empty --rationale and retries.
                     If no --operator-is-only-human was passed,
                     continue to step 1 (default human-gate path).
+
+                    IMPORTANT: do NOT use `sys.exit(rc)` here. The
+                    helper's EXIT_MULTI_OWNER (1) means "bypass
+                    refused, fall back to human-gate" -- it is a
+                    successful outcome of the bypass decision, NOT a
+                    failure of the skill. Mapping it 1:1 to a
+                    process exit code would surface a fake failure
+                    to CI for a refusal that the algorithm step 3D
+                    treats as a normal "REVIEW_REQUIRED -> exit 0"
+                    hand-off. The correct mapping is:
+
+                      if rc == bpc.EXIT_OK:
+                          sys.exit(0)
+                      elif rc == bpc.EXIT_MULTI_OWNER:
+                          sys.exit(0)   # human-gate fallback
+                      elif rc == bpc.EXIT_RATIONALE_REQUIRED:
+                          sys.exit(2)
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call)
   2. TERMINATE  — if REVIEW_VERDICT == "APPROVED"
                     AND every check.conclusion ∈ {success, skipped, neutral}
@@ -418,8 +435,22 @@ operator = subprocess.run(
     ["gh", "api", "/user", "-q", ".login"], check=True,
     capture_output=True, text=True).stdout.strip()
 codeowners_path = Path(".github/CODEOWNERS")
+
+# Resolve $REPO_OWNER / $REPO_NAME from the GitHub Actions env
+# (`GITHUB_REPOSITORY` is "owner/name") or fall back to `gh repo view`
+# so this block works both inside CI and from a local shell. Hard-fail
+# loudly if neither resolves -- the older wiring referenced undefined
+# `owner` / `repo` identifiers that NameError'd before the helper ran.
+repo_full = os.environ.get("GITHUB_REPOSITORY")
+if not repo_full:
+    repo_full = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        check=True, capture_output=True, text=True).stdout.strip()
+repo_owner, repo_name = repo_full.split("/", 1)
+
 collaborators = subprocess.run(
-    ["gh", "api", f"/repos/{owner}/{repo}/collaborators?per_page=100",
+    ["gh", "api",
+     f"/repos/{repo_owner}/{repo_name}/collaborators?per_page=100",
      "-q", ".[].login"],
     capture_output=True, text=True).stdout.splitlines() or []
 pr_number = int(subprocess.run(
@@ -433,6 +464,17 @@ rc = bpc.run_babysit_once(
     collaborator_handles=collaborators,
     pr_number=pr_number,
 )
+# Map the helper's three exit codes to the orchestrator's contract:
+#   EXIT_OK (0)              -> 0  (bypass approved, exit normally)
+#   EXIT_MULTI_OWNER (1)     -> 0  (fall back to human-gate per
+#                                §Algorithm step 3D; the skill's own
+#                                refusal printed above is enough -- the
+#                                bypass refused itself, no need to
+#                                surface an additional failure to CI)
+#   EXIT_RATIONALE_REQUIRED (2) -> 2  (operator must add a non-empty
+#                                --rationale and retry)
+if rc == bpc.EXIT_MULTI_OWNER:
+    sys.exit(0)
 sys.exit(rc)
 ```
 
