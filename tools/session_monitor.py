@@ -503,9 +503,16 @@ def _correlate_nodes_to_chains(nodes: list[AgentNode],
     so the description (which the parent ``Agent`` ``tool_use`` echoes
     back) is a stable identity even when concurrent sidechains
     interleave and the encounter index would swap turn counts between
-    agents. Falls back to position-by-index when no description match
-    is found -- preserves legacy behaviour for transcripts without
-    ``description`` fields. Mutates ``nodes`` in place."""
+    agents.
+
+    Mixed transcripts (some nodes have descriptions, others do not)
+    pair the unmatched nodes against the leftover chains by encounter
+    index so the legacy position-based behaviour still applies to the
+    records that need it -- without short-circuiting when at least one
+    description match succeeded. Pure-description transcripts (every
+    node has a description) skip the positional pass entirely.
+
+    Mutates ``nodes`` in place."""
     if not chains:
         return
     chain_user_texts = [meta.get("first_user_text", "") for _, meta in chains]
@@ -524,15 +531,31 @@ def _correlate_nodes_to_chains(nodes: list[AgentNode],
                 used.add(j)
                 matched_any = True
                 break
-    if matched_any:
+    if not matched_any:
+        # Legacy fallback for transcripts that carry no ``description``
+        # field at all: pair every node by encounter index.
+        for i, node in enumerate(nodes):
+            if i < len(chains):
+                _, meta = chains[i]
+                node.turn_count = meta.get("turns", 0) or 0
+                node.last_ts = meta.get("last_ts")
         return
-    # Legacy fallback: pair by encounter index for transcripts that
-    # carry no ``description`` field.
-    for i, node in enumerate(nodes):
-        if i < len(chains):
-            _, meta = chains[i]
-            node.turn_count = meta.get("turns", 0) or 0
-            node.last_ts = meta.get("last_ts")
+    # Mixed-description transcripts: any node still at zero counts after
+    # the description pass needs the positional fallback against the
+    # chains the description pass didn't claim. Iterate nodes in order
+    # so the pairing is stable across runs.
+    leftover = [j for j in range(len(chains)) if j not in used]
+    fallback_iter = iter(leftover)
+    for node in nodes:
+        if node.turn_count != 0 or node.last_ts is not None:
+            continue  # already matched by description
+        try:
+            j = next(fallback_iter)
+        except StopIteration:
+            break
+        _, meta = chains[j]
+        node.turn_count = meta.get("turns", 0) or 0
+        node.last_ts = meta.get("last_ts")
 
 
 def _first_user_text(msg: dict) -> str:

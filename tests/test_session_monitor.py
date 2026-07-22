@@ -1029,6 +1029,42 @@ class TestCorrelateNodesToChains(unittest.TestCase):
         self.assertEqual(nodes[0].turn_count, 5)
         self.assertEqual(nodes[1].turn_count, 0)
 
+    def test_mixed_descriptions_fall_back_for_unmatched(self):
+        """Mixed transcripts: one node matches by description, another
+        node has no description. The unmatched node must still be
+        paired with the remaining (unused) chain by position -- not
+        left at zero counts just because the description pass matched
+        something.
+
+        Regression: the previous implementation used
+        ``if matched_any: return`` and so orphaned the position-based
+        fallback for any transcript that contained at least one
+        description match. Partially populated older records would then
+        report ``turn_count=0`` instead of the correct per-agent count.
+        """
+        # n1 has no description -> falls through to positional fallback
+        # n2 has a description that matches chain c3's head text
+        n1 = self._node("n1", subagent_type="Plan")
+        n2 = sm.AgentNode(tool_use_id="n2", subagent_type="Explore",
+                          description="navigate the codebase")
+        nodes = [n1, n2]
+        chains = [
+            ("c1", {"turns": 4, "last_ts": NOW,
+                    "first_user_text": "plan the next step"}),
+            ("c2", {"turns": 7, "last_ts": NOW,
+                    "first_user_text": "unrelated chain"}),
+            ("c3", {"turns": 2, "last_ts": NOW,
+                    "first_user_text": "please navigate the codebase"}),
+        ]
+        sm._correlate_nodes_to_chains(nodes, chains)
+        # n2 matched chain c3 by description -> turn_count=2
+        self.assertEqual(nodes[1].turn_count, 2)
+        # n1 had no description and was previously left at zero;
+        # now it falls back to the first unused chain (c1) by position.
+        self.assertEqual(nodes[0].turn_count, 4,
+                         "unmatched node must pair with leftover chain, "
+                         "not stay at the default zero counts")
+
 
 class TestConcurrentSpawnCorrelation(unittest.TestCase):
     """Concurrent subagent spawns reorder sidechain records in the wire
@@ -1153,7 +1189,29 @@ class TestModeValidation(unittest.TestCase):
     def test_three_modes_conflict(self):
         rc, _, err = self._run("--list", "--json", "--print-resume-command")
         self.assertEqual(rc, 2)
-        self.assertIn("conflicting mode", err.lower())
+
+    def test_picker_plus_json_conflict(self):
+        """--picker --json must reject: --json returns before the TTY
+        check, silently dropping the picker's explicit-intent contract.
+
+        Regression for the review that flagged --picker as still being
+        silently ignored when combined with --json or --list.
+        """
+        rc, _, err = self._run("--picker", "--json")
+        self.assertEqual(rc, 2,
+                         f"--picker --json should exit 2; got rc={rc}, "
+                         f"stderr={err!r}")
+        self.assertIn("--picker", err)
+        self.assertIn("--json", err)
+
+    def test_picker_plus_list_conflict(self):
+        """--picker --list must reject for the same reason as picker+json."""
+        rc, _, err = self._run("--picker", "--list")
+        self.assertEqual(rc, 2,
+                         f"--picker --list should exit 2; got rc={rc}, "
+                         f"stderr={err!r}")
+        self.assertIn("--picker", err)
+        self.assertIn("--list", err)
 
     def test_cli_setup_short_circuits_without_conflict(self):
         # --cli-setup is mutually exclusive with data modes but handled

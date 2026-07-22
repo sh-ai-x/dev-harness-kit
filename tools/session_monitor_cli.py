@@ -93,6 +93,16 @@ def _validate_modes(args) -> list[str]:
     / ``--print-resume-command``) is enforced by argparse's
     ``add_mutually_exclusive_group`` and surfaces as a usage error
     before main() runs.
+
+    ``--picker`` is an explicit-intent flag that means "force the
+    interactive picker, error out (instead of silently falling back to
+    --list) when not on a TTY". It is mutually exclusive with the
+    other operator flags, but it also cannot be combined with the data
+    modes (``--list`` / ``--json``) -- those routes return before the
+    TTY check ever runs, so ``--picker --json`` silently produces JSON
+    and never enforces the picker's explicit-intent contract. Reject
+    those combinations here so the user sees the conflict instead of
+    a silent precedence drop.
     """
     data_modes = ("list", "json", "print_resume_command")
     active = [name for name in data_modes if getattr(args, name)]
@@ -100,6 +110,13 @@ def _validate_modes(args) -> list[str]:
         flags = ", ".join(f"--{n.replace('_', '-')}" for n in active)
         print(f"[session-monitor] conflicting mode flags: {flags}. "
               f"Pick exactly one.", file=sys.stderr)
+        raise SystemExit(2)
+    if args.picker and active:
+        data_flag = active[0].replace("_", "-")
+        print(f"[session-monitor] --picker cannot be combined with "
+              f"--{data_flag}; the explicit picker intent would be "
+              f"silently dropped because --{data_flag} returns before "
+              f"the TTY check.", file=sys.stderr)
         raise SystemExit(2)
     return active
 
