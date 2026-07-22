@@ -9,11 +9,15 @@ Pins the contract for the `--operator-is-only-human` opt-out (issue #324):
     T4: unknown flag -> SystemExit (argparse)
 
   parse_codeowners(path)
-    T5: missing file -> []
+    T5: missing file -> raises FileNotFoundError (fail-closed contract;
+        run_babysit_once catches and refuses the bypass)
     T6: typical CODEOWNERS file -> unique handles (no @, no comments)
     T7: capture group with @org/team-name -> "org/team-name"
     T8: dedup across multiple rules
     T9: email handles are ignored (CODEOWNERS user@domain format)
+    T10 (run_babysit_once): missing CODEOWNERS -> EXIT_MULTI_OWNER with
+         "could not read CODEOWNERS" -- the bypass refuses to authorize
+         auto-merge when ownership cannot be confirmed
 
   has_alternate_owners(operator_handle, codeowner_handles,
                         collaborator_handles=())
@@ -106,8 +110,24 @@ class TestParseCodeowners(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name)
 
-    def test_missing_returns_empty(self) -> None:
-        self.assertEqual(bpc.parse_codeowners(self.tmp / "absent"), [])
+    def test_missing_raises_for_fail_closed_contract(self) -> None:
+        """Missing file must raise -- the bypass cannot interpret
+        "could not read" as "no alternate owners". An outage or
+        permission glitch must not authorize the auto-merge.
+
+        The previous behaviour returned ``[]`` and let the bypass
+        authorize, which was a security-sensitive failure mode.
+        """
+        with self.assertRaises(FileNotFoundError):
+            bpc.parse_codeowners(self.tmp / "absent")
+
+    def test_unreadable_raises_for_fail_closed_contract(self) -> None:
+        """IsADirectoryError + permission errors also raise. The
+        orchestrator catches OSError broadly and refuses the bypass."""
+        # An existing directory passed where a file is expected: most
+        # platforms raise IsADirectoryError; some raise PermissionError.
+        with self.assertRaises((IsADirectoryError, PermissionError, OSError)):
+            bpc.parse_codeowners(self.tmp)
 
     def test_typical_file_dedupes(self) -> None:
         p = _write_codeowners(self.tmp, (
@@ -334,6 +354,37 @@ class TestRunBabysitOnce(unittest.TestCase):
         out = captured.stdout.getvalue()
         self.assertIn("alice", out)
         self.assertIn("human-gate", out)
+        self.assertEqual(captured.commented, [])
+        self.assertEqual(captured.merged, [])
+
+    def test_missing_codeowners_fails_closed(self) -> None:
+        """Fail-closed contract: an unreadable CODEOWNERS file must
+        refuse the bypass rather than authorize the auto-merge.
+
+        Regression for the security-sensitive bypass that the LLM
+        review surfaced. An outage, permission error, or truncated
+        first page CANNOT be interpreted as proof that no alternate
+        human exists -- the bypass must always confirm ownership.
+        """
+        captured = _CliResult()
+        argv = ["--operator-is-only-human", "--rationale",
+                "must refuse on missing CODEOWNERS"]
+        p_stdout, p_stderr, p_comment, p_merge = self._patch_io(captured)
+        with p_stdout, p_stderr, p_comment, p_merge:
+            rc = bpc.run_babysit_once(
+                argv=argv,
+                operator_handle="sh-ai-x",
+                codeowners_path=self.tmp / "absent",  # never created
+                collaborator_handles=["sh-ai-x"],
+                pr_number=42,
+            )
+        self.assertEqual(rc, bpc.EXIT_MULTI_OWNER,
+                         "missing CODEOWNERS must refuse the bypass")
+        out = captured.stdout.getvalue()
+        self.assertIn("could not read CODEOWNERS", out)
+        self.assertIn("human-gate", out)
+        # No comment, no merge scheduled -- the unknown-ownership state
+        # never authorizes the bypass side-effects.
         self.assertEqual(captured.commented, [])
         self.assertEqual(captured.merged, [])
 

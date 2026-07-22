@@ -311,17 +311,86 @@ I/O contract without mocking `subprocess` or `gh`. Failure to install
 the shims is a `RuntimeError`; the skill wires them at the top of the
 SLASH entry so a misconfigured run fails loudly rather than silently.
 
+### Wiring the helper into the SKILL execution path
+
+The skill body must actually invoke `lib.babysit_pr_cli.run_babysit_once(...)`
+with the slash arguments -- the §Algorithm pseudocode describes *what
+should happen*; this section is *how the skill does it*. The operator's
+`--operator-is-only-human` flag must reach the helper through a real
+Python call, not just narrative compliance.
+
+The canonical wiring (executed at the top of every `/dev-kit:babysit-pr`
+invocation, after the §Lock file protocol):
+
+```python
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+
+import babysit_pr_cli as bpc   # noqa: E402  (path set up above)
+
+bpc._write_stdout   = lambda s: print(s, flush=True)
+bpc._write_stderr   = lambda s: print(s, file=sys.stderr, flush=True)
+bpc._post_pr_comment = lambda n, body: subprocess.run(   # noqa: E731
+    ["gh", "pr", "comment", str(n), "--body", body], check=True)
+bpc._run_pr_merge   = lambda n, argv: subprocess.run(     # noqa: E731
+    ["gh", *argv], check=True)
+
+argv = sys.argv[1:]
+operator = subprocess.run(
+    ["gh", "api", "/user", "-q", ".login"], check=True,
+    capture_output=True, text=True).stdout.strip()
+codeowners_path = Path(".github/CODEOWNERS")
+collaborators = subprocess.run(
+    ["gh", "api", f"/repos/{owner}/{repo}/collaborators?per_page=100",
+     "-q", ".[].login"],
+    capture_output=True, text=True).stdout.splitlines() or []
+pr_number = int(subprocess.run(
+    ["gh", "pr", "view", "--json", "number", "-q", ".number"],
+    capture_output=True, text=True).stdout.strip())
+
+rc = bpc.run_babysit_once(
+    argv=argv,
+    operator_handle=operator,
+    codeowners_path=codeowners_path,
+    collaborator_handles=collaborators,
+    pr_number=pr_number,
+)
+sys.exit(rc)
+```
+
+If this wiring block is missing from the skill body, the flag reaches
+the §Algorithm pseudocode but never `run_babysit_once`, so the bypass
+silently no-ops and the PR is left waiting for human review. The
+`tests/test_babysit_pr_cli.py` suite pins the helper's behaviour in
+isolation; this section is the only place the
+slash-arguments-reach-the-helper contract lives.
+
+### Fail-closed ownership policy
+
+- `CODEOWNERS_PATH` is the file at `.github/CODEOWNERS`. The parse is
+  token-level and tolerates `# comments`, `@user` and `@org/team` forms,
+  and skips `user@domain` email handles (not actionable review gates).
+  **Fail-closed**: any IO error reading CODEOWNERS (missing file,
+  permission denied, is-a-directory) refuses the bypass with
+  `EXIT_MULTI_OWNER`. An outage or permission glitch CANNOT be
+  interpreted as "no alternate owners" -- the bypass requires
+  positive ownership confirmation before authorizing the auto-merge.
+- `COLLABORATORS` endpoint is rate-limited; an empty collaborator
+  list does NOT, on its own, grant the bypass. The bypass requires
+  CODEOWNERS to be readable AND to list only the operator. The
+  collaborators list is supplementary -- it widens the alt-owner set
+  when present, but its absence does not narrow it.
+
 ### Policy invariants (the bypass is one-human-only)
 
 - Operator handle is `gh api /user -q .login` -- the bot's own identity,
   not the PR author. Author/operator split matters on private repos
   where a bot opens PRs on behalf of a human.
-- `CODEOWNERS_PATH` is the file at `.github/CODEOWNERS`. The parse is
-  token-level and tolerates `# comments`, `@user` and `@org/team` forms,
-  and skips `user@domain` email handles (not actionable review gates).
-- `COLLABORATORS` endpoint is rate-limited; absence of alternate
-  owners in CODEOWNERS is sufficient to grant bypass even if `gh api`
-  errors. The bypass does **not** depend on the API succeeding.
+- CODEOWNERS read + collaborator resolution are covered by
+  `### Fail-closed ownership policy` above. An outage or empty
+  collaborator list CANNOT authorize the bypass.
 - `gh pr merge --auto --squash` waits for CI. If a check fails after
   the bypass, GitHub cancels the auto-merge and the operator must
   re-investigate -- the audit comment remains in the PR thread as a
