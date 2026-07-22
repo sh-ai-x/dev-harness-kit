@@ -196,11 +196,13 @@ class TestHasAlternateOwners(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(alts, ["my-org/devs"])
 
-    def test_operator_not_in_codeowners_is_allowed(self) -> None:
-        # If the operator is not declared anywhere in CODEOWNERS, the
-        # caller treats this as "no alternates known via CODEOWNERS";
-        # gate decision falls to collaborators. With no collaborators
-        # either, bypass is permitted.
+    def test_operator_not_in_codeowners_returns_no_alternates(self) -> None:
+        # `has_alternate_owners` itself returns (False, []) when the
+        # operator is absent from both lists -- *no alternates known*
+        # is not the same as *single-operator confirmed*. The
+        # orchestrator layer (`run_babysit_once`) enforces the
+        # positive-ownership check on top; this helper just stays
+        # pure and reports what's in the lists.
         ok, alts = bpc.has_alternate_owners(
             operator_handle="sh-ai-x",
             codeowner_handles=[],
@@ -354,6 +356,67 @@ class TestRunBabysitOnce(unittest.TestCase):
         out = captured.stdout.getvalue()
         self.assertIn("alice", out)
         self.assertIn("human-gate", out)
+        self.assertEqual(captured.commented, [])
+        self.assertEqual(captured.merged, [])
+
+    def test_operator_absent_from_codeowners_fails_closed(self) -> None:
+        """Positive-ownership confirmation: even with no alternates
+        found, the operator must be explicitly listed in CODEOWNERS.
+        An empty CODEOWNERS + empty collaborators list is *unknown*
+        ownership, not *single* ownership.
+
+        Regression for the security-sensitive fail-open: the
+        collaborator-endpoint being down or returning an empty page
+        must not authorize the auto-merge on a multi-operator repo.
+        """
+        captured = _CliResult()
+        empty = self.tmp / "EMPTY"
+        empty.write_text("", encoding="utf-8")
+        argv = ["--operator-is-only-human", "--rationale",
+                "operator not in CODEOWNERS - must refuse"]
+        p_stdout, p_stderr, p_comment, p_merge = self._patch_io(captured)
+        with p_stdout, p_stderr, p_comment, p_merge:
+            rc = bpc.run_babysit_once(
+                argv=argv,
+                operator_handle="sh-ai-x",
+                codeowners_path=empty,  # empty but readable
+                collaborator_handles=[],  # endpoint down / empty
+                pr_number=42,
+            )
+        self.assertEqual(rc, bpc.EXIT_MULTI_OWNER,
+                         "operator absent from CODEOWNERS + empty "
+                         "collaborators must refuse the bypass")
+        out = captured.stdout.getvalue()
+        self.assertIn("not listed in CODEOWNERS", out)
+        self.assertIn("human-gate", out)
+        self.assertEqual(captured.commented, [])
+        self.assertEqual(captured.merged, [])
+
+    def test_empty_codeowners_fails_closed(self) -> None:
+        """Empty-but-readable CODEOWNERS (file exists, zero rules)
+        is the third axis of the ownership contract: distinct from
+        unreadable (IO error, fail-closed via OSError) and from
+        operator-absent (fail-closed via positive-ownership check).
+        The orchestrator must refuse the bypass here too -- an empty
+        CODEOWNERS file is not proof of single-operator ownership.
+        """
+        captured = _CliResult()
+        empty = self.tmp / "EMPTY"
+        empty.write_text("", encoding="utf-8")
+        argv = ["--operator-is-only-human", "--rationale",
+                "empty CODEOWNERS - must refuse"]
+        p_stdout, p_stderr, p_comment, p_merge = self._patch_io(captured)
+        with p_stdout, p_stderr, p_comment, p_merge:
+            rc = bpc.run_babysit_once(
+                argv=argv,
+                operator_handle="sh-ai-x",
+                codeowners_path=empty,
+                collaborator_handles=[],
+                pr_number=42,
+            )
+        self.assertEqual(rc, bpc.EXIT_MULTI_OWNER,
+                         "empty CODEOWNERS + empty collaborators "
+                         "must refuse the bypass")
         self.assertEqual(captured.commented, [])
         self.assertEqual(captured.merged, [])
 

@@ -341,6 +341,26 @@ def run_babysit_once(
         )
         return EXIT_MULTI_OWNER
 
+    # Positive-ownership confirmation: even with no alternates found,
+    # the operator must be explicitly listed in CODEOWNERS for the
+    # bypass to authorize. An empty CODEOWNERS + empty collaborators
+    # list is *unknown* ownership, not *single* ownership -- the two
+    # cases are not equivalent. Refusing absent-operator closes the
+    # gap where an outage on the collaborators endpoint (or an empty
+    # but readable CODEOWNERS file) could otherwise authorize the
+    # auto-merge during a multi-operator incident.
+    op_normalized = operator_handle.lstrip("@")
+    if op_normalized not in codeowners:
+        _write_stdout(
+            f"Refusing --operator-is-only-human: operator "
+            f"{op_normalized!r} is not listed in CODEOWNERS at "
+            f"{codeowners_path}. Without positive proof of "
+            "single-operator ownership, the bypass refuses to "
+            "authorize auto-merge. Falling back to the human-gate "
+            "path (REVIEW_REQUIRED -> waiting for human review)."
+        )
+        return EXIT_MULTI_OWNER
+
     # Single-operator: post the audit comment + schedule auto-merge.
     body = format_bot_approve_comment(
         operator=operator_handle,
@@ -348,7 +368,24 @@ def run_babysit_once(
         now_iso=now_iso,
     )
     _post_pr_comment(pr_number, body)
-    _run_pr_merge(pr_number, ["pr", "merge", str(pr_number), "--auto", "--squash"])
+    try:
+        _run_pr_merge(pr_number, ["pr", "merge", str(pr_number), "--auto", "--squash"])
+    except (SystemExit, Exception) as exc:
+        # `check=True` on the merge subprocess raises
+        # CalledProcessError on failure (protected branch, stale HEAD,
+        # merge-queue state, etc.). The audit comment is already
+        # posted at this point, so the operator sees the partial
+        # trail. Convert the crash to EXIT_MULTI_OWNER so the
+        # orchestrator falls back to the human-gate path without
+        # surfacing an unhandled traceback.
+        _write_stderr(
+            f"gh pr merge --auto --squash failed after the audit "
+            f"comment was posted ({exc!r}). The /bot-approve comment "
+            f"remains in the PR thread for the audit trail. Falling "
+            f"back to the human-gate path; re-investigate the merge "
+            f"failure manually."
+        )
+        return EXIT_MULTI_OWNER
     _write_stdout(
         f"Single-operator bypass approved. "
         f"Audit comment posted; gh pr merge --auto --squash scheduled for PR #{pr_number}."

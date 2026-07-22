@@ -208,6 +208,72 @@ worktree from creation through merge.
 
 ```
 LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback)
+  0. OPT-OUT CHECK — if the slash invocation included
+                    --operator-is-only-human, defer to the bypass
+                    helper BEFORE entering the regular CLASSIFY loop:
+
+                      import sys, subprocess
+                      from pathlib import Path
+                      sys.path.insert(0, str(
+                          Path(__file__).resolve().parents[2] / "lib"))
+                      import babysit_pr_cli as bpc
+
+                      bpc._write_stdout   = lambda s: print(s, flush=True)
+                      bpc._write_stderr   = lambda s: print(
+                          s, file=sys.stderr, flush=True)
+                      bpc._post_pr_comment = lambda n, body: subprocess.run(
+                          ["gh", "pr", "comment", str(n), "--body", body],
+                          check=True)
+                      bpc._run_pr_merge    = lambda n, argv: subprocess.run(
+                          ["gh", *argv], check=True)
+
+                      argv = sys.argv[1:]
+                      operator = subprocess.run(
+                          ["gh", "api", "/user", "-q", ".login"],
+                          check=True,
+                          capture_output=True, text=True).stdout.strip()
+                      codeowners_path = ".github/CODEOWNERS"
+                      collaborators = subprocess.run(
+                          ["gh", "api",
+                           f"/repos/$REPO_OWNER/$REPO_NAME/"
+                           "collaborators?per_page=100",
+                           "-q", ".[].login"],
+                          capture_output=True, text=True).stdout.splitlines()
+                      pr_number = int(subprocess.run(
+                          ["gh", "pr", "view", "--json", "number",
+                           "-q", ".number"],
+                          capture_output=True, text=True).stdout.strip())
+
+                      rc = bpc.run_babysit_once(
+                          argv=argv,
+                          operator_handle=operator,
+                          codeowners_path=codeowners_path,
+                          collaborator_handles=collaborators,
+                          pr_number=pr_number,
+                          now_iso=subprocess.run(
+                              ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"],
+                              capture_output=True,
+                              text=True).stdout.strip(),
+                      )
+
+                    If the helper returned EXIT_OK (0) and printed
+                    the "Single-operator bypass approved" message,
+                    the auto-merge is already scheduled -- skip the
+                    rest of the algorithm and print the bypass
+                    message + exit 0.
+                    If the helper returned EXIT_MULTI_OWNER (1) and
+                    printed "alternate owner(s) found" or "could not
+                    read CODEOWNERS" or "operator ... not listed in
+                    CODEOWNERS", the bypass was refused -- print the
+                    helper's stdout and EXIT 0 to fall back to the
+                    human-gate path (REVIEW_REQUIRED -> waiting for
+                    human review). The PR cannot be auto-merged; do
+                    not retry.
+                    If the helper returned EXIT_RATIONALE_REQUIRED
+                    (2), print the helper's stderr and EXIT 2 so the
+                    operator adds a non-empty --rationale and retries.
+                    If no --operator-is-only-human was passed,
+                    continue to step 1 (default human-gate path).
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call)
   2. TERMINATE  — if REVIEW_VERDICT == "APPROVED"
                     AND every check.conclusion ∈ {success, skipped, neutral}
@@ -239,6 +305,16 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
   13. INCREMENT — `iter = iter + 1`; if `iter > MAX_ITERS`, fall through to
                   the cap-fallback below; otherwise `goto 1`.
 ```
+
+Step 0 is the **pre-loop opt-out check** the bypass requires. Without
+it, the flag reaches the §Algorithm pseudocode but never
+`run_babysit_once`, so the bypass silently no-ops and the PR is left
+waiting for human review. Step 0 must run *before* step 1's SNAPSHOT
+so the bypass decision happens on a fresh state, not on stale
+verdicts. The four `bpc._*` shim assignments are mandatory -- the
+helper's default shims raise RuntimeError; without the real
+`subprocess.run`/`print` wiring, the helper cannot post the audit
+comment or schedule the merge.
 
 If `iter == MAX_ITERS` and PR is still blocked → print the unresolved blocker
 list, exit 1. **Never** silently retry past the cap. (The earlier
