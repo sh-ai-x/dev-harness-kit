@@ -39,6 +39,21 @@ the branch, stop and tell the user to push + open one.
 | `CHECKS`         | `gh pr checks --json name,state,conclusion`                            |
 | `BRANCH`         | `git rev-parse --abbrev-ref HEAD`                                      |
 | `MAX_ITERS`      | `1000` (high cap; configurable via `BABYSIT_MAX_ITERS` env var; the 3-consecutive-no-progress stuck-loop guard still triggers earlier) |
+| `OPERATOR_HANDLE`| `gh api /user -q .login` (the human running the babysitter)           |
+| `CODEOWNERS_PATH`| `$REPO_ROOT/.github/CODEOWNERS` (parsed by `lib/babysit_pr_cli.py`)    |
+| `COLLABORATORS`  | `gh api /repos/{owner}/{repo}/collaborators?per_page=100 -q '.[].login'` |
+
+### CLI flags (issue #324)
+
+```
+/dev-kit:babysit-pr [--operator-is-only-human] [--rationale "<text>"]
+```
+
+| Flag                       | Effect |
+|----------------------------|--------|
+| *(no flag)*                | Default behavior: print `REVIEW_REQUIRED -> human-gate` and exit 0. The flag-absent path is the audit-safe default — operators never accidentally bypass review. |
+| `--operator-is-only-human` | Opt-out for single-operator repos. Refuses with exit 1 if `CODEOWNERS_PATH` OR `COLLABORATORS` list any handle other than `OPERATOR_HANDLE`. Requires `--rationale`. Posts the audit comment `/bot-approve by operator=<handle> at <ISO-8601>; rationale=<text>` and schedules `gh pr merge --auto --squash`. |
+| `--rationale "<text>"`     | Required when `--operator-is-only-human` is set; quoted verbatim into the audit comment. The flag pair is the *only* canonical way to bypass the human-review gate. |
 
 If `PR_NUMBER` is empty OR `PR_STATE != OPEN` → print a one-line message and
 exit 0. Never create a PR implicitly (MUST: explicit user action).
@@ -156,7 +171,9 @@ Iron Laws (apply to every claim of progress):
 
 Safety valves (forbidden):
   - git push --force to main/master.
-  - gh pr merge (user merges).
+  - gh pr merge (user merges); the single-operator opt-out
+    (`--operator-is-only-human`) is the only sanctioned merge path the
+    babysitter can drive.
   - secret auto-removal (abort + exit 1 on credential detection).
   - destructive git ops: reset --hard, clean -fd, branch -D.
   - pytest.skip / @unittest.skip / removing tests / commenting assertions.
@@ -235,7 +252,11 @@ stuck and avoids burning the full 1000-iter budget.)
 - **No `git push --force`** to `main`/`master`. Force-push to feature branches is
   allowed when the PR is your own (PR author == current user) AND the branch is
   not protected.
-- **No auto-merge**. `gh pr merge` is forbidden. The user merges.
+- **No auto-merge** *unless* the single-operator bypass is engaged
+  (see `## Single-operator bypass` below). `gh pr merge` is forbidden
+  by default. The user merges unless they opted into
+  `--operator-is-only-human`, in which case the skill schedules
+  `gh pr merge --auto --squash` and waits for CI to finalize the merge.
 - **No secret auto-removal**. If `secret-scan` or any check flags a credential,
   the skill aborts with the file:line and exits 1.
 - **No destructive git operations**: no `reset --hard`, no `clean -fd`, no
@@ -244,7 +265,150 @@ stuck and avoids burning the full 1000-iter budget.)
   (lock file at `.dev-kit/babysit.lock`).
 - **No worktree juggling** (per worktree hygiene in project memory).
 
-### NO-SKIP / NO-WORKAROUND IRON LAW (MUST-NO-SKIP)
+## Single-operator bypass (`--operator-is-only-human`, issue #324)
+
+When the flag is set on the slash command, the skill checks for
+alternate reviewers before exiting 0. The flow uses
+`lib/babysit_pr_cli.py::run_babysit_once(...)`, which stays pure (no
+`subprocess`/`gh` inside the helper) so the bypass contract is
+reproducible in CI without network access:
+
+```
+1. PARSE argv via parse_babysit_args(argv).
+   No flag -> emit "REVIEW_REQUIRED -> human-gate" + exit 0 (legacy).
+2. FLAG set + no rationale -> emit parser error + SystemExit 2.
+3. FLAG set + rationale present:
+   a. Read .github/CODEOWNERS via parse_codeowners(path).
+   b. Resolve COLLABORATORS via:
+        gh api /repos/{owner}/{repo}/collaborators?per_page=100 -q '.[].login'
+      (skip silently if the endpoint errors; fall back to CODEOWNERS-only
+      detection -- the call is best-effort, not a hard prerequisite).
+   c. has_alternate_owners(operator, codeowners, collaborators) returns
+      (has_alternate, alternates).
+   d. Has alternates -> print "Refusing --operator-is-only-human:
+      alternate owner(s) found: <names>" + "Falling back to the
+      human-gate path" + exit 1.
+   e. No alternates -> post the audit comment via
+      gh pr comment <PR_NUMBER> --body "/bot-approve by operator=<handle>
+      at <ISO-8601>; rationale=<text>", then run
+      gh pr merge <PR_NUMBER> --auto --squash, then exit 0.
+```
+
+### Wiring the four side-effect shims
+
+`run_babysit_once` is pure; the skill installs four named shims before
+calling it:
+
+| Shim                  | Real-world implementation                                       |
+|-----------------------|-----------------------------------------------------------------|
+| `_write_stdout(s)`    | `print(s, flush=True)`                                          |
+| `_write_stderr(s)`    | `print(s, file=sys.stderr, flush=True)`                         |
+| `_post_pr_comment(n, body)` | `subprocess.run(['gh', 'pr', 'comment', str(n), '--body', body], check=True)` |
+| `_run_pr_merge(n, argv)` | `subprocess.run(['gh', *argv], check=True)` where argv = `['pr', 'merge', str(n), '--auto', '--squash']` |
+
+The four shims let `tests/test_babysit_pr_cli.py` pin the orchestrator's
+I/O contract without mocking `subprocess` or `gh`. Failure to install
+the shims is a `RuntimeError`; the skill wires them at the top of the
+SLASH entry so a misconfigured run fails loudly rather than silently.
+
+### Wiring the helper into the SKILL execution path
+
+The skill body must actually invoke `lib.babysit_pr_cli.run_babysit_once(...)`
+with the slash arguments -- the §Algorithm pseudocode describes *what
+should happen*; this section is *how the skill does it*. The operator's
+`--operator-is-only-human` flag must reach the helper through a real
+Python call, not just narrative compliance.
+
+The canonical wiring (executed at the top of every `/dev-kit:babysit-pr`
+invocation, after the §Lock file protocol):
+
+```python
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+
+import babysit_pr_cli as bpc   # noqa: E402  (path set up above)
+
+bpc._write_stdout   = lambda s: print(s, flush=True)
+bpc._write_stderr   = lambda s: print(s, file=sys.stderr, flush=True)
+bpc._post_pr_comment = lambda n, body: subprocess.run(   # noqa: E731
+    ["gh", "pr", "comment", str(n), "--body", body], check=True)
+bpc._run_pr_merge   = lambda n, argv: subprocess.run(     # noqa: E731
+    ["gh", *argv], check=True)
+
+argv = sys.argv[1:]
+operator = subprocess.run(
+    ["gh", "api", "/user", "-q", ".login"], check=True,
+    capture_output=True, text=True).stdout.strip()
+codeowners_path = Path(".github/CODEOWNERS")
+collaborators = subprocess.run(
+    ["gh", "api", f"/repos/{owner}/{repo}/collaborators?per_page=100",
+     "-q", ".[].login"],
+    capture_output=True, text=True).stdout.splitlines() or []
+pr_number = int(subprocess.run(
+    ["gh", "pr", "view", "--json", "number", "-q", ".number"],
+    capture_output=True, text=True).stdout.strip())
+
+rc = bpc.run_babysit_once(
+    argv=argv,
+    operator_handle=operator,
+    codeowners_path=codeowners_path,
+    collaborator_handles=collaborators,
+    pr_number=pr_number,
+)
+sys.exit(rc)
+```
+
+If this wiring block is missing from the skill body, the flag reaches
+the §Algorithm pseudocode but never `run_babysit_once`, so the bypass
+silently no-ops and the PR is left waiting for human review. The
+`tests/test_babysit_pr_cli.py` suite pins the helper's behaviour in
+isolation; this section is the only place the
+slash-arguments-reach-the-helper contract lives.
+
+### Fail-closed ownership policy
+
+- `CODEOWNERS_PATH` is the file at `.github/CODEOWNERS`. The parse is
+  token-level and tolerates `# comments`, `@user` and `@org/team` forms,
+  and skips `user@domain` email handles (not actionable review gates).
+  **Fail-closed**: any IO error reading CODEOWNERS (missing file,
+  permission denied, is-a-directory) refuses the bypass with
+  `EXIT_MULTI_OWNER`. An outage or permission glitch CANNOT be
+  interpreted as "no alternate owners" -- the bypass requires
+  positive ownership confirmation before authorizing the auto-merge.
+- `COLLABORATORS` endpoint is rate-limited; an empty collaborator
+  list does NOT, on its own, grant the bypass. The bypass requires
+  CODEOWNERS to be readable AND to list only the operator. The
+  collaborators list is supplementary -- it widens the alt-owner set
+  when present, but its absence does not narrow it.
+
+### Policy invariants (the bypass is one-human-only)
+
+- Operator handle is `gh api /user -q .login` -- the bot's own identity,
+  not the PR author. Author/operator split matters on private repos
+  where a bot opens PRs on behalf of a human.
+- CODEOWNERS read + collaborator resolution are covered by
+  `### Fail-closed ownership policy` above. An outage or empty
+  collaborator list CANNOT authorize the bypass.
+- `gh pr merge --auto --squash` waits for CI. If a check fails after
+  the bypass, GitHub cancels the auto-merge and the operator must
+  re-investigate -- the audit comment remains in the PR thread as a
+  record of the bypass.
+- Rationale is required. Empty rationale is refused at the parser
+  level to keep the audit trail non-vacuous.
+
+### Example invocation
+
+```bash
+/dev-kit:babysit-pr --operator-is-only-human \
+  --rationale "trivial README typo in docstring; no behavior change"
+```
+
+For the iron-law audit trail the rationale text appears verbatim in the
+audit comment (`tests/test_babysit_pr_cli.py::TestFormatBotApproveComment`
+pins the comment shape). Operators are encouraged to link the PR URL
+or issue number inside the rationale text for cross-reference.
 
 The following are **forbidden** as a means of getting the PR to green:
 
