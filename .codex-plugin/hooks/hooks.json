@@ -76,6 +76,14 @@
             "command": "bash ${PLUGIN_ROOT}/hooks/provider-divergence-check.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/tools-sync.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
