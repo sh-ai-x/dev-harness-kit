@@ -1,36 +1,11 @@
 """Runtime-neutral adapter contracts shared by supported CLI runtimes."""
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
-
-@dataclass(frozen=True, slots=True)
-class TokenLog:
-    """Normalized token usage for one requested time window."""
-
-    window: str
-    input_tokens: int
-    output_tokens: int
-    cache_read_tokens: int = 0
-    cache_creation_tokens: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class SessionEvent:
-    """Normalized event emitted during one runtime session."""
-
-    session_id: str
-    event_name: str
-    timestamp: datetime
-    payload: Mapping[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+from .sessions import SessionEvent
+from .tokens import TokenLog
 
 
 @runtime_checkable
