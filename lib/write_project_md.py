@@ -160,6 +160,36 @@ def write_codebase_map_doc(project_root: Path) -> Path:
     return path
 
 
+def render_codebase_map_stub() -> str:
+    """docs/CODEBASE-MAP.md placeholder (default mode).
+
+    Always written so CLAUDE.md's `docs/CODEBASE-MAP.md` link resolves.
+    Full content is opt-in via `/dev-kit:bootstrap --full-claude-md`,
+    which calls `render_codebase_map_doc()` instead.
+    """
+    return (
+        "# Codebase Map (lazy placeholder)\n"
+        "\n"
+        "> Run `/dev-kit:bootstrap --full-claude-md` to (re)generate this\n"
+        "> file with the full 4-section map (Tree via `os.walk` depth 4,\n"
+        "> Manifest, Deps top-10, Conventions). Default bootstrap keeps\n"
+        "> this stub so CLAUDE.md's reference always resolves; the heavy\n"
+        "> content is opt-in.\n"
+    )
+
+
+def write_codebase_map_stub(project_root: Path) -> Path:
+    """Atomic write the docs/CODEBASE-MAP.md placeholder. Idempotent.
+
+    Always called by `write_project_md()` regardless of `full_map`. When
+    `full_map=True`, `write_codebase_map_doc()` overwrites this stub with
+    the full content.
+    """
+    path = project_root / CODEBASE_MAP_DOC_REL
+    atomic_write_text(path, render_codebase_map_stub())
+    return path
+
+
 # Credential redaction patterns for tree output (mask secrets in file/dir names)
 CREDENTIAL_PATTERNS = (
     re.compile(r"x-access-token:[^@/]+@"),
@@ -466,6 +496,10 @@ def write_project_md(project_root: Path, *, full_map: bool = False, stage: str =
     write_guidelines_index(project_root)
     write_hooks_index(project_root)
     write_rules_index(project_root)
+    # Always emit a stub so CLAUDE.md's `docs/CODEBASE-MAP.md` link
+    # resolves on a fresh bootstrap. `--full-claude-md` overwrites the
+    # stub with the full 4-section map.
+    write_codebase_map_stub(project_root)
     if full_map:
         write_codebase_map_doc(project_root)
     return path
@@ -487,4 +521,6 @@ if __name__ == "__main__":
     if (root / "rules").is_dir():
         print(f"wrote {root / 'rules' / 'index.md'}")
     if args.full_claude_md:
-        print(f"wrote {root / CODEBASE_MAP_DOC_REL}")
+        print(f"wrote {root / CODEBASE_MAP_DOC_REL} (full map; overwrote stub)")
+    else:
+        print(f"wrote {root / CODEBASE_MAP_DOC_REL} (stub; pass --full-claude-md for the full map)")

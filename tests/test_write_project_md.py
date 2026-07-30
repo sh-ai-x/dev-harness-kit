@@ -216,7 +216,24 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertTrue(rules_index.exists())
         self.assertIn("foo.md", rules_index.read_text())
 
+    def test_write_default_emits_codebase_map_stub(self):
+        """Default mode emits a stub so CLAUDE.md's link resolves."""
+        write_project_md.write_project_md(self.root, full_map=False, stage="plan")
+        doc_path = self.root / "docs" / "CODEBASE-MAP.md"
+        self.assertTrue(doc_path.exists())
+        content = doc_path.read_text()
+        # Stub signals opt-in for the full map
+        self.assertIn("--full-claude-md", content)
+        # Stub does NOT include the full Tree / Manifest sections
+        self.assertNotIn("## Tree", content)
+        self.assertNotIn("## Manifest", content)
+        # CLAUDE.md itself stays a pointer doc
+        claude = (self.root / "CLAUDE.md").read_text()
+        self.assertIn("iron-laws/index.md", claude)
+        self.assertNotIn("### Tree (depth 4)", claude)
+
     def test_write_full_map_writes_codebase_map_doc(self):
+        """--full-claude-md overwrites the stub with the full 4-section map."""
         write_project_md.write_project_md(self.root, full_map=True, stage="plan")
         doc_path = self.root / "docs" / "CODEBASE-MAP.md"
         self.assertTrue(doc_path.exists())
@@ -228,10 +245,16 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertIn("iron-laws/index.md", claude)
         self.assertNotIn("### Tree (depth 4)", claude)
 
-    def test_write_default_skips_codebase_map_doc(self):
+    def test_write_full_map_overwrites_stub(self):
+        """After a default run that emits the stub, --full-claude-md overwrites."""
         write_project_md.write_project_md(self.root, full_map=False, stage="plan")
-        doc_path = self.root / "docs" / "CODEBASE-MAP.md"
-        self.assertFalse(doc_path.exists())
+        stub_path = self.root / "docs" / "CODEBASE-MAP.md"
+        self.assertIn("lazy placeholder", stub_path.read_text())
+        write_project_md.write_project_md(self.root, full_map=True, stage="plan")
+        content = stub_path.read_text()
+        self.assertIn("## Tree", content)
+        # Stub markers are gone after overwrite
+        self.assertNotIn("lazy placeholder", content)
 
     def test_write_overwrites_cleanly(self):
         write_project_md.write_project_md(self.root, stage="plan")
