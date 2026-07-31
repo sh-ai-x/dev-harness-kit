@@ -100,3 +100,20 @@ deny() {
         >&2
     exit 2
 }
+
+# ask HOOK_PREFIX REASON — emit PreToolUse ask JSON envelope to stderr and
+# exit 0. Mirrors deny() but with permissionDecision:"ask", which makes
+# Claude Code prompt the user for confirmation before executing the tool
+# call. The REASON becomes the prompt body; users can approve, deny, or
+# type a justification that lands in the transcript. Used by hooks that
+# gate on main-checkout edits / non-default branches where the rule is
+# "soften deny to a confirmation prompt." Fails closed if jq is missing
+# — callers must source this file AFTER require_jq.
+ask() {
+    local hook_prefix="$1"
+    local reason="$2"
+    jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:($hp + ": " + $r)}}' \
+        >&2
+    exit 0
+}

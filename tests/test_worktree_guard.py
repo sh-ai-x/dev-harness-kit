@@ -2,7 +2,7 @@
 """test_worktree_guard.py — regression tests for the 2 worktree-rule hooks.
 
 Verifies the bash-level behavior of:
-  - hooks/worktree-guard.sh       (PreToolUse Edit|Write|MultiEdit — hard block)
+  - hooks/worktree-guard.sh       (PreToolUse Edit|Write|MultiEdit — confirmation prompt on main, hard deny on jq-missing)
   - hooks/session-start-check.sh  (SessionStart — advisory additionalContext)
 
 The hard rule under test (.claude/rules/git-workflow.md):
@@ -104,71 +104,75 @@ def _init_orch_worktree() -> tuple:
     return main_tmp, orch_path
 
 
-class TestWorktreeGuardBlocks(unittest.TestCase):
-    """worktree-guard.sh must DENY (exit 2) Edit/Write/MultiEdit in the main checkout."""
+class TestWorktreeGuardAsks(unittest.TestCase):
+    """worktree-guard.sh must ASK (exit 0 + permissionDecision:'ask' JSON)
+    on Edit/Write/MultiEdit in the main checkout for any non-safelist path.
+    Hard deny was relaxed to a confirmation prompt in chore/wg-ask-mode; the
+    user can override with an explicit reason captured in the transcript.
+    """
 
     def setUp(self):
         if not (HOOKS / "worktree-guard.sh").exists():
             self.skipTest("worktree-guard.sh not found")
 
-    def test_blocks_edit_in_main_checkout(self):
+    def test_asks_edit_in_main_checkout(self):
         main_tmp, _, _ = _init_main_with_worktree()
         try:
             r = _run_hook("worktree-guard.sh", _edit_payload("/some/file.py"), cwd=Path(main_tmp.name))
-            self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
+            self.assertEqual(r.returncode, 0, f"expected ask (exit 0), got rc={r.returncode}, stderr={r.stderr}")
             combined = r.stdout + r.stderr
             self.assertIn("WORKTREE GUARD", combined)
             self.assertIn("permissionDecision", combined)
-            self.assertIn('"deny"', combined)
+            self.assertIn('"ask"', combined)
             self.assertIn("main checkout", combined)
         finally:
             main_tmp.cleanup()
 
-    def test_deny_output_is_valid_pretooluse_json(self):
-        """Minor 4: deny output must match the PreToolUse JSON schema
-        that Claude Code parses (hookSpecificOutput.permissionDecision)."""
+    def test_ask_output_is_valid_pretooluse_json(self):
+        """Minor 4 (ask mode): ask output must match the PreToolUse JSON
+        schema that Claude Code parses (hookSpecificOutput.permissionDecision).
+        The permissionDecision must be 'ask' (not 'deny') so the user gets a
+        confirmation prompt instead of a hard refusal."""
         main_tmp, _, _ = _init_main_with_worktree()
         try:
             r = _run_hook("worktree-guard.sh", _edit_payload("/some/file.py"), cwd=Path(main_tmp.name))
-            self.assertEqual(r.returncode, 2)
-            # The deny JSON is printed to stderr; find it.
-            deny_lines = [ln for ln in (r.stdout + r.stderr).splitlines()
+            self.assertEqual(r.returncode, 0)
+            # The ask JSON is printed to stderr; find it.
+            ask_lines = [ln for ln in (r.stdout + r.stderr).splitlines()
                           if ln.strip().startswith("{")]
-            self.assertTrue(deny_lines, f"no JSON line in output: stdout={r.stdout!r} stderr={r.stderr!r}")
-            for line in deny_lines:
+            self.assertTrue(ask_lines, f"no JSON line in output: stdout={r.stdout!r} stderr={r.stderr!r}")
+            for line in ask_lines:
                 try:
                     doc = json.loads(line)
                 except json.JSONDecodeError as e:
-                    self.fail(f"deny output is not valid JSON: {line!r} ({e})")
+                    self.fail(f"ask output is not valid JSON: {line!r} ({e})")
                 self.assertIn("hookSpecificOutput", doc)
                 hso = doc["hookSpecificOutput"]
                 self.assertEqual(hso.get("hookEventName"), "PreToolUse")
-                self.assertEqual(hso.get("permissionDecision"), "deny")
+                self.assertEqual(hso.get("permissionDecision"), "ask")
                 self.assertIn("permissionDecisionReason", hso)
                 self.assertTrue(len(hso["permissionDecisionReason"]) > 0)
         finally:
             main_tmp.cleanup()
 
-    def test_blocks_write_in_subdir_of_main_checkout(self):
-        """Subdirectory of the main checkout is still main checkout."""
+    def test_asks_write_in_subdir_of_main_checkout(self):
+        """Subdirectory of the main checkout is still main checkout → ask."""
         main_tmp, _, _ = _init_main_with_worktree()
         try:
             sub = Path(main_tmp.name) / "src" / "deep"
             sub.mkdir(parents=True, exist_ok=True)
             r = _run_hook("worktree-guard.sh", _edit_payload(str(sub / "foo.py")), cwd=sub)
-            self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
+            self.assertEqual(r.returncode, 0, f"expected ask (exit 0), got rc={r.returncode}, stderr={r.stderr}")
             self.assertIn("WORKTREE GUARD", r.stdout + r.stderr)
         finally:
             main_tmp.cleanup()
 
 
-    def test_main_deny_msg_includes_route_question(self):
-        """Regression for PR #270: main-deny MSG must include the
-        deterministic env-var checklist + Iron Laws recap + routing actions AND the .dev-kit/round-*/** exception. Mirrors the harness
-        used by test_blocks_edit_in_main_checkout: jq missing -> skip;
-        jq present -> run hook in main checkout, parse the deny JSON,
-        and assert every required literal appears in
-        permissionDecisionReason.
+    def test_main_ask_msg_includes_routing_and_safelist(self):
+        """Regression for chore/wg-ask-mode: the ask reason must surface the
+        worktree-routing hint AND name the safelist (so users see why their
+        edit is being asked about and which paths are auto-allowed). jq
+        missing -> skip.
         """
         if not shutil.which("jq"):
             self.skipTest("jq not available")
@@ -179,16 +183,16 @@ class TestWorktreeGuardBlocks(unittest.TestCase):
                 _edit_payload("/some/file.py"),
                 cwd=Path(main_tmp.name),
             )
-            self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
+            self.assertEqual(r.returncode, 0, f"expected ask (exit 0), got rc={r.returncode}, stderr={r.stderr}")
             combined = r.stdout + r.stderr
-            deny_lines = [ln for ln in combined.splitlines()
+            ask_lines = [ln for ln in combined.splitlines()
                           if ln.strip().startswith("{")]
             self.assertTrue(
-                deny_lines,
+                ask_lines,
                 f"no JSON line in output: stdout={r.stdout!r} stderr={r.stderr!r}",
             )
             reason = ""
-            for line in deny_lines:
+            for line in ask_lines:
                 try:
                     doc = json.loads(line)
                 except json.JSONDecodeError:
@@ -201,27 +205,28 @@ class TestWorktreeGuardBlocks(unittest.TestCase):
                     break
             self.assertTrue(
                 reason,
-                f"WORKTREE GUARD deny JSON not found in output: {combined!r}",
+                f"WORKTREE GUARD ask JSON not found in output: {combined!r}",
             )
             for needle in (
-                # routing literals
-                "claude", "codex", "single", "parallel",
+                # ask semantics
+                "explicit approval",
+                # routing
                 "worktree add -b",
-                "a Claude session", "spawn",
-                # deterministic env-var checklist
-                "REQUIRED environment setup",
-                "git config --global",
-                "dev-kit.orch.client=claude",
-                "dev-kit.orch.concurrency=single",
-                # Iron Laws recap
+                ".worktrees/<slug>",
+                "a Claude session",
+                # Iron Laws recap (references iron-laws/index.md L1/L3/L4/L5)
                 "Iron Laws",
-                "abort this edit",
-                # round-* exception
+                "iron-laws/index.md",
+                "L1",
+                # safelist call-out
+                ".dev-kit/**",
+                "settings.local.json",
+                # round-* exception preserved for orchestrator handoff
                 ".dev-kit/round-*/**",
             ):
                 self.assertIn(
                     needle, reason,
-                    f"missing {needle!r} in deny reason: {reason!r}",
+                    f"missing {needle!r} in ask reason: {reason!r}",
                 )
         finally:
             main_tmp.cleanup()
@@ -288,6 +293,81 @@ class TestWorktreeGuardBlocks(unittest.TestCase):
             )
         finally:
             main_tmp.cleanup()
+
+class TestWorktreeGuardSafelist(unittest.TestCase):
+    """worktree-guard.sh must ALLOW (exit 0, no JSON envelope) on main checkout
+    when FILE_PATH is in the safelist. The safelist covers bootstrap / hand-off
+    / per-user override paths that are NOT real code changes under Iron Law L1.
+    """
+
+    def setUp(self):
+        if not (HOOKS / "worktree-guard.sh").exists():
+            self.skipTest("worktree-guard.sh not found")
+
+    def _assert_allows_on_main(self, file_path: str) -> None:
+        main_tmp, _, _ = _init_main_with_worktree()
+        try:
+            r = _run_hook(
+                "worktree-guard.sh",
+                _edit_payload(str(Path(main_tmp.name) / file_path)),
+                cwd=Path(main_tmp.name),
+            )
+            self.assertEqual(
+                r.returncode, 0,
+                f"expected allow (exit 0) on safelist path {file_path!r}, "
+                f"got rc={r.returncode}, stderr={r.stderr}",
+            )
+            combined = r.stdout + r.stderr
+            # Safelisted path must NOT emit any permissionDecision envelope —
+            # the hook short-circuits with `exit 0` before the ask path.
+            self.assertNotIn(
+                "permissionDecision", combined,
+                f"safelist path {file_path!r} unexpectedly emitted a "
+                f"permissionDecision envelope: {combined!r}",
+            )
+        finally:
+            main_tmp.cleanup()
+
+    def test_allows_dev_kit_path(self):
+        """`.dev-kit/<anything>` is bootstrap / hand-off → auto-allow."""
+        for p in (
+            ".dev-kit/round-foo/note.md",
+            ".dev-kit/scratch/tmp.txt",
+            ".dev-kit/round-bar/sub/deep/note.md",
+        ):
+            with self.subTest(path=p):
+                self._assert_allows_on_main(p)
+
+    def test_allows_claude_settings_local(self):
+        """`.claude/settings.local.json` is per-user Claude override → auto-allow."""
+        self._assert_allows_on_main(".claude/settings.local.json")
+
+    def test_allows_codex_settings_local(self):
+        """`.codex/settings.local.json` is per-user Codex override → auto-allow."""
+        self._assert_allows_on_main(".codex/settings.local.json")
+
+    def test_allows_worktrees_gitignore(self):
+        """`.worktrees/.gitignore` is worktree bookkeeping → auto-allow."""
+        self._assert_allows_on_main(".worktrees/.gitignore")
+
+    def test_asks_non_safelist_path(self):
+        """`.dev-kit.bak/...` (different name) is NOT on the safelist → ask."""
+        main_tmp, _, _ = _init_main_with_worktree()
+        try:
+            r = _run_hook(
+                "worktree-guard.sh",
+                _edit_payload(str(Path(main_tmp.name) / ".dev-kit.bak" / "x.py")),
+                cwd=Path(main_tmp.name),
+            )
+            self.assertEqual(
+                r.returncode, 0,
+                f"expected ask (exit 0) on non-safelist path, "
+                f"got rc={r.returncode}, stderr={r.stderr}",
+            )
+            self.assertIn('"ask"', r.stdout + r.stderr)
+        finally:
+            main_tmp.cleanup()
+
 
 class TestWorktreeGuardAllows(unittest.TestCase):
     """worktree-guard.sh must ALLOW (exit 0) edits inside a worktree."""

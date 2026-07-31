@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # worktree-guard.sh — PreToolUse hook for Write|Edit|MultiEdit.
 #
-# Enforces .claude/rules/git-workflow.md "every task = new worktree" rule.
+# Enforces .claude/rules/git-workflow.md "every task = new worktree" rule,
+# with a confirmation-prompt layer for the main checkout (chore/wg-ask-mode).
 #
-# Denies (exit 2):
-#   Edit / Write / MultiEdit when the session cwd is the MAIN repo checkout
-#   (the checkout that owns the .git directory at its root). Forces the
-#   user to cut a worktree off origin/main before making any edits.
+# Asks (exit 0 + permissionDecision:"ask" JSON) — main checkout, non-safelist:
+#   Edit / Write / MultiEdit on any path that is NOT in the safelist below.
+#   Surfaces the Iron Law L1 reminder + worktree list in the prompt body so
+#   the user can confirm with a justification that lands in the transcript.
 #
 # Allows (exit 0):
 #   Edits from inside ANY git worktree. The discriminator is
@@ -14,8 +15,15 @@
 #   anywhere on disk (not just `.worktrees/`).
 #   Edits in non-git directories — this hook is project-scoped.
 #   Empty / probe payloads — nothing to gate.
+#   Main-checkout edits whose FILE_PATH is in the safelist:
+#     .dev-kit/**                        (hand-off notes, round-* tmp, scratch)
+#     .claude/settings.local.json        (per-user Claude overrides)
+#     .codex/settings.local.json         (per-user Codex overrides)
+#     .worktrees/.gitignore              (worktree bookkeeping)
 #
-# Fails closed (exit 2 with deny JSON) when `jq` is missing.
+# Fails closed (exit 2 with deny JSON) when `jq` is missing. Even ask mode
+# must refuse to soften without a parseable payload — silent fail-open
+# would disable the rule.
 #
 # The discriminator lives in hooks/lib/worktree-detect.sh so the
 # three rule-hooks don't drift. See .claude/rules/git-workflow.md.
@@ -95,18 +103,44 @@ case "$WORKTREE_DETECT" in
   *) exit 0 ;;
 esac
 
-# In main checkout → deny with actionable reason. The case statement
-# and the deny() call below are byte-identical to the pre-PR-270
-# version — only the MSG string content is updated to the
-# deterministic env-var checklist + Iron Laws recap.
+# In main checkout → safelist short-circuit, otherwise ASK (not deny).
+# The previous hard-deny was softened to a confirmation prompt so the
+# user can override with an explicit reason captured in the transcript.
+# Real code / docs / hooks / tests / plugin / template edits still
+# gate on approval; routine bootstrap and per-user config edits pass.
 BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)"
 
+# _safelist_match PATH — return 0 if PATH is a bootstrap / hand-off /
+# per-user override path that may be edited on main without prompting.
+# Iron Law L1 protects code on main, not session notes or local
+# overrides; these paths are NOT "real code changes":
+#   .dev-kit/**                        # hand-off notes, round-* tmp, scratch
+#   .claude/settings.local.json        # per-user Claude overrides
+#   .codex/settings.local.json         # per-user Codex overrides
+#   .worktrees/.gitignore              # worktree bookkeeping
+# The case-globbing below is a defensive match: each pattern accepts
+# either an absolute path ending in the literal (cd into main checkout
+# yields /abs/.dev-kit/...) or a repo-relative path (.dev-kit/...).
+_safelist_match() {
+  case "$1" in
+    */.dev-kit/*|*/.dev-kit|.dev-kit/*|.dev-kit) return 0 ;;
+    */.claude/settings.local.json|.claude/settings.local.json) return 0 ;;
+    */.codex/settings.local.json|.codex/settings.local.json) return 0 ;;
+    */.worktrees/.gitignore|.worktrees/.gitignore) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if _safelist_match "$FILE_PATH"; then
+  exit 0
+fi
+
 # _worktree_list_rich — Phase 2.1 (issue #358).
-# Enumerate the project's worktrees for the deny message. Uses
+# Enumerate the project's worktrees for the ask message. Uses
 # `git worktree list --porcelain` directly. The previous LCS-first /
 # shell-fallback shape (with timeout-primitive selection for the LCS
 # read) was removed in PR #462 because the per-call Python startup
-# cost made it net-negative; the deny-path latency budget is ~10 ms
+# cost made it net-negative; the ask-path latency budget is ~10 ms
 # with direct shell on this repo (~220 worktrees today).
 #
 # The LCS substrate was dropped entirely in #463; the CLI no longer
@@ -132,21 +166,19 @@ else
   WT_BLOCK="(no worktrees listed — run \`git worktree list\` to enumerate them)"
 fi
 
-MSG="editing in main checkout (branch='$BRANCH') is forbidden.
+MSG="Editing on main checkout (branch='$BRANCH') requires explicit approval.
 
-REQUIRED environment setup before retrying:
-  git config --global dev-kit.orch.client=claude   # or codex
-  git config --global dev-kit.orch.concurrency=single   # or parallel
+Canonical path: open a Claude session in a worktree (chore/<slug>, fix/<slug>, etc.).
 
-Without these, abort this edit. Re-running without setting them will be denied.
+If you must edit here, approve and state the reason in the dialog — the
+override lands in the transcript and is reviewable later. Routine
+bootstrap paths (.dev-kit/**, settings.local.json, .worktrees/.gitignore)
+are auto-allowed and do NOT trigger this prompt.
 
-Routing (after config is set):
-  claude  + single   -> git worktree add -b <type>/<slug> .worktrees/<slug> origin/main
-                        cd .worktrees/<slug>
-                        open a Claude session there
-  claude  + parallel -> same worktree, then fan out sub-agents via the Agent tool
-  codex   + single   -> git worktree add ..., then spawn one sub-agent with cwd=<worktree>
-  codex   + parallel -> spawn N sub-agents each with cwd=<worktree> and explicit task prompt
+Routing (when you decide to cut a worktree instead):
+  git worktree add -b <type>/<slug> .worktrees/<slug> origin/main
+  cd .worktrees/<slug>
+  open a Claude session there
 
 Hard rules (Iron Laws: see iron-laws/index.md, L1/L3/L4/L5):
   M push / commit / PR to main: forbidden
@@ -154,6 +186,6 @@ Hard rules (Iron Laws: see iron-laws/index.md, L1/L3/L4/L5):
   Other worktrees are private to their T; entry is allowed ONLY for hand-off docs
    in .dev-kit/round-*/**."
 
-  deny "WORKTREE GUARD" "$MSG
+  ask "WORKTREE GUARD" "$MSG
 
 $WT_BLOCK"
