@@ -75,6 +75,59 @@ counts in this rule; inspect `skills/*/SKILL.md` when needed.
 > Note: `plan-ralph` was merged into `plan` (issue #58) — the plan skill is
 > now self-contained and does not delegate to a non-invocable sub-skill.
 
+## Description as trigger phrase (mandatory)
+
+The `description:` frontmatter field is **not** a summary of what the skill
+does — it is the **trigger phrase** Claude uses to decide whether to
+auto-invoke this skill from a user prompt. Treat it accordingly.
+
+### Rules
+
+1. **Write the description as the user would phrase the request**, not as
+   a docstring. If the user says "fix the broken build," the description
+   should contain words that match — "fix", "build", "broken" — not
+   abstract nouns like "build error remediation workflow."
+2. **Front-load the trigger verbs**. The first 8–12 words are what the
+   skill-discovery index exposes; the rest is padding. Put the strongest
+   match terms in the lead.
+3. **Avoid jargon unique to dev-kit internals** unless the user is
+   expected to know them. The trigger index doesn't reward
+   `must_classify_dispatch_mode`; it rewards "parallel" / "sequential" /
+   "auto-classify" because those are words the user actually types.
+4. **No marketing copy.** "The world's best debugging skill" wins zero
+   triggers; "use when encountering any bug, test failure, or unexpected
+   behavior" wins the bugs.
+5. **One sentence, ≤ 20 words** is the sweet spot. Two sentences is the
+   ceiling; if you need three, the trigger is too broad and the skill
+   should split.
+
+### Why this matters
+
+Claude Code's skill auto-invocation matches user prompts against each
+skill's `description:` field. A description that reads like internal
+documentation will never fire, regardless of how useful the skill is.
+A description that mirrors how the user phrases the request fires
+reliably and saves the user from typing `/dev-kit:foo` for the common
+case.
+
+### Counter-example
+
+Bad:
+```yaml
+description: Comprehensive code quality enforcement skill that integrates
+  static analysis, type checking, and linting workflows for the
+  dev-harness-kit harness runner.
+```
+
+Good:
+```yaml
+description: Use when code review flags a quality issue, lint fails,
+  or you want to enforce typing/lint before commit.
+```
+
+The bad version describes the skill's purpose; the good version
+describes when the user would invoke it.
+
 ## Body (mandatory style)
 
 - **All text in English** (no Korean, even in code comments).
