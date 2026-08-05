@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto-classify dispatch mode + thin-harness adoption of lessons from the agent-harness ecosystem</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Auto-classify dispatch mode + thin-harness adoption of lessons from the agent-harness ecosystem</h1>
+<p class="meta">2026-08-05 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">dispatch</span><span class="tag tag-info">auto-classify</span><span class="tag tag-info">thin-harness</span><span class="tag tag-info">cherry-pick</span><span class="tag tag-info">tmux</span><span class="tag tag-info">long-running</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Problem</a></li><li><a href="#sec-1">Recommended approach — auto-classify dispatch mode (the centerpiece)</a></li><li><a href="#sec-2">Reference policy (treat the ecosystem as reading material, not runtime)</a></li><li><a href="#sec-3">Thin-harness discipline (binding constraint on every cherry-pick)</a></li><li><a href="#sec-4">Pattern adoption backlog (ranked)</a></li><li><a href="#sec-5">Plumbing steps (Phase A — single worktree, single PR)</a></li><li><a href="#sec-6">Long-running + tmux safety matrix</a></li><li><a href="#sec-7">Execution sequence (user-prescribed workflow)</a></li><li><a href="#sec-8">Out of scope</a></li><li><a href="#sec-9">Next steps</a></li></ol></div>
+<h2 id="sec-0">Problem</h2>
+<p>Three adjacent agent-harness projects exist in the broader ecosystem that this repo competes with and can learn from. Each takes a different slice of the "what should a coding harness look like" question:</p>
+<ul><li>One is a <strong>pure skills library</strong> (~14 SKILL.md files), packaged to ship to many harnesses from a single source tree. One SessionStart hook injects a strong Iron Law that biases every prompt.</li><li>One is a <strong>spec-first "Agent OS"</strong> (~21 skills + named agent minds + a dedicated MCP server). Loop: interview → seed → run → evaluate → evolve.</li><li>One is a <strong>parallel-team harness config</strong> for a different runtime family. Currently mid OS-refactor upstream.</li></ul>
+<p>This repo already has 39 skills, 20+ hooks, slash commands, CI templates, agents, and an MCP integration. No name collisions with any of the three, but heavy <strong>functional overlap</strong> on TDD, debugging, verification, planning, review. None of the three has a CI / worktree / version-bump opinion.</p>
+<p>The user-prescribed direction (verbatim, translated): <em>"Cherry-pick where pros clearly outweigh cons. Don't blind-copy. Keep the harness thin. Make it work safely under long-running tasks in a tmux environment."</em></p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Recommended approach — auto-classify dispatch mode (the centerpiece)</h2>
+<p>Today <code>/dev-kit:build</code> exposes a <code>--parallel</code> flag the user must set consciously. The user wants this <strong>removed</strong>. The harness should <strong>auto-classify</strong> each batch as parallel vs. sequential based on the work itself.</p>
+<p>*<em>Why parallel sometimes </em>degrades<em> speed (observed failure modes):</em>*</p>
+<ol><li><strong>Hidden dependencies</strong> — task B consumes task A's output that the plan didn't make explicit → B re-does A's work or stalls.</li><li><strong>Ambiguous scope overlap</strong> — two "tasks" are the same task split badly → duplicate edits, merge conflicts, re-dispatch cycle.</li><li><strong>(N+1)x supervisor cost</strong> — every parallel sub-agent burns tokens on orchestrator re-reads; small N rarely justifies the multiplier.</li><li><strong>Shared-state contention</strong> — same worktree, <code>node_modules</code>, <code>target/</code>.</li></ol>
+<p><strong>Classifier (priority order, first match wins):</strong></p>
+<table><thead><tr><th>Check</th><th>If hit</th><th>Dispatch mode</th></tr></thead><tbody><tr><td>Dependency edge between any pair in the batch</td><td>yes</td><td>sequential</td></tr><tr><td>Any task has missing acceptance criteria or vague scope</td><td>yes</td><td>sequential</td></tr><tr><td>Two tasks touch the same files/modules without partition</td><td>yes</td><td>sequential</td></tr><tr><td>N ≥ 4 tasks AND each has clean worktree isolation AND cost is amortized</td><td>yes</td><td>parallel</td></tr><tr><td>Otherwise</td><td>—</td><td>sequential</td></tr></tbody></table>
+<p><strong>Output:</strong> <code>DispatchDecision { mode: parallel \| sequential, reason: string }</code>,</p>
+<p>logged as the first line of the build log (e.g. <code>dispatch: sequential — 3 tasks, ambiguous scope on api/auth.ts</code>) so the user can audit why parallelism was rejected.</p>
+<p><strong>Why this is the centerpiece (not just one cherry-pick among many):</strong></p>
+<ul><li>User <em>named</em> this as the direction.</li><li>Net-negative-weight by construction: removes a flag (bytes deleted) &gt; adds a 30-line classifier + 5-row log line (bytes added). Thin-harness Gate 2 passes trivially.</li><li>Zero runtime risk: pure-Python decision function, no hooks, no daemons, no network listeners. tmux + long-running Gate 3 passes by definition.</li><li>Aligns with iron law L5 (one answer, no option lists unless asked) and L7 (alpha in deterministic enforcement, not in reasoning).</li></ul>
+<p><strong>Implementation surface:</strong></p>
+<ul><li>New module <code>lib/dispatch_classifier.py</code> — pure function <code>classify(tasks: list[Task]) -&gt; DispatchDecision</code>.</li><li><code>/dev-kit:build</code> command drops <code>--parallel</code>. If a user still passes it, the classifier ignores the flag and emits <code>lint: deprecated --parallel flag, dispatch is auto-classified</code>.</li><li>Optional <code>/dev-kit:dispatch</code> skill (analysis alpha) — dry-run the decision on a plan without launching any sub-agent.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-2">Reference policy (treat the ecosystem as reading material, not runtime)</h2>
+<table><thead><tr><th>Ecosystem project</th><th>Disposition</th><th>Rationale</th></tr></thead><tbody><tr><td>Skills library</td><td>Keep installed, pin to current version, <code>autoUpdate: false</code>, neuter the bootstrap</td><td>Methodology reading material; reference value &gt; disk cost. Pinning avoids breakage from upstream renames.</td></tr><tr><td>Spec-first Agent OS</td><td>Keep installed, opt-in per project, never auto-invoke</td><td>Spec-first loop is a <em>different</em> methodology; useful when explicitly chosen. Run-mode requires its MCP server; persistent loop is fragile across tmux detach — wrap or skip in tmux.</td></tr><tr><td>Parallel-team harness</td><td><strong>Skip install</strong></td><td>Different runtime family; mid-refactor upstream; no integration path.</td></tr></tbody></table>
+<p><strong>Neurtering the skills-library bootstrap:</strong> a SessionStart hook at <code>~/.claude/settings.json</code> emits a higher-priority <code>additionalContext</code> block declaring this repo's iron laws primary and the reference bootstrap advisory only. Hook must be <strong>idempotent</strong> (no files written, no sockets opened, no daemons) so it survives tmux resume safely.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Thin-harness discipline (binding constraint on every cherry-pick)</h2>
+<p><strong>Gate 1 — Pros/cons memo.</strong> One page (≤ 30 lines) in <code>docs/cherry-picks/&lt;NNN-slug&gt;.md</code>: gains, losses, closest comparison within this repo, verdict (adopt / defer / reject).</p>
+<p><strong>Gate 2 — Net-negative-weight.</strong> Added frontmatter + body bytes ≤ bytes removed from the closest existing surface. Verified by <code>tools/token_efficiency_analyzer.py</code> before merge.</p>
+<p><strong>Gate 3 — tmux + long-running safety.</strong> Classify the change:</p>
+<ul><li>Pure prose (skill text): tmux-safe by definition.</li><li>Hook change: idempotent; no global state outside project tree; no daemons.</li><li>Subagent change: must use Agent tool (already tmux-safe), not raw subprocess; must propagate SIGTERM up the parent chain.</li><li>Persistent loop: max-iteration cap + checkpoint file; tmux detach triggers clean pause, not silent abandonment.</li></ul>
+<p><strong>Quarterly cap:</strong> ≤ 2 cherry-picks per quarter, verified by <code>git log --since="3 months ago" --grep="cherry-pick"</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Pattern adoption backlog (ranked)</h2>
+<table><thead><tr><th>Rank</th><th>Source category</th><th>Pattern</th><th>Why</th><th>Gate pass</th></tr></thead><tbody><tr><td><strong>1</strong></td><td>(user-named)</td><td><strong>Dispatch-mode classifier</strong></td><td>Auto-classify parallel vs. sequential; remove <code>--parallel</code> flag</td><td>All 3 by construction</td></tr><tr><td>2</td><td>Skills library</td><td>Subagent task-brief + review-package + multi-round circuit breaker</td><td>Tighten the parallel path <em>for tasks the classifier already chose to parallelize</em></td><td>Gate 2 (net-negative); Gate 3 (subagent rules)</td></tr><tr><td>3</td><td>Skills library</td><td>Skill-authoring principles (description-as-trigger-phrase; frontmatter as the contract)</td><td>Harden <code>rules/skill-authoring.md</code></td><td>Gate 2 (pure docs); Gate 3 N/A</td></tr><tr><td>4</td><td>Spec-first Agent OS</td><td>Gate concept (named quantitative thresholds)</td><td>Candidate for a <code>/dev-kit:gate</code> skill</td><td>Gate 2 (small); Gate 3 (in-process, tmux-safe)</td></tr></tbody></table>
+<p><strong>Do not adopt:</strong> multi-runtime packaging (out of mission scope), long-lived localhost visual-companion servers (conflicts with tmux + thin discipline), description-trigger auto-invocation across skills (conflicts with iron law L8 — prose that duplicates state-machine behavior must be trimmed).</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Plumbing steps (Phase A — single worktree, single PR)</h2>
+<p><strong>1. Pin the skills-library marketplace.</strong> Add <code>"autoUpdate": false</code> to the relevant entry in <code>~/.claude/plugins/known_marketplaces.json</code>.</p>
+<p><strong>2. SessionStart override hook.</strong> New file <code>/Users/sanghee/hooks/dev-kit-reference-override.sh</code> — emits static <code>additionalContext</code> declaring this repo's iron laws primary, all ecosystem-project bootstraps advisory only. Register in <code>~/.claude/settings.json</code> under <code>hooks.SessionStart[]</code>.</p>
+<p><strong>3. Document reference policy.</strong> Edit <code>CLAUDE.md</code> + <code>AGENTS.md</code> with the Reference Policy section above.</p>
+<p><strong>4. `/dev-kit:reference-bump` skill.</strong> New skill mirroring <code>/dev-kit:bump</code> structure. Behavior: query upstream latest tag of the skills library, diff vs. the pinned version (skill renames, hook changes, manifest changes, new Iron-Law phrasing in any injected file), <strong>display the diff and stop</strong>, require user <code>approve</code> before any <code>claude plugin update</code>. Frontmatter: <code>alpha: state</code>.</p>
+<p><strong>5. Leave the spec-first Agent OS alone.</strong> No edits to its marketplace. Just document in CLAUDE.md: opt-in per project, run-mode requires its MCP server, never chain with <code>/dev-kit:build</code>, persistent loops are tmux-fragile.</p>
+<p><strong>6. Skip the parallel-team harness.</strong> No install. Note in CLAUDE.md.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Long-running + tmux safety matrix</h2>
+<table><thead><tr><th>Change type</th><th>tmux detach</th><th>Long-running</th><th>Verification</th></tr></thead><tbody><tr><td>Pure prose (skill text)</td><td>N/A</td><td>N/A</td><td>Re-read after <code>/clear</code>; text round-trips</td></tr><tr><td>SessionStart hook (Plumbing 2)</td><td>Idempotent — static additionalContext, no state written</td><td>Once per session; cheap</td><td><code>~/.claude/logs/...jsonl</code> after detach+reattach; byte-identical on re-invoke</td></tr><tr><td>Subagent dispatch (Cherry-pick 2)</td><td>Subagents are independent OS processes; survive detach</td><td>Agent tool handles long-running</td><td>30-min parallel dispatch in <code>tmux new-session -d</code>; verify completion</td></tr><tr><td>Persistent loop (spec-first opt-in)</td><td><strong>Detach = silent abandonment</strong> unless wrapped in <code>tmux-resilient</code> checkpoint</td><td>Already requires human-in-loop checkpoints</td><td>Run 10 min, detach, reattach, verify checkpoint recovery</td></tr><tr><td>MCP server invocation</td><td>Separate OS processes; survive detach</td><td>Proven in this repo</td><td><code>~/.claude/mcp.json</code> audit per <code>/dev-kit:hook-doctor</code></td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-7">Execution sequence (user-prescribed workflow)</h2>
+<ol><li><strong>Step 0</strong> (sibling worktree, same branch): read the relevant files from each reference project <strong>once</strong> (don't vendor, don't install where not already installed). Author <code>docs/cherry-picks/{TEMPLATE, notes-&lt;category&gt;, BACKLOG}.md</code>. Dispatch classifier pre-promoted to rank #1. <strong>No skill/command changes in Step 0.</strong></li><li><strong>Render this proposal as HTML</strong> via <code>/dev-kit:proposal</code>. User reviews, iterates on YAML until explicit approval. No Linear, no code change before this gate.</li><li><strong>Register Linear issues</strong> via <code>/dev-kit:linear</code>. One umbrella for plumbing + one tracking issue per cherry-pick (≤ 2/quarter).</li><li><strong>`/dev-kit:plan` per phase:</strong> - <strong>Phase A</strong> — plumbing (Steps 1–6): single worktree, single PR. - <strong>Phase B</strong> — dispatch classifier (rank #1): fresh worktree, fresh PR, thin-harness gates re-validated. - <strong>Phase C</strong> — next cherry-pick (rank #2 if budget allows).</li></ol>
+<p><strong>Hard gates between phases</strong> (per <code>rules/git-workflow.md</code> + iron law L3):</p>
+<ol><li><strong>In-phase value gate — `/dev-kit:valuate`.</strong> Before declaring any phase's work "ready for review," run <code>/dev-kit:valuate</code> to score the change against the registered rubrics (<code>--harness-quality</code> and <code>--os-quality</code> are the relevant axes; <code>--case &lt;id&gt;</code> for targeted runs; <code>--dry-run</code> for preview). The valuate score is required input to the next gate; a failing score blocks commit even if code-side gates pass.</li><li><strong>Pre-commit review gate — `/codex:review`.</strong> Before <code>git commit</code>, dispatch the change to Codex via <code>/codex:review</code>. The returned report (standard sub-agent handoff envelope: <code>status</code> / <code>evidence</code> / <code>changed</code> / <code>next_actions</code>) is attached to the PR description. Review verdict must be <strong>Approve</strong> (or a clearly justified override) before the commit lands; verdict <strong>Request changes</strong> blocks commit and returns to the phase.</li><li><strong>Per-phase exit-code + token-economy snapshot.</strong> Each phase ends with a quoted exit code + a <code>tools/token_efficiency_analyzer.py</code> delta snapshot, per iron law L3 ("no completion claim without quoted exit code / test count / build log").</li><li><strong>Cherry-pick phases additionally require</strong> the cherry-pick memo (<code>docs/cherry-picks/&lt;NNN-slug&gt;.md</code>) re-validated against the actual diff.</li><li><strong>No phase begins</strong> until the previous PR is merged AND the Linear issue is "Done."</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-8">Out of scope</h2>
+<ul><li>Wholesale adoption of any external project as a runtime dependency.</li><li>Vendor-and-pin of external skill source into this repo's own <code>skills/</code> tree (defeats reference-only framing).</li><li>Multi-quarter rollout (≤ 2 cherry-picks/quarter cap).</li><li>Auto-update of any installed reference (permanent <code>autoUpdate: false</code>; upgrades go through <code>/dev-kit:reference-bump</code>).</li><li>Per-project settings overriding the user-scope SessionStart hook.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-9">Next steps</h2>
+<ol><li><strong>Approve this proposal</strong> — review the rendered HTML, iterate on YAML until explicit approval.</li><li><strong>Step 0</strong> — sibling worktree, one-time read of each reference category, cherry-pick backlog (dispatch classifier pre-promoted to #1). No skill/command changes.</li><li><strong>Phase A</strong> — plumbing.</li><li><strong>Phase B</strong> — dispatch classifier.</li><li><strong>Phase C</strong> — next cherry-pick, gated by quarterly cap.</li></ol>
+<p>Hand-off: this proposal + <code>BACKLOG.md</code> → <code>/dev-kit:linear</code> → <code>/dev-kit:plan</code> per phase.</p>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-05 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

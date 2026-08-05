@@ -1,0 +1,248 @@
+title: Auto-classify dispatch mode + thin-harness adoption of lessons from the agent-harness ecosystem
+status: draft
+date: 2026-08-05
+tags: [dispatch, auto-classify, thin-harness, cherry-pick, tmux, long-running]
+sections:
+  - title: Problem
+    body: |
+      Three adjacent agent-harness projects exist in the broader ecosystem
+      that this repo competes with and can learn from. Each takes a different
+      slice of the "what should a coding harness look like" question:
+
+      - One is a **pure skills library** (~14 SKILL.md files), packaged to
+        ship to many harnesses from a single source tree. One SessionStart
+        hook injects a strong Iron Law that biases every prompt.
+      - One is a **spec-first "Agent OS"** (~21 skills + named agent minds
+        + a dedicated MCP server). Loop: interview → seed → run →
+        evaluate → evolve.
+      - One is a **parallel-team harness config** for a different runtime
+        family. Currently mid OS-refactor upstream.
+
+      This repo already has 39 skills, 20+ hooks, slash commands, CI
+      templates, agents, and an MCP integration. No name collisions with
+      any of the three, but heavy **functional overlap** on TDD, debugging,
+      verification, planning, review. None of the three has a CI / worktree
+      / version-bump opinion.
+
+      The user-prescribed direction (verbatim, translated):
+      *"Cherry-pick where pros clearly outweigh cons. Don't blind-copy.
+      Keep the harness thin. Make it work safely under long-running tasks
+      in a tmux environment."*
+
+  - title: Recommended approach — auto-classify dispatch mode (the centerpiece)
+    body: |
+      Today `/dev-kit:build` exposes a `--parallel` flag the user must set
+      consciously. The user wants this **removed**. The harness should
+      **auto-classify** each batch as parallel vs. sequential based on the
+      work itself.
+
+      **Why parallel sometimes *degrades* speed (observed failure modes):**
+
+      1. **Hidden dependencies** — task B consumes task A's output that the
+         plan didn't make explicit → B re-does A's work or stalls.
+      2. **Ambiguous scope overlap** — two "tasks" are the same task split
+         badly → duplicate edits, merge conflicts, re-dispatch cycle.
+      3. **(N+1)x supervisor cost** — every parallel sub-agent burns tokens
+         on orchestrator re-reads; small N rarely justifies the multiplier.
+      4. **Shared-state contention** — same worktree, `node_modules`,
+         `target/`.
+
+      **Classifier (priority order, first match wins):**
+
+      | Check | If hit | Dispatch mode |
+      |---|---|---|
+      | Dependency edge between any pair in the batch | yes | sequential |
+      | Any task has missing acceptance criteria or vague scope | yes | sequential |
+      | Two tasks touch the same files/modules without partition | yes | sequential |
+      | N ≥ 4 tasks AND each has clean worktree isolation AND cost is amortized | yes | parallel |
+      | Otherwise | — | sequential |
+
+      **Output:** `DispatchDecision { mode: parallel \| sequential, reason: string }`,
+      logged as the first line of the build log
+      (e.g. `dispatch: sequential — 3 tasks, ambiguous scope on api/auth.ts`)
+      so the user can audit why parallelism was rejected.
+
+      **Why this is the centerpiece (not just one cherry-pick among many):**
+
+      - User *named* this as the direction.
+      - Net-negative-weight by construction: removes a flag (bytes deleted) >
+        adds a 30-line classifier + 5-row log line (bytes added). Thin-harness
+        Gate 2 passes trivially.
+      - Zero runtime risk: pure-Python decision function, no hooks, no
+        daemons, no network listeners. tmux + long-running Gate 3 passes by
+        definition.
+      - Aligns with iron law L5 (one answer, no option lists unless asked)
+        and L7 (alpha in deterministic enforcement, not in reasoning).
+
+      **Implementation surface:**
+
+      - New module `lib/dispatch_classifier.py` — pure function
+        `classify(tasks: list[Task]) -> DispatchDecision`.
+      - `/dev-kit:build` command drops `--parallel`. If a user still passes
+        it, the classifier ignores the flag and emits
+        `lint: deprecated --parallel flag, dispatch is auto-classified`.
+      - Optional `/dev-kit:dispatch` skill (analysis alpha) — dry-run the
+        decision on a plan without launching any sub-agent.
+
+  - title: Reference policy (treat the ecosystem as reading material, not runtime)
+    body: |
+      | Ecosystem project | Disposition | Rationale |
+      |---|---|---|
+      | Skills library | Keep installed, pin to current version, `autoUpdate: false`, neuter the bootstrap | Methodology reading material; reference value > disk cost. Pinning avoids breakage from upstream renames. |
+      | Spec-first Agent OS | Keep installed, opt-in per project, never auto-invoke | Spec-first loop is a *different* methodology; useful when explicitly chosen. Run-mode requires its MCP server; persistent loop is fragile across tmux detach — wrap or skip in tmux. |
+      | Parallel-team harness | **Skip install** | Different runtime family; mid-refactor upstream; no integration path. |
+
+      **Neurtering the skills-library bootstrap:** a SessionStart hook at
+      `~/.claude/settings.json` emits a higher-priority `additionalContext`
+      block declaring this repo's iron laws primary and the reference
+      bootstrap advisory only. Hook must be **idempotent** (no files
+      written, no sockets opened, no daemons) so it survives tmux resume
+      safely.
+
+  - title: Thin-harness discipline (binding constraint on every cherry-pick)
+    body: |
+      **Gate 1 — Pros/cons memo.** One page (≤ 30 lines) in
+      `docs/cherry-picks/<NNN-slug>.md`: gains, losses, closest
+      comparison within this repo, verdict (adopt / defer / reject).
+
+      **Gate 2 — Net-negative-weight.** Added frontmatter + body bytes ≤ bytes
+      removed from the closest existing surface. Verified by
+      `tools/token_efficiency_analyzer.py` before merge.
+
+      **Gate 3 — tmux + long-running safety.** Classify the change:
+
+      - Pure prose (skill text): tmux-safe by definition.
+      - Hook change: idempotent; no global state outside project tree; no
+        daemons.
+      - Subagent change: must use Agent tool (already tmux-safe), not raw
+        subprocess; must propagate SIGTERM up the parent chain.
+      - Persistent loop: max-iteration cap + checkpoint file; tmux detach
+        triggers clean pause, not silent abandonment.
+
+      **Quarterly cap:** ≤ 2 cherry-picks per quarter, verified by
+      `git log --since="3 months ago" --grep="cherry-pick"`.
+
+  - title: Pattern adoption backlog (ranked)
+    body: |
+      | Rank | Source category | Pattern | Why | Gate pass |
+      |---|---|---|---|---|
+      | **1** | (user-named) | **Dispatch-mode classifier** | Auto-classify parallel vs. sequential; remove `--parallel` flag | All 3 by construction |
+      | 2 | Skills library | Subagent task-brief + review-package + multi-round circuit breaker | Tighten the parallel path *for tasks the classifier already chose to parallelize* | Gate 2 (net-negative); Gate 3 (subagent rules) |
+      | 3 | Skills library | Skill-authoring principles (description-as-trigger-phrase; frontmatter as the contract) | Harden `rules/skill-authoring.md` | Gate 2 (pure docs); Gate 3 N/A |
+      | 4 | Spec-first Agent OS | Gate concept (named quantitative thresholds) | Candidate for a `/dev-kit:gate` skill | Gate 2 (small); Gate 3 (in-process, tmux-safe) |
+
+      **Do not adopt:** multi-runtime packaging (out of mission scope),
+      long-lived localhost visual-companion servers (conflicts with tmux +
+      thin discipline), description-trigger auto-invocation across skills
+      (conflicts with iron law L8 — prose that duplicates state-machine
+      behavior must be trimmed).
+
+  - title: Plumbing steps (Phase A — single worktree, single PR)
+    body: |
+      **1. Pin the skills-library marketplace.** Add `"autoUpdate": false`
+      to the relevant entry in `~/.claude/plugins/known_marketplaces.json`.
+
+      **2. SessionStart override hook.** New file
+      `/Users/sanghee/hooks/dev-kit-reference-override.sh` — emits static
+      `additionalContext` declaring this repo's iron laws primary, all
+      ecosystem-project bootstraps advisory only. Register in
+      `~/.claude/settings.json` under `hooks.SessionStart[]`.
+
+      **3. Document reference policy.** Edit `CLAUDE.md` + `AGENTS.md` with
+      the Reference Policy section above.
+
+      **4. `/dev-kit:reference-bump` skill.** New skill mirroring
+      `/dev-kit:bump` structure. Behavior: query upstream latest tag of
+      the skills library, diff vs. the pinned version (skill renames, hook
+      changes, manifest changes, new Iron-Law phrasing in any
+      injected file), **display the diff and stop**, require user
+      `approve` before any `claude plugin update`. Frontmatter:
+      `alpha: state`.
+
+      **5. Leave the spec-first Agent OS alone.** No edits to its
+      marketplace. Just document in CLAUDE.md: opt-in per project, run-mode
+      requires its MCP server, never chain with `/dev-kit:build`,
+      persistent loops are tmux-fragile.
+
+      **6. Skip the parallel-team harness.** No install. Note in CLAUDE.md.
+
+  - title: Long-running + tmux safety matrix
+    body: |
+      | Change type | tmux detach | Long-running | Verification |
+      |---|---|---|---|
+      | Pure prose (skill text) | N/A | N/A | Re-read after `/clear`; text round-trips |
+      | SessionStart hook (Plumbing 2) | Idempotent — static additionalContext, no state written | Once per session; cheap | `~/.claude/logs/...jsonl` after detach+reattach; byte-identical on re-invoke |
+      | Subagent dispatch (Cherry-pick 2) | Subagents are independent OS processes; survive detach | Agent tool handles long-running | 30-min parallel dispatch in `tmux new-session -d`; verify completion |
+      | Persistent loop (spec-first opt-in) | **Detach = silent abandonment** unless wrapped in `tmux-resilient` checkpoint | Already requires human-in-loop checkpoints | Run 10 min, detach, reattach, verify checkpoint recovery |
+      | MCP server invocation | Separate OS processes; survive detach | Proven in this repo | `~/.claude/mcp.json` audit per `/dev-kit:hook-doctor` |
+
+  - title: Execution sequence (user-prescribed workflow)
+    body: |
+      1. **Step 0** (sibling worktree, same branch): read the relevant
+         files from each reference project **once** (don't vendor, don't
+         install where not already installed). Author
+         `docs/cherry-picks/{TEMPLATE, notes-<category>, BACKLOG}.md`.
+         Dispatch classifier pre-promoted to rank #1. **No skill/command
+         changes in Step 0.**
+      2. **Render this proposal as HTML** via `/dev-kit:proposal`. User
+         reviews, iterates on YAML until explicit approval. No Linear, no
+         code change before this gate.
+      3. **Register Linear issues** via `/dev-kit:linear`. One umbrella
+         for plumbing + one tracking issue per cherry-pick (≤ 2/quarter).
+      4. **`/dev-kit:plan` per phase:**
+         - **Phase A** — plumbing (Steps 1–6): single worktree, single PR.
+         - **Phase B** — dispatch classifier (rank #1): fresh worktree,
+           fresh PR, thin-harness gates re-validated.
+         - **Phase C** — next cherry-pick (rank #2 if budget allows).
+
+      **Hard gates between phases** (per `rules/git-workflow.md` + iron
+      law L3):
+
+      1. **In-phase value gate — `/dev-kit:valuate`.** Before declaring any
+         phase's work "ready for review," run `/dev-kit:valuate` to score
+         the change against the registered rubrics (`--harness-quality`
+         and `--os-quality` are the relevant axes; `--case <id>` for
+         targeted runs; `--dry-run` for preview). The valuate score is
+         required input to the next gate; a failing score blocks
+         commit even if code-side gates pass.
+      2. **Pre-commit review gate — `/codex:review`.** Before `git
+         commit`, dispatch the change to Codex via `/codex:review`. The
+         returned report (standard sub-agent handoff envelope: `status` /
+         `evidence` / `changed` / `next_actions`) is attached to the PR
+         description. Review verdict must be **Approve** (or a clearly
+         justified override) before the commit lands; verdict **Request
+         changes** blocks commit and returns to the phase.
+      3. **Per-phase exit-code + token-economy snapshot.** Each phase
+         ends with a quoted exit code + a
+         `tools/token_efficiency_analyzer.py` delta snapshot, per iron law
+         L3 ("no completion claim without quoted exit code / test count
+         / build log").
+      4. **Cherry-pick phases additionally require** the cherry-pick memo
+         (`docs/cherry-picks/<NNN-slug>.md`) re-validated against the
+         actual diff.
+      5. **No phase begins** until the previous PR is merged AND the
+         Linear issue is "Done."
+
+  - title: Out of scope
+    body: |
+      - Wholesale adoption of any external project as a runtime dependency.
+      - Vendor-and-pin of external skill source into this repo's own
+        `skills/` tree (defeats reference-only framing).
+      - Multi-quarter rollout (≤ 2 cherry-picks/quarter cap).
+      - Auto-update of any installed reference (permanent `autoUpdate:
+        false`; upgrades go through `/dev-kit:reference-bump`).
+      - Per-project settings overriding the user-scope SessionStart hook.
+
+  - title: Next steps
+    body: |
+      1. **Approve this proposal** — review the rendered HTML, iterate on
+         YAML until explicit approval.
+      2. **Step 0** — sibling worktree, one-time read of each reference
+         category, cherry-pick backlog (dispatch classifier pre-promoted
+         to #1). No skill/command changes.
+      3. **Phase A** — plumbing.
+      4. **Phase B** — dispatch classifier.
+      5. **Phase C** — next cherry-pick, gated by quarterly cap.
+
+      Hand-off: this proposal + `BACKLOG.md` → `/dev-kit:linear` →
+      `/dev-kit:plan` per phase.
