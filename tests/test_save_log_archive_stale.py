@@ -292,6 +292,67 @@ class TestArchiveStaleRouting(unittest.TestCase):
             self.assertFalse(any(archive_root.rglob("sess-y.jsonl")),
                              "should not have archived without --archive-stale")
 
+    def test_archive_stale_resolves_subdir_cwd_to_worktree_root(self) -> None:
+        """Regression guard for code-review finding (2026-08-11 /critical):
+
+        A Claude Code session frequently chdirs to a SUBDIR of the
+        worktree (e.g. ``.worktrees/feat/src/foo``), not the literal
+        worktree root. The earlier implementation passed the session
+        cwd straight into ``_is_worktree_active``, which compared the
+        subdir's realpath against the ``worktree <path>`` porcelain
+        line and returned False — so an ACTIVE worktree was silently
+        archived.
+
+        Fix: pass the resolved worktree root, not the session cwd.
+        This test cd's to a subdir of the worktree and asserts the
+        archive path is NOT taken for an active worktree.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            main_root, wt_dir = self._setup_repo(tmp)
+            # Create a subdir inside the worktree and chdir there —
+            # this is the case the old code got wrong.
+            sub = wt_dir / "src" / "deep"
+            sub.mkdir(parents=True)
+            transcript = self._write_fake_transcript(tmp)
+            # Active worktree — must NOT be archived.
+            porcelain = (
+                f"worktree {os.path.realpath(main_root)}\n"
+                f"worktree {os.path.realpath(wt_dir)}\n"
+                "HEAD bbb\nbranch refs/heads/feat\n"
+            )
+
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(sub)
+                stdin_payload = _fake_payload(
+                    transcript=str(transcript),
+                    cwd=str(sub),
+                    session_id="sess-sub",
+                )
+                rc = _invoke_save_log(
+                    ["--tool", "claude-code", "--archive-stale"],
+                    stdin_payload,
+                    main_root=main_root, wt_dir=wt_dir,
+                    branch="feat-branch", porcelain=porcelain,
+                )
+                self.assertEqual(rc, 0)
+            finally:
+                os.chdir(old_cwd)
+
+            # Active worktree + session cwd in a subdir = must write
+            # to the canonical worktree logs path, NOT archive.
+            archive_root = main_root / "logs" / ".archive" / "feat-branch"
+            self.assertFalse(
+                archive_root.exists(),
+                f"active worktree should not be archived; got {archive_root}",
+            )
+            wt_logs = wt_dir / "logs" / "claude-code" / "feat-branch"
+            self.assertTrue(
+                (wt_logs / "sess-sub.jsonl").exists(),
+                "active worktree + subdir cwd must write to canonical path",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,20 +11,34 @@
 # Token counting strategy:
 #   We do not have a wire-level token counter. As a proxy, we read the
 #   session transcript_path from the hook payload (the harness exposes
-#   the active JSONL file) and compute the byte size of the
-#   `message.usage.input_tokens` plus `cache_read_input_tokens`
-#   sums. This is exact per-session for Claude Code transcripts; for
-#   Codex (no usage field) we fall back to byte-length / 4 (a
-#   conservative heuristic, ~25% over the true count for prose).
+#   the active JSONL file) and sum `message.usage.input_tokens` plus
+#   `cache_read_input_tokens` across every record that carries a
+#   usage block (Claude Code transcripts do; Codex transcripts do
+#   not, so they sum to 0 and the hook stays silent on Codex runs —
+#   see "Limitations" below for the rationale).
 #
-#   The thresholds (100K / 200K / 300K) are read from environment vars
-#   so an operator can tune them per repo without editing the hook:
+#   Metric semantics: this is **cumulative input tokens processed**
+#   over the lifetime of the session, NOT the size of the prompt the
+#   model currently sees. /dev-kit:token-analyzer uses the same
+#   metric on its HEAVY_CONTEXT trigger, so the thresholds line up.
+#
+#   Thresholds (100K / 200K / 300K) are read from environment vars so
+#   an operator can tune them per repo without editing the hook:
 #     CONTEXT_WINDOW_WARN_KB=100   # default; first warn
 #     CONTEXT_WINDOW_CAUTION_KB=200 # second warn
 #     CONTEXT_WINDOW_HARD_KB=300    # final warn
 #   Setting any to 0 disables that tier.
 #
 # Output: stderr WARN, exit 0 (advisory, non-blocking).
+#
+# Limitations:
+#   - Codex transcripts lack `.message.usage`; the hook stays silent.
+#     A byte-length/4 fallback was considered but rejected: the
+#     false-positive risk (a transcript full of repeated boilerplate
+#     would trip the warn even though the real context is small) is
+#     higher than the value of catching the rare Codex case where
+#     context genuinely bloats. Operators who want Codex coverage
+#     can grep the transcript with their own script.
 #
 # Fail-open contract: missing jq / unreadable transcript → exit 0.
 

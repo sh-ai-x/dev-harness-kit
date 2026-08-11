@@ -372,6 +372,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Env-var override (opt-in for hand-edited hooks): if the operator
+    # sets SAVE_LOG_ARCHIVE_STALE=1 in the hook's environment, behave as
+    # if --archive-stale was passed. This lets existing SessionEnd /
+    # Stop hook commands pick up the feature without rewriting the
+    # hook JSON. Flag wins over env (callers can force-disable).
+    if os.environ.get("SAVE_LOG_ARCHIVE_STALE", "").strip() in ("1", "true", "yes"):
+        if not args.archive_stale:
+            args.archive_stale = True
+
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError) as exc:  # narrow: stdin payload must be JSON
@@ -428,7 +437,7 @@ def main() -> int:
     # name. Without this, every worktree session falls back to (main)
     # attribution via the cwd field.
     if worktree_dir and os.path.realpath(worktree_dir) != os.path.realpath(main_root):
-        if args.archive_stale and not _is_worktree_active(cwd, main_root):
+        if args.archive_stale and not _is_worktree_active(worktree_dir, main_root):
             # Stale worktree: route to a dated archive subdir so the
             # analyzer can ignore it cleanly (the analyzer only walks
             # `logs/<tool>/<branch>/` paths; .archive is a sibling).
