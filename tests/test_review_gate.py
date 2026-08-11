@@ -224,7 +224,8 @@ class TestSeverityGateTolerance(unittest.TestCase):
         )
         combined = cp.stdout + cp.stderr
         self.assertIn("::error::review+security gate: AI agent was skipped", combined)
-        self.assertIn("anthropics/claude-code-action@v1 refused", combined)
+        self.assertIn("anthropics/claude-code-action@", combined)
+        self.assertIn("refused to run", combined)
 
     def test_security_agent_skipped_hard_fails(self):
         cp = _run_gate(r="Approve", s="", event="pull_request", s_agent="false")
