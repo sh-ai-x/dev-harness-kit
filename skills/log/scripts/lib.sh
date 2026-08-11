@@ -132,7 +132,7 @@ read_json_or_empty() {
 # A08 mitigation: every merged entry's command MUST match the documented
 # shape — a `for`-style python3 lookup that ends by exec'ing
 # "${CLAUDE_PROJECT_DIR}/tools/save_log.py --tool <name>". Anything else
-# (including arbitrary remote shell pipelines) is rejected and the merge
+# (including bare shell, `curl | sh`, etc.) is rejected and the merge
 # fails. This is a command allow-list, not a heuristic.
 #   $1 = source settings.json path (the loghooks repo's settings)
 #   $2 = target settings.json path (the project to log)
@@ -147,8 +147,8 @@ merge_loghooks_into() {
     # structural shape via a single regex. Both Claude and Codex hooks
     # are shell `for` loops that iterate python3/python/py, call
     # save_log.py --tool <name>, and end with `fi; done`. Anything else
-    # Remote shell pipelines and arbitrary rm -rf commands are rejected here
-    # so a poisoned $LOGHOOKS_DIR cannot exfiltrate through the merged command field.
+    # (curl|sh, arbitrary rm -rf, etc.) is rejected here so a poisoned
+    # $LOGHOOKS_DIR cannot exfiltrate through the merged command field.
     local bad
     bad="$(printf '%s' "$current" | jq \
         --slurpfile src "$src" '

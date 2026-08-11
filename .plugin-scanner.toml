@@ -6,6 +6,12 @@ profile = "public-marketplace"
 ignore_paths = [
   "tests/**",
   "skills/review/fixtures/**",
+  # These files document intentionally rejected patterns; keep the concrete
+  # examples visible to reviewers while excluding their prose-only matches.
+  "lib/llm_judge.py",
+  "lib/render_report_html.py",
+  "skills/log/scripts/lib.sh",
+  "skills/proposal/SKILL.md",
   # This is a CI template containing GitHub secret expressions, not literals.
   "templates/ci/.github/workflows/review.yml",
 ]
