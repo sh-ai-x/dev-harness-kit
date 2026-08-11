@@ -628,7 +628,7 @@ class TestLinearSync(unittest.TestCase):
             fake_home.mkdir()
             (fake_home / ".config" / "dev-kit").mkdir(parents=True)
             (fake_home / ".config" / "dev-kit" / ".env").write_text(
-                "LINEAR_API_KEY=linear-test-placeholder\n"
+                "LINEAR_API_KEY=set-at-runtime\n"
                 "LINEAR_TEAM_ID=team-7\n"
                 "SOME_OTHER_KEY=should-not-leak\n"
                 "GH_TOKEN=set-at-runtime\n",
@@ -639,7 +639,7 @@ class TestLinearSync(unittest.TestCase):
                  mock.patch.object(linear_sync, "_repo_root", return_value=repo):
                 linear_sync._load_env_file(repo)
                 self.assertEqual(
-                    os.environ.get("LINEAR_API_KEY"), "linear-test-placeholder"
+                    os.environ.get("LINEAR_API_KEY"), "set-at-runtime"
                 )
                 self.assertEqual(os.environ.get("LINEAR_TEAM_ID"), "team-7")
                 self.assertIsNone(os.environ.get("SOME_OTHER_KEY"))
