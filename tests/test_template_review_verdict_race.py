@@ -119,14 +119,19 @@ class TestTemplateVerdictExtractionOrdering(unittest.TestCase):
     def test_review_and_security_extract_use_verdict_source_label(self):
         """Both extract steps MUST emit a `verdict_source` output.
 
-        Distinguishes the four states the gate can encounter:
+        Distinguishes the four states the gate can encounter
+        (issue #612: `default-approve-empty-file` was the silent-Approve
+        path; replaced with `parse-failed-no-verdict` which threads
+        through the gate's PARSE_FAILED hard-fail branch):
           - agent-output-file              (extract-verdict.py returned a verdict)
-          - default-approve-empty-file     (file exists, no parseable verdict)
+          - parse-failed-no-verdict        (issue #612: file existed + parseable
+                                            JSON but no `Verdict:` line)
           - default-approve-no-file        (action silently skipped)
           - needs-fallback-bootstrap-pr    (needs_fallback=true early-return)
 
         Diagnostic label — pinned to prevent silent regressions of the
-        comment-grep fallback that motivated issue #244.
+        comment-grep fallback that motivated issue #244 + the silent
+        Approve regression that motivated issue #612.
         """
         for job in ("review", "security"):
             body = self._job_body(job)

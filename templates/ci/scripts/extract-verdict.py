@@ -21,21 +21,44 @@ result, etc.). The assistant messages contain the model's text output;
 the verdict appears in the FINAL assistant message per the prompt
 contract.
 
+CONTRACT (issue #612, consumer PR silent-Approve bug):
+  - file missing / HTML / unreadable / suspiciously small → stdout=""
+    (caller treats as the genuine "no-file" path; tolerance is
+    appropriate because it usually means a transient filesystem /
+    network problem)
+  - file exists, parseable JSON, but no assistant message contains a
+    recognizable `Verdict:` line → stdout="PARSE_FAILED"
+    (the agent ran and produced JSON output, but did not emit the
+    verdict contract — caller hard-fails the gate so the user MUST
+    fix the prompt contract instead of silently letting Approve pass;
+    see review.yml gate's `PARSE_FAILED` branch for the remediation
+    message)
+  - file exists, parseable JSON, with `Verdict:` in an assistant
+    message → stdout=verdict (last one wins)
+
+The "PARSE_FAILED" sentinel is what enables the gate to distinguish
+"agent ran but didn't follow the verdict contract" from "agent's output
+file is genuinely missing" — the two failure modes deserve different
+treatment (hard-fail vs. tolerance).
+
 Robustness:
 - If the file is missing, exits 0 with no output (caller falls back).
 - If the file is HTML (e.g. 404 from a redirect), exits 0 with no
   output (caller falls back). Detected by checking the first non-blank
   character.
-- If the file is JSON but has no Verdict, exits 0 with no output.
+- If the file is parseable JSON but has no Verdict, exits 0 with the
+  PARSE_FAILED sentinel (caller hard-fails the gate — see CONTRACT
+  above; this is the fix for the consumer silent-Approve bug).
 - If the file is unreadable, exits 0 with no output (caller falls back).
-- Returns exit 0 (not 1) on "not found" so the bash || true at the
-  call site can be simplified.
+- Returns exit 0 (not 1) on "not found" or "parse failed" so the
+  bash || true at the call site can stay simple.
 
 Usage:
   python3 extract-verdict.py <path-to-claude-execution-output.json>
 
-Prints the verdict (Approve|Blocked|Changes Requested) to stdout if
-found. Exits 0 always (no verdict on stdout = caller falls back).
+Prints the verdict (Approve|Blocked|Changes Requested), the sentinel
+`PARSE_FAILED`, or nothing (empty stdout = caller falls back to no-file
+path). Exits 0 always.
 """
 from __future__ import annotations
 
@@ -45,6 +68,13 @@ import sys
 from pathlib import Path
 
 VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
+
+# Sentinel emitted when the agent's output file exists and is parseable
+# JSONL but no assistant message contains a `Verdict:` line. The
+# review.yml severity gate has a dedicated branch that hard-fails with
+# a remediation message when this sentinel shows up in the verdict
+# output (see the `PARSE_FAILED` arm of the combined verdict gate).
+PARSE_FAILED = "PARSE_FAILED"
 
 
 def extract(path: Path) -> str:
@@ -99,6 +129,18 @@ def extract(path: Path) -> str:
             m = VERDICT_RE.search(t)
             if m:
                 last_verdict = m.group(1)
+    # Issue #612 fix: file passed the basic shape checks (exists, not
+    # HTML, has content) but no assistant message contained a
+    # recognizable `Verdict:` line. Either the JSONL was garbled, the
+    # agent didn't emit a verdict, or the wrapper changed format — in
+    # all cases we cannot trust a missing-verdict default. Emit the
+    # PARSE_FAILED sentinel so the gate hard-fails with the dedicated
+    # remediation message instead of silently defaulting to Approve
+    # (the old consumer-facing bug). The no-file / HTML / unreadable
+    # cases above still return "" so the caller can keep its genuine
+    # no-file tolerance path.
+    if not last_verdict:
+        return PARSE_FAILED
     return last_verdict
 
 

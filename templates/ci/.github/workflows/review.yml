@@ -312,46 +312,48 @@ jobs:
           if [ -f "$AGENT_OUTPUT" ]; then
             file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
           fi
-          if [ -n "$file_verdict" ]; then
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 fix: extract-verdict.py saw the file existed
+            # with parseable content but no recognizable `Verdict:`
+            # line — the agent ran but did not follow the verdict
+            # contract. Thread the PARSE_FAILED sentinel through to
+            # the gate so it hard-fails with the dedicated remediation
+            # message (see the gate's PARSE_FAILED branch) instead of
+            # silently defaulting to Approve (the old consumer-facing
+            # bug). The audit comment's source field now records
+            # `parse-failed-no-verdict` so the reviewer can see the
+            # actual failure mode without re-reading the gate logs.
+            echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+            verdict="PARSE_FAILED"
+            verdict_source="parse-failed-no-verdict"
+            agent_ran="true"
+          elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # ROOT-CAUSE FIX: when the agent's output file is missing or
-            # extract-verdict.py returns nothing, default to Approve +
-            # warning instead of grepping PR comments. Matches the
-            # severity gate's existing contract: empty verdict is valid;
-            # the human gate (REVIEW_REQUIRED / CHANGES_REQUESTED on the
-            # PR) is what actually blocks merge.
-            if [ -f "$AGENT_OUTPUT" ]; then
-              echo "::warning::review verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
-              verdict="Approve"
-              verdict_source="default-approve-empty-file"
-              agent_ran="true"
-            else
-              # Issue #253 backport (boilerplate-web PR #20): case-switch
-              # on ${{ job.status }} so transient failures (timeout /
-              # runtime error → cancelled|failure) are not misclassified
-              # as a bootstrap-PR skip. Pre-#253 the no-file branch was a
-              # flat agent_ran="false", which made boilerplate-web PR #18's
-              # 20-min timeouts hard-fail the gate even though review + CI
-              # were otherwise green. Default arm keeps the bootstrap-PR
-              # skip semantics (agent_ran="false") for success/anything else.
-              case "${{ job.status }}" in
-                cancelled|failure)
-                  echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-job-${{ job.status }}"
-                  agent_ran="true"
-                  ;;
-                *)
-                  echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-no-file"
-                  agent_ran="false"
-                  ;;
-              esac
-            fi
+            # Genuine no-file path: extract-verdict.py returned empty
+            # because the file is missing / HTML / unreadable /
+            # suspiciously small. Tolerance is appropriate for these
+            # transient filesystem / network cases — the gate's
+            # existing contract treats empty as "I couldn't read the
+            # file" rather than "the agent ran but produced no
+            # verdict" (that case now flows through the PARSE_FAILED
+            # arm above).
+            case "${{ job.status }}" in
+              cancelled|failure)
+                echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-job-${{ job.status }}"
+                agent_ran="true"
+                ;;
+              *)
+                echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-no-file"
+                agent_ran="false"
+                ;;
+            esac
           fi
           echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
           echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
@@ -587,37 +589,41 @@ jobs:
           if [ -f "$AGENT_OUTPUT" ]; then
             file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
           fi
-          if [ -n "$file_verdict" ]; then
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 fix (symmetric with the review job): the agent
+            # ran (file exists, JSONL parseable) but did not emit a
+            # recognizable `Verdict:` line. Thread the PARSE_FAILED
+            # sentinel through to the gate so it hard-fails with the
+            # dedicated remediation message instead of silently
+            # defaulting to Approve (the old consumer-facing bug).
+            echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+            verdict="PARSE_FAILED"
+            verdict_source="parse-failed-no-verdict"
+            agent_ran="true"
+          elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # Same root-cause fix as the review job: default to Approve +
-            # warning on empty verdict, never grep PR comments.
-            if [ -f "$AGENT_OUTPUT" ]; then
-              echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
-              verdict="Approve"
-              verdict_source="default-approve-empty-file"
-              agent_ran="true"
-            else
-              # Issue #253 backport (boilerplate-web PR #20): symmetric
-              # with the review job — see review-branch comment above for
-              # the cancelled|failure vs default rationale.
-              case "${{ job.status }}" in
-                cancelled|failure)
-                  echo "::warning::security verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-job-${{ job.status }}"
-                  agent_ran="true"
-                  ;;
-                *)
-                  echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-no-file"
-                  agent_ran="false"
-                  ;;
-              esac
-            fi
+            # Genuine no-file path: extract-verdict.py returned empty
+            # because the file is missing / HTML / unreadable /
+            # suspiciously small. Tolerance is appropriate for these
+            # transient filesystem / network cases — see the
+            # review-job comment above for the full rationale.
+            case "${{ job.status }}" in
+              cancelled|failure)
+                echo "::warning::security verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-job-${{ job.status }}"
+                agent_ran="true"
+                ;;
+              *)
+                echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-no-file"
+                agent_ran="false"
+                ;;
+            esac
           fi
           echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
           echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
@@ -761,22 +767,28 @@ jobs:
             {
               echo "::error::review+security gate: verdict parser failed"
               echo "  review.verdict=$R  security.verdict=$S"
-              echo "  The agent's output file couldn't be parsed into a"
-              echo "  recognizable Verdict. This is NOT a successful pass"
-              echo "  -- the security review is inconclusive."
+              echo "  The agent ran (output file existed + was parseable"
+              echo "  JSONL) but no assistant message contained a"
+              echo "  recognizable 'Verdict:' line. This is NOT a"
+              echo "  successful pass -- the review is inconclusive."
               echo
               echo "  Common causes:"
-              echo "    - Agent posted an inline comment but no summary with"
-              echo "      '**Verdict:** Approve|Changes Requested|Blocked'"
-              echo "    - Agent's output envelope changed (the parser reads"
-              echo "      a different JSON field than the wrapper now emits)"
+              echo "    - Agent ran but did not post the verdict summary"
+              echo "      (issue #612 consumer bug: provider ran"
+              echo "      successfully, posted inline comments, but the"
+              echo "      final summary was missing or malformed)"
+              echo "    - Agent's output envelope changed (the parser"
+              echo "      reads a different JSON field than the wrapper"
+              echo "      now emits)"
               echo "    - Agent output was truncated or empty"
               echo
               echo "  Fix:"
-              echo "    - Update extract-verdict.py to handle the new output"
-              echo "      shape, OR"
+              echo "    - Update extract-verdict.py to handle the new"
+              echo "      output shape, OR"
               echo "    - Update the agent's prompt to always emit a"
-              echo "      '**Verdict:** <value>' summary line"
+              echo "      single-line 'Verdict: Approve|Changes Requested|Blocked'"
+              echo "      summary (extract-verdict.py uses a non-bold regex;"
+              echo "      see templates/ci/scripts/extract-verdict.py:VERDICT_RE)"
             } >&2
             exit 1
           fi
