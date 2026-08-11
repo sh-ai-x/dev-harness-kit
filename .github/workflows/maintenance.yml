@@ -94,6 +94,18 @@ jobs:
             provider="${{ vars.CI_REVIEW_PROVIDER }}"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
+          # Fallback: when the `vars.CI_REVIEW_PROVIDER` context returns
+          # empty (GH-Actions can fail to render the var context even when
+          # the variable is set via `gh variable set`), infer the
+          # provider from the workflow-level MINIMAX_BASE_URL env — the
+          # workflow inlines that env unconditionally, so its presence
+          # is the strongest signal the operator intended `minimax`.
+          # This is the same graceful fallback as `bin/review-local.sh`'s
+          # local-auth path in lib/ci_setup.read_provider.
+          if [ -z "$provider" ] && [ -n "$MINIMAX_BASE_URL" ]; then
+            echo "::warning::vars.CI_REVIEW_PROVIDER was empty; falling back to MINIMAX_BASE_URL env inference"
+            provider="minimax"
+          fi
           if [ -z "$provider" ]; then
             echo "::error::No provider resolved. Set the GitHub repo variable:"
             echo "  gh variable set CI_REVIEW_PROVIDER --body anthropic"
