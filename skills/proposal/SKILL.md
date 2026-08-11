@@ -241,7 +241,7 @@ Inside a body, link to another proposal in the same umbrella as
 `[label](<other-sub>.html)`. From a proposal at `<main>/<sub>.html`,
 the relative hop to a sibling is the bare `<other-sub>.html` (same
 directory under `<main>/`). The 00-index page follows this convention
-— the 12 sub-topic links in its table read as `[label](<sub>.html)`
+-- the 12 sub-topic links in its table read as `[label](<sub>.html)`
 and resolve to siblings of the index.
 
 Cross-umbrella links (rare) would use `../<other-main>/<sub>.html`.
