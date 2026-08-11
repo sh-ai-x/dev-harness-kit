@@ -46,7 +46,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # fetch-depth: 0 so tests/test_skill_governance.py can resolve
           # origin/main as the L6 baseline (new-skill set is local - origin/main).
@@ -54,7 +54,7 @@ jobs:
           # through all 3 fallback tiers and reports "source='none'".
           fetch-depth: 0
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
         with:
           python-version: "3.12"
       - name: Install pytest + PyYAML
@@ -75,7 +75,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Full history needed for the Version freshness step (git show
           # $BASE_SHA:.claude-plugin/plugin.json); the default
@@ -86,7 +86,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
         with:
           python-version: "3.12"
 
@@ -216,14 +216,14 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # fetch-depth: 0 so ruff can blame ownership / detect introduced-in-
           # PR violations vs. baseline-leaked violations (parity with the
           # pre-commit hook's behavior on the developer side).
           fetch-depth: 0
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
         with:
           python-version: "3.12"
       - name: Install ruff

@@ -137,7 +137,7 @@ jobs:
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
@@ -194,7 +194,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           track_progress: ${{ github.event_name == 'pull_request' }}
@@ -218,7 +218,7 @@ jobs:
 
       - name: Run /dev-kit:review via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -245,7 +245,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           track_progress: ${{ github.event_name == 'pull_request' }}
@@ -311,7 +311,7 @@ jobs:
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
@@ -366,7 +366,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           track_progress: ${{ github.event_name == 'pull_request' }}
@@ -389,7 +389,7 @@ jobs:
 
       - name: Run /dev-kit:security via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -415,7 +415,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           track_progress: ${{ github.event_name == 'pull_request' }}
@@ -491,7 +491,7 @@ jobs:
         # red instead of flipping reviewDecision=APPROVED.
         # persist-credentials: false so the token does not leak into
         # git config after the step.
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 

@@ -1,0 +1,22 @@
+name: HOL Plugin Scanner
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan plugin trust and security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run HOL Plugin Scanner
+        uses: hashgraph-online/ai-plugin-scanner-action@264eb4757331c18125b4ba8914c4927124ed17ae # v1
+        with:
+          plugin_dir: "."
+          fail_on_severity: high
