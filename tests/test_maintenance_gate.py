@@ -223,6 +223,117 @@ class TestCombinedVerdictDerivation(unittest.TestCase):
                 self.assertEqual(outcome["verdict"], "Blocked")
 
 
+class TestFormatAuditBody(unittest.TestCase):
+    """The audit-comment formatter renders a parseable quartet on line 1
+    plus a human-readable markdown table below. The consumer in
+    lib/pr_verify.py reads ONLY the parseable quartet (marker +
+    run=/job=/status=/verdict=); the table is cosmetic.
+    """
+
+    def test_gh_minimal_no_extras(self):
+        body = maintenance_gate.format_audit_body(
+            run_id="31482962075",
+            job="maintenance",
+            status="success",
+            verdict="Approve",
+            source="lib.maintenance_gate",
+        )
+        # Parseable quartet is intact on line 1.
+        first_line = body.splitlines()[0]
+        self.assertIn("<!-- dev-kit-verdict-audit -->", first_line)
+        self.assertIn("run=31482962075", first_line)
+        self.assertIn("job=maintenance", first_line)
+        self.assertIn("status=success", first_line)
+        self.assertIn("verdict=Approve", first_line)
+        self.assertIn("source=lib.maintenance_gate", first_line)
+        # Human-facing header + 5-row table.
+        self.assertIn("Approve", body)
+        self.assertIn("| Run", body)
+        self.assertIn("31482962075", body)
+        self.assertIn("| Job", body)
+        self.assertIn("maintenance", body)
+        self.assertIn("| Status", body)
+        self.assertIn("success", body)
+        self.assertIn("| Verdict", body)
+        self.assertIn("| Source", body)
+        self.assertIn("lib.maintenance_gate", body)
+
+    def test_local_with_extras(self):
+        body = maintenance_gate.format_audit_body(
+            run_id="local-12345",
+            job="review-local",
+            status="success",
+            verdict="Changes Requested",
+            source="bin_review_local",
+            extras={
+                "review": "Approve",
+                "security": "Changes Requested",
+                "maintenance": "Approve",
+                "provider": "minimax",
+            },
+        )
+        first_line = body.splitlines()[0]
+        # Extras land on the parseable line (after source=).
+        self.assertIn("review=Approve", first_line)
+        self.assertIn("security=Changes Requested", first_line)
+        self.assertIn("maintenance=Approve", first_line)
+        self.assertIn("provider=minimax", first_line)
+        # AND each becomes a row in the table (label is Title-Case).
+        self.assertIn("| Review", body)
+        self.assertIn("Approve", body)
+        self.assertIn("| Security", body)
+        self.assertIn("Changes Requested", body)
+        self.assertIn("| Maintenance", body)
+        self.assertIn("| Provider", body)
+        self.assertIn("minimax", body)
+
+    def test_emoji_for_each_verdict(self):
+        cases = [
+            ("Approve", "✅"),
+            ("Changes Requested", "⚠️"),
+            ("Blocked", "❌"),
+            ("MISSING", "❓"),
+        ]
+        for verdict, emoji in cases:
+            with self.subTest(verdict=verdict):
+                body = maintenance_gate.format_audit_body(
+                    run_id="1", job="review", status="success",
+                    verdict=verdict, source="lib.maintenance_gate",
+                )
+                # Emoji appears next to the verdict in the table.
+                self.assertIn(emoji, body)
+                self.assertIn(verdict, body)
+                self.assertIn("| Verdict", body)
+
+    def test_empty_fields_render_gracefully(self):
+        body = maintenance_gate.format_audit_body(
+            run_id="1", job="", status="", verdict="", source="",
+        )
+        # Empty verdict renders as ❓ MISSING so the operator sees a
+        # missing-verdict signal rather than a blank cell.
+        self.assertIn("❓ MISSING", body)
+        # Empty source still renders (no emoji decoration).
+        self.assertIn("| Source", body)
+        # Parseable line still well-formed.
+        first_line = body.splitlines()[0]
+        self.assertIn("verdict=MISSING", first_line)
+        self.assertIn("source=", first_line)
+
+    def test_parseable_line_is_first(self):
+        body = maintenance_gate.format_audit_body(
+            run_id="42", job="review", status="success",
+            verdict="Approve", source="lib.maintenance_gate",
+        )
+        # The marker MUST be on line 1 — lib/pr_verify.py's regex
+        # anchors on it. If a future refactor accidentally moves the
+        # marker into a code block or a sub-heading, G4 stops parsing.
+        first_non_empty = next(line for line in body.splitlines() if line.strip())
+        self.assertTrue(
+            first_non_empty.startswith("<!-- dev-kit-verdict-audit -->"),
+            f"marker not on first non-empty line: {first_non_empty!r}",
+        )
+
+
 class TestCLISubprocess(unittest.TestCase):
     """End-to-end CLI invocation parity — the workflow calls the
     gate via `python3 -m lib.maintenance_gate ...` so we exercise that
@@ -258,6 +369,60 @@ class TestCLISubprocess(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["docs_ok"], True)
+
+    def test_cli_format_audit_gh_shape(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--format-audit",
+             "--run", "31482962075",
+             "--job", "maintenance",
+             "--status", "success",
+             "--verdict", "Approve",
+             "--source", "lib.maintenance_gate"],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = result.stdout
+        # Parseable quartet intact on line 1.
+        self.assertIn("<!-- dev-kit-verdict-audit -->", body)
+        self.assertIn("run=31482962075 job=maintenance status=success "
+                      "verdict=Approve source=lib.maintenance_gate", body)
+        # 5-row table rendered.
+        self.assertIn("| Field", body)
+        self.assertIn("| Run", body)
+        self.assertIn("31482962075", body)
+        self.assertIn("| Job", body)
+        self.assertIn("maintenance", body)
+
+    def test_cli_format_audit_local_extras(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--format-audit",
+             "--run", "local-12345",
+             "--job", "review-local",
+             "--status", "success",
+             "--verdict", "Approve",
+             "--source", "bin_review_local",
+             "--extra", "review=Approve",
+             "--extra", "security=Approve"],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = result.stdout
+        # Extras land on the parseable line.
+        self.assertIn("review=Approve", body)
+        self.assertIn("security=Approve", body)
+        # AND as table rows (Title-Case labels).
+        self.assertIn("| Review", body)
+        self.assertIn("| Security", body)
 
 
 if __name__ == "__main__":

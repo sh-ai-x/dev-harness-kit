@@ -209,7 +209,12 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "maintenance_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
-          audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=maintenance status=${{ job.status }} verdict=${verdict:-MISSING} source=lib.maintenance_gate"
+          audit_body="$(python3 -m lib.maintenance_gate --format-audit \
+            --run "${{ github.run_id }}" \
+            --job maintenance \
+            --status "${{ job.status }}" \
+            --verdict "${verdict:-MISSING}" \
+            --source lib.maintenance_gate)"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
 
   gate:

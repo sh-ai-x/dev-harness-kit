@@ -279,10 +279,15 @@ exit 0
             any(c.startswith("CLAUDE_CALLED") for c in calls),
             "bump-PR must not invoke claude",
         )
-        # Audit comment is posted with the bump-PR skip marker.
+        # Audit comment is posted with the bump-PR skip marker. The
+        # multi-line body (parseable quartet + human table + trailing
+        # marker) lands in the log as one entry with embedded newlines;
+        # splitlines() in `_calls()` turns it into many entries, so
+        # check across the whole log, not just the first line.
         comments = [c for c in calls if c.startswith("GH_PR_COMMENT")]
         self.assertEqual(len(comments), 1, f"expected one comment, got: {comments}")
-        self.assertIn("bump-PR skip", comments[0])
+        joined = "\n".join(calls)
+        self.assertIn("bump-PR skip", joined)
 
     def test_auto_approve_refuses_on_non_approve_verdict(self) -> None:
         """Security-judge finding: a Changes Requested verdict + --auto-approve

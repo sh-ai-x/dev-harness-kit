@@ -79,6 +79,23 @@ cd "$REPO_ROOT"
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "  $*"; }
 
+# format_audit <verdict> [<extra_key=val> ...]
+# Build the human-friendly + machine-parseable audit comment body via
+# lib.maintenance_gate --format-audit. Mirrors the emitter in
+# .github/workflows/review.yml:289 / maintenance.yml:209 but for the
+# local mirror: synthesizes run=local-<pid>, job=review-local, and
+# carries per-skill extras (review=/security=/maintenance=/provider=)
+# so the operator sees the full breakdown in a single comment.
+# Defined here (not next to extract_verdict) because bash does not
+# hoist functions — the bump-PR skip below at line ~317 needs it.
+format_audit() {
+  local verdict="${1:-MISSING}"; shift || true
+  local args=( --run "local-$$" --job review-local --status success
+               --verdict "$verdict" --source bin_review_local )
+  for kv in "$@"; do args+=( --extra "$kv" ); done
+  python3 -m lib.maintenance_gate --format-audit "${args[@]}"
+}
+
 usage() {
   sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
 }
@@ -310,7 +327,11 @@ fi
 # Bump-PR skip mirrors review.yml:75.
 if [ "$(is_bump_pr "$PR_TITLE")" = "yes" ]; then
   log "bump-PR detected — skipping LLM judge (auto-pass per review.yml:75)"
-  REPLY_BODY="<!-- dev-kit-verdict-audit --> run=local-$$ job=review-local status=success verdict=Approve source=bin_review_local (bump-PR skip)"
+  # Append a trailing <!-- bump-PR skip --> comment so the parseable
+  # quartet stays a stable 5-tuple and operators still see the
+  # auto-pass signal in the rendered table.
+  REPLY_BODY="$(format_audit Approve)
+<!-- bump-PR skip -->"
   if [ "$DRY_RUN" = "0" ]; then
     gh pr comment "$PR_NUMBER" --body "$REPLY_BODY" >/dev/null \
       || log "warning: gh pr comment failed (audit skipped)"
@@ -541,7 +562,15 @@ fi
 # ---------------------------------------------------------------------------
 # 10. Audit comment (mirrors review.yml:226-227).
 # ---------------------------------------------------------------------------
-AUDIT_BODY="<!-- dev-kit-verdict-audit --> run=local-$$ job=review-local status=success verdict=$WORST review=$REVIEW_V security=$SECURITY_V maintenance=$MAINTENANCE_V provider=$PROVIDER source=bin_review_local"
+# format_audit() (defined near extract_verdict() above) renders both the
+# parseable quartet on line 1 and the human-facing markdown table —
+# including per-skill breakdown rows for review=/security=/maintenance=/
+# provider=. The worst-of (WORST) verdict is the headline.
+AUDIT_BODY="$(format_audit "$WORST" \
+  "review=$REVIEW_V" \
+  "security=$SECURITY_V" \
+  "maintenance=$MAINTENANCE_V" \
+  "provider=$PROVIDER")"
 if [ "$DRY_RUN" = "1" ]; then
   log "would post: $AUDIT_BODY"
 else

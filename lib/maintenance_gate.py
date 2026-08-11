@@ -23,7 +23,7 @@ import argparse
 import json
 import re
 import sys
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 # Production roots: changes here MUST be paired with a docs/ update
 # unless the PR body explicitly justifies skipping docs.
@@ -54,6 +54,22 @@ _DOCS_NOT_REQUIRED_MARKER = "docs-not-required:"
 _VERDICT_RE = re.compile(
     r"\*\*Verdict:\*\*\s*(Approve|Blocked|Changes Requested)\b"
 )
+
+# Status / verdict → emoji decoration for the audit comment's
+# human-facing table. Status "MISSING" / verdict "MISSING" are how the
+# GH-Actions emitters report "the LLM judge emitted no verdict line"
+# (issue #612: this is a hard fail in gate.yml, not an Approve).
+_STATUS_EMOJI: Dict[str, str] = {
+    "success": "✅",
+    "failure": "❌",
+    "MISSING": "❓",
+}
+_VERDICT_EMOJI: Dict[str, str] = {
+    "Approve": "✅",
+    "Changes Requested": "⚠️",
+    "Blocked": "❌",
+    "MISSING": "❓",
+}
 
 
 def extract_verdict(comment_body: str) -> str:
@@ -169,10 +185,90 @@ def combine_verdict(
             "warn": True}
 
 
+def format_audit_body(
+    run_id: str,
+    job: str,
+    status: str,
+    verdict: str,
+    source: str,
+    *,
+    extras: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Build the human-friendly + machine-parseable audit comment.
+
+    The first line carries the marker + the canonical quartet
+    (``run=/job=/status=/verdict=``) plus the ``source=`` tail that
+    existing emitters use, plus any ``extras=`` the local mirror
+    passes (``review=/security=/maintenance=/provider=``). The
+    consumer in ``lib/pr_verify.py`` parses ONLY that quartet on
+    line 1 — everything below is purely cosmetic, so changes here
+    don't affect the verifier.
+
+    Local-only emitters (``bin/review-local.sh``) pass extras so the
+    per-skill breakdown lands on the parseable line AND in the
+    table. GH emitters leave ``extras=None``.
+
+    Empty fields degrade to ``MISSING`` (the same sentinel the GH
+    emitters used pre-refactor) so a missing LLM verdict still
+    shows a visible failure signal instead of a blank cell.
+    """
+    rid = (run_id or "").strip() or "MISSING"
+    jb = (job or "").strip() or "MISSING"
+    st = (status or "").strip() or "MISSING"
+    vd = (verdict or "").strip() or "MISSING"
+    src = source or ""  # allow empty source — it's informational
+
+    # Parseable line 1: marker + canonical quartet + source= + extras=.
+    # `source=` is always emitted (even when empty) so the parseable
+    # quartet stays a stable 5-tuple across emitters — consumers
+    # downstream of pr_verify.py may rely on `source=` being present.
+    parts = [f"<!-- dev-kit-verdict-audit --> run={rid}", f"job={jb}",
+             f"status={st}", f"verdict={vd}", f"source={src}"]
+    if extras:
+        # Stable key order for byte-identical output (matters for
+        # test fixtures and idempotent re-runs).
+        for key in sorted(extras):
+            parts.append(f"{key}={extras[key]}")
+    parseable_line = " ".join(parts)
+
+    # Human-facing markdown table.
+    status_emoji = _STATUS_EMOJI.get(st, "")
+    verdict_emoji = _VERDICT_EMOJI.get(vd, "")
+    header = f"**dev-kit CI verdict — {verdict_emoji} {vd}**"
+
+    rows = [
+        ("Run", rid),
+        ("Job", jb),
+        ("Status", f"{status_emoji} {st}".strip()),
+        ("Verdict", f"{verdict_emoji} {vd}".strip()),
+        ("Source", src or "MISSING"),
+    ]
+    if extras:
+        # Per-skill breakdown mirrors the parseable-line extras.
+        # Keys are rendered Title-Case for the table label.
+        for key in sorted(extras):
+            label = key.capitalize()
+            rows.append((label, extras[key]))
+
+    # Compute label column width: at least 8 chars so the standard
+    # five fields breathe, wider if any extras label needs it. The
+    # header column matches so pipes align.
+    label_width = max(8, max(len(label) for label, _ in rows))
+    divider = "-" * label_width
+    table_lines = [
+        f"| {'Field':<{label_width}}| Value",
+        f"|-{divider}-|------------------------",
+    ]
+    for label, value in rows:
+        table_lines.append(f"| {label:<{label_width}}| {value}")
+
+    return f"{parseable_line}\n\n{header}\n\n" + "\n".join(table_lines) + "\n"
+
+
 def cli_main(argv=None) -> int:
     """CLI entry point.
 
-    Three modes (selected by flag):
+    Four modes (selected by flag):
 
       --extract-verdict-from-stdin
           Read stdin, print extracted verdict on stdout.
@@ -180,6 +276,13 @@ def cli_main(argv=None) -> int:
       --docs-check
           With --changed-files (repeatable) and --pr-body, run the
           docs-updated check and print JSON {docs_ok, reason}.
+
+      --format-audit
+          Emit a PR audit comment body (the canonical
+          ``<!-- dev-kit-verdict-audit -->`` quartet on line 1 plus a
+          human-facing markdown table below). Use with --run / --job /
+          --status / --verdict / --source and optional --extra key=value
+          pairs.
 
       (default) — combine_verdict from --judge-verdict +
           --docs-ok + --docs-reason flags, print JSON.
@@ -197,6 +300,11 @@ def cli_main(argv=None) -> int:
         action="store_true",
         help="run docs-updated check (use with --changed-files + --pr-body)",
     )
+    mode.add_argument(
+        "--format-audit",
+        action="store_true",
+        help="emit a PR audit comment body (use with --run/--job/--status/--verdict/--source)",
+    )
     parser.add_argument(
         "--changed-files", action="append", default=[],
         help="changed file path (repeatable)",
@@ -206,6 +314,19 @@ def cli_main(argv=None) -> int:
     parser.add_argument("--docs-ok", action="store_true",
                         help="pre-computed docs_ok flag (for combine mode)")
     parser.add_argument("--docs-reason", default="")
+    # --format-audit flags
+    parser.add_argument("--run", default="",
+                        help="[--format-audit] run id (digits or local-$$)")
+    parser.add_argument("--job", default="",
+                        help="[--format-audit] job name")
+    parser.add_argument("--status", default="",
+                        help="[--format-audit] job status (success/failure)")
+    parser.add_argument("--verdict", default="",
+                        help="[--format-audit] judge verdict")
+    parser.add_argument("--source", default="lib.maintenance_gate",
+                        help="[--format-audit] source tag (default: lib.maintenance_gate)")
+    parser.add_argument("--extra", action="append", default=[],
+                        help="[--format-audit] extra key=value (repeatable)")
     args = parser.parse_args(argv)
 
     if args.extract_verdict_from_stdin:
@@ -217,6 +338,18 @@ def cli_main(argv=None) -> int:
         sys.stdout.write(json.dumps({"docs_ok": ok, "reason": reason}))
         sys.stdout.write("\n")
         return 0 if ok else 1
+    if args.format_audit:
+        extras: Dict[str, str] = {}
+        for kv in args.extra:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                extras[k] = v
+        sys.stdout.write(format_audit_body(
+            run_id=args.run, job=args.job,
+            status=args.status, verdict=args.verdict,
+            source=args.source, extras=extras or None,
+        ))
+        return 0
     # combine mode (default)
     out = combine_verdict(
         judge_verdict=args.judge_verdict,
