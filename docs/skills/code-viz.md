@@ -10,7 +10,7 @@
 
 **Then** 4 inventory tables: skills (with `pillars` column), commands, hook scripts (event × matcher × script), GitHub Actions (file / triggers / jobs).
 
-**Then** 6 abstraction levels + 1 cross-cutting pillar map (26 Mermaid diagrams on this repo, click each to expand):
+**Then** 6 abstraction levels + 1 cross-cutting pillar map (count depends on the target repo and `--top-skills N`; click each to expand):
 
 | # | Level | Diagrams |
 |---|---|---|
@@ -59,7 +59,7 @@ Skills that actually loop get a **dotted, labeled back-edge** on their per-skill
 
 - **All classification is filename/path heuristic** via the embedded `PILLAR_PATTERNS` dict. No hardcoded skill names, pipeline stages, or module roles. Works on any plugin/repo.
 - **Surfaces are optional**. Missing `skills/`, `hooks/`, `.github/`, `lib/`, etc. → section gracefully omitted, not crashed.
-- **IMPORTANT_SKILLS priority list** (15 skills) — `plan`, `build`, `review`, `security`, `eval`, `inspect`, `prune`, `refactor`, `ci-setup`, `babysit-pr`, `ship`, `bootstrap`, `code-viz`, `report`, `token-analyzer` — always fill first, before alphabetical selection, up to `--top-skills`.
+- **IMPORTANT_SKILLS priority list** — `plan`, `build`, `review`, `security`, `eval`, `inspect`, `prune`, `refactor`, `ci-setup`, `babysit-pr`, `ship`, `bootstrap`, `code-viz`, `report`, `token-analyzer` — always fill first, before alphabetical selection, up to `--top-skills`. The canonical list lives in `skills/code-viz/SKILL.md` (`IMPORTANT_SKILLS` constant); this doc mirrors it for reading convenience.
 - **Domain pillars are keyword-matched** against each discovered path. A file matches DB if its name contains `db|sql|mongo|redis|postgres|sqlite|orm`; matches Cloud if it contains `aws|gcp|azure|k8s|docker|lambda|s3`; etc.
 - **5-strategy per-skill cycle extraction** (in priority order):
   1. **F** — `## Categories` / `## Dimensions` / `## Audit areas` / `## Checks` bullet lists (security's OWASP A01–A10, inspect's 8 dims).
