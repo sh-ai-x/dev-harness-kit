@@ -30,7 +30,6 @@
     "category": "Developer Tools",
     "websiteURL": "https://github.com/sh-ai-x/dev-harness-kit",
     "privacyPolicyURL": "https://github.com/sh-ai-x/dev-harness-kit/blob/main/SECURITY.md",
-    "termsOfServiceURL": "https://github.com/sh-ai-x/dev-harness-kit/blob/main/LICENSE",
     "composerIcon": "./assets/plugin-icon.svg",
     "logo": "./assets/plugin-icon.svg",
     "screenshots": ["./assets/plugin-screenshot.svg"],

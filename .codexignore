@@ -2,6 +2,7 @@
 .dev-kit/
 .eval-cache/
 logs/
+tests/
 *.html
 *.assets/
 

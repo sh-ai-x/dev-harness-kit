@@ -9,7 +9,7 @@ when_to_use:
   - User is about to commit on a PR branch and needs the Cost-gate trailer
   - User wants visibility into per-session spend without leaving the terminal
 allowed-tools: Read Write Bash
-disallowed-tools: Write Edit
+disallowed-tools: Edit
 model: haiku
 user-invocable: true
 disable-model-invocation: true
@@ -37,7 +37,7 @@ The cost-gate is observed via this skill during the session itself; it is
    Cost-gate-Session: <session-id>
    ```
 
-The skill is read-only (`disallowed-tools: Write Edit`); the underlying
+The skill does not edit source files (`disallowed-tools: Edit`); the underlying
 CLI (`tools/cost_gate_status.py`) writes nothing on its own.
 
 ## Why a separate skill, not a flag on `/dev-kit:token-analyzer`

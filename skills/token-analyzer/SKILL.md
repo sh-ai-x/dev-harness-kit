@@ -9,7 +9,7 @@ when_to_use: |
   - User suspects prefix misalignment, redundant Read, or model overspec patterns
   - Pre-release FinOps review of session-level cost
 allowed-tools: Read Write Bash
-disallowed-tools: Write Edit
+disallowed-tools: Edit
 model: haiku
 user-invocable: true
 ---
@@ -69,7 +69,7 @@ slash commands.
    Do not try to read the HTML back into the conversation -- it is a
    binary-ish artifact best opened in a browser.
 
-The skill is read-only (`disallowed-tools: Write Edit`); the Python
+The skill does not edit source files (`disallowed-tools: Edit`); the Python
 CLI writes the file directly, mirroring how `/dev-kit:inspect --html`
 keeps the skill body pure and lets the driver handle I/O.
 

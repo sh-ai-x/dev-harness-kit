@@ -6,7 +6,7 @@ alpha: enforcement
 when_to_use: |
   - User types "bug" / "doesn't work" / "why failing" / "error"
 allowed-tools: Read Write Bash
-disallowed-tools: Edit Write WebFetch
+disallowed-tools: Edit WebFetch
 model: opus
 user-invocable: false
 ---

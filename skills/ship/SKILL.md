@@ -7,7 +7,7 @@ when_to_use: |
   - User types /dev-kit:ship
   - Release cutoff
 allowed-tools: Read Write Bash
-disallowed-tools: Write Edit WebFetch
+disallowed-tools: Edit WebFetch
 model: haiku
 disable-model-invocation: false
 ---
