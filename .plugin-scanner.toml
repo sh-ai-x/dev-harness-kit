@@ -1,9 +1,8 @@
 [scanner]
 profile = "public-marketplace"
 
-# These paths contain intentionally unsafe inputs used to verify that the
-# harness detects and reports dangerous content. They are test fixtures, not
-# executable plugin behavior, so keep them out of marketplace trust findings.
+# Tests are excluded from the shipped artifact via .codexignore; this broad
+# path keeps detector-only fixtures out of marketplace trust findings.
 ignore_paths = [
   "tests/**",
   "skills/review/fixtures/**",
