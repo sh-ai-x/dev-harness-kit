@@ -180,7 +180,7 @@ class TestLinearWorktreeCreateHook(unittest.TestCase):
             marker = Path(tmp) / "marker.json"
             stub_dir.mkdir()
             env = _python_stub_env(stub_dir, marker)
-            env["LINEAR_API_KEY"] = "set-at-runtime"  # force past the env fast-path
+            env["LINEAR_API_KEY"] = "test-key"  # force past the env fast-path
             # The parser will find `add -b fix/x .worktrees/fix/x`
             # but the response says git failed; the hook must bail
             # before forking.
@@ -221,7 +221,7 @@ class TestLinearWorktreeCreateHook(unittest.TestCase):
                 "# test shim\n", encoding="utf-8",
             )
             env = _hermetic_env()
-            env["LINEAR_API_KEY"] = "set-at-runtime"
+            env["LINEAR_API_KEY"] = "test-key"
             payload = json.dumps({
                 "tool_name": "Bash",
                 "tool_input": {

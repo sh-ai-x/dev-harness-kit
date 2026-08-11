@@ -8,8 +8,8 @@ when_to_use: |
   - User types /dev-kit:log off
   - User types /dev-kit:log setup
   - User types /dev-kit:log status
-allowed-tools: Read Write Bash
-disallowed-tools: Edit WebFetch Agent
+allowed-tools: Read Bash
+disallowed-tools: Write Edit WebFetch Agent
 model: haiku
 disable-model-invocation: false
 ---

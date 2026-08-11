@@ -214,11 +214,11 @@ class TestRunVerification(unittest.TestCase):
         fake = MagicMock()
         fake.return_value = MagicMock(
             returncode=1,
-            stdout="leaked token sk-ant-" + "abcdefghijklmnopqrstuvwxyzABCDEFGH12345",
+            stdout="leaked token sk-ant-abcdefghijklmnopqrstuvwxyzABCDEFGH12345",
             stderr="",
         )
         result = verify_harness.run_verification(["pytest -q"], cwd=Path("/tmp"), runner=fake)
-        self.assertNotIn("sk-ant-" + "abcdefghijklmnopqrstuvwxyzABCDEFGH12345", result.results[0].tail)
+        self.assertNotIn("sk-ant-abcdefghijklmnopqrstuvwxyzABCDEFGH12345", result.results[0].tail)
         self.assertIn("[REDACTED]", result.results[0].tail)
 
 

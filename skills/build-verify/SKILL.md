@@ -5,8 +5,8 @@ description: verification-before-completion. No "done" without quoted exit code 
 alpha: enforcement
 when_to_use: |
   - User types "done" / "finished" / "passing" (declaration phrases)
-allowed-tools: Read Write Bash
-disallowed-tools: Edit WebFetch
+allowed-tools: Read Bash
+disallowed-tools: Write Edit WebFetch
 model: haiku
 user-invocable: false
 ---

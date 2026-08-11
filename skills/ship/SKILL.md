@@ -6,8 +6,8 @@ alpha: state
 when_to_use: |
   - User types /dev-kit:ship
   - Release cutoff
-allowed-tools: Read Write Bash
-disallowed-tools: Edit WebFetch
+allowed-tools: Read Bash
+disallowed-tools: Write Edit WebFetch
 model: haiku
 disable-model-invocation: false
 ---

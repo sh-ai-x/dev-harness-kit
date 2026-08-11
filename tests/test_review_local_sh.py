@@ -250,7 +250,7 @@ exit 0
         """
         env_overrides = {
             "CI_REVIEW_PROVIDER": "anthropic",
-            "ANTHROPIC_API_KEY": "set-at-runtime",
+            "ANTHROPIC_API_KEY": "sk-ant-fake-for-test",
         }
         if env_extra:
             env_overrides.update(env_extra)
@@ -421,7 +421,7 @@ exit 0
 
         env_extra = {
             "CI_REVIEW_PROVIDER": "minimax",  # would-be fallback (no MINIMAX_API_KEY in env)
-            "ANTHROPIC_API_KEY": "set-at-runtime",
+            "ANTHROPIC_API_KEY": "sk-ant-fake-for-test",
         }
         r = self._run_with_stubs(
             "--pr", "605",

@@ -3,7 +3,6 @@
 .eval-cache/
 logs/
 tests/
-*.html
 *.assets/
 
 # Secrets and local configuration

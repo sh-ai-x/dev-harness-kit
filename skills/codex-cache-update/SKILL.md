@@ -8,8 +8,8 @@ when_to_use: |
   - User asks to update or refresh the Codex dev-kit plugin cache
   - `codex plugin marketplace upgrade dev-kit` reports up to date but files are stale
   - A new dev-kit version or commit was merged to main
-allowed-tools: Read Write Bash
-disallowed-tools: Edit WebFetch Agent
+allowed-tools: Read Bash
+disallowed-tools: Write Edit WebFetch Agent
 model: haiku
 disable-model-invocation: false
 user-invocable: true
