@@ -14,7 +14,7 @@ name: PR Review
 # human gate (REVIEW_REQUIRED / CHANGES_REQUESTED) is what blocks merge.
 #
 # Why `pull_request` (not `pull_request_target`):
-#   `anthropics/claude-code-action@v1` does an OIDC token exchange by
+#   `anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1` does an OIDC token exchange by
 #   default. With `pull_request_target` the exchanged token is rejected
 #   with 401 Invalid OIDC token in any consumer repo that does not have
 #   OIDC trust configured at the org/repo level. `pull_request` issues
@@ -95,7 +95,7 @@ jobs:
       # the dev-harness-kit source is private. Optional for self-install.
       DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Checkout PR head sha. With `pull_request`, the action defaults
           # to the PR head ref, but we pin the explicit sha so the agent
@@ -169,7 +169,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
@@ -206,7 +206,7 @@ jobs:
 
       - name: Run /dev-kit:review via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
@@ -248,7 +248,7 @@ jobs:
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # anthropics/claude-code-action@v1 skips when the PR head's
+          # anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
             | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
@@ -271,7 +271,7 @@ jobs:
             echo
             echo "LLM review (3-dim) skipped -- workflow validation guard"
             echo
-            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo 'anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
             echo
             echo "Action required: manual review of the workflow changes by a maintainer before merge."
           } | gh pr comment "$PR_NUMBER" --body-file -
@@ -382,7 +382,7 @@ jobs:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
       DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Checkout PR head sha. With `pull_request`, the action defaults
           # to the PR head ref, but we pin the explicit sha so the agent
@@ -455,7 +455,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
@@ -491,7 +491,7 @@ jobs:
 
       - name: Run /dev-kit:security via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
@@ -533,7 +533,7 @@ jobs:
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # anthropics/claude-code-action@v1 skips when the PR head's
+          # anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
             | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
@@ -556,7 +556,7 @@ jobs:
             echo
             echo "LLM security (10-dim OWASP) skipped -- workflow validation guard"
             echo
-            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo 'anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
             echo
             echo "Action required: manual review of the workflow changes by a maintainer before merge."
           } | gh pr comment "$PR_NUMBER" --body-file -
@@ -653,7 +653,7 @@ jobs:
       EVENT_NAME: ${{ github.event_name }}
     steps:
       - name: Checkout (for gh CLI git discovery)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
@@ -664,7 +664,7 @@ jobs:
           # This is robust: no fragile comment-body matching required.
           R="${{ needs.review.outputs.verdict }}"
           S="${{ needs.security.outputs.verdict }}"
-          # agent_ran: false when anthropics/claude-code-action@v1 SKIPPED
+          # agent_ran: false when anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 SKIPPED
           # the run due to workflow-validation. Set by the 'Extract <skill>
           # verdict' post-step based on whether any claude-prefixed comment
           # exists on the PR. The action skips silently on PRs that touch
@@ -684,7 +684,7 @@ jobs:
           echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT)"
           echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT)"
 
-          # Issue #212-C1-fix: anthropics/claude-code-action@v1 exits 0 with
+          # Issue #212-C1-fix: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 exits 0 with
           # a "workflow validation skip" warning when the PR's head differs
           # from the default branch under .github/workflows/*. Result is
           # "success" (the action's exit-0 mask), but the agent never ran —
@@ -699,7 +699,7 @@ jobs:
               echo "  review.agent_ran=$R_AGENT verdict=$R"
               echo "  security.agent_ran=$S_AGENT verdict=$S"
               echo
-              echo "  anthropics/claude-code-action@v1 refused to run on this PR."
+              echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run on this PR."
               echo "  The action refuses any PR whose head differs from the"
               echo "  default branch under .github/workflows/*. Result is"
               echo "  success (exit-0), but no claude[bot] comment was posted"
@@ -730,7 +730,7 @@ jobs:
               echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
               echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
               echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
-              echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+              echo "    - anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 rate-limit / transient network error"
               echo
               echo "  The severity gate does NOT default to Approve on failure"
               echo "  (that would mask install bugs -- issue #212-C1)."
