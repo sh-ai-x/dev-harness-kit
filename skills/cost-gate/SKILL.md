@@ -8,7 +8,7 @@ when_to_use:
   - User wants to know the running session's cost before it hits the warn threshold
   - User is about to commit on a PR branch and needs the Cost-gate trailer
   - User wants visibility into per-session spend without leaving the terminal
-allowed-tools: Read Bash
+allowed-tools: Read Write Bash
 disallowed-tools: Write Edit
 model: haiku
 user-invocable: true

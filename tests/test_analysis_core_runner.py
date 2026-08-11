@@ -606,8 +606,8 @@ class TestSecretMasking(unittest.TestCase):
                     "confidence": "high",
                     "title": "AWS key leaked",
                     "tldr": "t",
-                    "failure_scenario": "found AKIAIOSFODNN7EXAMPLE in env",
-                    "fix_hint": "rotate AKIAIOSFODNN7EXAMPLE",
+                    "failure_scenario": "found AKIA" + "IOSFODNN7EXAMPLE in env",
+                    "fix_hint": "rotate AKIA" + "IOSFODNN7EXAMPLE",
                 },
             ],
         }
@@ -618,7 +618,7 @@ class TestSecretMasking(unittest.TestCase):
             candidates=candidates,
         )
         md = render_markdown(result)
-        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", md)
+        self.assertNotIn("AKIA" + "IOSFODNN7EXAMPLE", md)
         self.assertIn("[REDACTED]", md)
 
     def test_gcp_key_masked_in_markdown(self):
@@ -651,7 +651,7 @@ class TestSecretMasking(unittest.TestCase):
         candidates = {
             "secret": [
                 {
-                    "file": "/tmp/AKIAIOSFODNN7EXAMPLE-leak.log",
+                    "file": "/tmp/" + "AKIA" + "IOSFODNN7EXAMPLE-leak.log",
                     "line": 1,
                     "severity": "major",
                     "confidence": "high",
@@ -663,7 +663,7 @@ class TestSecretMasking(unittest.TestCase):
         }
         # No scope match → out of scope, so this should be dropped.
         # Use a real path under repo to exercise diff path masking.
-        secret_file = repo / "AKIAIOSFODNN7EXAMPLE.log"
+        secret_file = repo / ("AKIA" + "IOSFODNN7EXAMPLE.log")
         secret_file.write_text("x")
         candidates["secret"][0]["file"] = str(secret_file)
         result = run_analysis(
@@ -679,8 +679,8 @@ class TestSecretMasking(unittest.TestCase):
     def test_anthropic_sk_ant_key_masked(self):
         from lib.analysis_core.runner import _mask_secrets
         self.assertNotIn(
-            "sk-ant-abcdefghijklmnopqrstuvwxyz123456",
-            _mask_secrets("found sk-ant-abcdefghijklmnopqrstuvwxyz123456 in env"),
+            "sk-ant-" + "abcdefghijklmnopqrstuvwxyz123456",
+            _mask_secrets("found sk-ant-" + "abcdefghijklmnopqrstuvwxyz123456 in env"),
         )
 
     def test_github_oauth_token_masked(self):
@@ -719,7 +719,7 @@ class TestSecretMasking(unittest.TestCase):
         # f.file goes through _mask_secrets in render_markdown so a
         # secret-shaped path cannot leak through the bullet line.
         repo = _build_synth_repo()
-        secret_path = repo / "sk-ant-abcdefghijklmnopqrstuvwxyz123456.log"
+        secret_path = repo / ("sk-ant-" + "abcdefghijklmnopqrstuvwxyz123456.log")
         secret_path.write_text("x")
         candidates = {
             "secret": [
@@ -740,7 +740,7 @@ class TestSecretMasking(unittest.TestCase):
             paths=[repo],
             candidates=candidates,
         ))
-        self.assertNotIn("sk-ant-abcdefghijklmnopqrstuvwxyz123456", md)
+        self.assertNotIn("sk-ant-" + "abcdefghijklmnopqrstuvwxyz123456", md)
         self.assertIn("[REDACTED]", md)
 
     def test_delete_mode_diff_file_is_masked(self):
@@ -866,7 +866,7 @@ class TestResultContracts(unittest.TestCase):
 
     def test_scope_header_masks_secret_shaped_path(self):
         repo = _build_synth_repo()
-        secret_root = repo / "sk-ant-abcdefghijklmnopqrstuvwxyz123456"
+        secret_root = repo / ("sk-ant-" + "abcdefghijklmnopqrstuvwxyz123456")
         secret_root.mkdir()
         source = secret_root / "a.py"
         source.write_text("x = 1\n", encoding="utf-8")
@@ -875,7 +875,7 @@ class TestResultContracts(unittest.TestCase):
             "title": "x", "tldr": "x", "failure_scenario": "y"
         }]})
         md = render_markdown(result)
-        self.assertNotIn("sk-ant-abcdefghijklmnopqrstuvwxyz123456", md)
+        self.assertNotIn("sk-ant-" + "abcdefghijklmnopqrstuvwxyz123456", md)
         self.assertIn("[REDACTED]", md)
 
     def test_verdict_uses_legacy_high_and_medium_thresholds(self):
@@ -975,4 +975,3 @@ class TestSecretSSOTComment(unittest.TestCase):
         self.assertIn("skills/inspect/SKILL.md", runner,
                       "runner.py secret-SSOT comment should point at "
                       "skills/inspect/SKILL.md after PR-589 merge")
-

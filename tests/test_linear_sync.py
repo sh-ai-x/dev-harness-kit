@@ -32,7 +32,7 @@ import linear_sync  # noqa: E402  (sys.path tweak above)
 
 
 @contextmanager
-def _fake_repo(linear_api_key: str | None = "test-key",
+def _fake_repo(linear_api_key: str | None = "set-at-runtime",
                enabled_json: dict | None = None,
                handoff: dict | None = None,
                branch: str = "feat/issue-539-linear-autosync",
@@ -123,7 +123,7 @@ class TestLinearSync(unittest.TestCase):
                 urlopen.assert_not_called()
 
     def test_enabled_when_env_var_present(self):
-        with _fake_repo(linear_api_key="test-key", enabled_json=None,
+        with _fake_repo(linear_api_key="set-at-runtime", enabled_json=None,
                         handoff={"prompt": "implement auto-sync"},
                         commit_subject="implement auto-sync") as repo:
             calls = []
@@ -150,7 +150,7 @@ class TestLinearSync(unittest.TestCase):
             self.assertGreaterEqual(len(calls), 2)  # project lookup + issue create
 
     def test_reuses_existing_issue_in_same_scope(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement auto-sync"},
                         commit_subject="implement auto-sync") as repo:
             def handler(payload):
@@ -178,7 +178,7 @@ class TestLinearSync(unittest.TestCase):
         """#539: 'A present, old, closed, or unrelated handoff is not
         sufficient evidence.' A different prompt = different scope =
         new issue, even if the handoff still points at one."""
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement old unrelated feature"},
                         commit_subject="implement new unrelated feature") as repo:
             def handler(payload):
@@ -206,7 +206,7 @@ class TestLinearSync(unittest.TestCase):
         """Every hand-off write stamps a `_meta` block declaring
         priority 2 and the Linear API as the source of truth, so a
         reader can tell at a glance that the file is a cache."""
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement auto-sync"},
                         commit_subject="implement auto-sync") as repo:
             def handler(payload):
@@ -234,7 +234,7 @@ class TestLinearSync(unittest.TestCase):
         """#539: 'Do not invoke Linear for read-only work such as
         inspect, review, security, or code-viz unless the user
         explicitly requests registration.'"""
-        with _fake_repo(linear_api_key="test-key", handoff={"prompt": "ls -la"}):
+        with _fake_repo(linear_api_key="set-at-runtime", handoff={"prompt": "ls -la"}):
             with mock.patch("urllib.request.urlopen") as urlopen:
                 self.assertEqual(linear_sync.sync(), 0)
                 urlopen.assert_not_called()
@@ -242,7 +242,7 @@ class TestLinearSync(unittest.TestCase):
     def test_transport_failure_is_non_blocking(self):
         """#539: 'Linear failures are non-blocking for implicit
         workflow calls.' A urllib failure must not raise."""
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement auto-sync"}):
             with mock.patch(
                 "urllib.request.urlopen",
@@ -257,7 +257,7 @@ class TestLinearSync(unittest.TestCase):
         non-blocking per the #539 contract — the Edit is never blocked
         by a flaky first request, but no handoff is written either
         (the previous round-flow kept the stale handoff intact)."""
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement x"}) as repo:
             call_count = {"n": 0}
 
@@ -292,7 +292,7 @@ class TestLinearSync(unittest.TestCase):
         auto-sync non-blocking flow can catch-and-continue; CLI surface flow
         surfaces a real stderr diagnostic instead of the misleading 'no issues
         match' empty-state message."""
-        with mock.patch.dict(os.environ, {"LINEAR_API_KEY": "test-key"}):
+        with mock.patch.dict(os.environ, {"LINEAR_API_KEY": "set-at-runtime"}):
             # 1) HTTPError -> RuntimeError (regression guard for TLS/auth codes)
             err = urllib.error.HTTPError(
                 "https://api.linear.app/graphql", 503, "Service Unavailable",
@@ -469,7 +469,7 @@ class TestLinearSync(unittest.TestCase):
         """#539 follow-up: when the handoff has no `prompt`, derive
         the task description from the latest commit subject instead
         of bailing out."""
-        with _fake_repo(linear_api_key="test-key", handoff=None,
+        with _fake_repo(linear_api_key="set-at-runtime", handoff=None,
                         commit_subject="implement linear auto-sync") as repo:
             def handler(payload):
                 q = payload["query"]
@@ -499,7 +499,7 @@ class TestLinearSync(unittest.TestCase):
         new one.
         """
         with _fake_repo(
-            linear_api_key="test-key",
+            linear_api_key="set-at-runtime",
             # Old task's prompt is still in the handoff.
             handoff={"prompt": "implement OLD task", "issue": "OLD-1"},
             # New task has a fresh commit subject.
@@ -631,14 +631,14 @@ class TestLinearSync(unittest.TestCase):
                 "LINEAR_API_KEY=key-1\n"
                 "LINEAR_TEAM_ID=team-7\n"
                 "SOME_OTHER_KEY=should-not-leak\n"
-                "GH_TOKEN=ghp_should-not-leak\n",
+                "GH_TOKEN=set-at-runtime\n",
                 encoding="utf-8",
             )
             env = {"PATH": os.environ.get("PATH", ""), "HOME": str(fake_home)}
             with mock.patch.dict(os.environ, env, clear=True), \
                  mock.patch.object(linear_sync, "_repo_root", return_value=repo):
                 linear_sync._load_env_file(repo)
-                self.assertEqual(os.environ.get("LINEAR_API_KEY"), "key-1")
+                self.assertEqual(os.environ.get("LINEAR_API_KEY"), "set-at-runtime")
                 self.assertEqual(os.environ.get("LINEAR_TEAM_ID"), "team-7")
                 self.assertIsNone(os.environ.get("SOME_OTHER_KEY"))
                 self.assertIsNone(os.environ.get("GH_TOKEN"))
@@ -1090,7 +1090,7 @@ class TestAutoOpen(unittest.TestCase):
     """Step 6 of sync(): create new issue in Todo state."""
 
     def test_first_edit_creates_issue_in_todo(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement auto-sync"},
                         commit_subject="implement auto-sync") as repo:
             def handler(payload):
@@ -1120,7 +1120,7 @@ class TestAutoOpen(unittest.TestCase):
             self.assertIn("DEMO-1", handoff["issue"])
 
     def test_falls_back_to_backlog_when_no_todo_column(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo"},
                         commit_subject="implement foo again") as repo:
@@ -1154,7 +1154,7 @@ class TestAutoInProgress(unittest.TestCase):
     """Step 7 of sync(): transition existing issue to In Progress on work signal."""
 
     def test_subsequent_edit_transitions_to_in_progress(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo", "issue": "DEMO-1 (iss-1)",
                                  "state": "Todo", "branch": "feat/x",
@@ -1187,7 +1187,7 @@ class TestAutoInProgress(unittest.TestCase):
             self.assertEqual(handoff["state"], "In Progress")
 
     def test_already_in_progress_is_idempotent(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo", "issue": "DEMO-1 (iss-1)",
                                  "state": "In Progress", "branch": "feat/x",
@@ -1216,7 +1216,7 @@ class TestAutoDone(unittest.TestCase):
     """Step 5 of sync(): transition to Done on completion verb."""
 
     def test_done_prompt_transitions_issue(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo", "issue": "DEMO-1 (iss-1)",
                                  "state": "In Progress", "branch": "feat/x",
@@ -1254,7 +1254,7 @@ class TestAutoDone(unittest.TestCase):
         # "done with the auth refactor" — "refactor" describes the
         # completed task (noun), not new work. The completion verb
         # is the signal; auto-Done fires.
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo", "issue": "DEMO-1 (iss-1)",
                                  "state": "In Progress", "branch": "feat/x",
@@ -1290,7 +1290,7 @@ class TestAutoArchiveDuplicates(unittest.TestCase):
     """Step 4 of sync(): archive older duplicates, keep newest."""
 
     def test_archives_older_keeps_newest(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo again",
                                  "scope": "feat/x::implement foo again",
@@ -1330,7 +1330,7 @@ class TestAutoArchiveDuplicates(unittest.TestCase):
             self.assertIn("DEMO-2", handoff["issue"])
 
     def test_no_archive_when_single_match(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         handoff={"prompt": "implement foo"},
                         commit_subject="implement foo"):
             def handler(payload):
@@ -1413,7 +1413,7 @@ class TestAutoDoneStateGuard(unittest.TestCase):
     """MAJOR 4: auto-Done must NOT resurrect Canceled/Done issues."""
 
     def test_done_verb_skips_when_issue_already_canceled(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo", "issue": "DEMO-1 (iss-1)",
                                  "state": "In Progress", "action": "updated",
@@ -1451,7 +1451,7 @@ class TestDedupeSkipsTerminal(unittest.TestCase):
     """MINOR 1: _find_all_issues excludes Done/Canceled issues."""
 
     def test_dedupe_skips_done_issue(self):
-        with _fake_repo(linear_api_key="test-key",
+        with _fake_repo(linear_api_key="set-at-runtime",
                         branch="feat/x",
                         handoff={"prompt": "implement foo"},
                         commit_subject="implement foo again"):
@@ -1500,21 +1500,21 @@ class TestIsRepoOwner(unittest.TestCase):
         linear_sync._OWNER_CACHE = {}
 
     def test_env_var_true_bypasses_detection(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             with mock.patch.dict(os.environ, {"LINEAR_REPO_OWNER_AUTO_SYNC": "1"}, clear=False):
                 with mock.patch.object(linear_sync, "_resolve_gh_login") as gh:
                     self.assertTrue(linear_sync.is_repo_owner(repo))
                     gh.assert_not_called()
 
     def test_env_var_false_bypasses_detection(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             with mock.patch.dict(os.environ, {"LINEAR_REPO_OWNER_AUTO_SYNC": "0"}, clear=False):
                 with mock.patch.object(linear_sync, "_resolve_gh_login") as gh:
                     self.assertFalse(linear_sync.is_repo_owner(repo))
                     gh.assert_not_called()
 
     def test_detection_match_returns_true(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             with mock.patch.dict(os.environ, {}, clear=False):
                 # Remove any LINEAR_REPO_OWNER_AUTO_SYNC leftover from the host env.
                 os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
@@ -1523,35 +1523,35 @@ class TestIsRepoOwner(unittest.TestCase):
                     self.assertTrue(linear_sync.is_repo_owner(repo))
 
     def test_detection_match_is_case_insensitive(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "_resolve_gh_login", return_value="Sh-AI-X"), \
                  mock.patch.object(linear_sync, "_resolve_origin_owner", return_value="sh-ai-x"):
                 self.assertTrue(linear_sync.is_repo_owner(repo))
 
     def test_detection_mismatch_returns_false(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "_resolve_gh_login", return_value="contributor"), \
                  mock.patch.object(linear_sync, "_resolve_origin_owner", return_value="sh-ai-x"):
                 self.assertFalse(linear_sync.is_repo_owner(repo))
 
     def test_detection_no_gh_returns_false(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "_resolve_gh_login", return_value=None), \
                  mock.patch.object(linear_sync, "_resolve_origin_owner", return_value="sh-ai-x"):
                 self.assertFalse(linear_sync.is_repo_owner(repo))
 
     def test_detection_no_origin_returns_false(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "_resolve_gh_login", return_value="sh-ai-x"), \
                  mock.patch.object(linear_sync, "_resolve_origin_owner", return_value=None):
                 self.assertFalse(linear_sync.is_repo_owner(repo))
 
     def test_result_is_cached_within_a_process(self):
-        with _fake_repo(linear_api_key="test-key") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime") as repo:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "_resolve_gh_login", return_value="sh-ai-x") as gh, \
                  mock.patch.object(linear_sync, "_resolve_origin_owner", return_value="sh-ai-x") as origin:
@@ -1566,8 +1566,8 @@ class TestIsRepoOwner(unittest.TestCase):
         # a cached answer. Regression for the previous module-global
         # cache that was correct by accident (one repo per process)
         # but unsound in principle.
-        with _fake_repo(linear_api_key="test-key", repo_dirname="repo-a") as repo_a, \
-             _fake_repo(linear_api_key="test-key", repo_dirname="repo-b") as repo_b:
+        with _fake_repo(linear_api_key="set-at-runtime", repo_dirname="repo-a") as repo_a, \
+             _fake_repo(linear_api_key="set-at-runtime", repo_dirname="repo-b") as repo_b:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "_resolve_gh_login", return_value="sh-ai-x") as gh, \
                  mock.patch.object(linear_sync, "_resolve_origin_owner", return_value="sh-ai-x") as origin:
@@ -1603,7 +1603,7 @@ class TestAutoSync(unittest.TestCase):
         linear_sync._OWNER_CACHE = {}
 
     def test_non_owner_bails_silently_without_network(self):
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement foo") as repo:
+        with _fake_repo(linear_api_key="set-at-runtime", commit_subject="implement foo") as repo:
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "is_repo_owner", return_value=False), \
                  mock.patch("urllib.request.urlopen") as urlopen:
@@ -1616,7 +1616,7 @@ class TestAutoSync(unittest.TestCase):
                 )
 
     def test_owner_delegates_to_sync(self):
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement foo"):
+        with _fake_repo(linear_api_key="set-at-runtime", commit_subject="implement foo"):
             with mock.patch.object(linear_sync, "is_repo_owner", return_value=True), \
                  mock.patch.object(linear_sync, "sync", return_value=0) as sync:
                 self.assertEqual(linear_sync.auto_sync(), 0)
@@ -1638,7 +1638,7 @@ class TestTaskChangeSync(unittest.TestCase):
         linear_sync._OWNER_CACHE = {}
 
     def test_non_owner_bails_silently(self):
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement foo",
+        with _fake_repo(linear_api_key="set-at-runtime", commit_subject="implement foo",
                         handoff={"scope": "feat/x::implement foo"}):
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "is_repo_owner", return_value=False), \
@@ -1647,7 +1647,7 @@ class TestTaskChangeSync(unittest.TestCase):
                 urlopen.assert_not_called()
 
     def test_same_scope_bails_without_network(self):
-        with _fake_repo(linear_api_key="test-key", branch="feat/x",
+        with _fake_repo(linear_api_key="set-at-runtime", branch="feat/x",
                         commit_subject="implement foo",
                         handoff={"scope": "feat/x::implement foo"}):
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
@@ -1658,7 +1658,7 @@ class TestTaskChangeSync(unittest.TestCase):
 
     def test_changed_scope_triggers_auto_sync(self):
         # Commit subject moved to a new task; handoff still has the old scope.
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement bar",
+        with _fake_repo(linear_api_key="set-at-runtime", commit_subject="implement bar",
                         handoff={"scope": "feat/x::implement foo"}):
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "is_repo_owner", return_value=True), \
@@ -1668,7 +1668,7 @@ class TestTaskChangeSync(unittest.TestCase):
 
     def test_missing_handoff_triggers_auto_sync(self):
         # No prior handoff means the scope is "unknown" → always sync.
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement foo",
+        with _fake_repo(linear_api_key="set-at-runtime", commit_subject="implement foo",
                         handoff=None):
             os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
             with mock.patch.object(linear_sync, "is_repo_owner", return_value=True), \

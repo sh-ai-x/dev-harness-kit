@@ -8,7 +8,7 @@ when_to_use: |
   - User wants to know where token spend is going in their Claude Code / Codex sessions
   - User suspects prefix misalignment, redundant Read, or model overspec patterns
   - Pre-release FinOps review of session-level cost
-allowed-tools: Read Bash
+allowed-tools: Read Write Bash
 disallowed-tools: Write Edit
 model: haiku
 user-invocable: true

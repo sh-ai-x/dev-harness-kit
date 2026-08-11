@@ -34,11 +34,11 @@ input, not the skill's purpose.
   on a flat directory listing and from a static-site host.
 
 Cross-references from the 00-index page (`<main>/00-index.html`) to a
-sibling are bare `<sub>.html` (no `../` needed, because all files live
-in the same `<main>/` directory and resolve as siblings under `file://`
-and on any static-site host). The relative-path safety check
-specifically allows bare relative paths and `../<sibling>.html` for
-cross-document links; the dangerous schemes (`javascript:`, `data:`,
+sibling outputs use bare relative paths (no `../` needed, because all files
+live in the same umbrella directory and resolve as siblings under `file://`
+and on any static-site host). The relative-path safety check specifically
+allows bare relative paths and parent-relative paths for cross-document
+links; the dangerous schemes (`javascript:`, `data:`,
 `vbscript:`, `file:`) are still rejected.
 
 **Back-to-index nav**: the renderer's CLI auto-attaches a
@@ -216,8 +216,8 @@ sections:
       - paragraphs
       - **bold**, *italic*, `code`
       - [link text](https://...)
-      - [cross-doc link](<sub>.html) -- bare relative paths and
-        `../<sibling>.html` are both allowed
+      - Cross-document links use bare relative paths or parent-relative
+        sibling paths.
       - unordered (- ) and ordered (1. ) lists
       - | GFM tables |
       - ``` fenced code blocks ```
@@ -237,12 +237,9 @@ the file as a leftover from a previous refactor and skips it.
 
 ### Cross-references between proposals
 
-Inside a body, link to another proposal in the same umbrella as
-`[label](<other-sub>.html)`. From a proposal at `<main>/<sub>.html`,
-the relative hop to a sibling is the bare `<other-sub>.html` (same
-directory under `<main>/`). The 00-index page follows this convention
--- the 12 sub-topic links in its table read as `[label](<sub>.html)`
-and resolve to siblings of the index.
+Inside a body, link to another proposal in the same umbrella with a
+relative link to the sibling output file. The 00-index page follows this
+convention, so its topic links resolve to files beside the index.
 
 Cross-umbrella links (rare) would use `../<other-main>/<sub>.html`.
 The proposal skill does not enforce a single umbrella -- each

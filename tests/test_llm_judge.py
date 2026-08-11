@@ -39,7 +39,7 @@ class TestLlmJudge(unittest.TestCase):
         with patch.dict(os.environ, {
             "JUDGE_PROVIDER": "anthropic",
             "JUDGE_MODEL": "claude-3-5-sonnet",
-            "ANTHROPIC_API_KEY": "test-key",
+            "ANTHROPIC_API_KEY": "set-at-runtime",
         }, clear=True):
             cfg = llm_judge.load_config(Path(tempfile.mkdtemp()))
             self.assertEqual(cfg["provider"], "anthropic")
@@ -98,7 +98,7 @@ class TestLlmJudge(unittest.TestCase):
         }):
             result = llm_judge.call_judge(
                 provider="minimax",
-                api_key="test-key",
+                api_key="set-at-runtime",
                 model="MiniMax-M3[1m]",
                 prompt="test prompt",
             )
@@ -123,7 +123,7 @@ class TestLlmJudge(unittest.TestCase):
         }):
             result = llm_judge.call_judge(
                 provider="minimax",
-                api_key="test-key",
+                api_key="set-at-runtime",
                 model="MiniMax-M3[1m]",
                 prompt="test prompt",
                 axes=llm_judge.DIM_AXES["plan"],

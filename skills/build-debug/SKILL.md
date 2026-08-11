@@ -5,7 +5,7 @@ description: 4-phase systematic debugging. No fix proposal before Phase 1 (repro
 alpha: enforcement
 when_to_use: |
   - User types "bug" / "doesn't work" / "why failing" / "error"
-allowed-tools: Read Bash
+allowed-tools: Read Write Bash
 disallowed-tools: Edit Write WebFetch
 model: opus
 user-invocable: false

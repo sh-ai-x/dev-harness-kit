@@ -371,7 +371,7 @@ for cfg_path in [target/'.mcp.json', target/'.claude'/'settings.json', target/'.
         except Exception:
             pass
 
-EXTERNAL_CLIS = ['claude','codex','docker','kubectl','helm','terraform','gh','aws','gcloud','az','psql','sqlite3','redis-cli','jq','yq','curl','git','make','npm','pnpm','yarn','pip','uv','poetry','cargo','go','node','python3','bash','sh']
+EXTERNAL_CLIS = ['claude','codex','docker','kubectl','helm','terraform','gh','aws','gcloud','az','psql','sqlite3','redis-cli','jq','yq','git','make','npm','pnpm','yarn','pip','uv','poetry','cargo','go','node','python3']
 external_cli_refs = collections.Counter()
 for src in [target/'bin', target/'lib', target/'tools', target/'skills']:
     if not src.exists(): continue

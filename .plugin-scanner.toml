@@ -1,0 +1,12 @@
+[scanner]
+profile = "public-marketplace"
+
+# These paths contain intentionally unsafe inputs used to verify that the
+# harness detects and reports dangerous content. They are test fixtures, not
+# executable plugin behavior, so keep them out of marketplace trust findings.
+ignore_paths = [
+  "tests/**",
+  "skills/review/fixtures/**",
+  # This is a CI template containing GitHub secret expressions, not literals.
+  "templates/ci/.github/workflows/review.yml",
+]
