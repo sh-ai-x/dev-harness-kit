@@ -121,6 +121,20 @@ _CI_PATHS_AFTER_HOOKS: tuple[str, ...] = (
     "lib/maintenance_gate.py",  # Python, invoked by bin/review-local.sh:96,439
     "lib/atomic.py",            # Python, dep of lib/maintenance_gate.py
     "lib/__init__.py",          # Python package marker (already exists at repo root)
+    # Linear auto-registration entrypoints. Every Linear hook
+    # (hooks/linear-*.sh, hooks/worktree-auto-cut.sh) guards on the
+    # presence of tools/linear_sync.py; without these in EXPECTED_PATHS,
+    # consumer repos after ci-setup would silently bail at that guard
+    # and never sync — issues land in the wrong project (or never land).
+    # linear_pr_sync.py is the GH-Actions-driven companion (workflow
+    # picks it up via sparse-checkout). tools/_repo_name.py is the
+    # shared helper both scripts `from _repo_name import ...` — without
+    # it in EXPECTED_PATHS the consumer's first hook fire raises
+    # ModuleNotFoundError. All three are invoked via `python3 <path>`
+    # so they do NOT need +x (no entry in EXECUTABLE_PATHS).
+    "tools/_repo_name.py",
+    "tools/linear_sync.py",
+    "tools/linear_pr_sync.py",
 )
 
 
@@ -625,6 +639,9 @@ def _build_marker() -> dict:
             "tools/skill_usage_render.py",
             "tools/portability_check.py",
             "tools/loop_engine.py",
+            "tools/_repo_name.py",
+            "tools/linear_sync.py",
+            "tools/linear_pr_sync.py",
         ],
         # /dev-kit:babysit-pr-local entrypoints (issue #619). Recorded in
         # the marker so consumers can audit which bin/ scripts and lib/

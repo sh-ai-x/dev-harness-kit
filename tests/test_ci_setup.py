@@ -1182,6 +1182,90 @@ class TestCiSetup(unittest.TestCase):
             self.assertNotIn("FileNotFoundError", result.stderr)
 
 
+class TestLinearToolsShip(unittest.TestCase):
+    """Regression tests: hooks/linear-*.sh and hooks/worktree-auto-cut.sh
+    all guard on `[ ! -f "$PROJECT_DIR/tools/linear_sync.py" ]` and silently
+    `exit 0` when the file is missing. Without these scripts in
+    EXPECTED_PATHS, every consumer repo after ci-setup would silently
+    bail at that guard — issues never land in the consumer's Linear
+    project (and the repo's own auto-sync is the only one that ever
+    works, because dev-harness-kit itself carries the source file).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ci_setup = _load_ci_setup()
+
+    def test_linear_files_in_expected_paths(self):
+        for rel in (
+            "tools/_repo_name.py",
+            "tools/linear_sync.py",
+            "tools/linear_pr_sync.py",
+        ):
+            self.assertIn(
+                rel, self.ci_setup.EXPECTED_PATHS,
+                f"missing from EXPECTED_PATHS: {rel} — hooks will silently bail "
+                f"or raise ModuleNotFoundError on import",
+            )
+
+    def test_linear_entrypoints_not_in_executable_paths(self):
+        """Python scripts invoked via `python3 <path>` (see every
+        hooks/linear-*.sh and .github/workflows/linear-pr-sync.yml);
+        shebang is not used, so +x is not required."""
+        for rel in ("tools/linear_sync.py", "tools/linear_pr_sync.py"):
+            self.assertNotIn(
+                rel, self.ci_setup.EXECUTABLE_PATHS,
+                f"{rel} must not be in EXECUTABLE_PATHS — invoked via python3",
+            )
+
+    def test_ci_setup_installs_linear_tools(self):
+        """End-to-end install: all three files land byte-identical, the
+        marker payload lists them under the `tools` key (drift guard
+        without this entry would emit a warning on every --force), and
+        a Python import of linear_sync from the consumer target succeeds
+        (catches missing `_repo_name.py` dependency, which would
+        otherwise raise ModuleNotFoundError on the first Edit/Write)."""
+        import subprocess
+        import sys
+        import tempfile
+        plugin_root = Path(__file__).parent.parent
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            r = self.ci_setup.install_ci_config(target, force=True)
+            self.assertEqual(r.errors, [], f"errors: {r.errors}")
+            for rel in (
+                "tools/_repo_name.py",
+                "tools/linear_sync.py",
+                "tools/linear_pr_sync.py",
+            ):
+                installed = target / rel
+                self.assertTrue(installed.exists(), f"missing from install target: {rel}")
+                self.assertEqual(
+                    installed.read_bytes(), (plugin_root / rel).read_bytes(),
+                    f"{rel} content mismatch vs plugin-root source",
+                )
+            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
+            self.assertIn("tools", marker)
+            self.assertIn("tools/_repo_name.py", marker["tools"])
+            self.assertIn("tools/linear_sync.py", marker["tools"])
+            self.assertIn("tools/linear_pr_sync.py", marker["tools"])
+            # Import smoke: every consumer Edit/Write hook forks Python
+            # to import linear_sync. A missing `_repo_name.py` shows up
+            # as a ModuleNotFoundError on the very first hook fire, not
+            # at install time — this regression pins the import.
+            result = subprocess.run(
+                [sys.executable, str(target / "tools" / "linear_sync.py"), "status"],
+                cwd=target, capture_output=True, text=True,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"linear_sync.py execution failed in installed consumer target:\n"
+                f"{result.stdout}{result.stderr}",
+            )
+            self.assertNotIn("ModuleNotFoundError", result.stderr)
+            self.assertNotIn("ImportError", result.stderr)
+
+
 def tempfile_path(name: str):
     """Return a Path to a tempfile file (helper for test_invalid_target_dir_raises)."""
     import tempfile
