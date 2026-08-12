@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _CODEX_CONV_EVENTS = ("user_message", "agent_message")
@@ -324,12 +325,61 @@ def slim_transcript(raw: str, tool: str):
     return "\n".join(kept) + "\n"
 
 
+def _is_worktree_active(cwd: str, main_root: str) -> bool:
+    """Return True when ``cwd``'s worktree is still listed in
+    ``git -C <main_root> worktree list --porcelain``.
+
+    Used by ``--archive-stale`` to detect sessions whose worktree has
+    been ``git worktree remove``'d but whose logs would otherwise
+    keep accumulating on disk. When git is unavailable or the call
+    fails, we default to *active* (do not archive) so a degraded
+    environment never silently drops logs.
+    """
+    if not cwd or not main_root:
+        return True
+    try:
+        out = subprocess.run(
+            ["git", "-C", main_root, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return True
+    if out.returncode != 0:
+        return True
+    cwd_real = os.path.realpath(cwd)
+    for line in out.stdout.splitlines():
+        if line.startswith("worktree "):
+            if os.path.realpath(line.split(maxsplit=1)[1]) == cwd_real:
+                return True
+    return False
+
+
 def main() -> int:
     # Never write to stdout — Codex parses Stop-hook stdout as a decision.
     # Always exit 0 so a logging failure never blocks the participant's session.
     parser = argparse.ArgumentParser()
     parser.add_argument("--tool", required=True, choices=["claude-code", "codex"])
+    parser.add_argument(
+        "--archive-stale",
+        action="store_true",
+        help=(
+            "When the cwd's worktree is no longer in `git worktree list`, "
+            "route the worktree-side log write to logs/.archive/<branch>/<ts>/ "
+            "instead of logs/<tool>/<branch>/. The main-checkout canonical "
+            "write is unchanged so /dev-kit:token-analyzer still sees the "
+            "session. Off by default to preserve current behavior."
+        ),
+    )
     args = parser.parse_args()
+
+    # Env-var override (opt-in for hand-edited hooks): if the operator
+    # sets SAVE_LOG_ARCHIVE_STALE=1 in the hook's environment, behave as
+    # if --archive-stale was passed. This lets existing SessionEnd /
+    # Stop hook commands pick up the feature without rewriting the
+    # hook JSON. Flag wins over env (callers can force-disable).
+    if os.environ.get("SAVE_LOG_ARCHIVE_STALE", "").strip() in ("1", "true", "yes"):
+        if not args.archive_stale:
+            args.archive_stale = True
 
     try:
         payload = json.load(sys.stdin)
@@ -387,7 +437,21 @@ def main() -> int:
     # name. Without this, every worktree session falls back to (main)
     # attribution via the cwd field.
     if worktree_dir and os.path.realpath(worktree_dir) != os.path.realpath(main_root):
-        _write(os.path.join(worktree_dir, "logs", args.tool, branch))
+        if args.archive_stale and not _is_worktree_active(worktree_dir, main_root):
+            # Stale worktree: route to a dated archive subdir so the
+            # analyzer can ignore it cleanly (the analyzer only walks
+            # `logs/<tool>/<branch>/` paths; .archive is a sibling).
+            ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            archive_dir = os.path.join(
+                main_root, "logs", ".archive", branch, ts,
+            )
+            _write(archive_dir)
+            print(
+                f"save_log: archived stale worktree log to {archive_dir}",
+                file=sys.stderr,
+            )
+        else:
+            _write(os.path.join(worktree_dir, "logs", args.tool, branch))
     return 0
 
 
