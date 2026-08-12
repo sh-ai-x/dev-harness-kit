@@ -76,11 +76,12 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 |---|---|---|
 | [`review`](review/SKILL.md) | `analysis` | Parallel multi-dimension code review with a false-positive filter. Fans out to per-dim experts (correctness, security, architecture) that run in parallel and return evidence-backed findings; a verifier pass confirms/rej… |
 
-### `security` (1)
+### `security` (2)
 
 | Skill | α | Description |
 |---|---|---|
 | [`security`](security/SKILL.md) | `enforcement` | Full OWASP Top 10 2025 fan-out (A01–A10) with a verifier pass. Ten parallel subagents, one per category, return evidence-backed findings; a verification pass confirms or rejects each before a per-category breakdown tabl… |
+| [`security-metrics`](security-metrics/SKILL.md) | `enforcement` | Deterministic 0–100 OWASP Top 10 scorecard with Markdown evidence table. |
 
 ### `ship` (4)
 
@@ -142,9 +143,9 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 30 | [`research-plan-build`](research-plan-build/SKILL.md) | `build` | `state` | human |
 | 31 | [`review`](review/SKILL.md) | `review` | `analysis` | human |
 | 32 | [`security`](security/SKILL.md) | `security` | `enforcement` | human |
+| 32a | [`security-metrics`](security-metrics/SKILL.md) | `security` | `enforcement` | human |
 | 33 | [`ship`](ship/SKILL.md) | `ship` | `state` | human |
 | 34 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
 | 35 | [`status`](status/SKILL.md) | `status` | `state` | human |
 | 36 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
 | 37 | [`valuate`](valuate/SKILL.md) | `design` | `enforcement` | model |
-

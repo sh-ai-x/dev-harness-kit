@@ -34,6 +34,20 @@ them.
 It works in both Claude Code and Codex, and the same commands mean the same thing
 in both.
 
+### Security scorecard
+
+For a quick, repeatable repository metric, invoke `$security-metrics` from either
+Claude Code or Codex. It calculates a deterministic 0–100 score for each OWASP
+Top 10 area and writes a Markdown table with the evidence and deductions:
+
+```bash
+python3 skills/security-metrics/scripts/score_security.py . \
+  --output security-metrics.md
+```
+
+The scorecard is a triage metric, not a certification. Use `/dev-kit:security`
+for the full evidence-backed OWASP review before a release or major refactor.
+
 **MCP integration is intentionally out of scope.** This plugin ships slash commands,
 hooks, and library functions — no MCP server entry. See
 [docs/decisions/0001-no-mcp.md](docs/decisions/0001-no-mcp.md) for the rationale.
@@ -48,7 +62,7 @@ and what to do when work doesn't go in a straight line.
 
 ## Install
 
-You need the Claude Code CLI. **Run every `claude plugin …` command on Node 22** —
+The plugin supports both Claude Code and Codex. For Claude Code, **run every `claude plugin …` command on Node 22** —
 the bundled CLI crashes on Node 25 and newer:
 
 ```bash
