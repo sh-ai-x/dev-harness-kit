@@ -1,6 +1,15 @@
 ---
 name: security-metrics
+category: security
 description: Calculate a deterministic 0-100 security scorecard for the current repository and render an evidence-backed Markdown table for OWASP Top 10 categories.
+alpha: enforcement
+when_to_use:
+  - User types /dev-kit:security-metrics
+  - User asks for a repository security score or Markdown security metric
+allowed-tools: Read Grep Glob Bash
+disallowed-tools: Write Edit
+model: sonnet
+user-invocable: true
 ---
 
 # Security Metrics
