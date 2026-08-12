@@ -178,10 +178,18 @@ class TestFallbackHelperScript(unittest.TestCase):
         self.assertTrue(SCRIPT_PATH.is_file(), f"missing: {SCRIPT_PATH}")
 
     def test_helper_script_has_verdict_re(self) -> None:
-        """The script must export / use VERDICT_RE matching extract-verdict.py:70."""
+        """The script must export / use VERDICT_RE matching extract-verdict.py:70.
+
+        Pin the regex (not just the substring) so a docstring containing
+        "Approve|Blocked|Changes Requested" without `re.compile(...)`
+        cannot satisfy the assertion.
+        """
         text = SCRIPT_PATH.read_text()
         self.assertIn("VERDICT_RE", text)
-        self.assertIn("Approve|Blocked|Changes Requested", text)
+        self.assertRegex(
+            text,
+            r"VERDICT_RE\s*=\s*re\.compile\(\s*r['\"][^'\"]*\(Approve\|Blocked\|Changes Requested\)",
+        )
 
     def test_helper_script_reads_verb_from_stdin(self) -> None:
         """The script must read comments from stdin (per the workflow step)."""
