@@ -68,9 +68,27 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Repo root + helpers.
 # ---------------------------------------------------------------------------
+# Resolve REPO_ROOT (issue #619). Two-pass strategy:
+#   1. Prefer cwd's git toplevel -- this is the cwd-independent path
+#      (works whether the script lives at `<repo>/bin/review-local.sh`
+#      or in a plugin cache, as long as the user is cd'd into a repo).
+#   2. Fall back to BASH_SOURCE's git toplevel -- covers the case
+#      where the user runs the script from OUTSIDE the repo (e.g. smoke
+#      test from /tmp). The script then finds the repo by walking up
+#      from its own location.
+# The previous BASH_SOURCE-only derivation hardcoded `<repo>/bin/` and
+# failed when the script was symlinked or copied into a non-git directory
+# (e.g. plugin cache without a .git marker).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null)" \
-  || { echo "error: not in a git repo" >&2; exit 1; }
+# `|| true` is required: `set -e` would kill the script on the non-zero
+# exit from `git rev-parse` when cwd is not a git repo. We deliberately
+# probe and fall back, so the failure is the expected branch, not a
+# script-killing error.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$REPO_ROOT" ]; then
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+[ -n "$REPO_ROOT" ] || { echo "error: not in a git repo" >&2; exit 1; }
 cd "$REPO_ROOT"
 
 # shellcheck source=lib/review_local_lib.sh
