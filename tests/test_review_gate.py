@@ -85,6 +85,8 @@ def _run_gate(
     s_agent: str = "true",
     r_result: str = "success",
     s_result: str = "success",
+    r_source: str = "",
+    s_source: str = "",
 ) -> subprocess.CompletedProcess:
     """Execute the gate bash with R, S, EVENT_NAME, agent_ran, result env vars.
 
@@ -92,6 +94,10 @@ def _run_gate(
     tests that pre-date the agent_ran = false hard-fail exercise the original
     tolerance without false positives. New tests for the bootstrap-PR / silent-
     skip case override `r_agent` or `s_agent` to "false".
+
+    r_source/s_source default to empty so the gate bash's backward-compat
+    branch (empty source -> bootstrap message) fires; this matches the
+    pre-#625 behavior for tests that predate the verdict_source split.
     """
     bash = _extract_gate_bash()
     # Strip the `needs.<job>.outputs.X` interpolation lines -- they're
@@ -107,6 +113,14 @@ def _run_gate(
         'S_AGENT="${S_AGENT_OVERRIDE:-true}"',
     )
     bash = bash.replace(
+        'R_SOURCE="${{ needs.review.outputs.verdict_source }}"',
+        'R_SOURCE="${R_SOURCE_OVERRIDE:-}"',
+    )
+    bash = bash.replace(
+        'S_SOURCE="${{ needs.security.outputs.verdict_source }}"',
+        'S_SOURCE="${S_SOURCE_OVERRIDE:-}"',
+    )
+    bash = bash.replace(
         'R_RESULT="${{ needs.review.result }}"',
         'R_RESULT="${R_RESULT_OVERRIDE:-success}"',
     )
@@ -120,6 +134,8 @@ def _run_gate(
     env["S_OVERRIDE"] = s
     env["R_AGENT_OVERRIDE"] = r_agent
     env["S_AGENT_OVERRIDE"] = s_agent
+    env["R_SOURCE_OVERRIDE"] = r_source
+    env["S_SOURCE_OVERRIDE"] = s_source
     env["R_RESULT_OVERRIDE"] = r_result
     env["S_RESULT_OVERRIDE"] = s_result
     env["EVENT_OVERRIDE"] = event
@@ -328,6 +344,74 @@ class TestSeverityGateTolerance(unittest.TestCase):
         cp = _run_gate(r="Requested", s="Approve", event="pull_request")
         self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
         self.assertIn("Unparseable verdict", cp.stdout)
+
+    # === Issue #625: split agent_ran=false message by verdict_source ===
+
+    def test_review_default_approve_no_file_does_not_emit_bootstrap_remediation(self):
+        """agent_ran=false with verdict_source=default-approve-no-file must NOT
+        print the bootstrap-PR remediation text.
+
+        Pre-#625 the gate hard-failed any agent_ran=false case with the
+        "PR-refuses-any-workflow-modification" message, even on PRs that
+        did NOT touch .github/workflows/* (the action ran but produced no
+        execution file -- e.g. provider=minimax wrapper-format output).
+        The misleading remediation pointed users at workflow-merge steps
+        that did not apply. The fix splits the gate arm: only the
+        bootstrap-PR source emits the workflow-merge message; default-
+        approve-no-file emits a generic "no execution file" message
+        pointing at the action logs / provider switch.
+        """
+        cp = _run_gate(
+            r="",
+            s="Approve",
+            event="pull_request",
+            r_agent="false",
+            r_source="default-approve-no-file",
+        )
+        self.assertEqual(
+            cp.returncode, 1,
+            f"agent_ran=false MUST hard-fail.\nstdout={cp.stdout}\nstderr={cp.stderr}",
+        )
+        combined = cp.stdout + cp.stderr
+        # The new no-file message must fire.
+        self.assertIn("::error::review+security gate: AI agent produced no execution file", combined)
+        self.assertIn("provider=minimax", combined)
+        # The bootstrap-PR text must NOT fire on the default-approve-no-file source.
+        self.assertNotIn("refuses any PR whose head differs", combined)
+        self.assertNotIn("Merge this PR's workflow changes to main", combined)
+
+    def test_review_bootstrap_pr_still_emits_bootstrap_remediation(self):
+        """Sanity: explicit verdict_source=needs-fallback-bootstrap-pr keeps
+        the existing bootstrap-PR remediation text (issue #212-C1-fix
+        behavior is preserved when the source is set correctly)."""
+        cp = _run_gate(
+            r="",
+            s="Approve",
+            event="pull_request",
+            r_agent="false",
+            r_source="needs-fallback-bootstrap-pr",
+        )
+        self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
+        combined = cp.stdout + cp.stderr
+        self.assertIn("::error::review+security gate: AI agent was skipped", combined)
+        self.assertIn("refuses any PR whose head differs", combined)
+        self.assertIn("Merge this PR's workflow changes to main", combined)
+
+    def test_review_security_default_approve_no_file_does_not_emit_bootstrap_remediation(self):
+        """Symmetric to the review case: security-side agent_ran=false
+        with verdict_source=default-approve-no-file must fire the new
+        no-file message, not the bootstrap-PR text."""
+        cp = _run_gate(
+            r="Approve",
+            s="",
+            event="pull_request",
+            s_agent="false",
+            s_source="default-approve-no-file",
+        )
+        self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
+        combined = cp.stdout + cp.stderr
+        self.assertIn("::error::review+security gate: AI agent produced no execution file", combined)
+        self.assertNotIn("refuses any PR whose head differs", combined)
 
     def test_extracted_bash_is_nonempty(self):
         """Sanity: the extractor actually returns bash, not a header."""

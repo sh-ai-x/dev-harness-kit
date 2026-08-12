@@ -80,6 +80,16 @@ _CI_PATHS_BEFORE_HOOKS: tuple[str, ...] = (
     # resurrect stale "Verdict: Changes Requested" comments from prior
     # pushes and re-introduce deterministic gate flapping).
     "scripts/extract-verdict.py",
+    # Comment-derived verdict fallback (issue #625): when the agent's
+    # output file is missing/unparseable (provider=minimax returns a
+    # wrapper-format envelope that the parser above can't read), this
+    # helper recovers the verdict from the most recent claude-prefixed
+    # PR comment, filtered by createdAt > cutoff to avoid resurrecting
+    # stale verdicts from prior pushes. Lives next to review.yml so the
+    # workflow can `python3 ${{ github.workspace }}/.github/workflows/
+    # _verdict_from_comment.py` without an extra consumer-side install
+    # step.
+    ".github/workflows/_verdict_from_comment.py",
 )
 
 # Keep the hook payload between consumer files and the remaining canonical

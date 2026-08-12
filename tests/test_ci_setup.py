@@ -1070,6 +1070,28 @@ class TestCiSetup(unittest.TestCase):
     # Resolves the structural root cause: hand-maintained lists drift; this
     # test fails on the first drift, before it ships to consumers.
 
+    def test_verdict_from_comment_helper_is_in_expected_paths(self):
+        """Regression: the comment-derived verdict fallback helper
+        (templates/ci/.github/workflows/_verdict_from_comment.py) MUST
+        be in EXPECTED_PATHS so ci-setup installs it on consumers.
+
+        The helper lives next to review.yml and is invoked by the
+        extract_verdict_comments step in the review + security jobs
+        (issue #625). Without this EXPECTED_PATHS entry, every consumer
+        that ran ci-setup would get a `No such file or directory` error
+        the first time the extract-verdict.py parser returned
+        PARSE_FAILED and the workflow tried to fall back to comment
+        search.
+        """
+        self.assertIn(
+            ".github/workflows/_verdict_from_comment.py",
+            set(self.ci_setup.EXPECTED_PATHS),
+            "the comment-derived verdict fallback helper must be in "
+            "EXPECTED_PATHS so ci-setup copies it to consumers (`gh pr "
+            "view ... --json comments` is piped into this helper when "
+            "the agent's output file is unparseable -- issue #625)",
+        )
+
     def test_every_sourced_lib_helper_is_in_expected_paths(self):
         """Regression: every `source ... lib/<helper>.sh` reference inside
         an EXPECTED_PATHS hook must resolve to a path that is also
