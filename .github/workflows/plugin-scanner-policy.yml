@@ -1,0 +1,49 @@
+name: Plugin Scanner Policy Gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-scanner:
+    name: Marketplace policy and trust gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Scan plugin
+        id: scan
+        uses: hashgraph-online/ai-plugin-scanner-action@264eb4757331c18125b4ba8914c4927124ed17ae # v1
+        with:
+          mode: scan
+          plugin_dir: "."
+          profile: public-marketplace
+          format: json
+          output: plugin-scan-report.json
+          min_score: 80
+          fail_on_severity: high
+          cisco_skill_scan: on
+          cisco_policy: balanced
+          install_cisco: true
+
+      - name: Enforce scanner outputs
+        if: ${{ always() && steps.scan.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s plugin-scan-report.json
+          policy_pass="$(jq -r '.policy_pass // false' plugin-scan-report.json)"
+          verify_pass="$(jq -r '.verify_pass // false' plugin-scan-report.json)"
+          max_severity="$(jq -r '[.. | objects | .severity? // empty | ascii_downcase] | map(select(. == "critical" or . == "high" or . == "medium" or . == "low" or . == "info")) | if any(. == "critical") then "critical" elif any(. == "high") then "high" elif any(. == "medium") then "medium" elif any(. == "low") then "low" else "none" end' plugin-scan-report.json)"
+          score="$(jq -r '.effective_score // .score // 0' plugin-scan-report.json)"
+          echo "policy_pass=${policy_pass} verify_pass=${verify_pass} score=${score} max_severity=${max_severity}"
+          test "${policy_pass}" = true
+          test "${verify_pass}" = true
+          test "${score}" -ge 80
+          case "${max_severity,,}" in
+            critical|high) echo "High-severity scanner findings remain" >&2; exit 1 ;;
+          esac
