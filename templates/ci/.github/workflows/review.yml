@@ -362,6 +362,43 @@ jobs:
           audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=review status=${{ job.status }} verdict=${verdict:-MISSING} source=${verdict_source:-unknown}"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
 
+      # Issue #625: when extract-verdict.py returns PARSE_FAILED (the agent
+      # ran but the parser could not read its output -- e.g. provider=minimax
+      # wrapper-format envelope), fall back to the most recent claude-prefixed
+      # PR comment so the gate still has a verdict to evaluate. The cutoff
+      # filter on createdAt avoids resurrecting stale verdicts from previous
+      # pushes (issue #244 root-cause). When no comment matches, the prior
+      # step's outputs stand (PARSE_FAILED still hard-fails the gate).
+      - name: Extract verdict from PR comments (fallback)
+        id: extract_verdict_comments
+        if: always()
+        needs: extract_verdict
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          VERDICT_COMMENT_CUTOFF: ${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+        run: |
+          set -uo pipefail
+          # Pipe the claude-prefixed comment bodies + ISO timestamps into the
+          # helper. The helper filters by cutoff and prints the first matching
+          # verdict word (Approve | Blocked | Changes Requested) or empty.
+          comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select(.author.login | startswith("claude")) | {body, createdAt}')
+          if [ -z "$comments_json" ]; then
+            echo "::notice::no claude-prefixed comments on PR $PR_NUMBER; verdict_source unchanged"
+            exit 0
+          fi
+          verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$VERDICT_COMMENT_CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py")
+          if [ -n "$verdict" ]; then
+            echo "::notice::verdict recovered from PR comments: ${verdict}"
+            {
+              echo "verdict=${verdict}"
+              echo "verdict_source=comments-fallback"
+              echo "agent_ran=true"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::no matching Verdict line in claude-prefixed comments; verdict_source unchanged"
+          fi
+
   security:
     # See review-job comment above; same fork-safety contract.
     if: |
@@ -631,6 +668,43 @@ jobs:
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=security status=${{ job.status }} verdict=${verdict:-MISSING} source=${verdict_source:-unknown}"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
+
+      # Issue #625: when extract-verdict.py returns PARSE_FAILED (the agent
+      # ran but the parser could not read its output -- e.g. provider=minimax
+      # wrapper-format envelope), fall back to the most recent claude-prefixed
+      # PR comment so the gate still has a verdict to evaluate. The cutoff
+      # filter on createdAt avoids resurrecting stale verdicts from previous
+      # pushes (issue #244 root-cause). When no comment matches, the prior
+      # step's outputs stand (PARSE_FAILED still hard-fails the gate).
+      - name: Extract verdict from PR comments (fallback)
+        id: extract_verdict_comments
+        if: always()
+        needs: extract_verdict
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          VERDICT_COMMENT_CUTOFF: ${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+        run: |
+          set -uo pipefail
+          # Pipe the claude-prefixed comment bodies + ISO timestamps into the
+          # helper. The helper filters by cutoff and prints the first matching
+          # verdict word (Approve | Blocked | Changes Requested) or empty.
+          comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select(.author.login | startswith("claude")) | {body, createdAt}')
+          if [ -z "$comments_json" ]; then
+            echo "::notice::no claude-prefixed comments on PR $PR_NUMBER; verdict_source unchanged"
+            exit 0
+          fi
+          verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$VERDICT_COMMENT_CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py")
+          if [ -n "$verdict" ]; then
+            echo "::notice::verdict recovered from PR comments: ${verdict}"
+            {
+              echo "verdict=${verdict}"
+              echo "verdict_source=comments-fallback"
+              echo "agent_ran=true"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::no matching Verdict line in claude-prefixed comments; verdict_source unchanged"
+          fi
 
   gate:
     # Severity gate: same fork-safety guard. Pull from job outputs --
