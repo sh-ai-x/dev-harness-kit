@@ -58,6 +58,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 |---|---|---|
 | [`review`](review.md) | `analysis` | 오탐 필터가 있는 병렬 정확성 + 보안 + 아키텍처 리뷰. |
 | [`security`](security.md) | `enforcement` | 검증 패스가 있는 OWASP Top 10 2025 (A01–A10) 전체 팬아웃. |
+| [`security-metrics`](security-metrics.md) | `enforcement` | 결정론적 OWASP Top 10 0–100 스코어카드와 Markdown 증거 표. `/dev-kit:security`는 심층 리뷰, 이 스킬은 반복 가능한 트리아지 지표. |
 | [`inspect`](inspect.md) | `analysis` | 8차원 읽기 전용 코드 건강 감사. |
 | [`refactor`](refactor.md) | `analysis` | 3단계 정리 체인: `inspect → build-refactor → review`. |
 | [`prune`](prune.md) | `analysis` | 4단계 삭제 스윕: sweep → dependents → report → verify. |

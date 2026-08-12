@@ -17,12 +17,15 @@ it's installed, you drive real development work through a handful of slash
 commands that always follow the same loop:
 
 ```
-bootstrap → plan → build → review → ship
+bootstrap → evidence-plan? → plan → build → review → ship
 ```
 
-Each step does one job. `plan` turns an idea into a written spec and a checklist
-of build steps. `build` works through that checklist one step at a time, running
-the tests as it goes. `review` and `ship` check the result and cut a release.
+Each step does one job. `evidence-plan` (optional) catches non-trivial ideas
+*before* the expensive 5-gate PRD runs — cited research, an HTML proposal you
+confirm, then a hand-off into `plan`. `plan` turns an idea into a written spec
+and a checklist of build steps. `build` works through that checklist one step
+at a time, running the tests as it goes. `review` and `ship` check the result
+and cut a release.
 
 The important part is the guardrails. dev-kit installs **hooks** — small scripts
 that run automatically on every file edit and shell command. They block things
@@ -36,17 +39,35 @@ in both.
 
 ### Security scorecard
 
-For a quick, repeatable repository metric, invoke `$security-metrics` from either
-Claude Code or Codex. It calculates a deterministic 0–100 score for each OWASP
-Top 10 area and writes a Markdown table with the evidence and deductions:
+For a quick, repeatable repository metric, invoke `/dev-kit:security-metrics`
+(or the `$security-metrics` model-invoked helper) from either Claude Code or
+Codex. It walks the repo with only `Read` / `Grep` / `Glob` / `Bash` (no
+external scanner, no network calls), produces a deterministic **0–100 score for
+each OWASP Top 10 (A01–A10) area**, and writes a Markdown report containing the
+score, the evidence rule that fired, and the deduction behind it:
 
 ```bash
 python3 skills/security-metrics/scripts/score_security.py . \
   --output security-metrics.md
 ```
 
-The scorecard is a triage metric, not a certification. Use `/dev-kit:security`
+**Scoring contract** (pinned by `skills/security-metrics/SKILL.md`):
+
+- Every category starts at 100 and applies only deterministic, source-tree-only
+  deductions.
+- The overall score is the arithmetic mean of the ten category scores,
+  rounded to the nearest integer.
+- Each check reports exactly one of two statuses: `PASS` (no rule fired) or
+  `REVIEW` (one or more rules fired). Deductions are never suppressed; if a
+  rule is a false positive, the scorer records the reason in the report for a
+  follow-up.
+- The skill is `Read`-only: it never installs dependencies, never calls an
+  external scanner, never modifies the working tree.
+
+The scorecard is a **triage metric, not a certification**. Use `/dev-kit:security`
 for the full evidence-backed OWASP review before a release or major refactor.
+Full scoring details, rules per category, and limitation list live in
+[`docs/skills/security-metrics.md`](docs/skills/security-metrics.md).
 
 **MCP integration is intentionally out of scope.** This plugin ships slash commands,
 hooks, and library functions — no MCP server entry. See
@@ -230,15 +251,15 @@ and the PR repair state machine.
 | [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
 | [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `SNAPSHOT` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
 
-![L0 Architecture overview — skills/commands → hooks → lib/tools/bin → external](docs/screenshots/code-viz/diagram-00.png)
+<img src="docs/screenshots/code-viz/diagram-00.png" alt="L0 Architecture overview — skills/commands → hooks → lib/tools/bin → external" width="900" />
 
-![`/dev-kit:plan` — 5 gates with ambiguity-loop back-edge from emit to frame](docs/screenshots/code-viz/diagram-04.png)
+<img src="docs/screenshots/code-viz/diagram-04.png" alt="/dev-kit:plan — 5 gates with ambiguity-loop back-edge from emit to frame" width="900" />
 
-![`/dev-kit:security` — OWASP A01–A10 parallel fan-out](docs/screenshots/code-viz/diagram-06.png)
+<img src="docs/screenshots/code-viz/diagram-06.png" alt="/dev-kit:security — OWASP A01–A10 parallel fan-out" width="900" />
 
-![`/dev-kit:babysit-pr` — 15-step repair loop with retry -> step 1 back-edge](docs/screenshots/code-viz/diagram-11.png)
+<img src="docs/screenshots/code-viz/diagram-11.png" alt="/dev-kit:babysit-pr — 15-step repair loop with retry -> step 1 back-edge" width="900" />
 
-> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots.
+> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots. Each embeds with `<img … width="900" />` so GitHub never crops the 1198-px source PNG.
 
 ### GH Actions gate workflow
 
@@ -246,7 +267,7 @@ The shipped `review.yml` defines a PR → review/security fan-out → gate verdi
 sequence. code-viz emits this as a `sequenceDiagram` (the same PNG that ships
 with the visualizer):
 
-![GH Actions gate workflow — PR → review/security fan-out → gate verdict](docs/screenshots/code-viz/diagram-26.png)
+<img src="docs/screenshots/code-viz/diagram-26.png" alt="GH Actions gate workflow — PR → review/security fan-out → gate verdict" width="900" />
 
 The same shape renders cleanly on GitHub from a fenced ```mermaid``` block:
 
@@ -351,7 +372,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:evidence-plan`](docs/skills/evidence-plan.md) | Idea → cited research → HTML proposal (you confirm) → `/dev-kit:plan` hand-off, before the expensive 5-gate PRD work runs. |
+| [`/dev-kit:evidence-plan`](docs/skills/evidence-plan.md) | Front-door to a non-trivial idea. Runs three non-skippable phases in order — (1) cited research via `/dev-kit:research`, (2) HTML proposal via `/dev-kit:proposal` (you confirm), (3) hand-off to `/dev-kit:plan` so the expensive 5-gate PRD run starts only after a human reviewer approves the pitch. Built-in `safety_valve: 3` + `user_interrupt: true`; never invokes `/dev-kit:build`. |
 | [`/dev-kit:plan`](docs/skills/plan.md) | Turns an idea into `PRD.md` + a step-by-step build checklist. |
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
