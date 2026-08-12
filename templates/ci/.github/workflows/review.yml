@@ -671,6 +671,13 @@ jobs:
           # .github/workflows/* (and on bootstrap-PRs that add the file).
           R_AGENT="${{ needs.review.outputs.agent_ran }}"
           S_AGENT="${{ needs.security.outputs.agent_ran }}"
+          # verdict_source: classifier that produced the verdict (issue #625).
+          # Used by the agent_ran=false arm to pick the correct remediation
+          # text: 'needs-fallback-bootstrap-pr' (PR touches a workflow file
+          # so the action skipped) vs 'default-approve-no-file' (action ran
+          # but produced no execution file -- distinct failure mode).
+          R_SOURCE="${{ needs.review.outputs.verdict_source }}"
+          S_SOURCE="${{ needs.security.outputs.verdict_source }}"
           # Job-level results: success | failure | cancelled | skipped.
           # Issue #212-C1: if the upstream agent job FAILED, the empty
           # verdict is "agent never ran" (e.g. DEV_KIT_GITHUB_TOKEN missing,
@@ -693,25 +700,72 @@ jobs:
           # silent pass (the bootstrap-PR / PR-modifies-workflow scenario).
           # Hard-fail with a remediation message so the user knows to merge
           # the workflow change first and re-push from a clean branch.
+          # Issue #625: split the agent_ran=false remediation text by
+          # verdict_source. The bootstrap-PR text below only applies when
+          # the workflow-validation guard actually skipped the action
+          # (verdict_source=needs-fallback-bootstrap-pr). On PRs that do
+          # NOT touch .github/workflows/* but still see agent_ran=false
+          # (e.g. provider=minimax returns no execution file -- the parser
+          # defaults to default-approve-no-file), print a generic "no
+          # execution file" remediation pointing at the action logs /
+          # provider switch instead of the misleading workflow-merge
+          # message.
+          #
+          # Backward-compat: when R_SOURCE / S_SOURCE is empty (older
+          # extract-verdict versions that did not emit a source label, or
+          # future call sites that forget to set it), default to the
+          # bootstrap arm so existing tests / workflows still behave
+          # like before this split. The new "no execution file" arm
+          # fires only when the source is explicitly set to a non-
+          # bootstrap value (default-approve-no-file, parse-failed-no-
+          # verdict, etc.).
           if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
+            if [ "$R_SOURCE" = "needs-fallback-bootstrap-pr" ] || [ "$S_SOURCE" = "needs-fallback-bootstrap-pr" ] || [ -z "$R_SOURCE$S_SOURCE" ]; then
+              {
+                echo "::error::review+security gate: AI agent was skipped"
+                echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
+                echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
+                echo
+                echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run on this PR."
+                echo "  The action refuses any PR whose head differs from the"
+                echo "  default branch under .github/workflows/*. Result is"
+                echo "  success (exit-0), but no claude[bot] comment was posted"
+                echo "  -- the 'Approve' verdict in the gate was the empty-verdict"
+                echo "  tolerance, NOT an actual AI review."
+                echo
+                echo "  Fix:"
+                echo "    1. Merge this PR's workflow changes to main first."
+                echo "    2. Re-open or sync from the updated default branch."
+                echo "    3. Future PRs (without workflow modifications) will run"
+                echo "       the agent normally and post real verdicts + inline"
+                echo "       comments."
+              } >&2
+              exit 1
+            fi
             {
-              echo "::error::review+security gate: AI agent was skipped"
-              echo "  review.agent_ran=$R_AGENT verdict=$R"
-              echo "  security.agent_ran=$S_AGENT verdict=$S"
+              echo "::error::review+security gate: AI agent produced no execution file"
+              echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
+              echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
               echo
-              echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run on this PR."
-              echo "  The action refuses any PR whose head differs from the"
-              echo "  default branch under .github/workflows/*. Result is"
-              echo "  success (exit-0), but no claude[bot] comment was posted"
-              echo "  -- the 'Approve' verdict in the gate was the empty-verdict"
-              echo "  tolerance, NOT an actual AI review."
+              echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 exited 0 but did not produce"
+              echo "  a claude-execution-output.json at the expected path."
+              echo "  This is NOT the workflow-validation skip (the PR does"
+              echo "  not touch .github/workflows/*); the action ran but"
+              echo "  its output envelope was empty or unreadable."
+              echo
+              echo "  Common causes:"
+              echo "    - provider=minimax occasionally returns no execution"
+              echo "      file when the conversation stream is missing (see"
+              echo "      issue #625). Consider switching CI_REVIEW_PROVIDER"
+              echo "      to 'anthropic' for this PR."
+              echo "    - action rate-limit masked by exit-0"
+              echo "    - transient filesystem / network error"
               echo
               echo "  Fix:"
-              echo "    1. Merge this PR's workflow changes to main first."
-              echo "    2. Re-open or sync from the updated default branch."
-              echo "    3. Future PRs (without workflow modifications) will run"
-              echo "       the agent normally and post real verdicts + inline"
-              echo "       comments."
+              echo "    - Inspect the 'Run anthropics/claude-code-action' step"
+              echo "      logs in the GH Actions run for the actual reason."
+              echo "    - If the failure mode is recurring for provider=minimax,"
+              echo "      set CI_REVIEW_PROVIDER=anthropic via 'gh variable set'."
             } >&2
             exit 1
           fi
