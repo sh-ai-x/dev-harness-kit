@@ -396,7 +396,9 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:prune`](docs/skills/prune.md) | Slop-removal chain — `inspect → 3-pass delete sweep → review`. Reach for it when you want AI slop or dead features gone (not refactored). |
 | [`/dev-kit:status`](docs/skills/status.md) | HOTL visualization — current loop progress, cumulative cycles, hand-off chain, and eval score on one screen. |
 | [`/dev-kit:code-viz`](docs/skills/code-viz.md) | Generic plugin-architecture visualizer — multi-level views + domain pillar map + per-skill workflows to one self-contained HTML page. |
+| [`/dev-kit:security-metrics`](docs/skills/security-metrics.md) | Deterministic 0–100 OWASP A01–A10 scorecard with Markdown evidence table. Triage metric before `/dev-kit:security`. |
 | [`/dev-kit:token-analyzer`](docs/skills/token-analyzer.md) | Shows where your Claude Code / Codex token spend is going, as an HTML dashboard. |
+| [`/dev-kit:cost-gate`](docs/skills/cost-gate.md) | Live session spend + two-line commit-trailer block so the PR-level cost flag can aggregate. Read-only, never blocks. |
 | [`/dev-kit:research`](docs/skills/research.md) | Every factual claim you write either cites a source or gets removed. |
 | [`/dev-kit:docs-maintenance`](docs/skills/docs-maintenance.md) | Audits stale docs and refreshes the README without baking in facts that go out of date. |
 | [`/dev-kit:ci-triage`](docs/skills/ci-triage.md) | Triages failing GitHub Actions runs across recent commits, deduplicates against a persisted case store, and judges each new failure against a model/context/harness taxonomy — every case must carry a re-runnable repro plus an executable regression test. |
@@ -699,6 +701,43 @@ the session monitor — none of them have data until you turn it on.
 
 Captured transcripts land in `logs/<tool>/<branch>/<sid>.jsonl` and are
 gitignored. See [`docs/skills/log.md`](docs/skills/log.md).
+
+### Metric skills (security · cost · eval)
+
+Five skills produce a number you can act on — they split cleanly into
+**post-hoc historical** (consume `/dev-kit:log` transcripts), **live session**
+(read the running ledger), and **static** (walk the repository without I/O).
+Each is read-only: it prints or writes a report; it never blocks a tool call.
+
+| Skill | Scope | Source | Output | When to reach for it |
+|---|---|---|---|---|
+| [`/dev-kit:security-metrics`](docs/skills/security-metrics.md) | Static | Source tree only (`Read` / `Grep` / `Glob` / `Bash`) | One overall 0–100 score + ten OWASP A01–A10 sub-scores, `PASS`/`REVIEW` per check, evidence + deductions in Markdown. Deterministic, idempotent, no scanner call. | Quick "is this repo's security hygiene OK?" check — the triage metric before a full `/dev-kit:security` review. |
+| [`/dev-kit:token-analyzer`](docs/skills/token-analyzer.md) | Post-hoc | `logs/{claude-code,codex}/*.jsonl` (from `/dev-kit:log`) | Self-contained HTML dashboard + per-worktree sidecar pages. 4-dim session scoring + 6 anti-pattern warnings (`CACHE_HIT_LOW`, `READ_HEAVY`, `MODEL_OVERSPEC`, `REPEATED_USER_MSG`, …) + USD savings estimate. | FinOps review of accumulated session spend; pre-release cost audit. |
+| [`/dev-kit:cost-gate`](docs/skills/cost-gate.md) | Live | `$CWD/.dev-kit/.cost-gate/state.json` (live session ledger) | Plain-text status (`scope`, `status`, `cost_usd`, threshold distance) **plus** a two-line `Cost-gate:` / `Cost-gate-Session:` commit-trailer block so the PR aggregator can aggregate. Read-only. | Right before a commit/PR — copy the trailer block into the commit message so the PR-level cost flag fires. |
+| [`/dev-kit:evaluate`](docs/skills/evaluate.md) | Post-hoc | Replayed transcripts + workflow evidence via `lib/eval_runner.RUBRIC_REGISTRY` | Per-rubric LLM-judge verdict, legacy D1–D7 Agent-Behavior report **and** five harness-effectiveness components (prevention / first-pass / recovery / learning / measurement-integrity); missing evidence is reported as `INSUFFICIENT_EVIDENCE`, never inferred. Converges when per-case axis mean ≥ 8.0. | After a harness change — programmatic gate on harness-quality and os-quality rubrics before merge. |
+| [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Static | `.github/`, `.dev-kit/ci-config.json`, provider file, secrets, `gh auth` status | One PASS / FAIL summary across five readiness checks. Read-only. | Pre-PR sanity check: "if I open a PR now, will CI even start?" |
+
+How they relate:
+
+- **`security-metrics` ≠ `security`.** `security-metrics` is a static
+  scorecard (triage); `security` is a deep OWASP Top-10 review with
+  evidence-backed findings and a verifier pass. Run `security-metrics`
+  for the headline number, `security` for the audit.
+- **`cost-gate` ≠ `token-analyzer`.** `cost-gate` is the live, in-session
+  ledger — print it before a commit and copy the two-line trailer into
+  the message. `token-analyzer` is the post-hoc dashboard — open it at
+  the end of a milestone to see accumulated anti-pattern spend.
+- **`evaluate` runs *itself* as a cron** on a per-dim rotation (see
+  `lib/eval_runner.RUBRIC_REGISTRY`); nightly calls land in
+  `.dev-kit/evaluations/` for trend tracking.
+- **`ci-doctor` is the only "metric" that's also a gate.** The other
+  four emit numbers but never block a tool call — they are
+  *observe-only*. `ci-doctor` doesn't block either; it just answers a
+  question.
+
+Full contracts (rubric YAMLs, judge prompts, threshold env vars) live in
+[`docs/skills/<name>.md`](docs/skills) and the per-skill page linked from
+each row above.
 
 ### Token efficiency + research
 

@@ -396,7 +396,9 @@ sequenceDiagram
 | [`/dev-kit:prune`](docs/skills/prune.md) | 슬롭 제거 체인 — `inspect → 3회차 삭제 스윕 → review`. AI 슬롭이나 죽은 기능을 (리팩터가 아니라) 제거하고 싶을 때 손을 댄다. |
 | [`/dev-kit:status`](docs/skills/status.md) | HOTL 시각화 — 현재 루프 진행도, 누적 사이클, 핸드오프 체인, 평가 점수를 한 화면에. |
 | [`/dev-kit:code-viz`](docs/skills/code-viz.md) | 범용 플러그인 아키텍처 시각화 — 다중 레벨 뷰 + 도메인 필러 맵 + 스킬별 워크플로를 자기 완결 HTML 1페이지로. |
+| [`/dev-kit:security-metrics`](docs/skills/security-metrics.md) | 결정적 0–100 OWASP A01–A10 스코어카드 + Markdown 증거 표. `/dev-kit:security` 본격 리뷰 전 트리아지 지표. |
 | [`/dev-kit:token-analyzer`](docs/skills/token-analyzer.md) | Claude Code / Codex 토큰 비용이 어디로 가는지를 HTML 대시보드로 보여준다. |
+| [`/dev-kit:cost-gate`](docs/skills/cost-gate.md) | 라이브 세션 지출 + PR 단위 비용 플래그 집계용 두 줄 커밋 트레일러. Read-only, 절대 차단 안 함. |
 | [`/dev-kit:research`](docs/skills/research.md) | 모든 사실 주장에 출처를 붙이거나 제거한다. |
 | [`/dev-kit:docs-maintenance`](docs/skills/docs-maintenance.md) | 오래된 문서를 감사하고 README를 새로 고치되 시점에 따라 변하는 사실은 박아두지 않는다. |
 | [`/dev-kit:ci-triage`](docs/skills/ci-triage.md) | 최근 커밋의 실패한 GitHub Actions 런을 분류하고 영속화된 케이스 저장소와 중복 제거 후 모델/컨텍스트/하네스 분류로 새 실패를 판정 — 모든 케이스는 재현 가능한 repro + 실행 가능한 회귀 테스트를 가져야 한다. |
@@ -688,6 +690,39 @@ bin/set-provider.sh                          # 로컬 확인: 현재 프로바�
 
 캡처된 트랜스크립트는 `logs/<tool>/<branch>/<sid>.jsonl`에 떨어지며
 gitignored다. [`docs/skills/log.md`](docs/skills/log.md) 참고.
+
+### 지표 스킬(보안 · 비용 · 평가)
+
+다섯 개의 스킬이 액션 가능한 숫자를 만들어낸다 — **사후 이력**(트랜스크립트
+소비), **실시간 세션**(러닝 원장 읽기), **정적**(I/O 없이 저장소 탐색)
+세 영역으로 깔끔히 나뉜다. 전부 read-only다. 출력하거나 보고서를 작성할
+뿐, 어떤 도구 호출도 차단하지 않는다.
+
+| 스킬 | 범위 | 입력 | 출력 | 언제 손을 뻗어야 하는가 |
+|---|---|---|---|---|
+| [`/dev-kit:security-metrics`](docs/skills/security-metrics.md) | 정적 | 소스 트리 전용(`Read` / `Grep` / `Glob` / `Bash`) | 전체 0–100 + OWASP A01–A10 하위 점수 10개, 체크별 `PASS`/`REVIEW`, Markdown 증거·감점. 결정적이고 멱등, 스캐너 호출 없음. | "이 저장소 보안 위생이 OK인가?" 빠른 트리아지 — 본격 리뷰 전 헤드라인 숫자. |
+| [`/dev-kit:token-analyzer`](docs/skills/token-analyzer.md) | 사후 이력 | `/dev-kit:log`의 `logs/{claude-code,codex}/*.jsonl` | 자기 완결 HTML 대시보드 + 워크트리별 사이드카. 4차원 세션 점수 + 6개 안티패턴 경고(`CACHE_HIT_LOW`, `READ_HEAVY`, `MODEL_OVERSPEC`, `REPEATED_USER_MSG` …) + USD 절감 추정. | 누적 세션 지출의 FinOps 리뷰; 릴리스 전 비용 감사. |
+| [`/dev-kit:cost-gate`](docs/skills/cost-gate.md) | 실시간 | `$CWD/.dev-kit/.cost-gate/state.json`(라이브 원장) | 일반 텍스트 상태(`scope`, `status`, `cost_usd`, 임계 거리) **+** `Cost-gate:` / `Cost-gate-Session:` 두 줄 커밋 트레일러. Read-only. | 커밋/PR 직전 — 커밋 메시지에 트레일러를 복사해 두면 PR 단위 비용 플래그가 집계된다. |
+| [`/dev-kit:evaluate`](docs/skills/evaluate.md) | 사후 이력 | `lib/eval_runner.RUBRIC_REGISTRY`를 통한 트랜스크립트 재생 + 워크플로 증거 | 루브릭별 LLM 판정, 레거시 D1–D7 Agent-Behavior 리포트 **+** 5개 하니스-효과성 구성요소(prevention / first-pass / recovery / learning / measurement-integrity). 증거 부족은 `INSUFFICIENT_EVIDENCE`로 보고되며 절대 추론되지 않는다. 케이스별 축 평균 ≥ 8.0에서 수렴. | 하니스 변경 후 — 머지 전 harness-quality / os-quality 루브릭의 프로그래매틱 게이트. |
+| [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | 정적 | `.github/`, `.dev-kit/ci-config.json`, 프로바이더 파일, 시크릿, `gh auth` | 5개 준비도 체크에 대한 PASS / FAIL 단일 요약. Read-only. | PR 직전 검진: "지금 PR을 열면 CI라도 시작하는가?" |
+
+서로의 관계:
+
+- **`security-metrics` ≠ `security`.** `security-metrics`는 정적 스코어카드
+  (트리아지)고, `security`는 증거 기반 발견과 검증 패스를 거치는 본격
+  OWASP Top-10 리뷰다. 헤드라인 숫자는 `security-metrics`, 감사는
+  `security`.
+- **`cost-gate` ≠ `token-analyzer`.** `cost-gate`는 라이브, in-세션 원장
+  — 커밋 직전에 출력해 트레일러를 메시지에 복사한다. `token-analyzer`는
+  사후 대시보드 — 마일스톤 끝에 열어 누적 안티패턴 지출을 본다.
+- **`evaluate`는 자체적으로 크론**을 돈다(`RUBRIC_REGISTRY` 참조).
+  야간 호출은 `.dev-kit/evaluations/`에 쌓인다.
+- **`ci-doctor`만 "측정값 중 유일한 게이트 같은" 동작이다.** 다른 넷은
+  숫자를 내지만 어떤 도구 호출도 차단하지 않는다 — *관측 전용*. `ci-doctor`도
+  차단하지는 않고 그냥 질문에 답한다.
+
+전체 계약(루브릭 YAML, 판정 프롬프트, 임계 환경변수)은
+[`docs/skills/<name>.md`](docs/skills)와 위 표의 각 스킬 페이지에 있다.
 
 ### 토큰 효율 + 리서치
 
