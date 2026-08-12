@@ -59,6 +59,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 |---|---|---|
 | [`review`](review.md) | `analysis` | Parallel correctness + security + architecture review with a false-positive filter. |
 | [`security`](security.md) | `enforcement` | Full OWASP Top 10 2025 (A01–A10) fan-out with a verifier pass. |
+| [`security-metrics`](security-metrics.md) | `enforcement` | Deterministic 0–100 OWASP Top 10 scorecard with Markdown evidence table. |
 | [`inspect`](inspect.md) | `analysis` | 8-dimension read-only code-health audit. |
 | [`refactor`](refactor.md) | `analysis` | 3-phase cleanup chain: `inspect → build-refactor → review`. |
 | [`prune`](prune.md) | `analysis` | 4-phase deletion sweep: sweep → dependents → report → verify. |
@@ -97,7 +98,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`proposal`](proposal.md) | `state` | Renders `docs/proposals/<main>/<sub>.yaml` to a self-contained review HTML. |
 | [`interview`](interview.md) | `enforcement` | 5-field safety-contract interview that gates plan emission. |
 | [`research`](research.md) | `enforcement` | 0-arg research gate: cache/direct/multi/human escalation + citation enforcement. |
-| [`valuate`](valuate.md) | `enforcement` | Plan-value gate; scores a plan on 6 axes and returns proceed/revise/hold/kill. |
 | [`sot-harness-writer`](sot-harness-writer.md) | `state` | Interview-based Single Source of Truth harness document writer — 5 rounds × 2–3 evidence-backed recommendations, hands off to `/dev-kit:plan`. |
 
 ---
@@ -114,6 +114,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | Verification-before-completion; no "done" without a quoted exit code + test count. |
 | [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4-pass cleanup (dead → dup → naming → coverage); no cleanup without a regression test. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | auto (visible hook failure) | Diagnose failed Claude Code / Codex hooks and repair safe cache + registration drift. |
+| [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` and other planning stages | Plan-value gate; scores a plan on 6 axes and returns proceed/revise/hold/kill. Advisory — the build stage proceeds unless the operator flags a non-`proceed` verdict manually. |
 
 ---
 
@@ -155,11 +156,12 @@ step inside their parent skill's flow; you never type them directly.
 | [`research-plan-build`](research-plan-build.md) | `build` | `state` | human |
 | [`review`](review.md) | `review` | `analysis` | human |
 | [`security`](security.md) | `security` | `enforcement` | human |
+| [`security-metrics`](security-metrics.md) | `security` | `enforcement` | human |
 | [`ship`](ship.md) | `ship` | `state` | human |
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | human |
 | [`status`](status.md) | `status` | `state` | human |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | human |
-| [`valuate`](valuate.md) | `design` | `enforcement` | human |
+| [`valuate`](valuate.md) | `design` | `enforcement` | model |
 
 Skill detail pages (`docs/skills/<name>.md`) are generated for user-facing
 skills on a rolling basis; the per-skill row above links to the page when it

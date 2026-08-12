@@ -86,8 +86,7 @@ bin/review-local.sh --pr 123 --review-only
 - `bin/review-local.sh` — the implementation.
 - `skills/review/SKILL.md` — the review skill invoked via `claude -p`.
 - `skills/security/SKILL.md` — the security skill.
-- `skills/maintenance/SKILL.md` — the maintenance skill.
-- `lib/maintenance_gate.py` — verdict-extraction + combined-gate helper.
+- `lib/maintenance_gate.py` — verdict-extraction + combined-gate helper (the `/dev-kit:maintenance` slash is the LLM-judge prompt dispatched by `maintenance.yml`, not a `SKILL.md` file).
 - `lib/ci_setup.py` — provider resolution + secret name lookup.
 - `bin/set-provider.sh` — local provider switch.
 - `.github/workflows/review.yml` — the GH-Actions equivalent (unchanged).

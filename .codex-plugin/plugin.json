@@ -1,6 +1,6 @@
 {
   "name": "dev-kit",
-  "version": "0.3.257",
+  "version": "0.3.259",
   "description": "AI-native dev harness: 13 categories, 0-arg commands, A2A typed, Eval-Repair, Human-on-the-Loop.",
   "author": {
     "name": "sanghee",
@@ -29,6 +29,8 @@
     "developerName": "sanghee",
     "category": "Developer Tools",
     "websiteURL": "https://github.com/sh-ai-x/dev-harness-kit",
+    "privacyPolicyURL": "https://github.com/sh-ai-x/dev-harness-kit/security/policy",
+    "termsOfServiceURL": "https://github.com/sh-ai-x/dev-harness-kit/blob/main/LICENSE",
     "composerIcon": "./assets/plugin-icon.svg",
     "logo": "./assets/plugin-icon.svg",
     "screenshots": [

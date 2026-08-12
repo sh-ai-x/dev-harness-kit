@@ -760,12 +760,14 @@ classify_all_worktrees()` 경유) `live`/`unknown`에 한해 제거 후보만
 게이트가 #463에서 제거되었다 — 실제로 어떤 의미인지 [워크플로 시나리오
 문서 Case 4](docs/workflow/WORKFLOW-SCENARIOS.ko.md#case-4-valuate-단계-건너뛰기) 참고.
 
-**에이전트 행동 평가** — `/dev-kit:evaluate`는 기록된 트랜스크립트를
-재생하고 차원별 루브릭(review / security / plan)에 더해 20 체크박스
-코드-새니티 체크리스트로 판정한다. `--harness-quality` 또는 `--os-quality`를
-추가하면 같은 러너에 매칭 횡단 루브릭을 등록한다.
+**에이전트 행동 및 하네스 효과성 평가** — `/dev-kit:evaluate`는 기존
+트랜스크립트/루브릭 평가를 유지한다. 하네스 효과성 설계는 legacy D1–D7
+평가와 함께 workflow evidence를 사용해 prevention, first-pass, recovery,
+learning, measurement integrity 5개 component를 별도로 보여준다. 누락된
+evidence는 추정하지 않고 명시적으로 표시한다.
 [`docs/skills/evaluate.md`](docs/skills/evaluate.md)에 상세 내용,
-근거는 `docs/adr/ADR-0022-eval-agent-behavior.md`.
+근거는 `docs/adr/ADR-0022-eval-agent-behavior.md`와
+[`docs/proposals/harness-effectiveness/00-index.html`](docs/proposals/harness-effectiveness/00-index.html)이다.
 
 **Codex 호환성** — 같은 스킬과 훅이 `.codex-plugin/` 매니페스트를 통해
 정식 훅 설정을 미러링하는 Codex CLI에서도 동작한다; 회귀 테스트가 양쪽을

@@ -706,5 +706,81 @@ exit 0
         self.assertNotIn("^^}", text, "found a bash-4-only ${VAR^^} uppercase expansion")
 
 
+# ---------------------------------------------------------------------------
+# Cwd-independence regression (issue #619 D2). Previously
+# bin/review-local.sh derived REPO_ROOT from BASH_SOURCE, which required
+# the script to live at `<repo>/bin/review-local.sh`. The fix replaces
+# the BASH_SOURCE dance with `git rev-parse --show-toplevel` so the
+# script resolves REPO_ROOT from cwd's git toplevel.
+#
+# This test mirrors the install pattern: copy the bin/scripts + lib/
+# helpers into a tmpdir consumer (exactly what ci-setup would do), then
+# run the script from a directory OUTSIDE the consumer. `--help` is
+# chosen because it short-circuits at L126 before any `gh pr view`
+# call (a meaningful difference from `--pr 0 --dry-run`, where `gh pr
+# view 0` returns non-zero in a throwaway repo).
+# ---------------------------------------------------------------------------
+class TestCwdIndependence(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.consumer = Path(self._tmp.name) / "consumer"
+        self.consumer.mkdir()
+        # Consumer must be a git repo so `git rev-parse --show-toplevel`
+        # works when invoked from the consumer or from outside.
+        subprocess.run(["git", "init", "-q"], cwd=self.consumer, check=True)
+        # Mirror what ci-setup would install: bin/ + lib/ but nothing else.
+        for filetype, rels in (
+            ("bin", ("babysit-pr-local.sh", "review-local.sh")),
+            ("lib", ("review_local_lib.sh", "maintenance_gate.py", "atomic.py", "__init__.py")),
+        ):
+            (self.consumer / filetype).mkdir()
+            for name in rels:
+                src = PROJECT_ROOT / filetype / name
+                self.assertTrue(src.is_file(), f"plugin source missing: {src}")
+                dst = self.consumer / filetype / name
+                dst.write_bytes(src.read_bytes())
+                # Match the +x bit that ci-setup would set.
+                dst.chmod(dst.stat().st_mode | 0o111)
+
+    def test_review_local_runs_from_arbitrary_cwd(self) -> None:
+        """Issue #619 D2 regression: `bin/review-local.sh` must resolve
+        REPO_ROOT from cwd's git toplevel, not from BASH_SOURCE. Mirror
+        an install into a tmpdir consumer, then invoke the script from
+        an unrelated directory (NOT inside the consumer). `--help` is
+        the shortest code path that exits successfully before any `gh`
+        call, so it proves cwd-independence without the noise of
+        fake-PR / unauthenticated-gh failures.
+        """
+        # /tmp is guaranteed to exist on every Unix; we cd INTO it but
+        # not into the consumer. The script must still locate the
+        # consumer's git toplevel.
+        outside = Path(self._tmp.name) / "outside"
+        outside.mkdir()
+        self.assertFalse(
+            outside.resolve().is_relative_to(self.consumer.resolve()),
+            "test setup wrong: outside should not be inside the consumer",
+        )
+
+        r = subprocess.run(
+            ["bash", str(self.consumer / "bin" / "review-local.sh"), "--help"],
+            cwd=outside,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(
+            r.returncode, 0,
+            f"expected exit 0 from cwd={outside}; got {r.returncode} "
+            f"stdout={r.stdout!r} stderr={r.stderr!r}",
+        )
+        # The help banner is the same as the in-repo test, so just
+        # verify the script's own header text renders.
+        self.assertIn("review-local.sh", r.stdout)
+        # And NO "not in a git repo" error — that would mean the
+        # BASH_SOURCE regression is back.
+        self.assertNotIn("not in a git repo", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

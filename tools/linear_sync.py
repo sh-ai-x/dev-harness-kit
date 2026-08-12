@@ -63,6 +63,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from _repo_name import repo_name as _repo_name
+
 
 class LinearTransportError(RuntimeError):
     """Raised by _linear_query when the transport layer (DNS, TLS handshake,
@@ -512,49 +514,6 @@ def _write_handoff(repo: Path, payload: dict[str, Any]) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload_with_meta, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
-
-
-def _main_repo_root(repo: Path) -> Path:
-    """Return the main checkout's path, even from inside a linked worktree.
-
-    Discriminator + resolution:
-      - `git rev-parse --git-common-dir` returns the main .git/ from
-        any worktree of the same repo.
-      - `dirname` of that path is the main checkout.
-      - In a non-worktree (or single-worktree) repo, the current
-        `repo` is the main checkout; return it unchanged.
-    """
-    try:
-        common = subprocess.check_output(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=str(repo), stderr=subprocess.DEVNULL, timeout=2,
-        ).decode("utf-8", "ignore").strip()
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-        return repo
-    if not common:
-        return repo
-    # `git rev-parse --git-common-dir` returns a path that may be
-    # relative to the worktree root. Resolve it against the worktree.
-    p = Path(common)
-    if not p.is_absolute():
-        p = (repo / p).resolve()
-    return p.parent
-
-
-def _repo_name(repo: Path) -> str:
-    """Canonical repository name = main-checkout basename.
-
-    A worktree at `.worktrees/fix-xxx/` returns the main checkout's
-    directory name (e.g. `dev-harness-kit`), NOT the worktree's own
-    basename. This is the name Linear projects follow per #539
-    ("A repository whose Linear project name differs from its
-    canonical repository name gets a project named exactly after the
-    repository").
-    """
-    name = _main_repo_root(repo).name
-    if name.startswith(".") and len(name) > 1:
-        name = name[1:]
-    return name or "repository"
 
 
 def _current_branch(repo: Path) -> str:

@@ -1,7 +1,7 @@
 ---
 name: evaluate
 category: eval
-description: 0-arg eval extension. Replays transcripts and judges against registered rubrics (harness-quality, os-quality, plus legacy review/security/plan). /dev-kit:evaluate [--harness-quality] [--os-quality] [--case <id>] [--dry-run].
+description: 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components. /dev-kit:evaluate.
 alpha: enforcement
 when_to_use:
   - User types /dev-kit:evaluate
@@ -23,9 +23,10 @@ safety:
 
 # /dev-kit:evaluate — Eval extension (Phase 3)
 
-Adds the **harness-quality** and **os-quality** dimensions to the agent-behavior
-eval. Backward-compatible: no flags = existing per-dim eval (review/security/plan)
-unchanged. The new dimensions are gated on a registered rubric (via
+Runs the existing eval dimensions and adds workflow-evidence-based
+harness-effectiveness reporting. Backward-compatible: the existing review,
+security, plan, harness-quality, os-quality, and D1–D7 contracts remain
+unchanged. The effectiveness result is gated on structured evidence (via
 `lib.eval_runner.RUBRIC_REGISTRY`), which is the deterministic enforcement hook
 that prevents the LLM judge from scoring against an unknown rubric.
 
@@ -34,8 +35,8 @@ deterministic registry lookup is the part the model cannot self-impose.
 
 ## Modes
 
-- `/dev-kit:evaluate` (no flags): run the existing per-dim eval (review /
-  security / plan). Backward-compatible — the pre-Phase-3 behaviour.
+- `/dev-kit:evaluate` (default): run the existing per-dim eval, legacy D1–D7,
+  and the five harness-effectiveness components in one report.
 - `/dev-kit:evaluate --harness-quality`: register `harness-quality` rubric +
   judge prompt with `RUBRIC_REGISTRY`, then run per-dim eval against the
   `harness` DIM_AXES tuple.
@@ -45,6 +46,12 @@ deterministic registry lookup is the part the model cannot self-impose.
 - `/dev-kit:evaluate --case <case_id>`: restrict to a single case fixture.
 - `/dev-kit:evaluate --dry-run`: skip the LLM judge; mock each case at
   7.0 / DRIFT_WARNING (same shape as the legacy `--dry-run`).
+
+The effectiveness components are not enabled by a new option. They consume
+workflow evidence already produced by TraceLog, repair-coordinator events,
+guard/verification producers, and existing eval artifacts. Missing evidence is
+reported as `INSUFFICIENT_EVIDENCE`; it is never inferred from a transcript or
+converted to a passing/zero score.
 
 ## Rubric registry (deterministic enforcement)
 

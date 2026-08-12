@@ -34,6 +34,20 @@ them.
 It works in both Claude Code and Codex, and the same commands mean the same thing
 in both.
 
+### Security scorecard
+
+For a quick, repeatable repository metric, invoke `$security-metrics` from either
+Claude Code or Codex. It calculates a deterministic 0–100 score for each OWASP
+Top 10 area and writes a Markdown table with the evidence and deductions:
+
+```bash
+python3 skills/security-metrics/scripts/score_security.py . \
+  --output security-metrics.md
+```
+
+The scorecard is a triage metric, not a certification. Use `/dev-kit:security`
+for the full evidence-backed OWASP review before a release or major refactor.
+
 **MCP integration is intentionally out of scope.** This plugin ships slash commands,
 hooks, and library functions — no MCP server entry. See
 [docs/decisions/0001-no-mcp.md](docs/decisions/0001-no-mcp.md) for the rationale.
@@ -48,7 +62,7 @@ and what to do when work doesn't go in a straight line.
 
 ## Install
 
-You need the Claude Code CLI. **Run every `claude plugin …` command on Node 22** —
+The plugin supports both Claude Code and Codex. For Claude Code, **run every `claude plugin …` command on Node 22** —
 the bundled CLI crashes on Node 25 and newer:
 
 ```bash
@@ -202,11 +216,39 @@ per-skill workflow extraction. The patterns it uses are reusable — same approa
 to render GH Actions pipelines, multi-phase repair loops, or any other
 long-running process with discrete phases.
 
+### Plugin at a glance
+
+The full set of 6 abstraction levels is in `/tmp/code-viz.html` after a
+code-viz run; the figures below are the ones worth a thumbnail — they
+describe the mental model, the planning contract, the code-review lenses,
+and the PR repair state machine.
+
+| Diagram | What it shows |
+|---|---|
+| L0 Architecture | Layered topology — user → skills/commands → hooks → lib/tools/bin → external (GH Actions / MCP / CLI). |
+| [`/dev-kit:plan` workflow](docs/skills/plan.md) | The 5-gate pipeline (frame → validate → non-goals → decompose → emit) with the ambiguity-loop back-edge from emit to frame. |
+| [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
+| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `SNAPSHOT` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
+
+![L0 Architecture overview — skills/commands → hooks → lib/tools/bin → external](docs/screenshots/code-viz/diagram-00.png)
+
+![`/dev-kit:plan` — 5 gates with ambiguity-loop back-edge from emit to frame](docs/screenshots/code-viz/diagram-04.png)
+
+![`/dev-kit:security` — OWASP A01–A10 parallel fan-out](docs/screenshots/code-viz/diagram-06.png)
+
+![`/dev-kit:babysit-pr` — 15-step repair loop with retry -> step 1 back-edge](docs/screenshots/code-viz/diagram-11.png)
+
+> Regenerate locally with `python3 /tmp/cv.py --target=. --out=/tmp/code-viz.html --screenshots=docs/screenshots/code-viz --top-skills=20`. The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots.
+
 ### GH Actions gate workflow
 
 The shipped `review.yml` defines a PR → review/security fan-out → gate verdict
-sequence. code-viz emits this as a `sequenceDiagram`; the same shape renders
-cleanly on GitHub from a fenced ```mermaid``` block:
+sequence. code-viz emits this as a `sequenceDiagram` (the same PNG that ships
+with the visualizer):
+
+![GH Actions gate workflow — PR → review/security fan-out → gate verdict](docs/screenshots/code-viz/diagram-26.png)
+
+The same shape renders cleanly on GitHub from a fenced ```mermaid``` block:
 
 ```mermaid
 sequenceDiagram
@@ -793,12 +835,15 @@ auto-gate that hard-blocked Build on a non-`proceed` verdict; it was removed in
 PR #463 — see [Case 4 of the workflow scenarios doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-the-valuate-step)
 for what that means in practice.
 
-**Agent-behavior eval** — `/dev-kit:evaluate` replays recorded transcripts and
-judges them against per-dimension rubrics (review / security / plan) plus a
-20-checkbox code-sanity checklist; adding `--harness-quality` or `--os-quality`
-registers the matching cross-cutting rubric on the same runner. Details in
+**Agent-behavior and harness-effectiveness eval** — `/dev-kit:evaluate` keeps
+the existing transcript/rubric evaluation. The harness-effectiveness design
+adds a workflow-native evidence report alongside the legacy D1–D7 Agent
+Behavior report, with five separate components: prevention, first-pass,
+recovery, learning, and measurement integrity. Missing evidence is reported
+explicitly rather than inferred. Details in
 [`docs/skills/evaluate.md`](docs/skills/evaluate.md), with the rationale in
-`docs/adr/ADR-0022-eval-agent-behavior.md`.
+`docs/adr/ADR-0022-eval-agent-behavior.md` and the design proposal at
+[`docs/proposals/harness-effectiveness/00-index.html`](docs/proposals/harness-effectiveness/00-index.html).
 
 **Codex compatibility** — the same skills and hooks run under Codex CLI via a
 `.codex-plugin/` manifest that mirrors the canonical hook config; a regression

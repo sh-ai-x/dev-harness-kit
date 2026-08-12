@@ -39,9 +39,41 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
+
+from _repo_name import repo_name as _repo_name
 
 LINEAR_API_URL = "https://api.linear.app/graphql"
-PROJECT_NAME = os.environ.get("LINEAR_PROJECT_NAME", "dev-harness-kit")
+
+
+def _resolved_project_name() -> str:
+    """Return the Linear project name for this repository.
+
+    Precedence:
+      1. ``LINEAR_PROJECT_NAME`` env var (explicit operator override).
+      2. The main-checkout directory name via ``git rev-parse
+         --git-common-dir`` — the canonical repository name per #539
+         ("A repository whose Linear project name differs from its
+         canonical repository name gets a project named exactly after
+         the repository").
+      3. The literal fallback ``"repository"`` only when both env is
+         missing AND git is unavailable / not a git repo. Mirrors
+         ``tools/linear_sync.py::_repo_name``'s terminal fallback so
+         the two scripts agree on what to call a projectless repo.
+    """
+    env = os.environ.get("LINEAR_PROJECT_NAME", "").strip()
+    if env:
+        return env
+    try:
+        return _repo_name(Path.cwd())
+    except Exception:
+        return "repository"
+
+
+# Backward-compat: keep the module-level constant so any external caller
+# (or test) that reads ``linear_pr_sync.PROJECT_NAME`` still gets a value.
+# Computed at import time from env-or-git, NOT from a hardcoded literal.
+PROJECT_NAME = _resolved_project_name()
 
 REQUIRED_STATE_NAMES = ("Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled")
 
@@ -107,7 +139,7 @@ def _project_id() -> str | None:
       }
     }
     """
-    r = _request(query, {"name": PROJECT_NAME})
+    r = _request(query, {"name": _resolved_project_name()})
     if not r:
         return None
     nodes = r.get("data", {}).get("projects", {}).get("nodes", [])
@@ -143,7 +175,7 @@ def _team_id() -> str | None:
       }
     }
     """
-    r = _request(query, {"name": PROJECT_NAME})
+    r = _request(query, {"name": _resolved_project_name()})
     if not r:
         return None
     nodes = r.get("data", {}).get("projects", {}).get("nodes", [])
@@ -357,7 +389,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     if not project_id:
         print("project not found", file=sys.stderr)
         return 1
-    print(f"project: {PROJECT_NAME} (id={project_id})")
+    print(f"project: {_resolved_project_name()} (id={project_id})")
     missing = []
     for name in REQUIRED_STATE_NAMES:
         sid = _state_id(name)

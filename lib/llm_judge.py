@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""llm_judge.py — LLM-as-judge for eval (agent-behavior).
+"""llm_judge.py — LLM-as-judge for evaluation (agent-behavior).
 
 Provider-agnostic via Anthropic-compatible API (default MiniMax).
 
