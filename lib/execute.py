@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atomic import atomic_write_json, now_iso  # noqa: E402
 from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
 from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
+from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
 
 SCHEMA_VERSION = "1.0.0"
 # Sub-agent stdout marker. If the per-step `claude -p` emits this line, the
@@ -102,6 +103,46 @@ SKIPPABLE_STATUSES = ("completed", "unimplemented")
 # parallelize typical multi-file work, small enough to bound the OS
 # process / file-descriptor / memory footprint on a 4-vCPU runner.
 _PARALLEL_MAX_CONCURRENT = 8
+
+
+def _emit_effectiveness_event(
+    root: Path,
+    phase: str,
+    step_num: int,
+    event_type: str,
+    outcome: str,
+    evidence_ref: dict,
+    parent_id: Optional[str] = None,
+) -> Optional[str]:
+    """Best-effort append-only event emission for the existing runner lifecycle.
+
+    Evidence logging must never change the build result.  A stable subject id
+    lets the reducer join start/write/verify/repair records across retries.
+    """
+    run_id = os.environ.get("DEV_KIT_RUN_ID", f"build-{phase}")
+    workflow_id = os.environ.get("DEV_KIT_WORKFLOW_ID", f"execute:{phase}")
+    subject_id = f"{phase}:step:{step_num}"
+    ts = now_utc()
+    event_id = new_event_id()
+    event = {
+        "schema_version": 1,
+        "event_id": event_id,
+        "run_id": run_id,
+        "workflow_id": workflow_id,
+        "stage": "execute",
+        "event_type": event_type,
+        "subject_id": subject_id,
+        "parent_id": parent_id,
+        "ts": ts,
+        "outcome": outcome,
+        "source": "lib.execute",
+        "evidence_ref": evidence_ref,
+    }
+    try:
+        append_event(root, event)
+        return event_id
+    except (OSError, ValueError):
+        return None
 
 
 # ---------- Phase / Step readers ----------
@@ -519,11 +560,16 @@ def _step_pre_spawn(
     preamble = preamble_path.read_text(encoding="utf-8") if preamble_path.exists() else ""
     full_prompt = preamble + "\n\n---\nAC: see step file. 3-cycle self-fix max."
     update_step_status(root, phase, step_num, status="in_progress")
+    started_event_id = _emit_effectiveness_event(
+        root, phase, step_num, "step.started", "started",
+        {"branch": branch, "worktree": str(wt), "step_file": str(preamble_path)},
+    )
     return {
         "wt": wt,
         "branch": branch,
         "full_prompt": full_prompt,
         "started_at_iso": now_iso(),
+        "started_event_id": started_event_id,
     }
 
 
@@ -574,15 +620,36 @@ def _step_post_collect(
 
     if blocked_reason is not None:
         update_step_status(root, phase, step_num, status="blocked", blocked_reason=blocked_reason)
+        _emit_effectiveness_event(
+            root, phase, step_num, "step.blocked", "blocked",
+            {"reason": blocked_reason, "output": f"phases/{phase}/step{step_num}-output.json"},
+            ctx.get("started_event_id"),
+        )
         return 2
     if exit_code != 0:
         update_step_status(root, phase, step_num, status="error", error_message=f"claude exited {exit_code}")
+        _emit_effectiveness_event(
+            root, phase, step_num, "step.failed", "error",
+            {"exit_code": exit_code, "output": f"phases/{phase}/step{step_num}-output.json"},
+            ctx.get("started_event_id"),
+        )
         return exit_code
 
     # Issue #221 RC2: --allow-empty is GONE. add-A + conditional commit.
     feat_msg = f"feat({phase}): step {step_num}" + (f" — {step_name}" if step_name else "")
-    _commit_step(wt, feat_msg)
-    _commit_step(wt, f"chore({phase}): step {step_num} output")
+    wrote_files = _commit_step(wt, feat_msg)
+    output_committed = _commit_step(wt, f"chore({phase}): step {step_num} output")
+    if wrote_files or output_committed:
+        _emit_effectiveness_event(
+            root, phase, step_num, "write.observed", "written",
+            {
+                "exit_code": exit_code,
+                "files_committed": wrote_files,
+                "output_committed": output_committed,
+                "output": f"phases/{phase}/step{step_num}-output.json",
+            },
+            ctx.get("started_event_id"),
+        )
 
     if push:
         subprocess.run(
@@ -591,6 +658,11 @@ def _step_post_collect(
         )
 
     update_step_status(root, phase, step_num, status="completed")
+    _emit_effectiveness_event(
+        root, phase, step_num, "step.completed", "completed",
+        {"exit_code": exit_code, "duration_seconds": duration},
+        ctx.get("started_event_id"),
+    )
     return 0
 
 

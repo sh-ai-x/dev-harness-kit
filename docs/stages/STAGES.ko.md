@@ -218,8 +218,15 @@
 ## 횡단 — Eval (`/dev-kit:evaluate`)
 
 - **목표**: 에이전트 행동 평가(등록된 루브릭에 대해 트랜스크립트 재생).
-- **Must**: 4축 점수(harness-quality / os-quality / review / security /
-  plan / maintenance). 2-judge 교차 검증.
-- **AC**: ≥ 8 OK. < 5 ROT → CI 실패.
-- **활성 스킬**: `evaluate`(등록된 루브릭: harness-quality, os-quality,
-  레거시 review/security/plan)
+- **Must**: 기존 review/security/plan, harness-quality, os-quality,
+  maintenance, D1–D7 계약을 유지하고 workflow evidence로
+  `harness_effectiveness` 5개 영역(예방, first-pass, recovery, learning,
+  measurement integrity)을 함께 평가한다.
+- **Must-Not**: 평가 중 성공 evidence를 만들거나, transcript만으로 누락된
+  workflow event를 추정하거나, 별도 effectiveness option/skill을 요구하지 않는다.
+- **Evidence source**: workflow 경계의 TraceLog event,
+  `.dev-kit/repair/events.jsonl`, 기존 eval transcript/report, legacy fallback
+  artifact를 명시적으로 구분한다.
+- **AC**: 기존 평가와 5개 effectiveness component가 별도로 표시된다.
+  evidence가 없으면 `INSUFFICIENT_EVIDENCE`이며 기존 verdict는 하위 호환된다.
+- **활성 스킬**: 통합 report를 제공하는 `evaluate`만 사용한다.

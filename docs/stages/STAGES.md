@@ -140,6 +140,8 @@
 ## Cross-cutting — Eval (`/dev-kit:evaluate`)
 
 - **Goal**: Agent-behavior eval (replay transcripts against registered rubrics).
-- **Must**: 4-axis score (harness-quality / os-quality / review / security / plan / maintenance). 2-judge cross-check.
-- **AC**: ≥ 8 OK. < 5 ROT → CI fail.
-- **Active Skills**: `evaluate` (registered rubrics: harness-quality, os-quality, plus legacy review/security/plan)
+- **Must**: Preserve the existing review/security/plan, harness-quality, os-quality, maintenance, and D1–D7 contracts; also consume workflow evidence for the five `harness_effectiveness` components: prevention, first-pass, recovery, learning, and measurement integrity.
+- **Must-Not**: Create success evidence during evaluation, infer missing workflow events from a transcript, or require a separate effectiveness option/skill.
+- **Evidence sources**: TraceLog events from workflow boundaries, `.dev-kit/repair/events.jsonl`, existing eval transcripts/reports, and legacy artifacts as explicitly marked fallback evidence.
+- **AC**: The report shows legacy evaluation and the five effectiveness components separately. Missing evidence is `INSUFFICIENT_EVIDENCE`; existing verdicts remain backward-compatible.
+- **Active Skills**: `evaluate` (the only entrypoint for the combined report)

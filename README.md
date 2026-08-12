@@ -34,6 +34,20 @@ them.
 It works in both Claude Code and Codex, and the same commands mean the same thing
 in both.
 
+### Security scorecard
+
+For a quick, repeatable repository metric, invoke `$security-metrics` from either
+Claude Code or Codex. It calculates a deterministic 0–100 score for each OWASP
+Top 10 area and writes a Markdown table with the evidence and deductions:
+
+```bash
+python3 skills/security-metrics/scripts/score_security.py . \
+  --output security-metrics.md
+```
+
+The scorecard is a triage metric, not a certification. Use `/dev-kit:security`
+for the full evidence-backed OWASP review before a release or major refactor.
+
 **MCP integration is intentionally out of scope.** This plugin ships slash commands,
 hooks, and library functions — no MCP server entry. See
 [docs/decisions/0001-no-mcp.md](docs/decisions/0001-no-mcp.md) for the rationale.
@@ -48,7 +62,7 @@ and what to do when work doesn't go in a straight line.
 
 ## Install
 
-You need the Claude Code CLI. **Run every `claude plugin …` command on Node 22** —
+The plugin supports both Claude Code and Codex. For Claude Code, **run every `claude plugin …` command on Node 22** —
 the bundled CLI crashes on Node 25 and newer:
 
 ```bash
@@ -337,9 +351,10 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
+| [`/dev-kit:evidence-plan`](docs/skills/evidence-plan.md) | Idea → cited research → HTML proposal (you confirm) → `/dev-kit:plan` hand-off, before the expensive 5-gate PRD work runs. |
 | [`/dev-kit:plan`](docs/skills/plan.md) | Turns an idea into `PRD.md` + a step-by-step build checklist. |
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
-| [`/dev-kit:research-plan-build`](docs/skills/research-plan-build.md) | 3-phase binder (research → plan → implement) — non-skippable pipeline for multi-session or multi-file tasks. |
+| [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<main>/<sub>.yaml` to a self-contained HTML page with structured before/after + pros/cons/limitations for pre-impl review. |
 
 ### Getting a PR over the line
@@ -821,12 +836,15 @@ auto-gate that hard-blocked Build on a non-`proceed` verdict; it was removed in
 PR #463 — see [Case 4 of the workflow scenarios doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-the-valuate-step)
 for what that means in practice.
 
-**Agent-behavior eval** — `/dev-kit:evaluate` replays recorded transcripts and
-judges them against per-dimension rubrics (review / security / plan) plus a
-20-checkbox code-sanity checklist; adding `--harness-quality` or `--os-quality`
-registers the matching cross-cutting rubric on the same runner. Details in
+**Agent-behavior and harness-effectiveness eval** — `/dev-kit:evaluate` keeps
+the existing transcript/rubric evaluation. The harness-effectiveness design
+adds a workflow-native evidence report alongside the legacy D1–D7 Agent
+Behavior report, with five separate components: prevention, first-pass,
+recovery, learning, and measurement integrity. Missing evidence is reported
+explicitly rather than inferred. Details in
 [`docs/skills/evaluate.md`](docs/skills/evaluate.md), with the rationale in
-`docs/adr/ADR-0022-eval-agent-behavior.md`.
+`docs/adr/ADR-0022-eval-agent-behavior.md` and the design proposal at
+[`docs/proposals/harness-effectiveness/00-index.html`](docs/proposals/harness-effectiveness/00-index.html).
 
 **Codex compatibility** — the same skills and hooks run under Codex CLI via a
 `.codex-plugin/` manifest that mirrors the canonical hook config; a regression

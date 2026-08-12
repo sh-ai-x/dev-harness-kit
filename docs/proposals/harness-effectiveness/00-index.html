@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Effectiveness — Workflow-Native Evidence and Agent Eval</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "¹3"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "¹7"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Harness Effectiveness — Workflow-Native Evidence and Agent Eval</h1>
+<p class="meta">2026-08-12 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">harness-effectiveness</span><span class="tag tag-info">agent-eval</span><span class="tag tag-info">self-heal</span><span class="tag tag-info">auto-learning</span><span class="tag tag-info">evidence</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">1. 설계 원칙 — 기존 workflow 안에서 측정한다</a></li><li><a href="#sec-1">2. 기존 시스템과의 통합 경계</a></li><li><a href="#sec-2">3. Minimal event contract</a></li><li><a href="#sec-3">4. 5개 score의 evidence-based 계산</a></li><li><a href="#sec-4">5. Score status와 기존 평가의 관계</a></li><li><a href="#sec-5">6. Workflow producer 연결</a></li><li><a href="#sec-6">7. 구현 순서와 검증</a></li><li><a href="#sec-7">결론</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">1. 설계 원칙 — 기존 workflow 안에서 측정한다</h2>
+<p>평가를 별도 replay workflow로 만들지 않는다. 실제 workflow가 실행될 때 결정 사건을 기록하고, evaluate는 그 evidence를 읽어 report를 만든다.</p>
+<pre><code class="language-text">plan → build/write → guard → verify/self-heal → review/security → ship
+  └─ producer가 evidence 기록 ───────────────────────────────┘
+                                ↓
+                        /dev-kit:evaluate
+                   legacy D1–D7 + 5 scores + HTML</code></pre>
+<p>새로 추가하는 production 계층은 두 개뿐이다.</p>
+<table><thead><tr><th>계층</th><th>책임</th></tr></thead><tbody><tr><td><code>TraceLog</code> additive event API</td><td>workflow 경계 사건을 append-only JSONL로 기록</td></tr><tr><td><code>lib/harness_effectiveness.py</code></td><td>기존 trace/repair/eval source를 EvidenceBundle로 정규화하고 계산</td></tr></tbody></table>
+<p>만들지 않는 것:</p>
+<ul><li><code>/dev-kit:harness-metrics</code> 신규 skill</li><li><code>--harness-effectiveness</code> 신규 option</li><li>별도 telemetry vendor/event bus</li><li>기존 repair event와 중복되는 event log</li><li>별도 dashboard renderer</li><li>기존 D1–D7을 대체하는 D8 dimension</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-1">2. 기존 시스템과의 통합 경계</h2>
+<table><thead><tr><th>기존 구성</th><th>그대로 재사용하는 역할</th><th>effectiveness와의 연결</th></tr></thead><tbody><tr><td><code>TraceLog</code> / <code>TraceStep</code></td><td>step, retry, token, latency, trajectory</td><td>first-pass/recovery cycle/context</td></tr><tr><td><code>repair_coordinator</code></td><td>failure signature, attempt, repair events</td><td>self-heal lifecycle와 learning candidate</td></tr><tr><td><code>behavior_scorers</code></td><td>D1–D7 score/evidence/verdict</td><td>별도 legacy namespace로 보존</td></tr><tr><td><code>eval_runner</code></td><td>case discovery, rubric registry, judge, variance</td><td>effectiveness calculator 호출 및 report join</td></tr><tr><td><code>meta_eval</code></td><td>golden expected verdict/score 검증</td><td>5개 score golden case 검증</td></tr><tr><td><code>render_report_html</code></td><td>기존 eval/inspect HTML</td><td>5개 score card와 evidence 표시</td></tr></tbody></table>
+<p>기존 <code>D1–D7</code>, <code>harness-quality</code>, <code>os-quality</code>의 score scale과 verdict는 변경하지 않는다. 새 결과는 다음처럼 분리한다.</p>
+<pre><code class="language-json">{
+  &quot;legacy_agent_behavior&quot;: {&quot;D1_outcome&quot;: 5, &quot;weighted_mean&quot;: 4.2, &quot;verdict&quot;: &quot;OK&quot;},
+  &quot;harness_effectiveness&quot;: {
+    &quot;prevention_quality&quot;: {&quot;score&quot;: null, &quot;status&quot;: &quot;INSUFFICIENT_EVIDENCE&quot;},
+    &quot;first_pass_quality&quot;: {&quot;score&quot;: 82.4, &quot;status&quot;: &quot;OK&quot;},
+    &quot;recovery_quality&quot;: {&quot;score&quot;: 76.0, &quot;status&quot;: &quot;DRIFT_WARNING&quot;},
+    &quot;learning_quality&quot;: {&quot;score&quot;: null, &quot;status&quot;: &quot;INSUFFICIENT_EVIDENCE&quot;},
+    &quot;measurement_integrity&quot;: {&quot;score&quot;: 96.2, &quot;status&quot;: &quot;OK&quot;},
+    &quot;overall_score&quot;: null
+  }
+}</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-2">3. Minimal event contract</h2>
+<p>event는 score를 결정하는 경계 사건만 기록한다. 일반 read, token-level transcript, 모델 원문 prompt, file content는 기록하지 않는다.</p>
+<pre><code class="language-json">{
+  &quot;schema_version&quot;: 1,
+  &quot;event_id&quot;: &quot;stable-id&quot;,
+  &quot;run_id&quot;: &quot;run-id&quot;,
+  &quot;workflow_id&quot;: &quot;workflow-id&quot;,
+  &quot;stage&quot;: &quot;build&quot;,
+  &quot;event_type&quot;: &quot;guard.blocked|verify.failed|heal.verified&quot;,
+  &quot;subject_id&quot;: &quot;write-or-error-id&quot;,
+  &quot;parent_id&quot;: &quot;parent-event-id-or-null&quot;,
+  &quot;ts&quot;: &quot;ISO-8601 UTC&quot;,
+  &quot;outcome&quot;: &quot;allowed|blocked|passed|failed|verified|escalated&quot;,
+  &quot;source&quot;: &quot;hook|execute|repair|review|security|ship&quot;,
+  &quot;evidence_ref&quot;: {&quot;path&quot;: &quot;...&quot;, &quot;exit_code&quot;: 1, &quot;signature&quot;: &quot;...&quot;}
+}</code></pre>
+<p><code>run_id</code>, <code>workflow_id</code>, <code>stage</code>, <code>subject_id</code>, <code>parent_id</code>, <code>event_type</code>, <code>outcome</code>, <code>source</code> 중 하나라도 없으면 score evidence로 사용하지 않는다. writer는 validation → redaction → append 순서로 실행하며 event write 실패는 workflow decision을 바꾸지 않고 measurement integrity finding을 남긴다.</p>
+<p>기존 <code>.dev-kit/repair/events.jsonl</code>은 repair coordinator의 source of truth로 유지한다. reducer는 이를 trace event와 join하지만 duplicate denominator를 만들지 않는다. 기존 plain logs와 git artifact는 legacy observation으로만 읽고, canonical event가 없으면 positive success claim을 만들지 않는다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">4. 5개 score의 evidence-based 계산</h2>
+<p>모든 raw metric은 <code>numerator</code>, <code>denominator</code>, <code>value</code>, <code>coverage</code>, <code>evidence_event_ids</code>, <code>status</code>를 반환한다. 분모가 0이거나 필수 evidence가 없으면 <code>value=null</code>이다. null을 0점으로 바꾸지 않는다.</p>
+<table><thead><tr><th>Score</th><th>계산</th><th>최소 evidence</th></tr></thead><tbody><tr><td><code>prevention_quality</code></td><td>labeled action의 <code>precision/recall</code>과 block evidence completeness</td><td>unsafe/legitimate ground-truth label, policy id, decision, reason</td></tr><tr><td><code>first_pass_quality</code></td><td>첫 write의 첫 verify가 required checks를 통과한 비율</td><td>write id, first verify id, exit code, retry-before-first flag</td></tr><tr><td><code>recovery_quality</code></td><td>error → mutation → clean verify → independent verify chain의 비율과 cycle bound</td><td>parent chain, failure signature, clean/independent verification</td></tr><tr><td><code>learning_quality</code></td><td>rule applied cohort와 control/baseline cohort의 verified recovery delta, promotion/rollback evidence</td><td>cohort identity, shadow/applied result, control 또는 compatible baseline</td></tr><tr><td><code>measurement_integrity</code></td><td>schema completeness, attribution, dedupe, required lifecycle coverage</td><td>raw line count, valid event id, parent link, required event set</td></tr></tbody></table>
+<p>구체적 판정:</p>
+<pre><code class="language-text">first_pass_rate = first_write_clean / first_write_verified
+
+verified_recovery_rate =
+  error_with_clean_and_independent_verify / error_with_terminal_outcome
+
+guard_precision = TP / (TP + FP)
+guard_recall    = TP / (TP + FN)
+
+learning_delta = treatment_verified_recovery_rate
+                 - comparable_control_verified_recovery_rate</code></pre>
+<ul><li>first verification 전에 retry/heal이 발생하면 first-pass가 아니다.</li><li>mutation만 있고 clean verify가 없으면 heal attempt일 뿐 recovery가 아니다.</li><li>independent verification이 없으면 verified recovery가 아니다.</li><li>label 없는 guard action은 prevention quality 분모에서 제외하고 coverage를 낮춘다.</li><li>control/baseline 없는 learning 결과는 observed delta로만 표시하고 score는 null이다.</li><li>source event가 없는 transcript 자기보고는 성공 evidence가 아니다.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-4">5. Score status와 기존 평가의 관계</h2>
+<p>component score는 0–100으로 표시하며 status는 <code>OK &gt;= 80</code>, <code>DRIFT_WARNING 60–79.9</code>, <code>ROT &lt; 60</code>을 사용한다. 단, required evidence coverage가 90% 미만이면 score와 무관하게 <code>INSUFFICIENT_EVIDENCE</code>다.</p>
+<p>전체 score는 5개 component가 모두 유효할 때만 계산한다. 하나라도 null이면 component별 점수는 보존하되 <code>overall_score=null</code>이다.</p>
+<p>LLM judge는 deterministic score를 생성하지 않는다. EvidenceBundle과 derivation만 받아 해석 품질과 judge variance를 평가한다. variance가 기존 threshold를 넘으면 기존 evaluate와 동일하게 <code>ESCALATED</code>다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">6. Workflow producer 연결</h2>
+<table><thead><tr><th>시점</th><th>producer</th><th>event</th></tr></thead><tbody><tr><td>plan/hand-off 생성</td><td>plan/hand-off writer</td><td><code>plan.created</code>, <code>step.declared</code></td></tr><tr><td>guard decision 직후</td><td>scope/worktree/tdd/bash/scaffold guard</td><td><code>guard.allowed</code>, <code>guard.blocked</code></td></tr><tr><td>build step 전이</td><td><code>lib/execute.py</code></td><td><code>step.started</code>, <code>step.completed</code>, <code>step.error</code>, <code>step.blocked</code></td></tr><tr><td>verification 직후</td><td>verify runner/post-write hook</td><td><code>verify.passed</code>, <code>verify.failed</code></td></tr><tr><td>repair 전후</td><td><code>repair_coordinator</code></td><td>기존 repair events + <code>heal.attempted</code>, <code>heal.verified</code> adapter</td></tr><tr><td>review/security 확정</td><td>review/security verifier</td><td><code>finding.verified</code>, <code>verdict.recorded</code></td></tr><tr><td>ship gate</td><td>stop-verify/ship</td><td><code>gate.accepted</code>, <code>gate.rejected</code></td></tr></tbody></table>
+<p><code>/dev-kit:evaluate</code>는 위 event를 새로 만들거나 workflow를 재실행하지 않고 이미 기록된 source를 reducer로 계산한다. workflow가 평가를 실행하지 않아도 evidence는 보존되고, 평가가 실행됐다는 사실만으로 workflow 성공을 만들지 않는다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">7. 구현 순서와 검증</h2>
+<ol><li><code>TraceLog</code> additive event API와 schema validation을 추가한다.</li><li><code>lib/harness_effectiveness.py</code>에 source adapter, lifecycle join, raw metric, 5개 score 계산을 구현한다.</li><li><code>lib/execute.py</code>와 최소 guard/post-write 지점에 boundary event를 연결한다.</li><li><code>eval_runner</code> 기본 report와 기존 HTML renderer에 effectiveness namespace를 추가한다. 새 option이나 skill은 추가하지 않는다.</li><li>harness-effectiveness rubric/prompt와 <code>meta_eval</code> golden cases를 연결한다.</li><li>evaluate/stages/README 문서를 같은 contract로 갱신한다.</li></ol>
+<p>필수 fixture:</p>
+<ul><li>clean first-pass</li><li>retry 후 clean recovery</li><li>mutation만 있고 verify 실패</li><li>unsafe block / legitimate false block</li><li>learning control vs treatment</li><li>missing parent, duplicate event, missing verifier</li><li>transcript에는 성공이라고 쓰였지만 source event가 없는 경우</li></ul>
+<p>acceptance criteria:</p>
+<ul><li>동일 source input은 동일 EvidenceBundle과 score를 만든다.</li><li>모든 non-null score가 source event와 derivation으로 역추적된다.</li><li>evidence 부족 시 null이며 0점/성공으로 대체되지 않는다.</li><li>canonical event와 legacy log가 중복 집계되지 않는다.</li><li>기존 D1–D7, review/security/plan, harness-quality/os-quality verdict가 회귀하지 않는다.</li><li><code>/dev-kit:evaluate</code>에서 기존 결과와 5개 score가 함께 표시된다.</li><li>기존 <code>render_report_html</code>에서 5개 score와 evidence status가 시각적으로 보인다.</li><li>신규 production module 수가 1개이고 신규 skill/telemetry service가 0개다.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-7">결론</h2>
+<p>이 설계의 기준은 “로그와 점수를 많이 만든다”가 아니다. workflow의 결정 경계에서 필요한 evidence만 기록하고, 기존 trace/repair/eval 시스템을 하나의 reducer로 연결해 5개 score를 계산하는 것이다. 기존 평가와 새 effectiveness 평가는 같은 <code>/dev-kit:evaluate</code> report에서 함께 보이지만, 의미와 source는 서로 섞지 않는다.</p>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>저장소에는 이미 두 평가 경로가 있다. <code>lib/behavior_scorers</code>는 worktree를 D1–D7로 1–5점 평가하고, <code>lib/eval_runner.py</code>는 transcript를 rubric별 0–10 LLM judge로 평가한다. <code>TraceLog</code>, <code>repair_coordinator</code> events, <code>meta_eval.py</code>, <code>render_report_html.py</code>도 이미 존재한다.</p>
+<p>그러나 guard block, 첫 verification, self-heal, learning 효과를 workflow의 실제 실행 사건과 연결하는 공통 contract가 없다. 기존 plain log를 사후에 읽으면 사건의 순서·parent·분모를 안정적으로 복구할 수 없다.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>lib/behavior_scorers/__init__.py</code>: D1–D7 registry와 1–5 weighted aggregate</li><li><code>lib/eval_runner.py</code> / <code>skills/evaluate/SKILL.md</code>: transcript rubric eval과 judge variance escalation</li><li><code>lib/trace_log.py</code>: TraceLog/TraceStep trajectory artifact</li><li><code>lib/repair_coordinator.py</code>: failure_signature와 <code>.dev-kit/repair/events.jsonl</code> repair lifecycle</li><li><code>lib/meta_eval.py</code>: golden case expected verdict/score 검증</li><li><code>lib/render_report_html.py</code>: 기존 eval/inspect HTML renderer</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>기존 workflow producer가 결정 시점에 최소 structured event를 남기고, 하나의 <code>lib/harness_effectiveness.py</code> reducer가 TraceLog events, repair events, 기존 eval artifacts를 EvidenceBundle로 결합한다. <code>/dev-kit:evaluate</code> 기본 결과에 기존 D1–D7과 5개 effectiveness score를 함께 표시한다. 별도 metrics skill, 별도 event bus, 별도 dashboard renderer는 만들지 않는다.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">lib/trace_log.py</span><p>기존 TraceLog에 additive structured event append/read API를 추가한다. 이벤트 저장소는 <code>.dev-kit/trace/events.jsonl</code>이다.</p></li><li><span class="file-path">lib/harness_effectiveness.py</span><p>기존 trace/repair/eval evidence를 정규화하고 raw metric과 5개 component score를 결정적으로 계산한다.</p></li><li><span class="file-path">lib/eval_runner.py</span><p>기존 evaluate 실행 결과에 effectiveness report를 추가하며 기존 API·verdict를 유지한다.</p></li><li><span class="file-path">skills/evaluate/SKILL.md</span><p>별도 option 없이 기본 evaluate가 legacy eval과 effectiveness score를 함께 출력하도록 문서화한다.</p></li><li><span class="file-path">lib/render_report_html.py</span><p>기존 HTML report에 5개 score card, status, coverage, evidence drill-down을 추가한다.</p></li><li><span class="file-path">lib/execute.py</span><p>step start/verify/retry/error/completed/blocked를 TraceLog event producer로 기록한다.</p></li><li><span class="file-path">hooks/*.sh</span><p>guard의 allow/deny와 post-write verification 결과를 결정 직후 structured event로 기록한다.</p></li><li><span class="file-path">eval/rubrics/harness-effectiveness.yaml</span><p>evidence completeness, attribution, recovery, learning safety rubric을 추가한다.</p></li><li><span class="file-path">eval/prompts/judge-harness-effectiveness.md</span><p>deterministic evidence report만 입력받아 해석/variance를 평가하는 prompt를 추가한다.</p></li><li><span class="file-path">tests/test_harness_effectiveness.py</span><p>evidence normalization, metric denominator, missing evidence, score contract, legacy compatibility를 검증한다.</p></li><li><span class="file-path">docs/skills/evaluate.md</span><p>workflow-native evidence와 5개 score 사용법을 기존 evaluate 문서에 통합한다.</p></li><li><span class="file-path">docs/stages/STAGES.md</span><p>각 stage의 evidence producer와 evaluate consumer 관계를 추가한다.</p></li><li><span class="file-path">README.md</span><p>evaluate가 기존 평가와 effectiveness score를 함께 제공한다는 사용자-facing 설명을 갱신한다.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>기존 TraceLog, repair coordinator, eval runner를 재사용해 새 계층을 최소화한다.</li><li>workflow 실행 시점의 evidence와 사후 평가를 같은 run/workflow identity로 연결한다.</li><li>5개 score를 각각 표시하면서도 evidence가 없으면 점수를 만들지 않는다.</li><li>기존 D1–D7과 evaluate의 backward compatibility를 유지한다.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>기존 hook/runner producer에 instrumentation을 추가해야 하므로 첫 rollout 동안 coverage가 낮을 수 있다.</li><li>ground-truth label이 없는 guard action은 prevention quality를 계산할 수 없다.</li><li>control/baseline이 없는 learning cohort는 learning quality를 계산할 수 없다.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>이 score는 사용자 만족도나 business outcome의 완전한 대리 지표가 아니다.</li><li>structured event가 도입되기 전 과거 run은 정확한 lifecycle로 재구성하지 않는다.</li><li>learning 효과는 control cohort가 없으면 관찰적 변화로만 보고한다.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-12 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

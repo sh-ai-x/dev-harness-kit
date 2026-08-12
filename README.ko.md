@@ -313,9 +313,10 @@ sequenceDiagram
 
 | 명령 | 하는 일 |
 |---|---|
+| [`/dev-kit:evidence-plan`](docs/skills/evidence-plan.md) | 아이디어 → 인용된 리서치 → HTML 제안서(사용자 확인) → `/dev-kit:plan` 핸드오프 — 비용이 큰 5-게이트 PRD 작업 전에 실행. |
 | [`/dev-kit:plan`](docs/skills/plan.ko.md) | 아이디어를 `PRD.md` + 단계별 빌드 체크리스트로 바꾼다. |
 | [`/dev-kit:build`](docs/skills/build.ko.md) | 체크리스트를 한 단계씩 처리하며 테스트와 코드를 작성하고 각 단계를 검증. |
-| [`/dev-kit:research-plan-build`](docs/skills/research-plan-build.md) | 3단계 바인더 (research → plan → implement) — 다중 세션 또는 다중 파일 작업의 건너뛸 수 없는 파이프라인. |
+| [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4단계 근본원인 디버깅(재현 → 격리 → 근본원인 → 수정). 단독 호출 시 근본원인을 인라인으로 고치는 대신 `/dev-kit:plan`으로 넘긴다. |
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | `docs/proposals/<main>/<sub>.yaml`을 before/after 구조 + 장단점/한계를 포함한 자기 완결 HTML 페이지로 렌더링해 구현 전에 리뷰할 수 있게 한다. |
 
 ### PR 통과시키기
@@ -760,12 +761,14 @@ classify_all_worktrees()` 경유) `live`/`unknown`에 한해 제거 후보만
 게이트가 #463에서 제거되었다 — 실제로 어떤 의미인지 [워크플로 시나리오
 문서 Case 4](docs/workflow/WORKFLOW-SCENARIOS.ko.md#case-4-valuate-단계-건너뛰기) 참고.
 
-**에이전트 행동 평가** — `/dev-kit:evaluate`는 기록된 트랜스크립트를
-재생하고 차원별 루브릭(review / security / plan)에 더해 20 체크박스
-코드-새니티 체크리스트로 판정한다. `--harness-quality` 또는 `--os-quality`를
-추가하면 같은 러너에 매칭 횡단 루브릭을 등록한다.
+**에이전트 행동 및 하네스 효과성 평가** — `/dev-kit:evaluate`는 기존
+트랜스크립트/루브릭 평가를 유지한다. 하네스 효과성 설계는 legacy D1–D7
+평가와 함께 workflow evidence를 사용해 prevention, first-pass, recovery,
+learning, measurement integrity 5개 component를 별도로 보여준다. 누락된
+evidence는 추정하지 않고 명시적으로 표시한다.
 [`docs/skills/evaluate.md`](docs/skills/evaluate.md)에 상세 내용,
-근거는 `docs/adr/ADR-0022-eval-agent-behavior.md`.
+근거는 `docs/adr/ADR-0022-eval-agent-behavior.md`와
+[`docs/proposals/harness-effectiveness/00-index.html`](docs/proposals/harness-effectiveness/00-index.html)이다.
 
 **Codex 호환성** — 같은 스킬과 훅이 `.codex-plugin/` 매니페스트를 통해
 정식 훅 설정을 미러링하는 Codex CLI에서도 동작한다; 회귀 테스트가 양쪽을

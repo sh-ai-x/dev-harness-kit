@@ -675,7 +675,7 @@ class TestReportDictsPreserved(unittest.TestCase):
     def test_run_eval_summary_keys_locked(self):
         report = eval_runner.run_eval(self.root, dry_run=True)
         self.assertEqual(set(report.keys()),
-                         {"results", "config", "summary"})
+                         {"results", "config", "summary", "harness_effectiveness"})
         self.assertEqual(
             set(report["summary"].keys()),
             {"OK", "DRIFT_WARNING", "ROT", "SKIPPED", "NO_FIXTURES"},

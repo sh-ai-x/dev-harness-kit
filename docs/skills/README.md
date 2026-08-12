@@ -51,7 +51,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 |---|---|---|
 | [`plan`](plan.md) | `state` | Idea → `PRD.md` + `phases/<name>/` through a 5-gate loop. |
 | [`build`](build.md) | `state` | Per-step sub-agent delegation with an integrated TDD + auto-fix loop. |
-| [`research-plan-build`](research-plan-build.md) | `state` | 3-phase binder (research → plan → implement) — non-skippable pipeline for multi-session or multi-file tasks. |
+| [`build-debug`](build-debug.md) | `enforcement` | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Also auto-invoked by the model mid-build-step for the in-build self-fix loop — standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
 
 ### Review → Ship
 
@@ -59,6 +59,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 |---|---|---|
 | [`review`](review.md) | `analysis` | Parallel correctness + security + architecture review with a false-positive filter. |
 | [`security`](security.md) | `enforcement` | Full OWASP Top 10 2025 (A01–A10) fan-out with a verifier pass. |
+| [`security-metrics`](security-metrics.md) | `enforcement` | Deterministic 0–100 OWASP Top 10 scorecard with Markdown evidence table. |
 | [`inspect`](inspect.md) | `analysis` | 8-dimension read-only code-health audit. |
 | [`refactor`](refactor.md) | `analysis` | 3-phase cleanup chain: `inspect → build-refactor → review`. |
 | [`prune`](prune.md) | `analysis` | 4-phase deletion sweep: sweep → dependents → report → verify. |
@@ -95,6 +96,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | Skill | Alpha | Summary |
 |---|---|---|
 | [`proposal`](proposal.md) | `state` | Renders `docs/proposals/<main>/<sub>.yaml` to a self-contained review HTML. |
+| [`evidence-plan`](evidence-plan.md) | `state` | Idea → cited research → HTML proposal (human confirms) → `/dev-kit:plan` hand-off, before the expensive 5-gate PRD work runs. |
 | [`interview`](interview.md) | `enforcement` | 5-field safety-contract interview that gates plan emission. |
 | [`research`](research.md) | `enforcement` | 0-arg research gate: cache/direct/multi/human escalation + citation enforcement. |
 | [`sot-harness-writer`](sot-harness-writer.md) | `state` | Interview-based Single Source of Truth harness document writer — 5 rounds × 2–3 evidence-backed recommendations, hands off to `/dev-kit:plan`. |
@@ -109,7 +111,6 @@ step inside their parent skill's flow; you never type them directly.
 | Skill | Alpha | Parent | Summary |
 |---|---|---|---|
 | [`build-tdd`](build-tdd.md) | `enforcement` | `/dev-kit:build` | Red-Green-Refactor cycle; `tdd-guard` hook enforces no production code without a failing test. |
-| [`build-debug`](build-debug.md) | `enforcement` | `/dev-kit:build` | 4-phase systematic debugging; no fix before Phase 1 (reproduce) completes. |
 | [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | Verification-before-completion; no "done" without a quoted exit code + test count. |
 | [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4-pass cleanup (dead → dup → naming → coverage); no cleanup without a regression test. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | auto (visible hook failure) | Diagnose failed Claude Code / Codex hooks and repair safe cache + registration drift. |
@@ -124,7 +125,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | human |
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
 | [`build`](build.md) | `build` | `state` | human |
-| [`build-debug`](build-debug.md) | `build` | `enforcement` | model |
+| [`build-debug`](build-debug.md) | `build` | `enforcement` | human |
 | [`build-refactor`](build-refactor.md) | `build` | `enforcement` | model |
 | [`build-tdd`](build-tdd.md) | `build` | `enforcement` | model |
 | [`build-verify`](build-verify.md) | `build` | `enforcement` | model |
@@ -138,6 +139,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`cost-gate`](cost-gate.md) | `audit` | `enforcement` | human |
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | human |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | human |
+| [`evidence-plan`](evidence-plan.md) | `design` | `state` | human |
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | model |
 | [`inspect`](inspect.md) | `audit` | `analysis` | human |
 | [`interview`](interview.md) | `design` | `enforcement` | human |
@@ -152,9 +154,9 @@ step inside their parent skill's flow; you never type them directly.
 | [`pr-verify`](pr-verify.md) | `ship` | `enforcement` | human |
 | [`refactor`](refactor.md) | `build` | `analysis` | human |
 | [`research`](research.md) | `design` | `enforcement` | human |
-| [`research-plan-build`](research-plan-build.md) | `build` | `state` | human |
 | [`review`](review.md) | `review` | `analysis` | human |
 | [`security`](security.md) | `security` | `enforcement` | human |
+| [`security-metrics`](security-metrics.md) | `security` | `enforcement` | human |
 | [`ship`](ship.md) | `ship` | `state` | human |
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | human |
 | [`status`](status.md) | `status` | `state` | human |

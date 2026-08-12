@@ -4,11 +4,20 @@
 
 **Category:** `eval` · **Alpha:** `enforcement` · **Invocation:** `/dev-kit:evaluate` (human-invoked)
 
-`evaluate` measures whether the agent behaves correctly when running dev-kit skills, across three core dimensions (review, security, plan) plus two cross-cutting dimensions (`harness-quality`, `os-quality`). It replays recorded transcripts and judges them against the registered rubrics in `eval/rubrics/`, so a Phase 3 batch (or any harness change) is gated on `harness-quality` and an env / secret / CI cost change is gated on `os-quality`. No flags = the three core dimensions (the former standalone `eval` skill's scope, now folded in here). Source: [`skills/evaluate/SKILL.md`](../../skills/evaluate/SKILL.md).
+> **Implementation:** The workflow-native harness-effectiveness integration is
+> implemented by the reducer and producers described in the [design proposal](../proposals/harness-effectiveness/00-index.html).
+
+`evaluate` currently measures whether the agent behaves correctly when running
+dev-kit skills across the existing review/security/plan, harness-quality, and
+os-quality rubrics. It preserves the legacy D1–D7 Agent Behavior report and
+consumes workflow evidence for five effectiveness components. It replays
+recorded transcripts and reads structured evidence produced during build and
+repair without creating success evidence in a separate workflow. Source:
+[`skills/evaluate/SKILL.md`](../../skills/evaluate/SKILL.md).
 
 ## When to use it
 
-- The user types `/dev-kit:evaluate [--harness-quality] [--os-quality] [--case <id>] [--dry-run]`.
+- The user types `/dev-kit:evaluate` for the normal combined report.
 - A Phase 3 batch (or any harness change) is about to land and needs the `harness-quality` rubric gate.
 - An env-var, secret, or CI cost change needs the `os-quality` rubric gate.
 - A nightly cron auto-call rotates through the registered dimensions.
@@ -22,7 +31,18 @@
 /dev-kit:evaluate --case <id> --dry-run
 ```
 
-`--dry-run` skips LLM calls (mocks each case at the per-dim threshold) — useful in CI without an API key. See `skills/evaluate/SKILL.md` for the full per-axis rubric, the `convergence: per-case axis mean >= 8.0` contract, and the `safety_valve: 1` / `dedup_metric: identical-case-score=2` frontmatter.
+Effectiveness is part of the default report and is not enabled by a new
+option. Its five components are
+`prevention_quality`, `first_pass_quality`, `recovery_quality`,
+`learning_quality`, and `measurement_integrity`. Missing workflow evidence
+will produce `INSUFFICIENT_EVIDENCE`, never a fabricated zero or pass.
+`--dry-run` remains a legacy fixture/judge option and must label synthetic
+results. See `skills/evaluate/SKILL.md` and the proposal for the runtime
+contract.
+
+The report keeps two namespaces: legacy Agent Behavior D1–D7 and
+`harness_effectiveness`. Existing verdicts and scales remain backward-compatible;
+the new component score is not substituted into the legacy weighted mean.
 
 ## Failure modes
 
