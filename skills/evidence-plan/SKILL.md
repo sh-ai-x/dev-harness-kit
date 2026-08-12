@@ -30,15 +30,23 @@ never invokes `/dev-kit:build` and never writes source code.
 2. **Proposal** — writes `docs/proposals/<main>/idea-<slug>.yaml`
    (before/after + pros/cons/limitations, seeded from the research
    output), then `Skill("proposal", "<main>/idea-<slug>")` to render
-   `docs/proposals/<main>/idea-<slug>.html`. **Stop here.** Tell the
-   user to open the HTML and confirm before continuing — do not
+   `docs/proposals/<main>/idea-<slug>.html`. `disallowed-tools` above
+   includes `Bash`, but `proposal` renders via its own `Bash` grant in
+   its own frontmatter — a called skill's tool grants are evaluated
+   against its own frontmatter, not the caller's. **Stop here.** Tell
+   the user to open the HTML and confirm before continuing — do not
    proceed to Phase 3 without an explicit go-ahead.
 3. **Plan hand-off** — once confirmed, `Skill("plan", <idea>)`. Plan
    runs its own unmodified 5-gate loop and, at Gate 5/5, renders its
    own proposal under the phase-name slug (`<main>/<phase>`) — a
    separate, later "final design record" distinct from this skill's
-   earlier "idea pitch" proposal at `<main>/idea-<slug>`. Slugs never
-   collide because of the `idea-` prefix.
+   earlier "idea pitch" proposal at `<main>/idea-<slug>`. Collision is
+   prevented by construction, not just the `idea-` prefix convention:
+   `/dev-kit:proposal` refuses to overwrite an existing file with
+   different content and has no overwrite flag (see
+   `skills/proposal/SKILL.md` §Limitations), so a phase later named
+   `idea-<slug>` would surface a conflict for the user to resolve
+   rather than silently overwriting this skill's earlier proposal.
 
 ## Why this order
 

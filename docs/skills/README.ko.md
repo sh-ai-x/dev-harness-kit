@@ -94,9 +94,9 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | 스킬 | Alpha | 요약 |
 |---|---|---|
 | [`proposal`](proposal.md) | `state` | `docs/proposals/<main>/<sub>.yaml`을 자체 완결 리뷰 HTML로 렌더링. |
+| [`evidence-plan`](evidence-plan.md) | `state` | 아이디어 → 인용된 리서치 → HTML 제안서(사용자 확인) → `/dev-kit:plan` 핸드오프 — 비용이 큰 5-게이트 PRD 작업 전에 실행. |
 | [`interview`](interview.md) | `enforcement` | plan 발행을 게이트하는 5필드 안전 계약 인터뷰. |
 | [`research`](research.md) | `enforcement` | 0-인자 리서치 게이트: cache/direct/multi/human 에스컬레이션 + 인용 시행. |
-| [`valuate`](valuate.md) | `enforcement` | 계획을 6개 축으로 채점하고 proceed/revise/hold/kill을 반환하는 plan-value 게이트. |
 | [`sot-harness-writer`](sot-harness-writer.md) | `state` | 인터뷰 기반 Single Source of Truth 하네스 문서 작성기 — 5라운드 × 라운드당 2–3개의 근거 기반 권고, `/dev-kit:plan`으로 핸드오프. |
 
 ---
@@ -112,6 +112,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | 완료 전 검증; 인용된 종료 코드 + 테스트 수 없이는 "완료"라고 하지 않는다. |
 | [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4단계 정리(dead → dup → naming → coverage); 회귀 테스트 없이는 정리하지 않는다. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | 자동 (훅 실패가 보일 때) | 실패한 Claude Code / Codex 훅을 진단하고 안전한 캐시 + 등록 드리프트를 복구한다. |
+| [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` | 계획을 6개 축으로 채점하고 proceed/revise/hold/kill을 반환하는 plan-value 게이트. |
 
 ---
 
@@ -136,6 +137,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`cost-gate`](cost-gate.md) | `audit` | `enforcement` | 사용자 |
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | 사용자 |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | 사용자 |
+| [`evidence-plan`](evidence-plan.md) | `design` | `state` | 사용자 |
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | 모델 |
 | [`inspect`](inspect.md) | `audit` | `analysis` | 사용자 |
 | [`interview`](interview.md) | `design` | `enforcement` | 사용자 |
@@ -156,7 +158,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | 사용자 |
 | [`status`](status.md) | `status` | `state` | 사용자 |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | 사용자 |
-| [`valuate`](valuate.md) | `design` | `enforcement` | 사용자 |
+| [`valuate`](valuate.md) | `design` | `enforcement` | 모델 |
 
 스킬 상세 페이지(`docs/skills/<name>.md`)는 사용자용 스킬에 대해
 점진적으로 생성된다; 위의 스킬별 행은 페이지가 배포되면 그것에

@@ -96,6 +96,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | Skill | Alpha | Summary |
 |---|---|---|
 | [`proposal`](proposal.md) | `state` | Renders `docs/proposals/<main>/<sub>.yaml` to a self-contained review HTML. |
+| [`evidence-plan`](evidence-plan.md) | `state` | Idea → cited research → HTML proposal (human confirms) → `/dev-kit:plan` hand-off, before the expensive 5-gate PRD work runs. |
 | [`interview`](interview.md) | `enforcement` | 5-field safety-contract interview that gates plan emission. |
 | [`research`](research.md) | `enforcement` | 0-arg research gate: cache/direct/multi/human escalation + citation enforcement. |
 | [`sot-harness-writer`](sot-harness-writer.md) | `state` | Interview-based Single Source of Truth harness document writer — 5 rounds × 2–3 evidence-backed recommendations, hands off to `/dev-kit:plan`. |
@@ -138,6 +139,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`cost-gate`](cost-gate.md) | `audit` | `enforcement` | human |
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | human |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | human |
+| [`evidence-plan`](evidence-plan.md) | `design` | `state` | human |
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | model |
 | [`inspect`](inspect.md) | `audit` | `analysis` | human |
 | [`interview`](interview.md) | `design` | `enforcement` | human |

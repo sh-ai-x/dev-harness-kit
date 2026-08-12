@@ -313,6 +313,7 @@ sequenceDiagram
 
 | 명령 | 하는 일 |
 |---|---|
+| [`/dev-kit:evidence-plan`](docs/skills/evidence-plan.md) | 아이디어 → 인용된 리서치 → HTML 제안서(사용자 확인) → `/dev-kit:plan` 핸드오프 — 비용이 큰 5-게이트 PRD 작업 전에 실행. |
 | [`/dev-kit:plan`](docs/skills/plan.ko.md) | 아이디어를 `PRD.md` + 단계별 빌드 체크리스트로 바꾼다. |
 | [`/dev-kit:build`](docs/skills/build.ko.md) | 체크리스트를 한 단계씩 처리하며 테스트와 코드를 작성하고 각 단계를 검증. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4단계 근본원인 디버깅(재현 → 격리 → 근본원인 → 수정). 단독 호출 시 근본원인을 인라인으로 고치는 대신 `/dev-kit:plan`으로 넘긴다. |

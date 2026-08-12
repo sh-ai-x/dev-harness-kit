@@ -351,6 +351,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
+| [`/dev-kit:evidence-plan`](docs/skills/evidence-plan.md) | Idea → cited research → HTML proposal (you confirm) → `/dev-kit:plan` hand-off, before the expensive 5-gate PRD work runs. |
 | [`/dev-kit:plan`](docs/skills/plan.md) | Turns an idea into `PRD.md` + a step-by-step build checklist. |
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
