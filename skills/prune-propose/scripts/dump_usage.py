@@ -88,8 +88,7 @@ def _ask_user(skill: str) -> bool:
         )
         return r.returncode == 0
     # Plain-text fallback.
-    sys.stdout.write(f"  Delete {skill!r}? [y/N]: ")
-    sys.stdout.flush()
+    print(f"  Delete {skill!r}? [y/N]: ", end="", flush=True)
     answer = sys.stdin.readline().strip().lower()
     return answer in ("y", "yes")
 

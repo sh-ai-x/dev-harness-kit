@@ -1,0 +1,11 @@
+[scanner]
+profile = "public-marketplace"
+
+# Tests are excluded from the shipped artifact via .codexignore; this broad
+# path keeps detector-only fixtures out of marketplace trust findings.
+ignore_paths = [
+  "tests/**",
+  "skills/review/fixtures/**",
+  # This is a CI template containing GitHub secret expressions, not literals.
+  "templates/ci/.github/workflows/review.yml",
+]

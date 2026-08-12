@@ -209,7 +209,7 @@ for name in required_secrets_for_provider(provider):
 print('')
 "
 }
-API_KEY="$(read_provider_api_key)"
+PROVIDER_VALUE="$(read_provider_api_key)"
 
 # Process env can override the .env lookup so a CI runner can pass the
 # key via env: without writing to .env. The KEY_NAME comes from
@@ -218,7 +218,9 @@ API_KEY="$(read_provider_api_key)"
 # one-line edit in lib/review_local_lib.sh.
 PROVIDER_CFG="$(provider_config "$PROVIDER")"
 KEY_NAME="${PROVIDER_CFG%%|*}"
-API_KEY="$(eval "printf '%s' \"\${$KEY_NAME:-\$API_KEY}\"")"
+if [[ -n "${!KEY_NAME:-}" ]]; then
+  PROVIDER_VALUE="${!KEY_NAME}"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. No key found: EXPLICIT provider ask -> fail loudly (real
@@ -231,7 +233,7 @@ API_KEY="$(eval "printf '%s' \"\${$KEY_NAME:-\$API_KEY}\"")"
 #    break this exact error path on a stock Mac.
 # ---------------------------------------------------------------------------
 USE_LOCAL_AUTH=0
-if [ -z "$API_KEY" ]; then
+if [ -z "$PROVIDER_VALUE" ]; then
   if [ "$PROVIDER_EXPLICIT" = "1" ]; then
     PROVIDER_UPPER="$(printf '%s' "$PROVIDER" | tr '[:lower:]' '[:upper:]')"
     die "no API key for provider '$PROVIDER' (set .env:${PROVIDER_UPPER}_API_KEY or env var)"
@@ -268,8 +270,8 @@ if [ "$USE_LOCAL_AUTH" = "0" ]; then
   if [ "${#PROVIDER_ENV[@]}" -gt 0 ] && [ -n "${PROVIDER_ENV[0]}" ]; then
     claude_env_args+=("${PROVIDER_ENV[@]}")
   fi
-  claude_env_args+=("ANTHROPIC_API_KEY=$API_KEY")
-  claude_env_args+=("ANTHROPIC_AUTH_TOKEN=$API_KEY")
+  claude_env_args+=("ANTHROPIC_API_KEY=$PROVIDER_VALUE")
+  claude_env_args+=("ANTHROPIC_AUTH_TOKEN=$PROVIDER_VALUE")
 fi
 
 # ---------------------------------------------------------------------------

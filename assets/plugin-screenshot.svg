@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="Dev Harness Kit workflow">
+  <rect width="960" height="540" fill="#172033"/>
+  <text x="64" y="110" fill="#f8fafc" font-family="sans-serif" font-size="42" font-weight="700">Dev Harness Kit</text>
+  <text x="64" y="160" fill="#99f6e4" font-family="sans-serif" font-size="24">Plan · Build · Review · Secure · Ship</text>
+  <g fill="#2dd4bf" font-family="sans-serif" font-size="24" font-weight="600">
+    <text x="90" y="300">Plan</text><text x="280" y="300">Build</text><text x="470" y="300">Review</text><text x="660" y="300">Ship</text>
+  </g>
+  <g stroke="#99f6e4" stroke-width="4" stroke-linecap="round">
+    <path d="M150 320h100M340 320h100M530 320h100"/>
+  </g>
+</svg>

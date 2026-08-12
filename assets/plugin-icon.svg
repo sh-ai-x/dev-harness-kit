@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Dev Harness Kit">
+  <rect width="128" height="128" rx="24" fill="#172033"/>
+  <path d="M28 40h72v48H28z" fill="#2dd4bf"/>
+  <path d="m44 54 12 10-12 10M64 76h20" fill="none" stroke="#172033" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"/>
+</svg>

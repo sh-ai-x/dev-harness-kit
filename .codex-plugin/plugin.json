@@ -28,6 +28,10 @@
     "longDescription": "Use dev-kit to run bootstrap, plan, build, review, security, audit, and ship stages through a single skill set shared with Claude Code.",
     "developerName": "sanghee",
     "category": "Developer Tools",
+    "websiteURL": "https://github.com/sh-ai-x/dev-harness-kit",
+    "composerIcon": "./assets/plugin-icon.svg",
+    "logo": "./assets/plugin-icon.svg",
+    "screenshots": ["./assets/plugin-screenshot.svg"],
     "capabilities": [
       "Interactive",
       "Read",

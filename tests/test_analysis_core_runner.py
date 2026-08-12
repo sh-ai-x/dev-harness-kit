@@ -975,4 +975,3 @@ class TestSecretSSOTComment(unittest.TestCase):
         self.assertIn("skills/inspect/SKILL.md", runner,
                       "runner.py secret-SSOT comment should point at "
                       "skills/inspect/SKILL.md after PR-589 merge")
-

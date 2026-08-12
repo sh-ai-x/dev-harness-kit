@@ -1,0 +1,18 @@
+# Local state and generated reports
+.dev-kit/
+.eval-cache/
+logs/
+tests/
+*.assets/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Build and editor artifacts
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+.DS_Store
