@@ -35,3 +35,17 @@ def test_render_contains_markdown_score_table(tmp_path: Path) -> None:
     assert "| OWASP area | Score | Status | Evidence / deductions |" in report
     assert report.count("/100") >= 11
     assert "/dev-kit:security" in report
+
+
+def test_render_is_deterministic_and_escapes_table_cells(tmp_path: Path) -> None:
+    categories = MODULE.scan(tmp_path)
+    categories[0].findings = ["-1: evidence | contains a pipe"]
+    assert MODULE.render(tmp_path, categories) == MODULE.render(tmp_path, categories)
+    assert "evidence \\| contains a pipe" in MODULE.render(tmp_path, categories)
+
+
+def test_access_design_and_authentication_rules_are_assessed(tmp_path: Path) -> None:
+    categories = {item.code: item for item in MODULE.scan(tmp_path)}
+    assert categories["A01"].score < 100
+    assert categories["A06"].score < 100
+    assert categories["A07"].score < 100

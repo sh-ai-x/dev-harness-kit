@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +16,7 @@ class Category:
     findings: list[str] = field(default_factory=list)
 
     def deduct(self, points: int, evidence: str) -> None:
+        """Apply a bounded deduction and retain its deterministic evidence."""
         self.score = max(0, self.score - points)
         self.findings.append(f"-{points}: {evidence}")
 
@@ -31,8 +31,9 @@ NAMES = {
 
 
 def files(root: Path) -> list[Path]:
+    """Return regular repository files while excluding ignored trees and links."""
     ignored = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache"}
-    return [p for p in root.rglob("*") if p.is_file() and not ignored.intersection(p.parts)]
+    return [p for p in root.rglob("*") if p.is_file() and not p.is_symlink() and not ignored.intersection(p.parts)]
 
 
 def text_files(root: Path) -> list[tuple[Path, str]]:
@@ -54,6 +55,7 @@ def assessed_files(root: Path) -> list[tuple[Path, str]]:
 
 
 def scan(root: Path) -> list[Category]:
+    """Score repository contents using the fixed OWASP-oriented rules."""
     data = assessed_files(root)
     all_text = "\n".join(text for _, text in data)
     result = [Category(code, name) for code, name in NAMES.items()]
@@ -61,7 +63,7 @@ def scan(root: Path) -> list[Category]:
 
     if not (root / "SECURITY.md").exists():
         by["Security Misconfiguration"].deduct(10, "SECURITY.md is missing")
-    if not (root / "LICENSE").exists():
+    if not any(path.name.lower().startswith("license") for path, _ in data):
         by["Security Misconfiguration"].deduct(5, "LICENSE is missing")
     if re.search(r"(?i)(password|secret|api[_-]?key|token)\s*[:=]\s*[\"'][^\"']{8,}", all_text):
         by["Security Misconfiguration"].deduct(20, "possible hardcoded credential pattern")
@@ -79,6 +81,12 @@ def scan(root: Path) -> list[Category]:
         by["Mishandling Exceptional Conditions"].deduct(15, "bare exception handler detected")
     if re.search(r"(?m)^\s*uses:\s*[^#\n]+@(main|master|v?\d+)(?:\s|$)", all_text):
         by["Software Supply Chain Failures"].deduct(15, "GitHub Action is not pinned to a commit SHA")
+    if not re.search(r"(?i)\b(allowlist|denylist|authorization|permission|rbac|acl)\b", all_text):
+        by["Broken Access Control"].deduct(10, "no authorization or permission-control marker detected")
+    if not re.search(r"(?i)\b(validate|invariant|threat model|security requirement)\b", all_text):
+        by["Insecure Design"].deduct(10, "no validation, invariant, or threat-model marker detected")
+    if not re.search(r"(?i)\b(auth|authentication|session|oauth|oidc|mfa|password)\b", all_text):
+        by["Authentication Failures"].deduct(10, "no authentication or session-control marker detected")
     if not any(path.name in {"requirements.lock", "uv.lock", "poetry.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"} for path, _ in data):
         by["Software Supply Chain Failures"].deduct(10, "no recognized dependency lockfile")
     if not re.search(r"(?i)\b(timeout|deadline)\b", all_text):
@@ -91,11 +99,11 @@ def scan(root: Path) -> list[Category]:
 
 
 def render(root: Path, categories: list[Category]) -> str:
+    """Render a byte-stable Markdown scorecard for already-scanned categories."""
     overall = round(sum(item.score for item in categories) / len(categories))
-    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
-    lines = ["# Security Metrics", "", f"- Repository: `{root}`", f"- Generated: `{now}`", f"- Overall score: **{overall}/100**", "", "| OWASP area | Score | Status | Evidence / deductions |", "|---|---:|---|---|"]
+    lines = ["# Security Metrics", "", f"- Repository: `{root}`", f"- Overall score: **{overall}/100**", "", "| OWASP area | Score | Status | Evidence / deductions |", "|---|---:|---|---|"]
     for item in categories:
-        evidence = "<br>".join(item.findings) if item.findings else "No deterministic findings"
+        evidence = "<br>".join(item.findings).replace("|", "\\|") if item.findings else "No deterministic findings"
         status = "PASS" if item.score == 100 else "REVIEW"
         lines.append(f"| {item.code} {item.name} | {item.score}/100 | {status} | {evidence} |" )
     lines += ["", "> This is a deterministic triage metric, not a security certification. Run `/dev-kit:security` for the full OWASP evidence review.", ""]
