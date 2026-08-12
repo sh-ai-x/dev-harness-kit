@@ -202,11 +202,39 @@ per-skill workflow extraction. The patterns it uses are reusable — same approa
 to render GH Actions pipelines, multi-phase repair loops, or any other
 long-running process with discrete phases.
 
+### Plugin at a glance
+
+The full set of 6 abstraction levels is in `/tmp/code-viz.html` after a
+code-viz run; the figures below are the ones worth a thumbnail — they
+describe the mental model, the planning contract, the code-review lenses,
+and the PR repair state machine.
+
+| Diagram | What it shows |
+|---|---|
+| L0 Architecture | Layered topology — user → skills/commands → hooks → lib/tools/bin → external (GH Actions / MCP / CLI). |
+| [`/dev-kit:plan` workflow](docs/skills/plan.md) | The 5-gate pipeline (frame → validate → non-goals → decompose → emit) with the ambiguity-loop back-edge from emit to frame. |
+| [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
+| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `SNAPSHOT` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
+
+![L0 Architecture overview — skills/commands → hooks → lib/tools/bin → external](docs/screenshots/code-viz/diagram-00.png)
+
+![`/dev-kit:plan` — 5 gates with ambiguity-loop back-edge from emit to frame](docs/screenshots/code-viz/diagram-04.png)
+
+![`/dev-kit:security` — OWASP A01–A10 parallel fan-out](docs/screenshots/code-viz/diagram-06.png)
+
+![`/dev-kit:babysit-pr` — 15-step repair loop with retry -> step 1 back-edge](docs/screenshots/code-viz/diagram-11.png)
+
+> Regenerate locally with `python3 /tmp/cv.py --target=. --out=/tmp/code-viz.html --screenshots=docs/screenshots/code-viz --top-skills=20`. The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots.
+
 ### GH Actions gate workflow
 
 The shipped `review.yml` defines a PR → review/security fan-out → gate verdict
-sequence. code-viz emits this as a `sequenceDiagram`; the same shape renders
-cleanly on GitHub from a fenced ```mermaid``` block:
+sequence. code-viz emits this as a `sequenceDiagram` (the same PNG that ships
+with the visualizer):
+
+![GH Actions gate workflow — PR → review/security fan-out → gate verdict](docs/screenshots/code-viz/diagram-26.png)
+
+The same shape renders cleanly on GitHub from a fenced ```mermaid``` block:
 
 ```mermaid
 sequenceDiagram
