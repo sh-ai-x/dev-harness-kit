@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 from lib.trace_log import append_event as append_trace_event
+from lib.trace_log import new_event_id
 
 SCHEMA_VERSION = "1.0.0"
 MAX_REPAIR_ATTEMPTS = 2
@@ -175,9 +176,7 @@ def append_event(root: Path, event: str, state: RepairState, **details: Any) -> 
     try:
         append_trace_event(root, {
             "schema_version": 1,
-            "event_id": hashlib.sha256(
-                f"{state.run_id}:{state.failure_signature}:{event}:{timestamp}".encode()
-            ).hexdigest()[:16],
+            "event_id": new_event_id(),
             "run_id": state.run_id,
             "workflow_id": f"repair:{state.parent_pr}",
             "stage": "repair",

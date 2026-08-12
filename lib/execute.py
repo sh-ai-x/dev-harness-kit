@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atomic import atomic_write_json, now_iso  # noqa: E402
 from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
 from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
-from trace_log import append_event  # noqa: E402 — additive effectiveness evidence
+from trace_log import append_event, new_event_id  # noqa: E402 — additive effectiveness evidence
 
 SCHEMA_VERSION = "1.0.0"
 # Sub-agent stdout marker. If the per-step `claude -p` emits this line, the
@@ -122,8 +122,8 @@ def _emit_effectiveness_event(
     run_id = os.environ.get("DEV_KIT_RUN_ID", f"build-{phase}")
     workflow_id = os.environ.get("DEV_KIT_WORKFLOW_ID", f"execute:{phase}")
     subject_id = f"{phase}:step:{step_num}"
-    ts = now_iso()
-    event_id = f"{run_id}:{subject_id}:{event_type}:{ts}"
+    ts = datetime.now().astimezone().isoformat(timespec="microseconds")
+    event_id = new_event_id()
     event = {
         "schema_version": 1,
         "event_id": event_id,

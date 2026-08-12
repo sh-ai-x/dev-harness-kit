@@ -18,8 +18,8 @@ additive; never repurpose existing field names.
 """
 from __future__ import annotations
 
-import hashlib
 import json
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -176,6 +176,11 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def new_event_id() -> str:
+    """Return one canonical collision-resistant opaque event identifier."""
+    return uuid.uuid4().hex
+
+
 def _event_path(root: Path) -> Path:
     return Path(root) / ".dev-kit" / "trace" / "events.jsonl"
 
@@ -250,17 +255,16 @@ def _event_cli() -> int:
     parser.add_argument("--root", type=Path, default=Path("."))
     args = parser.parse_args()
     evidence = json.loads(args.evidence_json)
+    timestamp = args.ts or now_utc()
     path = append_event(args.root, {
-        "event_id": hashlib.sha256(
-            f"{args.run_id}:{args.event_type}:{args.subject_id}:{args.ts or now_utc()}".encode()
-        ).hexdigest()[:16],
+        "event_id": new_event_id(),
         "run_id": args.run_id,
         "workflow_id": args.workflow_id,
         "stage": args.stage,
         "event_type": args.event_type,
         "subject_id": args.subject_id,
         "parent_id": args.parent_id,
-        "ts": args.ts or now_utc(),
+        "ts": timestamp,
         "outcome": args.outcome,
         "source": args.source,
         "evidence_ref": evidence,

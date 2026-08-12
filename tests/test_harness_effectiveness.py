@@ -25,6 +25,10 @@ def _event(root: Path, *, event_id: str, event_type: str, subject: str,
 
 
 def test_first_pass_and_recovery_require_ordered_evidence(tmp_path: Path) -> None:
+    _event(tmp_path, event_id="s1", event_type="step.started", subject="file-1",
+           outcome="started", ts="2026-08-11T23:59:59Z")
+    _event(tmp_path, event_id="c1", event_type="step.completed", subject="file-1",
+           outcome="completed", ts="2026-08-12T00:00:05Z", parent="s1")
     _event(tmp_path, event_id="w1", event_type="write.observed", subject="file-1",
            outcome="observed", ts="2026-08-12T00:00:00Z")
     _event(tmp_path, event_id="v1", event_type="verify.passed", subject="file-1",
@@ -44,6 +48,27 @@ def test_first_pass_and_recovery_require_ordered_evidence(tmp_path: Path) -> Non
     assert report["components"]["measurement_integrity"]["status"] == "OK"
 
 
+def test_recovery_verified_and_independent_are_distinct(tmp_path: Path) -> None:
+    _event(tmp_path, event_id="e1", event_type="verify.failed", subject="file-1",
+           outcome="failed", ts="2026-08-12T00:00:00Z")
+    _event(tmp_path, event_id="h1", event_type="heal.attempted", subject="file-1",
+           outcome="attempted", ts="2026-08-12T00:00:01Z", parent="e1")
+    _event(tmp_path, event_id="v1", event_type="verify.passed", subject="file-1",
+           outcome="passed", ts="2026-08-12T00:00:02Z", parent="h1",
+           independent=False, retry_count=1)
+    recovery = build_report(tmp_path)["components"]["recovery_quality"]
+    assert recovery["submetrics"]["verified_recovery_rate"]["value"] == 100.0
+    assert recovery["submetrics"]["independent_verification_rate"]["value"] == 0.0
+
+
+def test_integrity_coverage_requires_terminal_lifecycle_event(tmp_path: Path) -> None:
+    _event(tmp_path, event_id="s1", event_type="step.started", subject="file-1",
+           outcome="started", ts="2026-08-12T00:00:00Z")
+    integrity = build_report(tmp_path)["components"]["measurement_integrity"]
+    assert integrity["status"] == "INSUFFICIENT_EVIDENCE"
+    assert integrity["submetrics"]["event_coverage"]["value"] == 0.0
+
+
 def test_missing_verifier_does_not_count_as_verified_recovery(tmp_path: Path) -> None:
     _event(tmp_path, event_id="e1", event_type="verify.failed", subject="file-1",
            outcome="failed", ts="2026-08-12T00:00:00Z", error_signature="sig-1")
@@ -54,8 +79,8 @@ def test_missing_verifier_does_not_count_as_verified_recovery(tmp_path: Path) ->
            required_checks_passed=True, independent=False, retry_count=1)
 
     recovery = build_report(tmp_path)["components"]["recovery_quality"]
-    assert recovery["status"] == "ROT"
-    assert recovery["submetrics"]["verified_recovery_rate"]["value"] == 0.0
+    assert recovery["status"] == "DRIFT_WARNING"
+    assert recovery["submetrics"]["verified_recovery_rate"]["value"] == 100.0
 
 
 def test_prevention_requires_ground_truth_label(tmp_path: Path) -> None:

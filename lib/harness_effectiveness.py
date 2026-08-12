@@ -159,7 +159,7 @@ def _recovery(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             cycles = int(terminal["evidence_ref"].get("retry_count", 99))
             bounded += bool(linked and cycles <= 3)
             no_regression += not any(e["event_type"] == "verify.failed" and e["ts"] > terminal["ts"] for e in values)
-            verified += bool(linked and terminal["evidence_ref"].get("independent", False))
+            verified += bool(linked)
     total = len(errors)
     metrics = {
         "verified_recovery_rate": _metric(verified, total, evidence=evidence_ids),
@@ -187,7 +187,9 @@ def _learning(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     co = sum(bool(e["evidence_ref"].get("verified_recovery")) for e in control) / len(control)
     delta = round((tr - co) * 100, 1)
     yield_score = max(0.0, min(100.0, 50.0 + delta * 10.0))
-    metrics = {"learning_yield_score": _metric(len(treatment), len(treatment), evidence=ids, value=yield_score),
+    metrics = {"learning_yield_score": _metric(
+                   sum(bool(e["evidence_ref"].get("verified_recovery")) for e in treatment + control),
+                   len(treatment) + len(control), evidence=ids, value=yield_score),
                "control_treatment_delta_pp": {"value": delta, "evidence_event_ids": ids}}
     return _component("learning_quality", yield_score, submetrics=metrics, evidence=ids)
 
@@ -204,17 +206,29 @@ def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:
     if malformed:
         findings.append(f"malformed event lines: {malformed}")
     schema = _ratio(parsed_count, len(raw_lines))
-    dedupe = _ratio(len(set(valid_ids)), len(raw_lines)) if raw_lines else None
+    dedupe = _ratio(len(set(valid_ids)), parsed_count) if parsed_count else None
     parents = sum(1 for e in events if e["parent_id"] is None or e["parent_id"] in set(valid_ids))
     attribution = _ratio(parents, len(events))
-    coverage = _ratio(len(events), len(events)) if events else None
+    started_subjects = {
+        e["subject_id"] for e in events if e["event_type"] == "step.started"
+    }
+    terminal_subjects = {
+        e["subject_id"] for e in events
+        if e["event_type"] in {"step.completed", "step.failed", "step.blocked"}
+    }
+    coverage = _ratio(len(started_subjects & terminal_subjects), len(started_subjects)) if started_subjects else None
     score = None if None in (schema, dedupe, attribution, coverage) else schema * .3 + attribution * .25 + dedupe * .2 + coverage * .25
     metrics = {"schema_completeness": _metric(parsed_count, len(raw_lines), evidence=valid_ids, value=schema),
                "attribution_completeness": _metric(parents, len(events), evidence=valid_ids, value=attribution),
-               "dedupe_integrity": _metric(len(set(valid_ids)), len(raw_lines), evidence=valid_ids, value=dedupe),
-               "event_coverage": _metric(len(events), len(events), evidence=valid_ids, value=coverage)}
-    status = "INSUFFICIENT_EVIDENCE" if findings else _status(score, coverage=1.0 if events else 0.0)
-    result = _component("measurement_integrity", score, submetrics=metrics, evidence=valid_ids, findings=findings)
+               "dedupe_integrity": _metric(len(set(valid_ids)), parsed_count, evidence=valid_ids, value=dedupe),
+               "event_coverage": _metric(len(started_subjects & terminal_subjects), len(started_subjects), evidence=valid_ids, value=coverage)}
+    status = "INSUFFICIENT_EVIDENCE" if findings else _status(
+        score, coverage=0.0 if coverage is None else coverage,
+    )
+    result = _component(
+        "measurement_integrity", score, submetrics=metrics, evidence=valid_ids,
+        coverage=0.0 if coverage is None else coverage, findings=findings,
+    )
     result["status"] = status
     return result
 
