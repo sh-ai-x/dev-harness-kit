@@ -90,7 +90,7 @@ fi
 # function never returns 1 here because we just verified jq exists;
 # $WORKTREE_DETECT was already populated by the preamble.
 case "$WORKTREE_DETECT" in
-  worktree|outside|"") exit 0 ;;
+  worktree|outside|"") emit_guard_event "WORKTREE GUARD" "allowed" allowed; exit 0 ;;
   main) ;;
   *) exit 0 ;;
 esac

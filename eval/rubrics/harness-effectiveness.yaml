@@ -1,0 +1,24 @@
+name: harness-effectiveness
+version: 1
+mode: deterministic-evidence
+description: >-
+  Score only workflow events emitted at guard, write, verify, repair, and
+  learning boundaries. Missing or unverifiable evidence is null, never zero.
+components:
+  prevention_quality:
+    required_evidence: [guard.blocked, guard.allowed, ground_truth, policy_id, reason]
+  first_pass_quality:
+    required_evidence: [write.observed, verify.passed, required_checks_passed, retry_count]
+  recovery_quality:
+    required_evidence: [verify.failed, heal.attempted, verify.passed, independent, retry_count]
+  learning_quality:
+    required_evidence: [learning.outcome, treatment, control, verified_recovery]
+  measurement_integrity:
+    required_evidence: [schema_version, event_id, run_id, workflow_id, parent_id, evidence_ref]
+rules:
+  - id: no-inference
+    text: A score is null with INSUFFICIENT_EVIDENCE when required evidence is absent.
+  - id: ordered-join
+    text: Events must join by subject_id and causal parent/timestamp order.
+  - id: dedupe
+    text: Duplicate event_id or malformed lines invalidate integrity scoring.

@@ -25,6 +25,7 @@ VERDICT_CLASS = {
     "DRIFT_WARNING": "verdict-warn",
     "ROT": "verdict-bad",
     "SKIPPED": "verdict-skip",
+    "INSUFFICIENT_EVIDENCE": "verdict-warn",
     "Critical": "verdict-bad",
     "Major drift": "verdict-warn",
     "Minor drift": "verdict-soft",
@@ -203,6 +204,16 @@ def _parse_eval_per_case(body: str) -> List[Dict[str, str]]:
     return out
 
 
+def _parse_effectiveness(body: str) -> Dict[str, Dict[str, str]]:
+    """Parse the compact Harness Effectiveness component table."""
+    out: Dict[str, Dict[str, str]] = {}
+    pat = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*$")
+    for m in _iter_table_rows(body, pat):
+        name, score, status, coverage = (part.strip() for part in m.groups())
+        out[name] = {"score": score, "status": status, "coverage": coverage}
+    return out
+
+
 # ---------- inspect parsing ----------
 
 
@@ -328,6 +339,22 @@ def _render_eval_per_case(cases: List[Dict[str, str]]) -> str:
     return "".join(out)
 
 
+def _render_effectiveness(components: Dict[str, Dict[str, str]]) -> str:
+    if not components:
+        return ""
+    out = ['<h3>Harness effectiveness</h3>', '<div class="cards">']
+    for name, component in components.items():
+        status = component.get("status", "UNKNOWN")
+        cls = VERDICT_CLASS.get(status, "")
+        out.append(
+            f'<div class="card"><div class="label">{_esc(name)}</div>'
+            f'<div class="value {_esc(cls)}">{_esc(component.get("score", "null"))}</div>'
+            f'<div class="meta">{_esc(status)} · coverage {_esc(component.get("coverage", "0%"))}</div></div>'
+        )
+    out.append("</div>")
+    return "".join(out)
+
+
 def _render_inspect_findings(findings: List[Dict[str, str]]) -> str:
     if not findings:
         return '<p class="meta">No findings.</p>'
@@ -383,6 +410,7 @@ class EvalData:
     summary: Dict[str, int] = field(default_factory=dict)
     per_dim_blocks: List[Tuple[str, int, float, List[Tuple[str, float]]]] = field(default_factory=list)
     per_case: List[Dict[str, str]] = field(default_factory=list)
+    effectiveness: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -416,7 +444,9 @@ def parse_eval_sections(eval_report_md: str) -> EvalData:
             continue
         per_dim_blocks.extend(_parse_eval_per_dim(header, body))
     per_case = _parse_eval_per_case(sections.get("Per-Case Results", ""))
-    return EvalData(summary=summary, per_dim_blocks=per_dim_blocks, per_case=per_case)
+    effectiveness = _parse_effectiveness(sections.get("Harness Effectiveness", ""))
+    return EvalData(summary=summary, per_dim_blocks=per_dim_blocks, per_case=per_case,
+                    effectiveness=effectiveness)
 
 
 def parse_inspect_sections(inspect_report_md: str) -> InspectData:
@@ -499,6 +529,7 @@ def compose_html(
                      '<code>/dev-kit:evaluate</code> first.</div>')
     else:
         parts.append(_render_eval_cards(eval_data.summary))
+        parts.append(_render_effectiveness(eval_data.effectiveness))
         if eval_data.per_dim_blocks:
             parts.append('<h3>Per-dimension scores</h3>')
             parts.append(_render_eval_per_dim(eval_data.per_dim_blocks))

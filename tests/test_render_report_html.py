@@ -42,6 +42,16 @@ EVAL_MIN = """# Eval Report -- agent-behavior (dev-harness-kit)
 - **OK** `review-01-clean` (dim=review) score=9.0 (precision=10.0, recall=8.0)
 - **DRIFT_WARNING** `review-02-trap` (dim=review) score=7.0 (precision=7.0, recall=7.0)
 - **ROT** `review-03-bug` (dim=review) score=4.0 (precision=4.0, recall=4.0)
+
+## Harness Effectiveness
+- overall_score: **null**
+- status: **INSUFFICIENT_EVIDENCE**
+- event_count: `2`
+
+| Component | Score | Status | Coverage |
+|---|---:|---|---:|
+| `prevention_quality` | null | INSUFFICIENT_EVIDENCE | 50.0% |
+| `first_pass_quality` | 82.4 | OK | 100.0% |
 """
 
 INSPECT_MIN = """# Code Health Inspection -- 2026-07-09 -- /repo
@@ -173,6 +183,12 @@ class TestEvalSection(unittest.TestCase):
         self.assertIn("review-03-bug", out)
         self.assertIn("verdict-ok", out)
         self.assertIn("verdict-bad", out)
+
+    def test_effectiveness_cards_present(self):
+        out = render_report_html.render(EVAL_MIN, "")
+        self.assertIn("prevention_quality", out)
+        self.assertIn("first_pass_quality", out)
+        self.assertIn("INSUFFICIENT_EVIDENCE", out)
 
 
 class TestInspectSection(unittest.TestCase):
@@ -411,7 +427,7 @@ class TestRoundTripParsingContract(unittest.TestCase):
         d = render_report_html.parse_eval_sections(EVAL_MIN)
         self.assertEqual(
             set(d.__dataclass_fields__),
-            {"summary", "per_dim_blocks", "per_case"},
+            {"summary", "per_dim_blocks", "per_case", "effectiveness"},
         )
 
     def test_inspect_data_key_set_is_locked(self):

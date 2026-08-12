@@ -10,9 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
+
+from lib.trace_log import append_event as append_trace_event
+from lib.trace_log import new_event_id, now_utc
 
 SCHEMA_VERSION = "1.0.0"
 MAX_REPAIR_ATTEMPTS = 2
@@ -20,7 +22,7 @@ REPAIR_STATE_DIR = ".dev-kit/repair"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_utc()
 
 
 def failure_signature(
@@ -157,6 +159,41 @@ def append_event(root: Path, event: str, state: RepairState, **details: Any) -> 
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
+    # Keep the existing repair audit log as the source of truth and project
+    # the same boundary into the shared effectiveness stream. This is
+    # additive and best-effort: a telemetry failure must not stop repair.
+    event_type = {
+        "verification_failed": "verify.failed",
+        "checks_failed": "verify.failed",
+        "repair_attempted": "heal.attempted",
+        "repair_pr_created": "heal.attempted",
+        "verification_passed": "verify.passed",
+        "checks_passed": "verify.passed",
+        "recovered": "verify.passed",
+    }.get(event, "repair.observed")
+    timestamp = record["timestamp"]
+    try:
+        append_trace_event(root, {
+            "schema_version": 1,
+            "event_id": new_event_id(),
+            "run_id": state.run_id,
+            "workflow_id": f"repair:{state.parent_pr}",
+            "stage": "repair",
+            "event_type": event_type,
+            "subject_id": details.get("subject_id", state.failure_signature),
+            "parent_id": details.get("parent_id"),
+            "ts": timestamp,
+            "outcome": event,
+            "source": "lib.repair_coordinator",
+            "evidence_ref": {
+                "attempt": state.attempt,
+                "failure_signature": state.failure_signature,
+                "commit_sha": state.commit_sha,
+                **details,
+            },
+        })
+    except (OSError, ValueError):
+        pass
     return path
 
 
