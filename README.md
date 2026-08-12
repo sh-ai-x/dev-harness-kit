@@ -238,7 +238,7 @@ and the PR repair state machine.
 
 ![`/dev-kit:babysit-pr` — 15-step repair loop with retry -> step 1 back-edge](docs/screenshots/code-viz/diagram-11.png)
 
-> Regenerate locally with `python3 /tmp/cv.py --target=. --out=/tmp/code-viz.html --screenshots=docs/screenshots/code-viz --top-skills=20`. The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots.
+> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots.
 
 ### GH Actions gate workflow
 
