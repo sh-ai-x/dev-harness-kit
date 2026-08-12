@@ -96,6 +96,34 @@ match it)."""
         self.assertEqual(cp.returncode, 0, cp.stderr)
         self.assertEqual(cp.stdout.strip(), "Changes Requested")
 
+    def test_fallback_parses_bold_wrapped_verdict(self) -> None:
+        """Bold-wrapped `**Verdict:** <Word>` (LLM-judge Markdown form).
+
+        The LLM judges (review, security, maintenance) post their
+        verdict summary as a PR comment in Markdown with bold-wrapped
+        labels (`**Verdict:** Changes Requested`). The fallback helper
+        MUST recover the verdict from this form -- otherwise the
+        severity gate keeps hard-failing on PARSE_FAILED for every
+        LLM-judge PR (#625 follow-up).
+        """
+        body = (
+            "## Review verdict\n\n"
+            "**Verdict:** Changes Requested\n\n"
+            "Findings inline below.\n"
+        )
+        comments = [_comment("claude[bot]", body)]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "Changes Requested")
+
+    def test_fallback_parses_bold_wrapped_approve(self) -> None:
+        """Bold-wrapped `**Verdict:** Approve` should also be recognized."""
+        body = "**Verdict:** Approve\n"
+        comments = [_comment("claude[bot]", body)]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "Approve")
+
 
 class TestFallbackFilterRules(unittest.TestCase):
     """Reject non-claude authors + stale comments."""

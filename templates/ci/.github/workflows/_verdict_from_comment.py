@@ -16,6 +16,16 @@ match group. Duplicated rather than imported because extract-verdict.py
 runs in a different action context that does not have import access
 to this helper script.
 
+Why a second regex (VERDICT_RE_LENIENT) lives here: the LLM judges
+(review, security, maintenance) post their summary as a PR comment
+in Markdown, which wraps the verdict label in bold asterisks
+(`**Verdict:** Changes Requested`). The strict extract-verdict.py
+regex is correct for the agent's output file (its contract is the
+plain form), but PR comments are an LLM-formatted surface where
+bold decoration is the norm. This helper therefore uses
+VERDICT_RE_LENIENT in the comment-parsing loop and keeps VERDICT_RE
+strict for documentation parity with the gate's primary parser.
+
 Cutoff filter (issue #244 root-cause): only comments strictly newer
 than $VERDICT_COMMENT_CUTOFF (ISO 8601) count. The caller passes the
 PR head-commit timestamp (PR-mode) or pull_request.updated_at
@@ -46,7 +56,15 @@ import sys
 from datetime import datetime, timezone
 
 # Mirrored from templates/ci/scripts/extract-verdict.py:70.
+# Kept for reference; the helper uses VERDICT_RE_LENIENT below to
+# recover from bold-form LLM-judge comments (`**Verdict:** <Word>`).
 VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
+# Lenient variant: tolerates zero/two leading or trailing `*` chars
+# around both `Verdict` and the colon (Markdown bold wrapping).
+# Anchor `(?:^|\n)` keeps it from matching across line boundaries.
+VERDICT_RE_LENIENT = re.compile(
+    r'(?:^|\n)\s*\*?\*?Verdict:\*?\*?\s*(Approve|Blocked|Changes Requested)\b'
+)
 CUTOFF_ENV = "VERDICT_COMMENT_CUTOFF"
 
 
@@ -99,10 +117,15 @@ def _is_claude_author(comment: dict) -> bool:
 
 
 def _verdict_from_body(body: str) -> str:
-    """Return the verdict word if body contains a recognized Verdict line, else ''."""
+    """Return the verdict word if body contains a recognized Verdict line, else ''.
+
+    Uses VERDICT_RE_LENIENT so bold-wrapped LLM-judge comments
+    (`**Verdict:** <Word>`) are recognized in addition to the plain
+    `Verdict: <Word>` form.
+    """
     if not isinstance(body, str):
         return ""
-    m = VERDICT_RE.search(body)
+    m = VERDICT_RE_LENIENT.search(body)
     return m.group(1) if m else ""
 
 
