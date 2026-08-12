@@ -51,7 +51,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 |---|---|---|
 | [`plan`](plan.md) | `state` | Idea → `PRD.md` + `phases/<name>/` through a 5-gate loop. |
 | [`build`](build.md) | `state` | Per-step sub-agent delegation with an integrated TDD + auto-fix loop. |
-| [`research-plan-build`](research-plan-build.md) | `state` | 3-phase binder (research → plan → implement) — non-skippable pipeline for multi-session or multi-file tasks. |
+| [`build-debug`](build-debug.md) | `enforcement` | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Also auto-invoked by the model mid-build-step for the in-build self-fix loop — standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
 
 ### Review → Ship
 
@@ -110,7 +110,6 @@ step inside their parent skill's flow; you never type them directly.
 | Skill | Alpha | Parent | Summary |
 |---|---|---|---|
 | [`build-tdd`](build-tdd.md) | `enforcement` | `/dev-kit:build` | Red-Green-Refactor cycle; `tdd-guard` hook enforces no production code without a failing test. |
-| [`build-debug`](build-debug.md) | `enforcement` | `/dev-kit:build` | 4-phase systematic debugging; no fix before Phase 1 (reproduce) completes. |
 | [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | Verification-before-completion; no "done" without a quoted exit code + test count. |
 | [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4-pass cleanup (dead → dup → naming → coverage); no cleanup without a regression test. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | auto (visible hook failure) | Diagnose failed Claude Code / Codex hooks and repair safe cache + registration drift. |
@@ -125,7 +124,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | human |
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
 | [`build`](build.md) | `build` | `state` | human |
-| [`build-debug`](build-debug.md) | `build` | `enforcement` | model |
+| [`build-debug`](build-debug.md) | `build` | `enforcement` | human |
 | [`build-refactor`](build-refactor.md) | `build` | `enforcement` | model |
 | [`build-tdd`](build-tdd.md) | `build` | `enforcement` | model |
 | [`build-verify`](build-verify.md) | `build` | `enforcement` | model |
@@ -153,7 +152,6 @@ step inside their parent skill's flow; you never type them directly.
 | [`pr-verify`](pr-verify.md) | `ship` | `enforcement` | human |
 | [`refactor`](refactor.md) | `build` | `analysis` | human |
 | [`research`](research.md) | `design` | `enforcement` | human |
-| [`research-plan-build`](research-plan-build.md) | `build` | `state` | human |
 | [`review`](review.md) | `review` | `analysis` | human |
 | [`security`](security.md) | `security` | `enforcement` | human |
 | [`security-metrics`](security-metrics.md) | `security` | `enforcement` | human |

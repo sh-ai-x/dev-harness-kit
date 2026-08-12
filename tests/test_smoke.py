@@ -42,6 +42,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # /dev-kit:bootstrap with runtime ci-setup prompt). (38 on this branch's baseline — PR-1 removes audit + bootstrap-full (-2); no new skills added.)
 # Added skills/pr-verify/SKILL.md (deterministic 5-gate PR verifier, PR #588)
 # (38 -> 39).
+# Removed skills/research-plan-build/SKILL.md; build-debug/SKILL.md
+# absorbed its standalone-entry role in place instead of adding a new
+# skill (40 -> 39).
+# Added skills/evidence-plan/SKILL.md (research -> proposal.html
+# (human confirms) -> /dev-kit:plan hand-off) (39 -> 40).
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
 SKILL_COUNT = 41

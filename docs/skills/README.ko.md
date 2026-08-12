@@ -50,7 +50,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 |---|---|---|
 | [`plan`](plan.ko.md) | `state` | 아이디어 → 5-게이트 루프를 거쳐 `PRD.md` + `phases/<name>/`. |
 | [`build`](build.ko.md) | `state` | TDD + 자동 수정 루프가 통합된 스텝별 서브에이전트 위임. |
-| [`research-plan-build`](research-plan-build.md) | `state` | 3단계 바인더(research → plan → implement) — 여러 세션/여러 파일 작업을 위한 건너뛸 수 없는 파이프라인. |
+| [`build-debug`](build-debug.md) | `enforcement` | 4단계 근본원인 디버깅(재현 → 격리 → 근본원인 → 수정). 빌드 단계 중간에 모델이 자동 호출하기도 한다 — 단독 호출 시에는 근본원인을 인라인으로 고치는 대신 `/dev-kit:plan`으로 넘긴다. |
 
 ### Review → Ship
 
@@ -109,7 +109,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | 스킬 | Alpha | 부모 | 요약 |
 |---|---|---|---|
 | [`build-tdd`](build-tdd.md) | `enforcement` | `/dev-kit:build` | Red-Green-Refactor 사이클; `tdd-guard` 훅이 실패하는 테스트 없이는 프로덕션 코드를 막는다. |
-| [`build-debug`](build-debug.md) | `enforcement` | `/dev-kit:build` | 4단계 체계적 디버깅; Phase 1(재현) 완료 전에는 수정하지 않는다. |
 | [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | 완료 전 검증; 인용된 종료 코드 + 테스트 수 없이는 "완료"라고 하지 않는다. |
 | [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4단계 정리(dead → dup → naming → coverage); 회귀 테스트 없이는 정리하지 않는다. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | 자동 (훅 실패가 보일 때) | 실패한 Claude Code / Codex 훅을 진단하고 안전한 캐시 + 등록 드리프트를 복구한다. |
@@ -123,7 +122,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | 사용자 |
 | [`bootstrap`](bootstrap.ko.md) | `bootstrap` | `state` | 사용자 |
 | [`build`](build.ko.md) | `build` | `state` | 사용자 |
-| [`build-debug`](build-debug.md) | `build` | `enforcement` | 모델 |
+| [`build-debug`](build-debug.md) | `build` | `enforcement` | 사용자 |
 | [`build-refactor`](build-refactor.md) | `build` | `enforcement` | 모델 |
 | [`build-tdd`](build-tdd.md) | `build` | `enforcement` | 모델 |
 | [`build-verify`](build-verify.md) | `build` | `enforcement` | 모델 |
@@ -151,7 +150,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`pr-verify`](pr-verify.md) | `ship` | `enforcement` | 사용자 |
 | [`refactor`](refactor.md) | `build` | `analysis` | 사용자 |
 | [`research`](research.md) | `design` | `enforcement` | 사용자 |
-| [`research-plan-build`](research-plan-build.md) | `build` | `state` | 사용자 |
 | [`review`](review.md) | `review` | `analysis` | 사용자 |
 | [`security`](security.md) | `security` | `enforcement` | 사용자 |
 | [`ship`](ship.md) | `ship` | `state` | 사용자 |

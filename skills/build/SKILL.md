@@ -45,29 +45,31 @@ is `kill` or unresolved `hold`, the operator should not have invoked
 `build`. There is no auto-gate, no `--skip-valuation` flag, and no exit
 code based on the verdict.
 
-## Composition with /dev-kit:research-plan-build
+## Composition with /dev-kit:research and /dev-kit:build-debug
 
-`/dev-kit:research-plan-build` is the 3-phase binder that wraps research
-+ plan + implement into one non-skippable pipeline. The trigger fires
-when ANY of:
+For net-new feature ideas that need cited evidence before planning,
+run `/dev-kit:research` directly, then `/dev-kit:plan` — Gate 2.1
+(evidence) reads the cited claims straight from that research output.
+No binder skill sits between them; `/dev-kit:plan` is a single
+`Skill` hop away from a research result.
 
-- Task spans more than 1 session (multi-day work).
-- Task touches more than 3 files in its blast radius.
-- User explicitly typed `/dev-kit:research-plan-build <idea>`.
+For bug reports that need a proper plan instead of a quick self-fix,
+invoke `/dev-kit:build-debug` standalone (outside any active build
+step). It runs the same reproduce → isolate → root-cause phases it
+already uses for the in-build self-fix loop, but its Phase 4 branches:
+standalone, it calls `Skill("plan", <root cause>)` instead of patching
+code inline. Like the research path, **it never invokes
+`/dev-kit:build` — that stays a separate, explicit, user-typed
+command**, reached only after `/dev-kit:plan`'s Gate 5/5 auto-renders
+`proposal.html` and the user reviews it.
 
-When the trigger fires, hand off to `Skill("research-plan-build", <idea>)`
-BEFORE running `/dev-kit:plan`. The binder writes `research.md` + `plan.md`
-in `.dev-kit/hand-off/<session>/`, then `/dev-kit:plan` emits the
-canonical `phases/<name>/index.json` + `step<N>.md` artifacts. The
-build runner reads the phases artifacts (NOT `plan.md`); `plan.md` is
-the reviewer-facing companion the binder produced.
+For single-session, non-bug work, `/dev-kit:build` runs the direct
+`plan -> build` path — no binder. `/dev-kit:plan` emits the canonical
+`phases/<name>/index.json` + `step<N>.md` artifacts either way; the
+build runner reads those (NOT any binder-owned file).
 
-For single-session work (<=3 files), `/dev-kit:build` runs the direct
-`plan -> build` path - no binder. The threshold lives here so a user who
-calls `/dev-kit:build` for a multi-file task still gets the 3-phase
-pipeline.
-
-See `skills/research-plan-build/SKILL.md` for the per-phase contract.
+See `skills/build-debug/SKILL.md` §"Two invocation contexts" for the
+per-phase contract.
 
 ## Behavior
 
