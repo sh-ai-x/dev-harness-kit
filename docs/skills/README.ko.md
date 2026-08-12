@@ -112,7 +112,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | 완료 전 검증; 인용된 종료 코드 + 테스트 수 없이는 "완료"라고 하지 않는다. |
 | [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4단계 정리(dead → dup → naming → coverage); 회귀 테스트 없이는 정리하지 않는다. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | 자동 (훅 실패가 보일 때) | 실패한 Claude Code / Codex 훅을 진단하고 안전한 캐시 + 등록 드리프트를 복구한다. |
-| [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` | 계획을 6개 축으로 채점하고 proceed/revise/hold/kill을 반환하는 plan-value 게이트. |
+| [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` 등 다른 계획 단계 | 계획을 6개 축으로 채점하고 proceed/revise/hold/kill을 반환하는 plan-value 게이트. 권고용 — 운영자가 수동으로 non-`proceed` 판정을 플래그하지 않는 한 빌드 단계는 계속 진행된다. |
 
 ---
 
