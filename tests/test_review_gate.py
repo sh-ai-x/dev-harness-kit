@@ -423,6 +423,65 @@ class TestSeverityGateTolerance(unittest.TestCase):
         self.assertIn("S_AGENT=", bash, "S_AGENT env var must be referenced in gate")
         self.assertNotIn("run:", bash, "extractor must strip the run: | header")
 
+    # === Issue #628: job-level outputs must expose verdict_source ===
+
+    def test_review_and_security_jobs_expose_verdict_source_in_outputs(self):
+        """Both review + security jobs MUST declare `verdict_source` in their
+        job-level `outputs:` block. Without this declaration,
+        `needs.<job>.outputs.verdict_source` is always empty in production,
+        the gate's `[ -z "$R_SOURCE$S_SOURCE" ]` backward-compat branch is
+        always-true, and the no-execution-file remediation arm (issue #625)
+        becomes unreachable. The PR's stated purpose — split the agent_ran=false
+        gate message by verdict_source — is functionally defeated.
+
+        This test parses the workflow YAML structurally so a future editor
+        who removes or renames the key (e.g. renames to `source`) breaks the
+        test rather than silently regressing to the all-bootstrap-PR fallback.
+        """
+        import yaml
+
+        workflow_path = REPO_ROOT / "templates" / "ci" / ".github" / "workflows" / "review.yml"
+        self.assertTrue(
+            workflow_path.is_file(),
+            f"workflow file must exist at {workflow_path}",
+        )
+        with workflow_path.open() as f:
+            wf = yaml.safe_load(f)
+
+        self.assertIn("jobs", wf, "workflow must define `jobs:`")
+        jobs = wf["jobs"]
+        self.assertIn("review", jobs, "review job must exist")
+        self.assertIn("security", jobs, "security job must exist")
+
+        for job_name in ("review", "security"):
+            with self.subTest(job=job_name):
+                job = jobs[job_name]
+                self.assertIsInstance(
+                    job, dict, f"{job_name} job must be a mapping",
+                )
+                self.assertIn(
+                    "outputs", job,
+                    f"{job_name} job MUST declare `outputs:` (else job-level outputs are unreachable)",
+                )
+                outputs = job["outputs"]
+                self.assertIsInstance(
+                    outputs, dict, f"{job_name} job `outputs:` must be a mapping",
+                )
+                self.assertIn(
+                    "verdict_source", outputs,
+                    f"{job_name} job `outputs:` MUST include `verdict_source` — "
+                    f"without it, the gate's source-split (issue #625) is unreachable. "
+                    f"Currently declared keys: {sorted(outputs.keys())}",
+                )
+                # Spot-check: the value must actually wire the step output,
+                # not be a literal string or empty.
+                self.assertIn(
+                    "extract_verdict.outputs.verdict_source", outputs["verdict_source"],
+                    f"{job_name}.outputs.verdict_source MUST interpolate "
+                    f"steps.extract_verdict.outputs.verdict_source, got: "
+                    f"{outputs['verdict_source']!r}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

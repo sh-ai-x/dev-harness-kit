@@ -84,6 +84,7 @@ jobs:
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
       agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
+      verdict_source: ${{ steps.extract_verdict.outputs.verdict_source }}
     permissions:
       contents: read
       pull-requests: write
@@ -392,6 +393,7 @@ jobs:
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
       agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
+      verdict_source: ${{ steps.extract_verdict.outputs.verdict_source }}
     permissions:
       contents: read
       pull-requests: write
