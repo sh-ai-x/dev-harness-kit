@@ -44,6 +44,7 @@ from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
     mock_skipped,
     real_result,
 )
+from lib.harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +431,7 @@ def write_report(
     project_root: Path,
     results: List[Dict],
     config: Optional[Dict] = None,
+    effectiveness: Optional[Dict] = None,
 ) -> Path:
     """Write `.dev-kit/eval-report.md`. Thin dispatcher (issue #93).
 
@@ -446,11 +448,30 @@ def write_report(
     )
     banner = _infra_failure_banner(results)
     sections = [_render_summary(results), _render_per_dim_table(results), _render_per_case(results)]
+    if effectiveness is not None:
+        sections.append(_render_effectiveness(effectiveness))
     if banner:
         sections.insert(0, banner)
     body = "\n\n".join(sections)
     path.write_text(f"{header}\n{body}\n", encoding="utf-8")
+    if effectiveness is not None:
+        atomic_write_json(project_root / ".dev-kit" / "harness-effectiveness-report.json", effectiveness)
     return path
+
+
+def _render_effectiveness(report: Dict) -> str:
+    """Render the deterministic five-component effectiveness report."""
+    lines = ["## Harness Effectiveness", "", f"- overall_score: **{report.get('overall_score')}**",
+             f"- status: **{report.get('status', 'UNKNOWN')}**",
+             f"- event_count: `{report.get('event_count', 0)}`", "",
+             "| Component | Score | Status | Coverage |", "|---|---:|---|---:|"]
+    for name, component in report.get("components", {}).items():
+        score = component.get("score")
+        score_text = "null" if score is None else f"{score:.1f}"
+        lines.append(f"| `{name}` | {score_text} | {component.get('status')} | {component.get('coverage', 0):.1%} |")
+        for finding in component.get("findings", []):
+            lines.append(f"  - finding: {finding}")
+    return "\n".join(lines)
 
 
 # ---------- top-level driver ----------
@@ -496,7 +517,8 @@ def _run_real_judges(project_root: Path, cases: List[Dict], config: Dict) -> Lis
 def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict) -> Dict:
     """Tally verdicts, write the report, return the run summary dict."""
     results_dicts = [asdict(r) for r in results]
-    write_report(project_root, results_dicts, config)
+    effectiveness = build_effectiveness_report(project_root)
+    write_report(project_root, results_dicts, config, effectiveness)
     summary: Dict[str, int] = {
         v: 0 for v in ("OK", "DRIFT_WARNING", "ROT", "SKIPPED", "NO_FIXTURES")
     }
@@ -504,6 +526,7 @@ def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict)
         summary[r.verdict or "OK"] = summary.get(r.verdict or "OK", 0) + 1
     return {
         "results": results_dicts,
+        "harness_effectiveness": effectiveness,
         "config": {k: v for k, v in config.items() if k != "api_key"},
         "summary": summary,
     }

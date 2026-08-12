@@ -18,13 +18,19 @@ additive; never repurpose existing field names.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 SCHEMA_VERSION = 1
+EVENT_SCHEMA_VERSION = 1
+EVENT_REQUIRED_FIELDS = (
+    "event_id", "run_id", "workflow_id", "stage", "event_type",
+    "subject_id", "parent_id", "ts", "outcome", "source", "evidence_ref",
+)
 
 
 @dataclass(frozen=True)
@@ -168,3 +174,102 @@ class TraceLog:
 def now_utc() -> str:
     """ISO-8601 UTC timestamp string (e.g. `2026-07-31T10:00:00Z`)."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _event_path(root: Path) -> Path:
+    return Path(root) / ".dev-kit" / "trace" / "events.jsonl"
+
+
+def validate_event(event: Mapping[str, Any]) -> Dict[str, Any]:
+    """Validate and normalize one workflow evidence event."""
+    missing = [key for key in EVENT_REQUIRED_FIELDS if key not in event]
+    if missing:
+        raise ValueError(f"event missing required fields: {', '.join(missing)}")
+    normalized = dict(event)
+    normalized.setdefault("schema_version", EVENT_SCHEMA_VERSION)
+    if normalized["schema_version"] != EVENT_SCHEMA_VERSION:
+        raise ValueError("unsupported event schema_version")
+    for key in ("event_id", "run_id", "workflow_id", "stage", "event_type", "subject_id", "ts", "outcome", "source"):
+        if not isinstance(normalized[key], str) or not normalized[key]:
+            raise ValueError(f"event field {key!r} must be a non-empty string")
+    if normalized["parent_id"] is not None and not isinstance(normalized["parent_id"], str):
+        raise ValueError("event parent_id must be a string or null")
+    if not isinstance(normalized["evidence_ref"], dict):
+        raise ValueError("event evidence_ref must be an object")
+    return normalized
+
+
+def append_event(root: Path, event: Mapping[str, Any]) -> Path:
+    """Append one validated workflow event without changing workflow outcome."""
+    import fcntl
+
+    record = validate_event(event)
+    path = _event_path(Path(root))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+            handle.flush()
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    return path
+
+
+def read_events(root: Path) -> List[Dict[str, Any]]:
+    """Read valid structured events; malformed lines remain inspectable findings."""
+    path = _event_path(Path(root))
+    if not path.is_file():
+        return []
+    result: List[Dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            result.append(validate_event(json.loads(line)))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return result
+
+
+def _event_cli() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Append a structured workflow event")
+    parser.add_argument("action", choices=("append-event",))
+    parser.add_argument("--type", dest="event_type", required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--workflow-id", default="workflow-unknown")
+    parser.add_argument("--stage", default="unknown")
+    parser.add_argument("--subject-id", required=True)
+    parser.add_argument("--parent", dest="parent_id")
+    parser.add_argument("--ts", default=None)
+    parser.add_argument("--outcome", required=True)
+    parser.add_argument("--source", default="hook")
+    parser.add_argument("--evidence-json", default="{}")
+    parser.add_argument("--root", type=Path, default=Path("."))
+    args = parser.parse_args()
+    evidence = json.loads(args.evidence_json)
+    path = append_event(args.root, {
+        "event_id": hashlib.sha256(
+            f"{args.run_id}:{args.event_type}:{args.subject_id}:{args.ts or now_utc()}".encode()
+        ).hexdigest()[:16],
+        "run_id": args.run_id,
+        "workflow_id": args.workflow_id,
+        "stage": args.stage,
+        "event_type": args.event_type,
+        "subject_id": args.subject_id,
+        "parent_id": args.parent_id,
+        "ts": args.ts or now_utc(),
+        "outcome": args.outcome,
+        "source": args.source,
+        "evidence_ref": evidence,
+    })
+    print(path)
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "append-event":
+        raise SystemExit(_event_cli())

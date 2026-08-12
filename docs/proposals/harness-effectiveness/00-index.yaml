@@ -1,0 +1,270 @@
+title: "Harness Effectiveness — Workflow-Native Evidence and Agent Eval"
+status: design-discussion
+date: 2026-08-12
+tags: [harness-effectiveness, agent-eval, self-heal, auto-learning, evidence]
+
+before:
+  summary: |
+    저장소에는 이미 두 평가 경로가 있다. `lib/behavior_scorers`는 worktree를
+    D1–D7로 1–5점 평가하고, `lib/eval_runner.py`는 transcript를 rubric별
+    0–10 LLM judge로 평가한다. `TraceLog`, `repair_coordinator` events,
+    `meta_eval.py`, `render_report_html.py`도 이미 존재한다.
+
+    그러나 guard block, 첫 verification, self-heal, learning 효과를 workflow의
+    실제 실행 사건과 연결하는 공통 contract가 없다. 기존 plain log를 사후에
+    읽으면 사건의 순서·parent·분모를 안정적으로 복구할 수 없다.
+  evidence:
+    - '`lib/behavior_scorers/__init__.py`: D1–D7 registry와 1–5 weighted aggregate'
+    - '`lib/eval_runner.py` / `skills/evaluate/SKILL.md`: transcript rubric eval과 judge variance escalation'
+    - '`lib/trace_log.py`: TraceLog/TraceStep trajectory artifact'
+    - '`lib/repair_coordinator.py`: failure_signature와 `.dev-kit/repair/events.jsonl` repair lifecycle'
+    - '`lib/meta_eval.py`: golden case expected verdict/score 검증'
+    - '`lib/render_report_html.py`: 기존 eval/inspect HTML renderer'
+
+after:
+  summary: |
+    기존 workflow producer가 결정 시점에 최소 structured event를 남기고,
+    하나의 `lib/harness_effectiveness.py` reducer가 TraceLog events, repair
+    events, 기존 eval artifacts를 EvidenceBundle로 결합한다. `/dev-kit:evaluate`
+    기본 결과에 기존 D1–D7과 5개 effectiveness score를 함께 표시한다.
+    별도 metrics skill, 별도 event bus, 별도 dashboard renderer는 만들지 않는다.
+  files:
+    - path: lib/trace_log.py
+      change: '기존 TraceLog에 additive structured event append/read API를 추가한다. 이벤트 저장소는 `.dev-kit/trace/events.jsonl`이다.'
+    - path: lib/harness_effectiveness.py
+      change: '기존 trace/repair/eval evidence를 정규화하고 raw metric과 5개 component score를 결정적으로 계산한다.'
+    - path: lib/eval_runner.py
+      change: '기존 evaluate 실행 결과에 effectiveness report를 추가하며 기존 API·verdict를 유지한다.'
+    - path: skills/evaluate/SKILL.md
+      change: '별도 option 없이 기본 evaluate가 legacy eval과 effectiveness score를 함께 출력하도록 문서화한다.'
+    - path: lib/render_report_html.py
+      change: '기존 HTML report에 5개 score card, status, coverage, evidence drill-down을 추가한다.'
+    - path: lib/execute.py
+      change: 'step start/verify/retry/error/completed/blocked를 TraceLog event producer로 기록한다.'
+    - path: hooks/*.sh
+      change: 'guard의 allow/deny와 post-write verification 결과를 결정 직후 structured event로 기록한다.'
+    - path: eval/rubrics/harness-effectiveness.yaml
+      change: 'evidence completeness, attribution, recovery, learning safety rubric을 추가한다.'
+    - path: eval/prompts/judge-harness-effectiveness.md
+      change: 'deterministic evidence report만 입력받아 해석/variance를 평가하는 prompt를 추가한다.'
+    - path: tests/test_harness_effectiveness.py
+      change: 'evidence normalization, metric denominator, missing evidence, score contract, legacy compatibility를 검증한다.'
+    - path: docs/skills/evaluate.md
+      change: 'workflow-native evidence와 5개 score 사용법을 기존 evaluate 문서에 통합한다.'
+    - path: docs/stages/STAGES.md
+      change: '각 stage의 evidence producer와 evaluate consumer 관계를 추가한다.'
+    - path: README.md
+      change: 'evaluate가 기존 평가와 effectiveness score를 함께 제공한다는 사용자-facing 설명을 갱신한다.'
+
+pros:
+  - '기존 TraceLog, repair coordinator, eval runner를 재사용해 새 계층을 최소화한다.'
+  - 'workflow 실행 시점의 evidence와 사후 평가를 같은 run/workflow identity로 연결한다.'
+  - '5개 score를 각각 표시하면서도 evidence가 없으면 점수를 만들지 않는다.'
+  - '기존 D1–D7과 evaluate의 backward compatibility를 유지한다.'
+
+cons:
+  - '기존 hook/runner producer에 instrumentation을 추가해야 하므로 첫 rollout 동안 coverage가 낮을 수 있다.'
+  - 'ground-truth label이 없는 guard action은 prevention quality를 계산할 수 없다.'
+  - 'control/baseline이 없는 learning cohort는 learning quality를 계산할 수 없다.'
+
+limitations:
+  - '이 score는 사용자 만족도나 business outcome의 완전한 대리 지표가 아니다.'
+  - 'structured event가 도입되기 전 과거 run은 정확한 lifecycle로 재구성하지 않는다.'
+  - 'learning 효과는 control cohort가 없으면 관찰적 변화로만 보고한다.'
+
+sections:
+  - title: 1. 설계 원칙 — 기존 workflow 안에서 측정한다
+    body: |
+      평가를 별도 replay workflow로 만들지 않는다. 실제 workflow가 실행될 때
+      결정 사건을 기록하고, evaluate는 그 evidence를 읽어 report를 만든다.
+
+      ```text
+      plan → build/write → guard → verify/self-heal → review/security → ship
+        └─ producer가 evidence 기록 ───────────────────────────────┘
+                                      ↓
+                              /dev-kit:evaluate
+                         legacy D1–D7 + 5 scores + HTML
+      ```
+
+      새로 추가하는 production 계층은 두 개뿐이다.
+
+      | 계층 | 책임 |
+      |---|---|
+      | `TraceLog` additive event API | workflow 경계 사건을 append-only JSONL로 기록 |
+      | `lib/harness_effectiveness.py` | 기존 trace/repair/eval source를 EvidenceBundle로 정규화하고 계산 |
+
+      만들지 않는 것:
+
+      - `/dev-kit:harness-metrics` 신규 skill
+      - `--harness-effectiveness` 신규 option
+      - 별도 telemetry vendor/event bus
+      - 기존 repair event와 중복되는 event log
+      - 별도 dashboard renderer
+      - 기존 D1–D7을 대체하는 D8 dimension
+
+  - title: 2. 기존 시스템과의 통합 경계
+    body: |
+      | 기존 구성 | 그대로 재사용하는 역할 | effectiveness와의 연결 |
+      |---|---|---|
+      | `TraceLog` / `TraceStep` | step, retry, token, latency, trajectory | first-pass/recovery cycle/context |
+      | `repair_coordinator` | failure signature, attempt, repair events | self-heal lifecycle와 learning candidate |
+      | `behavior_scorers` | D1–D7 score/evidence/verdict | 별도 legacy namespace로 보존 |
+      | `eval_runner` | case discovery, rubric registry, judge, variance | effectiveness calculator 호출 및 report join |
+      | `meta_eval` | golden expected verdict/score 검증 | 5개 score golden case 검증 |
+      | `render_report_html` | 기존 eval/inspect HTML | 5개 score card와 evidence 표시 |
+
+      기존 `D1–D7`, `harness-quality`, `os-quality`의 score scale과 verdict는
+      변경하지 않는다. 새 결과는 다음처럼 분리한다.
+
+      ```json
+      {
+        "legacy_agent_behavior": {"D1_outcome": 5, "weighted_mean": 4.2, "verdict": "OK"},
+        "harness_effectiveness": {
+          "prevention_quality": {"score": null, "status": "INSUFFICIENT_EVIDENCE"},
+          "first_pass_quality": {"score": 82.4, "status": "OK"},
+          "recovery_quality": {"score": 76.0, "status": "DRIFT_WARNING"},
+          "learning_quality": {"score": null, "status": "INSUFFICIENT_EVIDENCE"},
+          "measurement_integrity": {"score": 96.2, "status": "OK"},
+          "overall_score": null
+        }
+      }
+      ```
+
+  - title: 3. Minimal event contract
+    body: |
+      event는 score를 결정하는 경계 사건만 기록한다. 일반 read, token-level
+      transcript, 모델 원문 prompt, file content는 기록하지 않는다.
+
+      ```json
+      {
+        "schema_version": 1,
+        "event_id": "stable-id",
+        "run_id": "run-id",
+        "workflow_id": "workflow-id",
+        "stage": "build",
+        "event_type": "guard.blocked|verify.failed|heal.verified",
+        "subject_id": "write-or-error-id",
+        "parent_id": "parent-event-id-or-null",
+        "ts": "ISO-8601 UTC",
+        "outcome": "allowed|blocked|passed|failed|verified|escalated",
+        "source": "hook|execute|repair|review|security|ship",
+        "evidence_ref": {"path": "...", "exit_code": 1, "signature": "..."}
+      }
+      ```
+
+      `run_id`, `workflow_id`, `stage`, `subject_id`, `parent_id`, `event_type`,
+      `outcome`, `source` 중 하나라도 없으면 score evidence로 사용하지 않는다.
+      writer는 validation → redaction → append 순서로 실행하며 event write
+      실패는 workflow decision을 바꾸지 않고 measurement integrity finding을
+      남긴다.
+
+      기존 `.dev-kit/repair/events.jsonl`은 repair coordinator의 source of truth로
+      유지한다. reducer는 이를 trace event와 join하지만 duplicate denominator를
+      만들지 않는다. 기존 plain logs와 git artifact는 legacy observation으로만
+      읽고, canonical event가 없으면 positive success claim을 만들지 않는다.
+
+  - title: 4. 5개 score의 evidence-based 계산
+    body: |
+      모든 raw metric은 `numerator`, `denominator`, `value`, `coverage`,
+      `evidence_event_ids`, `status`를 반환한다. 분모가 0이거나 필수 evidence가
+      없으면 `value=null`이다. null을 0점으로 바꾸지 않는다.
+
+      | Score | 계산 | 최소 evidence |
+      |---|---|---|
+      | `prevention_quality` | labeled action의 `precision/recall`과 block evidence completeness | unsafe/legitimate ground-truth label, policy id, decision, reason |
+      | `first_pass_quality` | 첫 write의 첫 verify가 required checks를 통과한 비율 | write id, first verify id, exit code, retry-before-first flag |
+      | `recovery_quality` | error → mutation → clean verify → independent verify chain의 비율과 cycle bound | parent chain, failure signature, clean/independent verification |
+      | `learning_quality` | rule applied cohort와 control/baseline cohort의 verified recovery delta, promotion/rollback evidence | cohort identity, shadow/applied result, control 또는 compatible baseline |
+      | `measurement_integrity` | schema completeness, attribution, dedupe, required lifecycle coverage | raw line count, valid event id, parent link, required event set |
+
+      구체적 판정:
+
+      ```text
+      first_pass_rate = first_write_clean / first_write_verified
+
+      verified_recovery_rate =
+        error_with_clean_and_independent_verify / error_with_terminal_outcome
+
+      guard_precision = TP / (TP + FP)
+      guard_recall    = TP / (TP + FN)
+
+      learning_delta = treatment_verified_recovery_rate
+                       - comparable_control_verified_recovery_rate
+      ```
+
+      - first verification 전에 retry/heal이 발생하면 first-pass가 아니다.
+      - mutation만 있고 clean verify가 없으면 heal attempt일 뿐 recovery가 아니다.
+      - independent verification이 없으면 verified recovery가 아니다.
+      - label 없는 guard action은 prevention quality 분모에서 제외하고 coverage를 낮춘다.
+      - control/baseline 없는 learning 결과는 observed delta로만 표시하고 score는 null이다.
+      - source event가 없는 transcript 자기보고는 성공 evidence가 아니다.
+
+  - title: 5. Score status와 기존 평가의 관계
+    body: |
+      component score는 0–100으로 표시하며 status는 `OK >= 80`,
+      `DRIFT_WARNING 60–79.9`, `ROT < 60`을 사용한다. 단, required evidence
+      coverage가 90% 미만이면 score와 무관하게 `INSUFFICIENT_EVIDENCE`다.
+
+      전체 score는 5개 component가 모두 유효할 때만 계산한다.
+      하나라도 null이면 component별 점수는 보존하되 `overall_score=null`이다.
+
+      LLM judge는 deterministic score를 생성하지 않는다. EvidenceBundle과
+      derivation만 받아 해석 품질과 judge variance를 평가한다. variance가 기존
+      threshold를 넘으면 기존 evaluate와 동일하게 `ESCALATED`다.
+
+  - title: 6. Workflow producer 연결
+    body: |
+      | 시점 | producer | event |
+      |---|---|---|
+      | plan/hand-off 생성 | plan/hand-off writer | `plan.created`, `step.declared` |
+      | guard decision 직후 | scope/worktree/tdd/bash/scaffold guard | `guard.allowed`, `guard.blocked` |
+      | build step 전이 | `lib/execute.py` | `step.started`, `step.completed`, `step.error`, `step.blocked` |
+      | verification 직후 | verify runner/post-write hook | `verify.passed`, `verify.failed` |
+      | repair 전후 | `repair_coordinator` | 기존 repair events + `heal.attempted`, `heal.verified` adapter |
+      | review/security 확정 | review/security verifier | `finding.verified`, `verdict.recorded` |
+      | ship gate | stop-verify/ship | `gate.accepted`, `gate.rejected` |
+
+      `/dev-kit:evaluate`는 위 event를 새로 만들거나 workflow를 재실행하지 않고
+      이미 기록된 source를 reducer로 계산한다. workflow가 평가를 실행하지 않아도
+      evidence는 보존되고, 평가가 실행됐다는 사실만으로 workflow 성공을 만들지
+      않는다.
+
+  - title: 7. 구현 순서와 검증
+    body: |
+      1. `TraceLog` additive event API와 schema validation을 추가한다.
+      2. `lib/harness_effectiveness.py`에 source adapter, lifecycle join,
+         raw metric, 5개 score 계산을 구현한다.
+      3. `lib/execute.py`와 최소 guard/post-write 지점에 boundary event를 연결한다.
+      4. `eval_runner` 기본 report와 기존 HTML renderer에 effectiveness namespace를
+         추가한다. 새 option이나 skill은 추가하지 않는다.
+      5. harness-effectiveness rubric/prompt와 `meta_eval` golden cases를 연결한다.
+      6. evaluate/stages/README 문서를 같은 contract로 갱신한다.
+
+      필수 fixture:
+
+      - clean first-pass
+      - retry 후 clean recovery
+      - mutation만 있고 verify 실패
+      - unsafe block / legitimate false block
+      - learning control vs treatment
+      - missing parent, duplicate event, missing verifier
+      - transcript에는 성공이라고 쓰였지만 source event가 없는 경우
+
+      acceptance criteria:
+
+      - 동일 source input은 동일 EvidenceBundle과 score를 만든다.
+      - 모든 non-null score가 source event와 derivation으로 역추적된다.
+      - evidence 부족 시 null이며 0점/성공으로 대체되지 않는다.
+      - canonical event와 legacy log가 중복 집계되지 않는다.
+      - 기존 D1–D7, review/security/plan, harness-quality/os-quality verdict가 회귀하지 않는다.
+      - `/dev-kit:evaluate`에서 기존 결과와 5개 score가 함께 표시된다.
+      - 기존 `render_report_html`에서 5개 score와 evidence status가 시각적으로 보인다.
+      - 신규 production module 수가 1개이고 신규 skill/telemetry service가 0개다.
+
+  - title: 결론
+    body: |
+      이 설계의 기준은 “로그와 점수를 많이 만든다”가 아니다. workflow의
+      결정 경계에서 필요한 evidence만 기록하고, 기존 trace/repair/eval 시스템을
+      하나의 reducer로 연결해 5개 score를 계산하는 것이다. 기존 평가와 새
+      effectiveness 평가는 같은 `/dev-kit:evaluate` report에서 함께 보이지만,
+      의미와 source는 서로 섞지 않는다.

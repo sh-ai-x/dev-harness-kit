@@ -821,12 +821,15 @@ auto-gate that hard-blocked Build on a non-`proceed` verdict; it was removed in
 PR #463 — see [Case 4 of the workflow scenarios doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-the-valuate-step)
 for what that means in practice.
 
-**Agent-behavior eval** — `/dev-kit:evaluate` replays recorded transcripts and
-judges them against per-dimension rubrics (review / security / plan) plus a
-20-checkbox code-sanity checklist; adding `--harness-quality` or `--os-quality`
-registers the matching cross-cutting rubric on the same runner. Details in
+**Agent-behavior and harness-effectiveness eval** — `/dev-kit:evaluate` keeps
+the existing transcript/rubric evaluation. The harness-effectiveness design
+adds a workflow-native evidence report alongside the legacy D1–D7 Agent
+Behavior report, with five separate components: prevention, first-pass,
+recovery, learning, and measurement integrity. Missing evidence is reported
+explicitly rather than inferred. Details in
 [`docs/skills/evaluate.md`](docs/skills/evaluate.md), with the rationale in
-`docs/adr/ADR-0022-eval-agent-behavior.md`.
+`docs/adr/ADR-0022-eval-agent-behavior.md` and the design proposal at
+[`docs/proposals/harness-effectiveness/00-index.html`](docs/proposals/harness-effectiveness/00-index.html).
 
 **Codex compatibility** — the same skills and hooks run under Codex CLI via a
 `.codex-plugin/` manifest that mirrors the canonical hook config; a regression
