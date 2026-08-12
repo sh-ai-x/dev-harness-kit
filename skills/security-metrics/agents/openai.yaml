@@ -1,0 +1,6 @@
+interface:
+  display_name: "Security Metrics"
+  short_description: "Generate a deterministic OWASP security scorecard"
+  default_prompt: "Use $security-metrics to calculate this repository's 0-100 OWASP security scorecard."
+policy:
+  allow_implicit_invocation: false
