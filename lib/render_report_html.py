@@ -18,7 +18,7 @@ from typing import Dict, Iterator, List, Tuple
 
 KST = timezone(timedelta(hours=9))
 
-# Verdict -> CSS class. Used for both eval (OK / DRIFT_WARNING / ROT /
+# Verdict -> CSS class. Used for both evaluation (OK / DRIFT_WARNING / ROT /
 # SKIPPED) and inspect (Critical / Major drift / Minor drift / Healthy).
 VERDICT_CLASS = {
     "OK": "verdict-ok",
