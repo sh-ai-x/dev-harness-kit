@@ -60,6 +60,16 @@
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/linear-task-change.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/notification-collapse.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/context-window-guard.sh",
+            "timeout": 30
           }
         ]
       }
