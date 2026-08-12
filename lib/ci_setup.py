@@ -108,6 +108,19 @@ _CI_PATHS_AFTER_HOOKS: tuple[str, ...] = (
     # shipped with CI setup so a consumer does not need the plugin checkout.
     "tools/portability_check.py",
     "tools/loop_engine.py",
+    # /dev-kit:babysit-pr-local entrypoints (issue #619). The local
+    # mirror invokes these by relative path from the consumer repo;
+    # ci-setup previously installed neither bin/ nor lib/ so consumers
+    # had to manually cp from the plugin cache.
+    "bin/babysit-pr-local.sh",
+    "bin/review-local.sh",
+    "bin/set-provider.sh",
+    # lib/ helpers actually imported by bin/review-local.sh. The rest of
+    # lib/ is plugin-internal and intentionally not shipped.
+    "lib/review_local_lib.sh",  # bash, sourced by bin/review-local.sh:77
+    "lib/maintenance_gate.py",  # Python, invoked by bin/review-local.sh:96,439
+    "lib/atomic.py",            # Python, dep of lib/maintenance_gate.py
+    "lib/__init__.py",          # Python package marker (already exists at repo root)
 )
 
 
@@ -211,6 +224,13 @@ EXECUTABLE_PATHS: _LazyTuple = _LazyTuple(
         "tools/skill_usage.py",
         "tools/portability_check.py",
         "tools/loop_engine.py",
+        # /dev-kit:babysit-pr-local entrypoints (issue #619). These must be
+        # +x so the consumer can invoke them by relative path from anywhere
+        # (cwd-independent, per bin/review-local.sh's REPO_ROOT-from-git
+        # derivation).
+        "bin/babysit-pr-local.sh",
+        "bin/review-local.sh",
+        "bin/set-provider.sh",
         *[path for path in EXPECTED_PATHS
           if path.startswith("hooks/") and path.endswith(".sh")],
     )
@@ -440,6 +460,15 @@ def _resolve_template_source(rel_path: str) -> Path:
         if not candidate.exists():
             raise FileNotFoundError(f"rule source missing: {candidate}")
         return candidate
+    # /dev-kit:babysit-pr-local entrypoints (issue #619): bin/ scripts and
+    # selected lib/ helpers live at the plugin root, not under
+    # templates/ci/. Resolve them directly off _PLUGIN_ROOT so the install
+    # path doesn't fragment the canonical source.
+    if rel_path.startswith("bin/") or rel_path.startswith("lib/"):
+        candidate = _PLUGIN_ROOT / rel_path
+        if not candidate.exists():
+            raise FileNotFoundError(f"bin/lib source missing: {candidate}")
+        return candidate
     # Default: read from the templates/ci/ tree.
     candidate = _TEMPLATES_ROOT / rel_path
     if not candidate.exists():
@@ -596,6 +625,20 @@ def _build_marker() -> dict:
             "tools/skill_usage_render.py",
             "tools/portability_check.py",
             "tools/loop_engine.py",
+        ],
+        # /dev-kit:babysit-pr-local entrypoints (issue #619). Recorded in
+        # the marker so consumers can audit which bin/ scripts and lib/
+        # helpers landed via ci-setup vs locally-copied.
+        "bin": [
+            "bin/babysit-pr-local.sh",
+            "bin/review-local.sh",
+            "bin/set-provider.sh",
+        ],
+        "lib": [
+            "lib/review_local_lib.sh",
+            "lib/maintenance_gate.py",
+            "lib/atomic.py",
+            "lib/__init__.py",
         ],
     }
 
