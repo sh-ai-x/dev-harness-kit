@@ -2,7 +2,8 @@
 
 Verifies the verdict extraction contract that review.yml + security
 post-steps rely on (issue #244, boilerplate-web PR #19 verification;
-issue #612, consumer silent-Approve bug):
+issue #612, consumer silent-Approve bug; issue #625, MINIMAX provider
+drops assistant stream):
 
   1. Missing file     → exit 0, empty stdout
   2. HTML file        → exit 0, empty stdout (network error page)
@@ -16,6 +17,12 @@ Issue #612 contract: distinguish "I couldn't read the file"
 "the file existed but had no recognizable `Verdict:` line"
 (stout="PARSE_FAILED"). The latter is hard-failed by the severity
 gate so a real review failure can't be papered over as Approve.
+
+Issue #625 contract: when the execution-file verdict is empty OR
+PARSE_FAILED AND a PR-comments file is provided as the second arg,
+fall back to scanning that file for `Verdict: <value>` lines. The
+caller is responsible for filtering by run_id (defeats #244 stale-
+comment flap). The file verdict still wins when present.
 """
 from __future__ import annotations
 
@@ -249,3 +256,132 @@ def test_non_assistant_messages_ignored(tmp_path: Path) -> None:
     result = _run([str(target)])
     assert result.returncode == 0
     assert result.stdout.strip() == "Approve"
+
+
+# ---------------------------------------------------------------------------
+# Issue #625: PR-comments fallback tests (MINIMAX provider drops the
+# assistant stream from claude-execution-output.json but the agent still
+# posts the verdict as a `gh pr comment` body). The caller filters by
+# run_id; this contract just verifies the LAST-WINS extraction logic.
+# ---------------------------------------------------------------------------
+
+
+def _write_comments(path: Path, bodies: list[str]) -> None:
+    """Write a PR-comments JSON file (array of {body} objects)."""
+    path.write_text(
+        json.dumps([{"body": b} for b in bodies]),
+        encoding="utf-8",
+    )
+
+
+def test_comments_fallback_when_execution_file_missing(tmp_path: Path) -> None:
+    """Issue #625: MINIMAX provider path — no execution file, but the
+    agent posted the verdict as a PR comment body. The caller filtered
+    by run_id; we just scan the file for the LAST Verdict: line."""
+    target = tmp_path / "nope.json"  # does not exist
+    comments = tmp_path / "comments.json"
+    _write_comments(
+        comments,
+        [
+            "<!-- dev-kit-verdict-audit --> run=12345 job=review ...\n",
+            "Verdict: Approve\n\n## review summary...\n",
+            "<!-- dev-kit-verdict-audit --> run=12345 job=review status=success verdict=Approve source=agent-pr-comment\n",
+        ],
+    )
+    result = _run([str(target), str(comments)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_comments_fallback_when_execution_file_parse_failed(tmp_path: Path) -> None:
+    """Issue #625: MINIMAX execution file has no assistant blocks
+    (PARSE_FAILED), but the agent's PR-comment body has the verdict.
+    Fall back to comments; should NOT propagate PARSE_FAILED."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {"type": "preset", "content": "system preset"},
+            {"type": "system", "subtype": "init"},
+            {"type": "result", "subtype": "success"},
+        ],
+    )
+    comments = tmp_path / "comments.json"
+    _write_comments(
+        comments,
+        [
+            "<!-- dev-kit-verdict-audit --> run=99 job=review ...\n",
+            "Verdict: Changes Requested\n\n## review summary\n",
+        ],
+    )
+    result = _run([str(target), str(comments)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Changes Requested"
+
+
+def test_file_verdict_wins_over_comments(tmp_path: Path) -> None:
+    """Strict superset of pre-#625 behavior: anthropic provider
+    produces an assistant message with the verdict; the comments
+    file may have stale / different data — the FILE wins."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [_assistant_msg("Verdict: Approve")],
+    )
+    comments = tmp_path / "comments.json"
+    _write_comments(
+        comments,
+        ["Verdict: Blocked\n\n<!-- stale from previous run -->\n"],
+    )
+    result = _run([str(target), str(comments)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_comments_fallback_returns_empty_if_nothing(tmp_path: Path) -> None:
+    """Both file missing and comments empty → empty stdout (no-file
+    tolerance path), NOT PARSE_FAILED. PARSE_FAILED is reserved for
+    'agent ran and produced parseable content but no verdict'."""
+    target = tmp_path / "nope.json"
+    comments = tmp_path / "comments.json"
+    _write_comments(comments, ["<!-- just an audit comment, no verdict -->\n"])
+    result = _run([str(target), str(comments)])
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_comments_fallback_last_wins(tmp_path: Path) -> None:
+    """Multiple comments with verdicts — LAST one wins (mirrors the
+    file-path 'last assistant message wins' semantics)."""
+    target = tmp_path / "nope.json"
+    comments = tmp_path / "comments.json"
+    _write_comments(
+        comments,
+        [
+            "Verdict: Approve\n",
+            "Verdict: Changes Requested\n",
+            "Verdict: Blocked\n",
+        ],
+    )
+    result = _run([str(target), str(comments)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Blocked"
+
+
+def test_comments_file_malformed_returns_empty(tmp_path: Path) -> None:
+    """Tolerate malformed JSON / non-list shapes — returns empty so
+    the caller's no-file tolerance still applies. Never raises."""
+    target = tmp_path / "nope.json"
+    comments = tmp_path / "comments.json"
+    comments.write_text("{not valid json at all", encoding="utf-8")
+    result = _run([str(target), str(comments)])
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_comments_file_missing_returns_empty(tmp_path: Path) -> None:
+    """Caller forgot to pass the file — empty stdout, no exception."""
+    target = tmp_path / "nope.json"
+    result = _run([str(target), str(tmp_path / "missing.json")])
+    assert result.returncode == 0
+    assert result.stdout == ""

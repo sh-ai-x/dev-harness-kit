@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 extract-verdict.py — extract the LLM review/security verdict from
-anthropics/claude-code-action@v1's output file.
+anthropics/claude-code-action@v1's output file, with a PR-comments
+fallback for providers that drop the assistant stream.
 
 ROOT-CAUSE FIX (issue #244, boilerplate-web PR #17/#19): the previous
 post-script extracted the verdict by grepping PR comments for
@@ -21,6 +22,24 @@ result, etc.). The assistant messages contain the model's text output;
 the verdict appears in the FINAL assistant message per the prompt
 contract.
 
+ISSUE #625 — MINIMAX PROVIDER FALLBACK
+The MINIMAX provider (CI_REVIEW_PROVIDER=minimax, via
+https://api.minimax.io/anthropic) drops the assistant-message stream
+from `claude-execution-output.json` — the file is parseable JSONL but
+contains only `type: "preset"`, `type: "system"` init, and
+`type: "result"` summary messages. The agent DOES post the verdict as
+a PR comment body, but `extract()` returns PARSE_FAILED because there
+is no assistant text block.
+
+This script accepts an optional SECOND argument — a path to a JSON file
+containing the PR comments for the current run (already filtered by
+the caller to ONLY include comments whose body contains the current
+`run=<GITHUB_RUN_ID>`). If the execution-file extraction returns
+empty OR PARSE_FAILED, the script falls back to scanning those
+comments for `Verdict: <value>`. The run-id filter is what defeats
+the #244 stale-comment flap: by construction only comments posted in
+THIS run are candidates.
+
 CONTRACT (issue #612, consumer PR silent-Approve bug):
   - file missing / HTML / unreadable / suspiciously small → stdout=""
     (caller treats as the genuine "no-file" path; tolerance is
@@ -35,6 +54,11 @@ CONTRACT (issue #612, consumer PR silent-Approve bug):
     message)
   - file exists, parseable JSON, with `Verdict:` in an assistant
     message → stdout=verdict (last one wins)
+  - NEW (issue #625): if the file verdict is empty OR PARSE_FAILED
+    AND a PR-comments file is provided as the second argument, fall
+    back to scanning those comments for the verdict. The PR-comments
+    file must be filtered by run_id by the caller (otherwise the
+    #244 stale-comment flap returns).
 
 The "PARSE_FAILED" sentinel is what enables the gate to distinguish
 "agent ran but didn't follow the verdict contract" from "agent's output
@@ -46,15 +70,19 @@ Robustness:
 - If the file is HTML (e.g. 404 from a redirect), exits 0 with no
   output (caller falls back). Detected by checking the first non-blank
   character.
-- If the file is parseable JSON but has no Verdict, exits 0 with the
+- If the file is parseable JSON but no Verdict, exits 0 with the
   PARSE_FAILED sentinel (caller hard-fails the gate — see CONTRACT
   above; this is the fix for the consumer silent-Approve bug).
 - If the file is unreadable, exits 0 with no output (caller falls back).
+- If a PR-comments file is provided and the file verdict is empty /
+  PARSE_FAILED, scan those comments for the LAST `Verdict:` line.
+  Caller is responsible for filtering by run_id (#244 defeat).
 - Returns exit 0 (not 1) on "not found" or "parse failed" so the
   bash || true at the call site can stay simple.
 
 Usage:
   python3 extract-verdict.py <path-to-claude-execution-output.json>
+                             [<path-to-pr-comments-this-run.json>]
 
 Prints the verdict (Approve|Blocked|Changes Requested), the sentinel
 `PARSE_FAILED`, or nothing (empty stdout = caller falls back to no-file
@@ -78,6 +106,13 @@ PARSE_FAILED = "PARSE_FAILED"
 
 
 def extract(path: Path) -> str:
+    """Read the agent's execution file and extract the LAST `Verdict: <value>`.
+
+    Returns "" if the file is missing / HTML / unreadable / suspiciously small.
+    Returns PARSE_FAILED if the file is parseable JSONL but contains no
+    recognizable `Verdict:` line in any assistant message.
+    Returns the verdict string otherwise.
+    """
     if not path.exists():
         return ""
     try:
@@ -144,12 +179,80 @@ def extract(path: Path) -> str:
     return last_verdict
 
 
+def extract_from_comments(path: Path) -> str:
+    """Issue #625: scan PR-comments JSON for the LAST `Verdict:` line.
+
+    The CALLER is responsible for filtering by run_id — otherwise the
+    #244 stale-comment flap returns (this is exactly what the old
+    `gh pr comment --jq` grep did, and it broke boilerplate-web PR #18
+    by picking up a stale `Verdict: Changes Requested` from a previous
+    push). The review.yml wrapper builds the comments file with:
+
+        gh api .../issues/$PR_NUMBER/comments \\
+            --jq '.[] | select(.body | contains("run=$RUN_ID")) | {body: .body}'
+
+    so only comments from THIS run are candidates.
+
+    Expected JSON shape: array of objects with a `body` string field.
+    Tolerant of unknown shapes — returns "" on any parse error so the
+    caller's no-file fallback still works.
+
+    Returns the LAST `Verdict: <value>` line found, or "" if none.
+    """
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    text = text.strip()
+    if not text:
+        return ""
+    try:
+        comments = json.loads(text)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(comments, list):
+        return ""
+    last_verdict = ""
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        body = comment.get("body", "")
+        if not isinstance(body, str):
+            continue
+        # Scan each comment body for a verdict line. The agent's
+        # summary comment body starts with a single-line "Verdict:"
+        # preamble followed by the review content; the audit comment
+        # has no verdict line at all. The regex is the same as the
+        # execution-file path so the verdict semantics match.
+        m = VERDICT_RE.search(body)
+        if m:
+            last_verdict = m.group(1)
+    return last_verdict
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} <claude-execution-output.json>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print(
+            f"usage: {sys.argv[0]} <claude-execution-output.json> "
+            f"[<pr-comments-this-run.json>]",
+            file=sys.stderr,
+        )
         return 2
-    path = Path(sys.argv[1])
-    verdict = extract(path)
+    file_path = Path(sys.argv[1])
+    verdict = extract(file_path)
+
+    # Issue #625 fallback: if the execution-file verdict is empty or
+    # PARSE_FAILED, AND a PR-comments file is provided, scan those
+    # comments for the verdict. Caller MUST have filtered by run_id
+    # (see extract_from_comments docstring for the rationale).
+    if (not verdict or verdict == PARSE_FAILED) and len(sys.argv) >= 3:
+        comments_path = Path(sys.argv[2])
+        comments_verdict = extract_from_comments(comments_path)
+        if comments_verdict:
+            verdict = comments_verdict
+
     # ALWAYS print to stdout (empty if not found). Caller uses stdout
     # to decide whether to use the file verdict or fall back.
     if verdict:

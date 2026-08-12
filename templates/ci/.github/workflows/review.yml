@@ -308,10 +308,26 @@ jobs:
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
+          # Issue #625: fetch PR comments for THIS run (filtered by run_id) so
+          # extract-verdict.py can recover the verdict when the MINIMAX
+          # provider drops the assistant stream from the execution file.
+          # The run_id filter defeats #244's stale-comment flap — by
+          # construction only comments posted in THIS run are candidates.
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number || github.event.inputs.pr_number }}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          else
+            # Execution file genuinely missing — still try the comments
+            # fallback before defaulting.
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || echo '')"
           fi
+          # Track which path produced the verdict for the audit comment.
+          # file-only path → agent-output-file; comments fallback → agent-pr-comment.
+          comment_fallback_used="false"
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             # Issue #612 fix: extract-verdict.py saw the file existed
             # with parseable content but no recognizable `Verdict:`
@@ -323,23 +339,42 @@ jobs:
             # bug). The audit comment's source field now records
             # `parse-failed-no-verdict` so the reviewer can see the
             # actual failure mode without re-reading the gate logs.
+            #
+            # Issue #625 exception: when MINIMAX is the provider, the
+            # execution file lacks assistant messages even though the
+            # agent DID post a verdict as a PR comment. extract-verdict.py
+            # tried the comments fallback internally — if it found a
+            # verdict there, file_verdict is no longer PARSE_FAILED.
+            # If we got here with PARSE_FAILED still set, the comments
+            # fallback ALSO didn't find a verdict, so the original
+            # #612 hard-fail logic still applies.
             echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
             verdict="PARSE_FAILED"
             verdict_source="parse-failed-no-verdict"
             agent_ran="true"
           elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
-            verdict_source="agent-output-file"
+            # The PR-comments fallback is engaged when the execution
+            # file was missing / unreadable / HTML / PARSE_FAILED — the
+            # script's contract is "file verdict wins when present;
+            # fall through to comments otherwise". Infer which path
+            # produced this verdict from the AGENT_OUTPUT state.
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+              comment_fallback_used="true"
+            else
+              verdict_source="agent-output-file"
+            fi
             agent_ran="true"
           else
             # Genuine no-file path: extract-verdict.py returned empty
             # because the file is missing / HTML / unreadable /
-            # suspiciously small. Tolerance is appropriate for these
-            # transient filesystem / network cases — the gate's
-            # existing contract treats empty as "I couldn't read the
-            # file" rather than "the agent ran but produced no
-            # verdict" (that case now flows through the PARSE_FAILED
-            # arm above).
+            # suspiciously small AND the comments fallback also found
+            # nothing. Tolerance is appropriate for these transient
+            # filesystem / network cases — the gate's existing
+            # contract treats empty as "I couldn't read the file"
+            # rather than "the agent ran but produced no verdict"
+            # (that case now flows through the PARSE_FAILED arm above).
             case "${{ job.status }}" in
               cancelled|failure)
                 echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
@@ -585,9 +620,18 @@ jobs:
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
+          # Issue #625: same comment-fallback fetch as the review job — see
+          # that step for the rationale (MINIMAX provider drops the
+          # assistant stream; recover from PR comments filtered by run_id).
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number || github.event.inputs.pr_number }}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || true)"
+          else
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || true)"
           fi
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             # Issue #612 fix (symmetric with the review job): the agent
@@ -596,20 +640,28 @@ jobs:
             # sentinel through to the gate so it hard-fails with the
             # dedicated remediation message instead of silently
             # defaulting to Approve (the old consumer-facing bug).
+            #
+            # Issue #625 exception: see review-job comment for the
+            # MINIMAX-fallback rationale.
             echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
             verdict="PARSE_FAILED"
             verdict_source="parse-failed-no-verdict"
             agent_ran="true"
           elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
-            verdict_source="agent-output-file"
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+            else
+              verdict_source="agent-output-file"
+            fi
             agent_ran="true"
           else
             # Genuine no-file path: extract-verdict.py returned empty
             # because the file is missing / HTML / unreadable /
-            # suspiciously small. Tolerance is appropriate for these
-            # transient filesystem / network cases — see the
-            # review-job comment above for the full rationale.
+            # suspiciously small AND the comments fallback also found
+            # nothing. Tolerance is appropriate for these transient
+            # filesystem / network cases — see the review-job comment
+            # above for the full rationale.
             case "${{ job.status }}" in
               cancelled|failure)
                 echo "::warning::security verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
