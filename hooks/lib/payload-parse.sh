@@ -95,6 +95,7 @@ extract_content() {
 emit_guard_event() {
     local hook_prefix="$1"
     local reason="$2"
+    local outcome="${3:-blocked}"
     local root subject run_id workflow_id evidence
     root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     subject="$(printf '%s' "${INPUT_JSON:-}" | jq -r '.tool_name // .tool_input.file_path // "unknown"' 2>/dev/null || printf 'unknown')"
@@ -102,10 +103,12 @@ emit_guard_event() {
     workflow_id="${DEV_KIT_WORKFLOW_ID:-hook:${hook_prefix}}"
     evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" \
         '{policy_id:$policy, reason:$why, ground_truth:(env.DEV_KIT_GROUND_TRUTH // null)}' 2>/dev/null || printf '{}')"
+    local event_type="guard.blocked"
+    [ "$outcome" = "allowed" ] && event_type="guard.allowed"
     python3 -m lib.trace_log append-event \
-        --root "$root" --type guard.blocked --run-id "$run_id" \
+        --root "$root" --type "$event_type" --run-id "$run_id" \
         --workflow-id "$workflow_id" --stage guard --subject-id "$subject" \
-        --outcome blocked --source "hook:${hook_prefix}" --evidence-json "$evidence" \
+        --outcome "$outcome" --source "hook:${hook_prefix}" --evidence-json "$evidence" \
         >/dev/null 2>&1 || true
 }
 

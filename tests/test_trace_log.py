@@ -22,7 +22,7 @@ def test_now_utc_is_iso8601() -> None:
     s = now_utc()
     assert s.endswith("Z")
     assert "T" in s
-    assert len(s) == 20  # YYYY-MM-DDTHH:MM:SSZ
+    assert len(s) == 27  # YYYY-MM-DDTHH:MM:SS.ffffffZ
 
 
 def test_trace_step_defaults() -> None:

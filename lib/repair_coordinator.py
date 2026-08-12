@@ -10,12 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 from lib.trace_log import append_event as append_trace_event
-from lib.trace_log import new_event_id
+from lib.trace_log import new_event_id, now_utc
 
 SCHEMA_VERSION = "1.0.0"
 MAX_REPAIR_ATTEMPTS = 2
@@ -23,7 +22,7 @@ REPAIR_STATE_DIR = ".dev-kit/repair"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return now_utc()
 
 
 def failure_signature(

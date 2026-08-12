@@ -11,7 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from lib.trace_log import EVENT_REQUIRED_FIELDS, read_events, validate_event
+from lib.trace_log import EVENT_RECORD_REQUIRED_FIELDS, read_events, validate_event
 
 COMPONENT_WEIGHTS = {
     "prevention_quality": 0.20,
@@ -20,9 +20,6 @@ COMPONENT_WEIGHTS = {
     "learning_quality": 0.20,
     "measurement_integrity": 0.15,
 }
-REQUIRED_EVENT_FIELDS = set(EVENT_REQUIRED_FIELDS) | {"schema_version"}
-
-
 def _ratio(numerator: int, denominator: int) -> Optional[float]:
     return None if denominator == 0 else round(numerator / denominator * 100, 1)
 
@@ -216,12 +213,15 @@ def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         e["subject_id"] for e in events
         if e["event_type"] in {"step.completed", "step.failed", "step.blocked"}
     }
-    coverage = _ratio(len(started_subjects & terminal_subjects), len(started_subjects)) if started_subjects else None
-    score = None if None in (schema, dedupe, attribution, coverage) else schema * .3 + attribution * .25 + dedupe * .2 + coverage * .25
+    coverage_pct = _ratio(len(started_subjects & terminal_subjects), len(started_subjects)) if started_subjects else None
+    coverage = None if coverage_pct is None else coverage_pct / 100.0
+    score = None if None in (schema, dedupe, attribution, coverage_pct) else (
+        schema * .3 + attribution * .25 + dedupe * .2 + coverage_pct * .25
+    )
     metrics = {"schema_completeness": _metric(parsed_count, len(raw_lines), evidence=valid_ids, value=schema),
                "attribution_completeness": _metric(parents, len(events), evidence=valid_ids, value=attribution),
                "dedupe_integrity": _metric(len(set(valid_ids)), parsed_count, evidence=valid_ids, value=dedupe),
-               "event_coverage": _metric(len(started_subjects & terminal_subjects), len(started_subjects), evidence=valid_ids, value=coverage)}
+               "event_coverage": _metric(len(started_subjects & terminal_subjects), len(started_subjects), evidence=valid_ids, value=coverage_pct)}
     status = "INSUFFICIENT_EVIDENCE" if findings else _status(
         score, coverage=0.0 if coverage is None else coverage,
     )
@@ -236,10 +236,10 @@ def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _parse_line(line: str) -> Optional[Dict[str, Any]]:
     try:
         data = json.loads(line)
-        if not isinstance(data, dict) or not REQUIRED_EVENT_FIELDS.issubset(data):
+        if not isinstance(data, dict) or not set(EVENT_RECORD_REQUIRED_FIELDS).issubset(data):
             return None
         return validate_event(data)
-    except (json.JSONDecodeError, TypeError):
+    except (ValueError, TypeError):
         return None
 
 

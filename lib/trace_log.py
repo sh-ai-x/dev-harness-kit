@@ -31,6 +31,7 @@ EVENT_REQUIRED_FIELDS = (
     "event_id", "run_id", "workflow_id", "stage", "event_type",
     "subject_id", "parent_id", "ts", "outcome", "source", "evidence_ref",
 )
+EVENT_RECORD_REQUIRED_FIELDS = EVENT_REQUIRED_FIELDS + ("schema_version",)
 
 
 @dataclass(frozen=True)
@@ -173,7 +174,7 @@ class TraceLog:
 
 def now_utc() -> str:
     """ISO-8601 UTC timestamp string (e.g. `2026-07-31T10:00:00Z`)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def new_event_id() -> str:

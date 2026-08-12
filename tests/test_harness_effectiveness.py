@@ -69,6 +69,26 @@ def test_integrity_coverage_requires_terminal_lifecycle_event(tmp_path: Path) ->
     assert integrity["submetrics"]["event_coverage"]["value"] == 0.0
 
 
+def test_integrity_partial_coverage_is_insufficient(tmp_path: Path) -> None:
+    _event(tmp_path, event_id="s1", event_type="step.started", subject="file-1",
+           outcome="started", ts="2026-08-12T00:00:00Z")
+    _event(tmp_path, event_id="c1", event_type="step.completed", subject="file-1",
+           outcome="completed", ts="2026-08-12T00:00:01Z", parent="s1")
+    _event(tmp_path, event_id="s2", event_type="step.started", subject="file-2",
+           outcome="started", ts="2026-08-12T00:00:02Z")
+    integrity = build_report(tmp_path)["components"]["measurement_integrity"]
+    assert integrity["status"] == "INSUFFICIENT_EVIDENCE"
+    assert integrity["coverage"] == 0.5
+
+
+def test_schema_drift_is_counted_not_raised(tmp_path: Path) -> None:
+    path = tmp_path / ".dev-kit" / "trace" / "events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"schema_version": 2}) + "\n")
+    integrity = build_report(tmp_path)["components"]["measurement_integrity"]
+    assert any("malformed" in finding for finding in integrity["findings"])
+
+
 def test_missing_verifier_does_not_count_as_verified_recovery(tmp_path: Path) -> None:
     _event(tmp_path, event_id="e1", event_type="verify.failed", subject="file-1",
            outcome="failed", ts="2026-08-12T00:00:00Z", error_signature="sig-1")
