@@ -222,7 +222,9 @@ class TestCiSetup(unittest.TestCase):
 
     def test_worktree_rule_files_are_in_expected_paths(self):
         """EXPECTED_PATHS includes the 7 worktree-rule files added in PR #22 +
-        the shared payload-parse helper (PR #78 / issue #273)."""
+        the shared payload-parse helper (PR #78 / issue #273), plus the
+        /dev-kit:babysit-pr-local entrypoints and lib helpers added in
+        PR for issue #619."""
         expected_new = {
             "hooks/worktree-guard.sh",
             "hooks/session-start-check.sh",
@@ -231,6 +233,14 @@ class TestCiSetup(unittest.TestCase):
             "hooks/hooks.json",
             ".claude/rules/git-workflow.md",
             "tests/test_worktree_guard.py",
+            # /dev-kit:babysit-pr-local entrypoints (issue #619).
+            "bin/babysit-pr-local.sh",
+            "bin/review-local.sh",
+            "bin/set-provider.sh",
+            "lib/review_local_lib.sh",
+            "lib/maintenance_gate.py",
+            "lib/atomic.py",
+            "lib/__init__.py",
         }
         actual = set(self.ci_setup.EXPECTED_PATHS)
         self.assertTrue(
@@ -1072,10 +1082,13 @@ class TestCiSetup(unittest.TestCase):
 
     def test_every_sourced_lib_helper_is_in_expected_paths(self):
         """Regression: every `source ... lib/<helper>.sh` reference inside
-        an EXPECTED_PATHS hook must resolve to a path that is also
-        EXPECTED_PATHS + EXECUTABLE_PATHS. Prevents the #273/#277 class
-        of bugs where a new helper is added to the plugin tree and
+        an EXPECTED_PATHS hook or bin/ script must resolve to a path that
+        is also EXPECTED_PATHS + EXECUTABLE_PATHS. Prevents the #273/#277
+        class of bugs where a new helper is added to the plugin tree and
         sourced by the plugin's own hooks but never catalogued.
+
+        Extended in issue #619 to also walk bin/*.sh scripts (notably
+        bin/review-local.sh, which sources lib/review_local_lib.sh).
         """
         import re
         # Match `source ... lib/<helper>.sh` for both common shapes:
@@ -1087,8 +1100,10 @@ class TestCiSetup(unittest.TestCase):
         plugin_root = Path(__file__).parent.parent
         sourced: set[str] = set()
         sources_examined: list[str] = []
+        # Walk both hooks/ (PR #273 catalog) and bin/ (issue #619). Either
+        # can source a lib helper; both must be guarded.
         for rel in self.ci_setup.EXPECTED_PATHS:
-            if not (rel.endswith(".sh") and rel.startswith("hooks/")):
+            if not (rel.endswith(".sh") and (rel.startswith("hooks/") or rel.startswith("bin/"))):
                 continue
             src_path = plugin_root / rel
             self.assertTrue(
@@ -1097,8 +1112,11 @@ class TestCiSetup(unittest.TestCase):
                 "re-run the structural test against the plugin tree",
             )
             sources_examined.append(rel)
+            # The helper ref is always relative to the file's own directory:
+            # hooks/<x>.sh -> hooks/lib/<helper>.sh; bin/<x>.sh -> lib/<helper>.sh.
+            helper_prefix = "hooks/lib/" if rel.startswith("hooks/") else "lib/"
             for m in sourced_helper_re.finditer(src_path.read_text(encoding="utf-8")):
-                sourced.add(f"hooks/lib/{m.group(1)}")
+                sourced.add(f"{helper_prefix}{m.group(1)}")
         # Every sourced helper must be in EXPECTED_PATHS (so it ships) AND
         # EXECUTABLE_PATHS (so it gets +x on install — sourced-as-library
         # files need +x if any consumer invokes them as a CLI later).
@@ -1106,13 +1124,13 @@ class TestCiSetup(unittest.TestCase):
         missing_from_executable = sourced - set(self.ci_setup.EXECUTABLE_PATHS)
         self.assertEqual(
             missing_from_expected, set(),
-            f"Hook scripts in EXPECTED_PATHS source these helpers but the "
+            f"Hook / bin scripts in EXPECTED_PATHS source these helpers but the "
             f"helpers aren't in EXPECTED_PATHS (so consumers don't receive "
             f"them -> `command not found` at runtime): {sorted(missing_from_expected)}",
         )
         self.assertEqual(
             missing_from_executable, set(),
-            f"Hook scripts in EXPECTED_PATHS source these helpers but the "
+            f"Hook / bin scripts in EXPECTED_PATHS source these helpers but the "
             f"helpers aren't in EXECUTABLE_PATHS (so +x bit is missing): "
             f"{sorted(missing_from_executable)}",
         )
@@ -1121,9 +1139,9 @@ class TestCiSetup(unittest.TestCase):
         # case where the helper regex itself goes stale.
         self.assertGreater(
             len(sources_examined), 0,
-            "no hooks/*/*.sh entries were examined — EXPECTED_PATHS shape "
-            "or the test's own filter likely drifted; the structural guard "
-            "would mask new regressions",
+            "no hooks/*/*.sh or bin/*.sh entries were examined — "
+            "EXPECTED_PATHS shape or the test's own filter likely drifted; "
+            "the structural guard would mask new regressions",
         )
 
     def test_import_succeeds_without_hooks_manifest(self):
