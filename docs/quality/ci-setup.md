@@ -92,6 +92,9 @@ added hooks and their helpers.
 | **`hooks/hooks.json`** | Canonical registration manifest copied with all hook sources |
 | **`rules/git-workflow.md`** | Canonical worktree rule; installed to `.claude/rules/git-workflow.md` for Claude Code discovery |
 | **`tests/test_worktree_guard.py`** | regression tests covering the worktree rule (blocks/allows/executable bits/etc.) |
+| `tools/_repo_name.py` | Shared `main_repo_root` + `repo_name` helper used by the Linear sync tools |
+| `tools/linear_sync.py` | Edit/Write auto-sync entrypoint invoked by `hooks/linear-*.sh` |
+| `tools/linear_pr_sync.py` | GH-Actions-driven PR sync entrypoint (workflow picks it up via sparse-checkout) |
 
 After install, the marker file `.dev-kit/ci-config.json` is written at the project root. The marker is the **contract** with `/dev-kit:build` — without it, build refuses to start.
 
