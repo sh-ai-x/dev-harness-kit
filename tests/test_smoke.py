@@ -49,7 +49,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # (human confirms) -> /dev-kit:plan hand-off) (39 -> 40).
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 41
+SKILL_COUNT = 42
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

@@ -58,11 +58,12 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `state` | Interview-based Single Source of Truth harness document writer (5 rounds × 2-3 evidence-backed recommendations, full traceability, hands off to /dev-kit:plan). |
 | [`valuate`](valuate/SKILL.md) 🔒 | `enforcement` | Plan-value gate. Scores a plan on 6 axes via LLM judge and returns proceed / revise / hold / kill. Verdict envelope persists to .dev-kit/valuations/<plan-id>.json. |
 
-### `eval` (1)
+### `eval` (2)
 
 | Skill | α | Description |
 |---|---|---|
 | [`evaluate`](evaluate/SKILL.md) | `enforcement` | 0-arg eval extension. Replays transcripts and judges against registered rubrics (harness-quality, os-quality, plus legacy review/security/plan). /dev-kit:evaluate [--harness-quality] [--os-quality] [--case <id>] [--dry-… |
+| [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `enforcement` | 0-arg harness-effectiveness scorecard. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) JSON. /dev-kit:harness-effectiveness. |
 
 ### `plan` (1)
 
@@ -130,6 +131,7 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 17 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `audit` | `analysis` | human |
 | 18 | [`evaluate`](evaluate/SKILL.md) | `eval` | `enforcement` | human |
 | 19 | [`evidence-plan`](evidence-plan/SKILL.md) | `design` | `state` | human |
+| 19a | [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `eval` | `enforcement` | human |
 | 20 | [`hook-doctor`](hook-doctor/SKILL.md) | `audit` | `enforcement` | model |
 | 21 | [`inspect`](inspect/SKILL.md) | `audit` | `analysis` | human |
 | 22 | [`interview`](interview/SKILL.md) | `design` | `enforcement` | human |
