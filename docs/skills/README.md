@@ -73,6 +73,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | Skill | Alpha | Summary |
 |---|---|---|
 | [`evaluate`](evaluate.md) | `enforcement` | Agent-behavior eval across review/security/plan dimensions + a 20-checkbox code-sanity rubric, plus the `harness-quality` and `os-quality` dimensions on the same runner. |
+| [`harness-effectiveness`](harness-effectiveness.md) | `enforcement` | Standalone, sub-second, zero-API-spend wrapper around the 5-component `lib.harness_effectiveness.build_report` reducer — the same table `/dev-kit:evaluate` embeds, exposed as its own slash. |
 | [`token-analyzer`](token-analyzer.md) | `analysis` | Token-efficiency dashboard rendered from session log transcripts. |
 | [`cost-gate`](cost-gate.md) | `enforcement` | Live, read-only cost ledger + PR cost-flag trailer. |
 | [`status`](status.md) | `state` | HOTL visualization: loop progress + cycles + hand-off chain + eval score. |
@@ -140,6 +141,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | human |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | human |
 | [`evidence-plan`](evidence-plan.md) | `design` | `state` | human |
+| [`harness-effectiveness`](harness-effectiveness.md) | `eval` | `enforcement` | human |
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | model |
 | [`inspect`](inspect.md) | `audit` | `analysis` | human |
 | [`interview`](interview.md) | `design` | `enforcement` | human |
