@@ -58,7 +58,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pytest + PyYAML
-        run: pip install --quiet pytest pyyaml
+        run: pip install --quiet -r requirements.lock
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
         env:

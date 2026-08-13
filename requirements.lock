@@ -1,0 +1,11 @@
+# Pinned dependency versions for dev-harness-kit's CI test job.
+#
+# Format: one pinned requirement per line, comments allowed.
+# Regenerate with: pip freeze -r requirements.lock
+#
+# CI installs these exactly:
+#   pip install --quiet -r requirements.lock
+# See .github/workflows/ci.yml (`Install dependencies` step).
+
+pytest==8.4.2
+PyYAML==6.0.3
