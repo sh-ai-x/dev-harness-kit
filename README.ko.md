@@ -243,35 +243,92 @@ python3 tools/loop_engine.py verify --feature-list feature_list.json
 ### 플러그인 한눈에
 
 6단계 추상화 뷰 전체는 code-viz 실행 후 `/tmp/code-viz.html`에 있다.
-아래 그림은 썸네일로 볼 가치가 있는 것들이다 — 멘탈 모델, 계획 계약,
-코드 리뷰 렌즈, PR 수정 상태 머신을 설명한다.
+시각화 도구가 출력하는 `mermaid` 문법을 그대로 인라인으로 재현한다 —
+라이브 페이지는 6단계 추상화 + 도메인 필러 맵을 한 페이지에 접어
+출력하는 다중 레벨 뷰고, 이 섹션 끝의 스크린샷이 그 예시다.
 
 | 다이어그램 | 내용 |
 |---|---|
 | L0 아키텍처 | 계층 토폴로지 — 사용자 → 스킬/명령 → 훅 → lib/tools/bin → 외부(GH Actions / MCP / CLI). |
 | [`/dev-kit:plan` 워크플로](docs/skills/plan.md) | 5게이트 파이프라인(frame → validate → non-goals → decompose → emit)과 emit에서 frame으로 돌아가는 모호성 루프 백엣지. |
 | [`/dev-kit:security` 워크플로](docs/skills/security.md) | OWASP Top-10(A01–A10) 병렬 팬아웃 — 코드 리뷰의 심층 보안 렌즈. |
-| [`/dev-kit:babysit-pr` 워크플로](docs/skills/babysit-pr.md) | 15단계 수정 상태 머신. `INCREMENT`에서 `SNAPSHOT`으로 가는 점선 백엣지가 CI 판정이 초록으로 뒤집힐 때까지 재폴링하는 제한된 반복 루프다. |
+| [`/dev-kit:babysit-pr` 워크플로](docs/skills/babysit-pr.md) | 15단계 수정 상태 머신. `INCREMENT`에서 `OPT-OUT CHECK`로 가는 점선 백엣지가 CI 판정이 초록으로 뒤집힐 때까지 재폴링하는 제한된 반복 루프다. |
 
-![L0 아키텍처 개요 — 스킬/명령 → 훅 → lib/tools/bin → 외부](docs/screenshots/code-viz/diagram-00.png)
+#### `/dev-kit:plan` — 모호성 루프를 가진 5게이트
 
-![`/dev-kit:plan` — emit에서 frame으로 돌아가는 모호성 루프 백엣지를 가진 5게이트](docs/screenshots/code-viz/diagram-04.png)
+```mermaid
+flowchart TD
+  plan([계획])
+  frame["frame<br/>목표 + 대상 사용자 + 1줄 상황"]
+  validate["validate<br/>증거 (>=3 출처) + value_score + 모호성 점수"]
+  non_goals["non-goals<br/>3개 이상 비목표 + 근거 + 위반 대응"]
+  decompose["decompose<br/>phases/name/index.json + stepN.md (단계별)"]
+  emit["emit<br/>PRD.md 6섹션 DoD 통과 + 핸드오프"]
+  plan --> frame
+  frame --> validate
+  validate --> non_goals
+  non_goals --> decompose
+  decompose --> emit
+  emit -. 모호성 루프 .-> frame
+```
 
-![`/dev-kit:security` — OWASP A01–A10 병렬 팬아웃](docs/screenshots/code-viz/diagram-06.png)
+#### `/dev-kit:security` — OWASP Top-10 (A01–A10)
 
-![`/dev-kit:babysit-pr` — 재시도 → 1단계 백엣지를 가진 15단계 수정 루프](docs/screenshots/code-viz/diagram-11.png)
+```mermaid
+flowchart TD
+  sec([보안]) --> A01
+  A01["A01 · 손상된 접근 통제<br/>IDOR, 경로 순회, 누락된 인가"] --> A02
+  A02["A02 · 보안 설정 오류<br/>기본 자격증명, 켜진 디버그 모드, 상세 에러"] --> A03
+  A03["A03 · 소프트웨어 공급망 실패<br/>취약한 의존성, 신뢰할 수 없는 CI 아티팩트"] --> A04
+  A04["A04 · 암호화 실패<br/>약한 해시 (MD5/SHA1), TLS 없음, 하드코드된 키"] --> A05
+  A05["A05 · 인젝션<br/>SQL, 명령, 템플릿, XSS, LDAP"] --> A06
+  A06["A06 · 안전하지 않은 설계<br/>rate limit 없음, 클라이언트 측 신뢰, 위협 모델 누락"] --> A07
+  A07["A07 · 인증 실패<br/>약한 패스워드, MFA 누락, 자격증명 채우기"] --> A08
+  A08["A08 · 소프트웨어/데이터 무결성 실패<br/>미서명 업데이트, 안전하지 않은 역직렬화, CI/CD 파이프라인 공격"] --> A09
+  A09["A09 · 보안 로깅 및 알림 실패<br/>감사 추적 없음, 알림 누락, 로그 인젝션"] --> A10
+  A10["A10 · 예외 상황 처리 오류<br/>bare except, fail-open 기본값, 패닉 기반 에러"]
+```
 
-> 로컬 재생성: `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (생성기는 `skills/code-viz/SKILL.md`에 내장된 스크립트다). PNG 세트는 스킬 본문, 훅 매트릭스, 워크플로 파일이 바뀔 때마다 갱신된다. 스크린샷을 손으로 수정하지 않는다. 각 임베드는 `<img … width="900" />`로 작성해서 GitHub가 1198-px 원본을 잘라내지 않게 한다.
+#### `/dev-kit:babysit-pr` — 재시도 백엣지를 가진 15단계 수정 루프
+
+```mermaid
+flowchart TD
+  bp([babysit-pr]) --> s0
+  s0["step 0 · OPT-OUT CHECK<br/>--operator-is-only-human이면 바이패스로 위임"] --> s1
+  s1["step 1 · SNAPSHOT<br/>PR_NUMBER, REVIEW_VERDICT, CHECKS 가져오기"] --> s2
+  s2["step 2 · TERMINATE<br/>APPROVED + 모든 체크 초록이면 exit 0"] --> s3
+  s3["step 3 · CLASSIFY<br/>차단 요인을 CI 실패/대기/리뷰로 분류"] --> s4
+  s4["step 4 · WAIT<br/>보류 중인 체크가 있고 실패가 없으면 30초 대기"] --> s5
+  s5["step 5 · FETCH LOGS<br/>변경된 실패 체크마다 gh run view --log-failed"] --> s6
+  s6["step 6 · DIAGNOSE<br/>실패 체크마다 단일 근본 원인 식별"] --> s7
+  s7["step 7 · APPLY FIX<br/>코드 수정, 반복당 하나의 논리적 변경"] --> s8
+  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, 같은 실패 명령을 로컬에서 재실행"] --> s9
+  s9["step 9 · COMMIT<br/>git add 특정 경로 + 컨벤셔널 커밋"] --> s10
+  s10["step 10 · PUSH<br/>git push origin HEAD"] --> s11
+  s11["step 11 · LOG<br/>.dev-kit/babysit.log에 한 줄 추가"] --> s12
+  s12["step 12 · SLEEP<br/>gh pr checks --watch 또는 20초 대기"] --> s13
+  s13["step 13 · SAVE STATE<br/>.dev-kit/babysit-checks.json 덮어쓰기"] --> s14
+  s14["step 14 · INCREMENT<br/>iter = iter + 1; MAX_ITERS 초과 시 종료"]
+  s14 -. 재시도 -> step 0 .-> s0
+```
+
+#### 시각화 도구가 출력하는 것
+
+위 다이어그램은 code-viz가 출력하는 도형과 동일하다. 시각화 도구가
+`/tmp/code-viz.html`에 쓰는 HTML은 6단계 추상화 + GH Actions 게이트를
+한 페이지에 접어낸 다중 레벨 뷰다. 아래 스크린샷은 그 HTML에서
+렌더링한 L0 아키텍처 개요다 — 브라우저에서 `/dev-kit:code-viz`가
+어떻게 보이는지의 예시:
+
+<img src="docs/screenshots/code-viz/diagram-00.png" alt="/dev-kit:code-viz가 브라우저에서 렌더링한 L0 아키텍처 개요 — 사용자 → 스킬/명령 → 훅 → lib/tools/bin → 외부" width="360" />
+
+> 로컬 재생성: `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (생성기는 `skills/code-viz/SKILL.md`에 내장된 스크립트다). PNG 세트는 스킬 본문, 훅 매트릭스, 워크플로 파일이 바뀔 때마다 갱신된다. 스크린샷을 손으로 수정하지 않는다. README는 L0 PNG 하나만 임베드하고, 스킬별 워크플로는 `mermaid` 블록으로 인라인 렌더하므로 PNG 내보내기가 필요 없다.
 
 ### GitHub Actions 게이트 워크플로
 
 배포된 `review.yml`은 PR → review/security 팬아웃 → 게이트 판정
-시퀀스를 정의한다. code-viz는 이걸 `sequenceDiagram`으로 출력한다
-(시각화 도구와 함께 배포되는 것과 동일한 PNG):
-
-<img src="docs/screenshots/code-viz/diagram-26.png" alt="GH Actions 게이트 워크플로 — PR → review/security 팬아웃 → 게이트 판정" width="900" />
-
-같은 형태는 ```mermaid``` 펜스로 GitHub에서 깨끗하게 렌더링된다:
+시퀀스를 정의한다. code-viz는 이걸 `sequenceDiagram`으로 출력한다;
+펜스된 ```mermaid``` 블록이 GitHub에서 그대로 인라인 렌더된다:
 
 ```mermaid
 sequenceDiagram
