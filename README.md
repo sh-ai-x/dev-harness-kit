@@ -239,37 +239,96 @@ long-running process with discrete phases.
 
 ### Plugin at a glance
 
-The full set of 6 abstraction levels is in `/tmp/code-viz.html` after a
-code-viz run; the figures below are the ones worth a thumbnail — they
-describe the mental model, the planning contract, the code-review lenses,
-and the PR repair state machine.
+`/dev-kit:code-viz` walks the plugin and emits one self-contained HTML with
+multi-level views (architecture → code → skill → hook → tools → external)
+plus a per-skill workflow extraction. The same `mermaid` syntax the
+visualizer emits is reproduced inline below; the visualizer's HTML output
+is the multi-level view that folds them all into one page (see the
+screenshot at the end of this section for an example).
 
 | Diagram | What it shows |
 |---|---|
 | L0 Architecture | Layered topology — user → skills/commands → hooks → lib/tools/bin → external (GH Actions / MCP / CLI). |
 | [`/dev-kit:plan` workflow](docs/skills/plan.md) | The 5-gate pipeline (frame → validate → non-goals → decompose → emit) with the ambiguity-loop back-edge from emit to frame. |
 | [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
-| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `SNAPSHOT` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
+| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
 
-<img src="docs/screenshots/code-viz/diagram-00.png" alt="L0 Architecture overview — skills/commands → hooks → lib/tools/bin → external" width="900" />
+#### `/dev-kit:plan` — 5 gates with ambiguity loop
 
-<img src="docs/screenshots/code-viz/diagram-04.png" alt="/dev-kit:plan — 5 gates with ambiguity-loop back-edge from emit to frame" width="900" />
+```mermaid
+flowchart TD
+  plan([plan])
+  frame["frame<br/>goal + target user + 1-line situation"]
+  validate["validate<br/>evidence (>=3 sources) + value_score + ambiguity score"]
+  non_goals["non-goals<br/>3+ non-goals with rationale + breach response"]
+  decompose["decompose<br/>phases/name/index.json + stepN.md (per-step)"]
+  emit["emit<br/>PRD.md 6-section DoD pass + hand-off"]
+  plan --> frame
+  frame --> validate
+  validate --> non_goals
+  non_goals --> decompose
+  decompose --> emit
+  emit -. ambiguity loop .-> frame
+```
 
-<img src="docs/screenshots/code-viz/diagram-06.png" alt="/dev-kit:security — OWASP A01–A10 parallel fan-out" width="900" />
+#### `/dev-kit:security` — OWASP Top-10 (A01–A10)
 
-<img src="docs/screenshots/code-viz/diagram-11.png" alt="/dev-kit:babysit-pr — 15-step repair loop with retry -> step 1 back-edge" width="900" />
+```mermaid
+flowchart TD
+  sec([security]) --> A01
+  A01["A01 · Broken Access Control<br/>IDOR, path traversal, missing authz"] --> A02
+  A02["A02 · Security Misconfiguration<br/>default creds, debug mode on, verbose errors"] --> A03
+  A03["A03 · Software Supply Chain Failures<br/>vulnerable deps, untrusted CI artifacts"] --> A04
+  A04["A04 · Cryptographic Failures<br/>weak hashes (MD5/SHA1), no TLS, hardcoded keys"] --> A05
+  A05["A05 · Injection<br/>SQL, command, template, XSS, LDAP"] --> A06
+  A06["A06 · Insecure Design<br/>no rate limit, client-side trust, missing threat model"] --> A07
+  A07["A07 · Authentication Failures<br/>weak passwords, missing MFA, credential stuffing"] --> A08
+  A08["A08 · Software/Data Integrity Failures<br/>unsigned updates, unsafe deserialization, CI/CD pipeline attack"] --> A09
+  A09["A09 · Security Logging and Alerting Failures<br/>no audit trail, missing alerts, log injection"] --> A10
+  A10["A10 · Mishandling Exceptional Conditions<br/>bare except, fail-open defaults, panic-driven errors"]
+```
 
-> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots. Each embeds with `<img … width="900" />` so GitHub never crops the 1198-px source PNG.
+#### `/dev-kit:babysit-pr` — 15-step repair loop with retry back-edge
+
+```mermaid
+flowchart TD
+  bp([babysit-pr]) --> s0
+  s0["step 0 · OPT-OUT CHECK<br/>if --operator-is-only-human, defer to bypass"] --> s1
+  s1["step 1 · SNAPSHOT<br/>fetch PR_NUMBER, REVIEW_VERDICT, CHECKS"] --> s2
+  s2["step 2 · TERMINATE<br/>if APPROVED + every check green, exit 0"] --> s3
+  s3["step 3 · CLASSIFY<br/>bucket blockers: CI failing / pending / review"] --> s4
+  s4["step 4 · WAIT<br/>if any check pending and no failures, sleep 30s"] --> s5
+  s5["step 5 · FETCH LOGS<br/>gh run view --log-failed for each failing check in changed"] --> s6
+  s6["step 6 · DIAGNOSE<br/>identify ONE root cause per failing check"] --> s7
+  s7["step 7 · APPLY FIX<br/>modify code; one logical change per iteration"] --> s8
+  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s9
+  s9["step 9 · COMMIT<br/>git add specific paths + conventional commit"] --> s10
+  s10["step 10 · PUSH<br/>git push origin HEAD"] --> s11
+  s11["step 11 · LOG<br/>append one line to .dev-kit/babysit.log"] --> s12
+  s12["step 12 · SLEEP<br/>gh pr checks --watch or sleep 20s"] --> s13
+  s13["step 13 · SAVE STATE<br/>overwrite .dev-kit/babysit-checks.json"] --> s14
+  s14["step 14 · INCREMENT<br/>iter = iter + 1; cap at MAX_ITERS"]
+  s14 -. retry -> step 0 .-> s0
+```
+
+#### What the visualizer ships
+
+The diagrams above are the same shapes `code-viz` emits. The HTML
+output it writes to `/tmp/code-viz.html` is the multi-level view that
+folds all 6 abstraction levels + the GH Actions gate into a single
+self-contained page. The screenshot below is the L0 architecture
+overview rendered from that HTML — what `/dev-kit:code-viz` looks
+like in a browser:
+
+<img src="docs/screenshots/code-viz/diagram-00.png" alt="L0 Architecture overview rendered by /dev-kit:code-viz — user → skills/commands → hooks → lib/tools/bin → external" width="360" />
+
+> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots. The README only embeds the L0 PNG above; the per-skill workflows render inline as `mermaid` blocks and need no PNG export.
 
 ### GH Actions gate workflow
 
 The shipped `review.yml` defines a PR → review/security fan-out → gate verdict
-sequence. code-viz emits this as a `sequenceDiagram` (the same PNG that ships
-with the visualizer):
-
-<img src="docs/screenshots/code-viz/diagram-26.png" alt="GH Actions gate workflow — PR → review/security fan-out → gate verdict" width="900" />
-
-The same shape renders cleanly on GitHub from a fenced ```mermaid``` block:
+sequence. code-viz emits this as a `sequenceDiagram`; it renders inline
+directly from a fenced ```mermaid``` block:
 
 ```mermaid
 sequenceDiagram
