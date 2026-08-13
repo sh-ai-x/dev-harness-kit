@@ -31,9 +31,34 @@ NAMES = {
 
 
 def files(root: Path) -> list[Path]:
-    """Return regular repository files while excluding ignored trees and links."""
-    ignored = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache"}
-    return [p for p in root.rglob("*") if p.is_file() and not p.is_symlink() and not ignored.intersection(p.parts)]
+    """Return regular repository files while excluding ignored trees and links.
+
+    Excludes:
+    - VCS / cache trees (`.git`, `.mypy_cache`, …)
+    - Stale agent worktrees (`.worktrees`, `.claude/worktrees`) — those are
+      scratch directories left by prior agent runs; scoring them inflates
+      the scorecard with false positives (e.g. every stale worktree copies
+      the same fixture / regex literal as the canonical source).
+    - The scorer output artifact itself (`security-metrics.md`) — it
+      contains the report table, which echoes pattern names like
+      `shell=True` and triggers self-matching on re-run.
+    """
+    ignored_dirs = {
+        ".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache",
+        ".worktrees", ".claude",
+    }
+    ignored_files = {"security-metrics.md"}
+    out: list[Path] = []
+    for p in root.rglob("*"):
+        if not p.is_file() or p.is_symlink():
+            continue
+        if p.name in ignored_files:
+            continue
+        parts = set(p.relative_to(root).parts)
+        if ignored_dirs.intersection(parts):
+            continue
+        out.append(p)
+    return out
 
 
 def text_files(root: Path) -> list[tuple[Path, str]]:
@@ -48,24 +73,49 @@ def text_files(root: Path) -> list[tuple[Path, str]]:
 
 
 def assessed_files(root: Path) -> list[tuple[Path, str]]:
-    """Return shipped implementation/config files, not examples or tests."""
-    excluded = {"docs", "tests", "eval", "README.md", "README.ko.md"}
-    return [(path, text) for path, text in text_files(root)
-            if not any(part in excluded for part in path.relative_to(root).parts)]
+    """Return shipped implementation/config files, not examples, tests, or fixtures."""
+    excluded_components = {"docs", "tests", "eval"}
+    excluded_filenames = {"README.md", "README.ko.md"}
+    # Path-prefix exclusions — matched against the repo-relative POSIX
+    # path, so multi-segment dirs like `skills/review/fixtures` work
+    # without flattening every `skills/*` file into an exclusion.
+    excluded_prefixes = (
+        "skills/review/fixtures/",
+        "skills/security-metrics/",
+    )
+    out: list[tuple[Path, str]] = []
+    for path, text in text_files(root):
+        rel = path.relative_to(root)
+        parts = rel.parts
+        if any(p in excluded_components for p in parts):
+            continue
+        if rel.name in excluded_filenames:
+            continue
+        rel_posix = rel.as_posix()
+        if any(rel_posix.startswith(prefix) for prefix in excluded_prefixes):
+            continue
+        out.append((path, text))
+    return out
 
 
 def scan(root: Path) -> list[Category]:
     """Score repository contents using the fixed OWASP-oriented rules."""
     data = assessed_files(root)
+    all_files = files(root)
     all_text = "\n".join(text for _, text in data)
     result = [Category(code, name) for code, name in NAMES.items()]
     by = {item.name: item for item in result}
 
     if not (root / "SECURITY.md").exists():
         by["Security Misconfiguration"].deduct(10, "SECURITY.md is missing")
-    if not any(path.name.lower().startswith("license") for path, _ in data):
+    # Look at all repository files (not just extensioned text files),
+    # so an extensionless `LICENSE` file is detected.
+    if not any(path.name.lower().startswith("license") for path in all_files):
         by["Security Misconfiguration"].deduct(5, "LICENSE is missing")
-    if re.search(r"(?i)(password|secret|api[_-]?key|token)\s*[:=]\s*[\"'][^\"']{8,}", all_text):
+    # Match a hardcoded credential-shaped string. Skip values that start with
+    # `$` — those are shell variable references (`$VAR`, `${VAR-…}`), not
+    # literal secrets. Pattern: `<name>[:=] ['"] <8+ chars not starting with $> ['"]`.
+    if re.search(r"(?i)(password|secret|api[_-]?key|token)\s*[:=]\s*[\"'](?!\$)[^\"']{8,}", all_text):
         by["Security Misconfiguration"].deduct(20, "possible hardcoded credential pattern")
     if re.search(r"(?i)\b(md5|sha1)\s*\(", all_text):
         by["Cryptographic Failures"].deduct(20, "weak hash call detected")
@@ -75,7 +125,11 @@ def scan(root: Path) -> list[Category]:
         by["Software/Data Integrity Failures"].deduct(25, "network content piped to a shell")
     if re.search(r"(?i)\bshell\s*=\s*True\b", all_text):
         by["Injection"].deduct(20, "shell=True detected")
-    if re.search(r"(?i)\bSELECT\b.*\{[^}]+\}", all_text):
+    # Match only SQL-shaped interpolation: SELECT ... FROM ... WHERE/INTO ... {var}.
+    # `jq`'s `select(... | contains(...)) | {body: .body}` queries look
+    # superficially similar but lack the FROM keyword, so they're filtered
+    # out by the FROM requirement below.
+    if re.search(r"(?i)\bSELECT\b[^\n]*\bFROM\b[^\n]*\{[^}]+\}", all_text):
         by["Injection"].deduct(20, "SQL-like interpolated query detected")
     if re.search(r"(?m)^\s*except\s*:\s*(?:pass)?\s*$", all_text):
         by["Mishandling Exceptional Conditions"].deduct(15, "bare exception handler detected")
@@ -87,13 +141,13 @@ def scan(root: Path) -> list[Category]:
         by["Insecure Design"].deduct(10, "no validation, invariant, or threat-model marker detected")
     if not re.search(r"(?i)\b(auth|authentication|session|oauth|oidc|mfa|password)\b", all_text):
         by["Authentication Failures"].deduct(10, "no authentication or session-control marker detected")
-    if not any(path.name in {"requirements.lock", "uv.lock", "poetry.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"} for path, _ in data):
+    if not any(path.name in {"requirements.lock", "uv.lock", "poetry.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"} for path in all_files):
         by["Software Supply Chain Failures"].deduct(10, "no recognized dependency lockfile")
     if not re.search(r"(?i)\b(timeout|deadline)\b", all_text):
         by["Mishandling Exceptional Conditions"].deduct(10, "no timeout/deadline marker detected")
     if not re.search(r"(?i)\b(log|logger|logging|audit)\b", all_text):
         by["Security Logging and Alerting Failures"].deduct(15, "no logging/audit marker detected")
-    if not any(path.name == "dependabot.yml" or ".github/dependabot" in path.as_posix() for path, _ in data):
+    if not any(path.name == "dependabot.yml" or ".github/dependabot" in path.as_posix() for path in all_files):
         by["Software Supply Chain Failures"].deduct(5, "Dependabot configuration is missing")
     return result
 
