@@ -65,6 +65,15 @@ def _agent_command(worktree: Path, prompt: str) -> list[str]:
 
     Claude remains the default for compatibility. Codex is selected with
     ``DEV_KIT_BUILD_AGENT=codex`` and receives the same worktree + prompt.
+
+    Related env flags (issue #647):
+      - ``DEV_KIT_BUILD_AGENT`` selects the runner for both this step
+        agent AND the TDD scope judge (``lib.tdd_scope_judge``).
+      - ``DEV_KIT_SKIP_TDD=1`` is an escape hatch that bypasses the
+        TDD scope judge entirely (``tdd_required=False``). Use only
+        when ``claude -p`` is unresponsive and ``codex exec`` is
+        unavailable — may produce lower-quality builds; not for
+        production use.
     """
     agent = os.environ.get("DEV_KIT_BUILD_AGENT", "claude").strip().lower()
     if agent == "claude":
