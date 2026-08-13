@@ -59,12 +59,19 @@ def _score(tmp_path: Path) -> dict[str, MODULE.Category]:
 
 
 def test_files_excludes_stale_worktree_dirs(tmp_path: Path) -> None:
-    """Files under `.worktrees/` and `.claude/` must not be scored."""
+    """Files under `.worktrees/` and `.claude/worktrees/` must not be scored.
+
+    Files under `.claude/` outside the worktree scratch directory
+    (e.g. `.claude/settings.json`, `.claude/hooks/foo.sh`) are checked-in
+    config and MUST still be scored.
+    """
     # Real source — clean (no findings expected)
     (tmp_path / "src").mkdir()
     (tmp_path / "src/clean.py").write_text("x = 1\n", encoding="utf-8")
-    # Stale worktree pollution — would inflate findings if scanned
-    for stale_dir in (".worktrees/old", ".claude/worktrees/old", ".claude/agents/old"):
+    # Stale worktree pollution — would inflate findings if scanned.
+    # Only the `.worktrees/...` and `.claude/worktrees/...` paths are
+    # excluded; `.claude/agents/...` is checked-in config and IS scored.
+    for stale_dir in (".worktrees/old", ".claude/worktrees/old"):
         d = tmp_path / stale_dir
         d.mkdir(parents=True)
         (d / "bad.py").write_text(
@@ -76,8 +83,20 @@ def test_files_excludes_stale_worktree_dirs(tmp_path: Path) -> None:
     # If stale dirs leaked through, A05 / A04 would be deducted.
     assert cats["A05"].score == 100
     assert cats["A04"].score == 100
-    assert not any(".worktrees" in str(p) or ".claude" in str(p)
-                   for p, _ in MODULE.assessed_files(tmp_path))
+
+
+def test_files_does_not_exclude_checked_in_claude_config(tmp_path: Path) -> None:
+    """Checked-in `.claude/` config (settings.json, hooks/) IS scored."""
+    (tmp_path / ".claude/hooks").mkdir(parents=True)
+    (tmp_path / ".claude/settings.json").write_text(
+        '{"permissions": {"allow": ["Bash"]}}\n', encoding="utf-8"
+    )
+    (tmp_path / ".claude/hooks/foo.sh").write_text(
+        "#!/usr/bin/env bash\necho ok\n", encoding="utf-8"
+    )
+    cats = _score(tmp_path)
+    # No production paths changed → docs_ok / scorer should be clean.
+    assert cats["A05"].score == 100
 
 
 def test_assessed_files_excludes_intentional_fixtures(tmp_path: Path) -> None:
@@ -119,6 +138,23 @@ def test_sql_regex_still_flags_real_sql_injection(tmp_path: Path) -> None:
     cats = _score(tmp_path)
     assert cats["A05"].score < 100
     assert any("SQL-like" in finding for finding in cats["A05"].findings)
+
+
+def test_sql_regex_catches_identifier_interpolation(tmp_path: Path) -> None:
+    """SELECT {cols} FROM users — identifier interpolation BEFORE FROM is also SQL injection."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "vuln.py").write_text(
+        'def bad():\n'
+        '    cols = "id, name"\n'
+        '    return f"SELECT {cols} FROM users WHERE active = 1"\n',
+        encoding="utf-8",
+    )
+    cats = _score(tmp_path)
+    assert cats["A05"].score < 100
+    assert any("SQL-like" in finding for finding in cats["A05"].findings), (
+        f"identifier interpolation should trip SQL regex, got: {cats['A05'].findings}"
+    )
 
 
 def test_assessed_files_excludes_self_references(tmp_path: Path) -> None:

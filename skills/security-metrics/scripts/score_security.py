@@ -34,19 +34,23 @@ def files(root: Path) -> list[Path]:
     """Return regular repository files while excluding ignored trees and links.
 
     Excludes:
-    - VCS / cache trees (`.git`, `.mypy_cache`, …)
-    - Stale agent worktrees (`.worktrees`, `.claude/worktrees`) — those are
-      scratch directories left by prior agent runs; scoring them inflates
-      the scorecard with false positives (e.g. every stale worktree copies
-      the same fixture / regex literal as the canonical source).
+    - VCS / cache trees (`.git`, `.mypy_cache`, …).
+    - Stale agent worktrees at the repo root (`.worktrees/`).
+    - Stale agent worktrees nested under `.claude/worktrees/`. We do NOT
+      exclude all of `.claude/` because that tree also holds checked-in
+      config (settings.json, hooks/, commands/) that should be scored;
+      only the scratch worktrees nested inside it are excluded.
     - The scorer output artifact itself (`security-metrics.md`) — it
       contains the report table, which echoes pattern names like
       `shell=True` and triggers self-matching on re-run.
     """
     ignored_dirs = {
         ".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache",
-        ".worktrees", ".claude",
+        ".worktrees",
     }
+    ignored_dir_prefixes = (
+        ".claude/worktrees/",  # stale agent scratch under .claude/
+    )
     ignored_files = {"security-metrics.md"}
     out: list[Path] = []
     for p in root.rglob("*"):
@@ -54,8 +58,12 @@ def files(root: Path) -> list[Path]:
             continue
         if p.name in ignored_files:
             continue
-        parts = set(p.relative_to(root).parts)
+        rel = p.relative_to(root)
+        parts = set(rel.parts)
         if ignored_dirs.intersection(parts):
+            continue
+        rel_posix = rel.as_posix()
+        if any(rel_posix.startswith(prefix) for prefix in ignored_dir_prefixes):
             continue
         out.append(p)
     return out
@@ -125,11 +133,18 @@ def scan(root: Path) -> list[Category]:
         by["Software/Data Integrity Failures"].deduct(25, "network content piped to a shell")
     if re.search(r"(?i)\bshell\s*=\s*True\b", all_text):
         by["Injection"].deduct(20, "shell=True detected")
-    # Match only SQL-shaped interpolation: SELECT ... FROM ... WHERE/INTO ... {var}.
+    # Match SQL-shaped interpolation: SELECT ... FROM ... {var} (anywhere in
+    # the statement, before or after FROM). Catches both:
+    #   - `SELECT * FROM {table} WHERE name = '{val}'`
+    #   - `SELECT {cols} FROM users WHERE id = {id}`
     # `jq`'s `select(... | contains(...)) | {body: .body}` queries look
     # superficially similar but lack the FROM keyword, so they're filtered
-    # out by the FROM requirement below.
-    if re.search(r"(?i)\bSELECT\b[^\n]*\bFROM\b[^\n]*\{[^}]+\}", all_text):
+    # out by the FROM requirement.
+    if re.search(
+        r"(?i)\bSELECT\b[^\n]*\{[^}]+\}[^\n]*\bFROM\b"
+        r"|\bSELECT\b[^\n]*\bFROM\b[^\n]*\{[^}]+\}",
+        all_text,
+    ):
         by["Injection"].deduct(20, "SQL-like interpolated query detected")
     if re.search(r"(?m)^\s*except\s*:\s*(?:pass)?\s*$", all_text):
         by["Mishandling Exceptional Conditions"].deduct(15, "bare exception handler detected")
