@@ -50,53 +50,52 @@ class TestHooksStatus(unittest.TestCase):
             "Codex and Claude hook events must stay synchronized",
         )
 
-    def test_claude_manifest_registers_shared_hook_definition(self):
-        """Regression test for issue #616.
+    def test_claude_manifest_does_not_duplicate_the_auto_loaded_hooks_file(self):
+        """Regression test for the '/plugin' duplicate-hooks-file load error.
 
-        Without a `hooks` field in `.claude-plugin/plugin.json`, the runtime
-        never auto-loads `hooks/hooks.json` and every hook declared there
+        Claude Code's plugin loader auto-loads `hooks/hooks.json` by
+        convention; `manifest.hooks` should only reference *additional*
+        hook files. Declaring the standard path again in
+        `.claude-plugin/plugin.json` collides with the auto-load and the
+        CLI refuses to load the plugin: "Duplicate hooks file detected:
+        ./hooks/hooks.json resolves to already-loaded file ...".
+
+        Issue #616 originally added the `hooks` key because the auto-load
+        convention did not exist yet and every hook in `hooks/hooks.json`
         (PreToolUse / UserPromptSubmit / SessionStart / PostToolUse / Stop)
-        is dead code regardless of how well-formed the JSON is. The Claude
-        plugin manifest has historically shipped only `commands` + `skills`,
-        which leaves the four linear-* hooks declared in `hooks/hooks.json`
-        unable to fire.
-
-        Mirrors the Codex counterpart above: asserts the manifest declares
-        a `hooks` field, the path resolves to an existing file, and that
-        file parses as valid hook config with at least one event matcher.
+        was dead code without it. The runtime has since added auto-load,
+        so the explicit key must come back out, not stay in — this test
+        asserts the manifest stays free of it while `hooks/hooks.json`
+        remains present and populated (mirrors the Codex counterpart's
+        content checks, minus the manifest-registration half which no
+        longer applies to Claude).
         """
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-        self.assertIn(
+        self.assertNotIn(
             "hooks", manifest,
-            "Claude plugin manifest must declare a 'hooks' field so the "
-            "runtime auto-loads hooks/hooks.json (issue #616).",
+            "Claude plugin manifest must NOT declare a 'hooks' field — the "
+            "runtime auto-loads hooks/hooks.json by convention, and an "
+            "explicit reference to the same file collides ('Duplicate "
+            "hooks file detected').",
         )
-        claude_hooks_rel = manifest["hooks"]
-        self.assertIsInstance(
-            claude_hooks_rel, str,
-            f"Claude plugin 'hooks' must be a string path, got "
-            f"{type(claude_hooks_rel).__name__}",
-        )
-        # Paths in both manifests resolve relative to the repo root
-        # (existing convention: commands/skills are also "./<name>/" at root).
-        claude_hooks = ROOT / claude_hooks_rel
+        # Paths resolve relative to the repo root (existing convention:
+        # commands/skills are also "./<name>/" at root).
+        claude_hooks = ROOT / "hooks" / "hooks.json"
         self.assertTrue(
             claude_hooks.is_file(),
             f"missing Claude plugin hooks: {claude_hooks} "
-            f"(declared in .claude-plugin/plugin.json:hooks)",
+            f"(expected at the conventional auto-load path)",
         )
         config = json.loads(claude_hooks.read_text(encoding="utf-8"))
         self.assertIn(
             "hooks", config,
             f"{claude_hooks} must contain a top-level 'hooks' object",
         )
-        # Sanity: at least one event matcher was wired. The bug left the
-        # whole file unread, so any non-empty event set guards against
-        # the same gap appearing under a different name later.
+        # Sanity: at least one event matcher is wired, so an empty file
+        # doesn't silently pass this check.
         self.assertTrue(
             config["hooks"],
-            f"{claude_hooks} declares no event matchers; the manifest "
-            f"field fix would be a no-op until hooks/hooks.json is populated.",
+            f"{claude_hooks} declares no event matchers.",
         )
 
     def test_shared_definition_keeps_the_complete_claude_hook_inventory(self):
