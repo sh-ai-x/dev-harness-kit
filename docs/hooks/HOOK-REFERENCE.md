@@ -109,7 +109,10 @@ UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
 - `worktree-auto-cut.sh` runs `git fetch origin main` + `git worktree add`,
   both of which can exceed 30s on slow origin or large HEAD.
 - `tdd-scope-judge.sh` runs an LLM judge (`lib.tdd_scope_judge`) as
-  fallback for path-rule misses.
+  fallback for path-rule misses. The judge honors
+  `DEV_KIT_BUILD_AGENT` (default `claude`; `codex` routes through
+  `codex exec`) and `DEV_KIT_SKIP_TDD=1` (escape hatch that bypasses
+  the judge entirely — issue #647).
 
 Both hooks are advisory (exit 0 on failure per the script-level
 contract), so a timeout silently discards the nudge rather than
