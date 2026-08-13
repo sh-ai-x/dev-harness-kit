@@ -378,19 +378,11 @@ jobs:
             # (that case now flows through the PARSE_FAILED arm above).
             case "${{ job.status }}" in
               cancelled|failure)
-                # Issue #638 fix: a cancelled or failed upstream agent
-                # MUST be treated as agent_ran=false so the severity
-                # gate's "AI agent was skipped" hard-fail branch fires.
-                # The old behavior (agent_ran=true, verdict=Approve) let
-                # a timeout / rate-limit / manual cancellation reach the
-                # gate without an AI verdict and emit a synthetic Approve,
-                # letting PRs pass CI on a backend where the agent never
-                # ran. Do NOT default-Approve on a missed upstream run.
-                # The empty-file `*)` arm below keeps its existing
-                # tolerance (file genuinely missing == "agent didn't run
-                # at all, tolerate it"); the cancelled|failure arm is the
-                # corrected behavior (the agent ran but didn't complete;
-                # do NOT tolerate it).
+                # Issue #638: cancelled/failed upstream agent is NOT
+                # default-Approve. agent_ran=false routes through the
+                # gate's "AI agent was skipped" hard-fail branch (gate
+                # L812-861); the empty-file `*)` arm below keeps its
+                # existing tolerance (file genuinely missing).
                 echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); gate will hard-fail via agent_ran=false"
                 verdict=""
                 verdict_source="default-no-verdict-job-${{ job.status }}"

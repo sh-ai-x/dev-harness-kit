@@ -290,17 +290,23 @@ class TestTemplateGateTolerance(unittest.TestCase):
 
 
 class TestTemplateJobStatusTolerance(unittest.TestCase):
-    """Pin issue #253 — backport boilerplate-web PR #20 contract on the
-    no-file branch of review + security extract steps:
+    """Pin the post-#638 contract on the no-file branch of review + security
+    extract steps. The cancelled|failure arm MUST NOT default-Approve —
+    routing through `agent_ran="false"` causes the gate's "AI agent was
+    skipped" hard-fail branch to fire (gate L812-861). The empty-file
+    default arm keeps the lenient tolerance (file genuinely missing ==
+    "agent didn't run at all, tolerate it"):
 
       case "${{ job.status }}" in
-        cancelled|failure) verdict="Approve"  verdict_source="default-approve-job-${{ job.status }}"  agent_ran="true"
-        *)                 verdict="Approve"  verdict_source="default-approve-no-file"              agent_ran="false"
+        cancelled|failure) verdict=""      verdict_source="default-no-verdict-job-${{ job.status }}"  agent_ran="false"
+        *)                 verdict="Approve" verdict_source="default-approve-no-file"               agent_ran="false"
       esac
 
-    Pre-#253 the no-file branch is a flat `agent_ran="false"` which makes
-    timeouts (job.status=cancelled) trigger the gate's hard-fail-on-skip
-    rule — boilerplate-web PR #18 failure mode.
+    The pre-#638 boilerplate-web PR #20 contract (cancelled|failure →
+    verdict="Approve", agent_ran="true") is intentionally inverted: that
+    tolerance let timeouts / rate-limits / manual cancellations reach the
+    gate without an AI verdict and emit a synthetic Approve, letting PRs
+    pass CI on a backend where the agent never ran.
     """
 
     def setUp(self):
@@ -346,9 +352,9 @@ class TestTemplateJobStatusTolerance(unittest.TestCase):
         )
         for arm, label, expect in (
             (transient, "cancelled|failure", {
-                "verdict": "Approve",
-                "verdict_source": "default-approve-job-${{ job.status }}",
-                "agent_ran": "true",
+                "verdict": "",
+                "verdict_source": "default-no-verdict-job-${{ job.status }}",
+                "agent_ran": "false",
             }),
             (default, "*) default", {
                 "verdict": "Approve",
@@ -359,7 +365,7 @@ class TestTemplateJobStatusTolerance(unittest.TestCase):
             for key, val in expect.items():
                 self.assertIn(
                     f'{key}="{val}"', arm,
-                    f"{job}: {label} arm missing {key}=\"{val}\" (issue #253)",
+                    f"{job}: {label} arm missing {key}=\"{val}\" (issue #638)",
                 )
 
     def test_review_job_status_tolerance(self):
