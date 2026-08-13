@@ -973,11 +973,34 @@ with sync_playwright() as p:
     page = b.new_page(viewport={{"width":1400,"height":900}})
     page.goto("file://{out}", wait_until="networkidle", timeout=20000)
     page.wait_for_timeout(1500)
-    for i,el in enumerate(page.query_selector_all("pre.mermaid")):
-        el.scroll_into_view_if_needed()
-        page.wait_for_timeout(150)
+    # Hide the sticky nav so it doesn't overlap the SVG bbox (otherwise the
+    # top of the screenshot ends up rendered behind the nav, leaving the nav
+    # text visible inside the PNG), and hide the pre.mermaid::after "click to
+    # expand" badge that the user only sees on the live page (the badge is
+    # painted on top of the SVG inside the same bbox, so the SVG screenshot
+    # would otherwise capture it).
+    page.add_style_tag(content=".nav{{display:none!important}}pre.mermaid::after{{display:none!important}}")
+    for i, el in enumerate(page.query_selector_all("pre.mermaid")):
+        # The live page caps pre.mermaid at max-height:72vh + overflow:hidden so
+        # long skill-workflow diagrams don't push the page to absurd lengths on
+        # the live site. The README embed wants the FULL diagram, so we lift
+        # the cap on each element before capturing AND we screenshot the inner
+        # <svg> (whose viewBox is the natural diagram extent) rather than the
+        # pre.mermaid wrapper bbox. The svg.screenshot() path also avoids the
+        # "click to expand" ::after badge that the pre.mermaid wrapper would
+        # otherwise include.
+        page.evaluate(
+            "(el) => {{ el.style.maxHeight = 'none'; el.style.overflow = 'visible'; }}",
+            el,
+        )
+        page.wait_for_timeout(80)
+        svg = el.query_selector("svg")
+        if svg is None:
+            page.wait_for_timeout(200)
+            svg = el.query_selector("svg")
+        page.wait_for_timeout(60)
         out_png = "{screenshots}/diagram-{{:02d}}.png".format(i)
-        el.screenshot(path=out_png, omit_background=False)
+        svg.screenshot(path=out_png, omit_background=False)
         print("png=" + out_png)
     b.close()
 '''], capture_output=True, text=True, timeout=120)
