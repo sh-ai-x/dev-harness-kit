@@ -124,6 +124,28 @@ python3 -m lib.maintenance_gate \
   --docs-reason "ok"
 ```
 
+## Fork PRs
+
+`maintenance_judge` (and `review.yml`'s `review`/`security`) skip
+themselves on the `pull_request` trigger when the PR's head repo is a
+fork — GitHub caps `GITHUB_TOKEN` to read-only and withholds OIDC
+tokens for fork-origin `pull_request` runs unconditionally, regardless
+of the workflow's declared `permissions:`, so running the judge there
+would just fail on the OIDC fetch step. `gate` skips its
+"missing-verdict defaults to Approve" fallback for the same PRs too, so
+a fork PR can't silently reach an Approve-defaulted gate without a
+judge ever having run.
+
+`.github/workflows/fork-pr-review.yml` is the escalation path: on
+`pull_request_target` (workflow file read from trusted `main`, so safe
+to grant write permissions) for fork PRs only, gated behind the
+`fork-pr-review` GitHub Environment (required reviewer = repo owner).
+On approval it dispatches `maintenance.yml` + `review.yml` via
+`workflow_dispatch` — not a fork-origin event, so that run reaches
+`maintenance_judge`/`gate` with full normal permissions. Same-repo PRs
+(including the owner's own) are unaffected; they keep running on
+`pull_request` fully automatically.
+
 ## Related
 
 - `eval/prompts/judge-code-sanity.md` — the 20-checkbox rubric (the
@@ -139,4 +161,7 @@ python3 -m lib.maintenance_gate \
 - `.github/workflows/review.yml` — the sibling security/correctness
   gate. Both gates share the verdict-extraction pattern so PR
   comments look identical to operators.
+- `.github/workflows/fork-pr-review.yml` — maintainer-approval gate
+  that dispatches this workflow (+ `review.yml`) for fork PRs. See
+  "Fork PRs" above.
 - `docs/stages/STAGES.md` §7 — the pipeline-stage description.

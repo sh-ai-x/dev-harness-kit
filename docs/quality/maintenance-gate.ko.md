@@ -118,6 +118,27 @@ python3 -m lib.maintenance_gate \
   --docs-reason "ok"
 ```
 
+## 포크 PR
+
+`maintenance_judge`(및 `review.yml`의 `review`/`security`)는 PR의 head
+repo가 포크일 때 `pull_request` 트리거에서 스스로 스킵한다 — GitHub는
+포크에서 온 `pull_request` 실행에 대해 워크플로우가 선언한
+`permissions:`와 무관하게 `GITHUB_TOKEN`을 read-only로 제한하고 OIDC
+토큰 발급을 거부하므로, judge를 그대로 실행하면 OIDC 토큰 요청
+단계에서 실패한다. `gate`도 해당 PR에 대해서는 "판정 누락 시 Approve로
+기본값 처리"하는 폴백을 스킵해, judge가 한 번도 실행되지 않은 채로
+Approve로 기본 처리된 게이트를 통과하는 일이 없도록 한다.
+
+`.github/workflows/fork-pr-review.yml`이 이 경우의 에스컬레이션
+경로다. `pull_request_target`(신뢰된 `main`에서 워크플로우 파일을
+읽으므로 write 권한을 부여해도 안전) 트리거로, 포크 PR에 대해서만
+`fork-pr-review` GitHub Environment(필수 리뷰어 = 저장소 오너) 뒤에
+게이트된다. 승인되면 `maintenance.yml` + `review.yml`을
+`workflow_dispatch`로 디스패치한다 — 포크에서 온 이벤트가 아니므로 그
+실행은 `maintenance_judge`/`gate`에 정상 권한으로 도달한다. 같은
+저장소 PR(오너 본인 것 포함)은 영향받지 않고 `pull_request`에서
+그대로 완전 자동으로 실행된다.
+
 ## 관련
 
 - `eval/prompts/judge-code-sanity.md` — 20-체크박스 루브릭(maintenance
@@ -131,4 +152,7 @@ python3 -m lib.maintenance_gate \
   회귀 픽스처(가치 정렬, 과도한 엔지니어링, 범위 드리프트).
 - `.github/workflows/review.yml` — 형제 보안/정확성 게이트. 두 게이트가
   판정-추출 패턴을 공유해 운영자에게 PR 코멘트가 동일하게 보임.
+- `.github/workflows/fork-pr-review.yml` — 포크 PR에 대해 이 워크플로우
+  (+ `review.yml`)를 디스패치하는 메인테이너 승인 게이트. 위 "포크 PR"
+  참고.
 - `docs/stages/STAGES.md` §7 — 파이프라인 단계 설명.
