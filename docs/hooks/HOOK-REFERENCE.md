@@ -112,7 +112,11 @@ UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
   fallback for path-rule misses. The judge honors
   `DEV_KIT_BUILD_AGENT` (default `claude`; `codex` routes through
   `codex exec`) and `DEV_KIT_SKIP_TDD=1` (escape hatch that bypasses
-  the judge entirely — issue #647).
+  the judge entirely — issue #647). It resolves its state-file root via
+  `${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel)}` — the same
+  fallback `tdd-guard.sh` uses to read `.tdd-scope.json` — so the two
+  hooks agree on where state lives even when `DEV_KIT_TDD_ROOT` points
+  outside the git toplevel.
 
 Both hooks are advisory (exit 0 on failure per the script-level
 contract), so a timeout silently discards the nudge rather than

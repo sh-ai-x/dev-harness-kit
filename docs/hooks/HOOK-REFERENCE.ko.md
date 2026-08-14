@@ -101,7 +101,11 @@ UserPromptSubmit 훅(특히 `tdd-scope-judge.sh`와 `worktree-auto-cut.sh`)은
 - `worktree-auto-cut.sh`는 `git fetch origin main` + `git worktree add`를
   실행하며, 둘 다 느린 origin이나 큰 HEAD에서 30초를 초과할 수 있다.
 - `tdd-scope-judge.sh`는 path-규칙 미스 폴백으로 LLM judge
-  (`lib.tdd_scope_judge`)를 실행한다.
+  (`lib.tdd_scope_judge`)를 실행한다. state 파일 root는
+  `${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel)}`로 결정되며,
+  이는 `tdd-guard.sh`가 `.tdd-scope.json`을 읽을 때 쓰는 것과 동일한
+  폴백이다 — `DEV_KIT_TDD_ROOT`가 git toplevel 밖을 가리켜도 두 훅이
+  같은 state 경로에 합의하도록 한다.
 
 두 훅 모두 advisory이므로(스크립트 레벨 계약에 따라 실패 시 exit 0)
 타임아웃은 정확성을 깨는 대신 알림을 조용히 버린다 — 그러나 사용자가
