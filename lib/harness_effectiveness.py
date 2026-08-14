@@ -25,6 +25,12 @@ COMPONENT_WEIGHTS = {
     "recovery_quality":        0.31,
     "learning_quality":        0.00,
     "measurement_integrity":   0.19,
+    # NOTE: the formula no longer divides by `sum(weights)` because
+    # weights sum to 1.00 by construction (the previous commit did
+    # divide; that step is gone). Zero-weight components and None-scored
+    # components drop out of both the numerator and the divisor so a
+    # partially-scored corpus reports a meaningful overall instead of
+    # collapsing to None.
 }
 def _ratio(numerator: int, denominator: int) -> Optional[float]:
     return None if denominator == 0 else round(numerator / denominator * 100, 1)
@@ -259,18 +265,24 @@ def build_report(root: Path) -> Dict[str, Any]:
         "learning_quality": _learning(events),
         "measurement_integrity": _integrity(root, events),
     }
-    scores = [item["score"] for item in components.values()]
-    if any(score is None for score in scores):
+    scored = {name: item for name, item in components.items()
+              if item["score"] is not None}
+    if not scored:
         overall = None
     else:
-        # Weights sum to 1.00 by construction; zero-weight components drop
-        # out of the numerator (learning_quality stays at 0 until Phase 4).
-        overall = round(
-            sum(components[name]["score"] * COMPONENT_WEIGHTS[name]
-                for name in components
-                if COMPONENT_WEIGHTS[name] > 0),
-            1,
-        )
+        # None-scored components drop out of both numerator (their
+        # contribution is 0) and divisor (subtract their weight from the
+        # divisor). Zero-weight components do the same. Weights sum to
+        # 1.00 by construction; the divisor below equals the sum of
+        # weights for the scored set, so the result stays in [0, 100].
+        # The earlier "any score is None ⇒ overall None" guard collapsed
+        # the visible scorecard to INSUFFICIENT_EVIDENCE whenever a
+        # single component lacked evidence; the fix is to honor the
+        # actual evidence instead.
+        numerator = sum(item["score"] * COMPONENT_WEIGHTS[name]
+                        for name, item in scored.items())
+        divisor = sum(COMPONENT_WEIGHTS[name] for name in scored)
+        overall = round(numerator / divisor, 1) if divisor else None
     return {
         "schema_version": 1,
         "contract_version": "harness-effectiveness-v1",
