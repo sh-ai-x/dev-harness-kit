@@ -124,9 +124,22 @@ jobs:
     # today buys nothing but CI minutes — the human-gate hand-off is
     # unaffected either way. `workflow_dispatch` always runs regardless
     # (explicit manual override intent).
+    #
+    # Also skip on the `pull_request` trigger when the PR's head repo is a
+    # fork (`head.repo.full_name != github.repository`): GitHub caps
+    # GITHUB_TOKEN to read-only and never issues an OIDC token for
+    # `pull_request` runs originating from a fork, regardless of the
+    # `permissions:` block below — the job would just fail loudly on the
+    # OIDC fetch step. Fork PRs are reviewed via `fork-pr-review.yml`
+    # instead, which requires maintainer approval (GitHub Environment
+    # `fork-pr-review`) before dispatching THIS workflow via
+    # `workflow_dispatch` — that dispatch is not a fork-origin `pull_request`
+    # event, so it gets full permissions and reaches this same job normally.
     if: |
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
-      (github.event_name == 'workflow_dispatch' || needs.scope.outputs.touches_prod == 'true')
+      (github.event_name == 'workflow_dispatch' ||
+        (needs.scope.outputs.touches_prod == 'true' &&
+         github.event.pull_request.head.repo.full_name == github.repository))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -302,10 +315,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     needs: scope
-    # Skip on bump-PRs and docs/tests-only PRs — same rationale as `review:` above.
+    # Skip on bump-PRs, docs/tests-only PRs, and fork PRs on the
+    # `pull_request` trigger — same rationale as `review:` above.
     if: |
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
-      (github.event_name == 'workflow_dispatch' || needs.scope.outputs.touches_prod == 'true')
+      (github.event_name == 'workflow_dispatch' ||
+        (needs.scope.outputs.touches_prod == 'true' &&
+         github.event.pull_request.head.repo.full_name == github.repository))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -475,9 +491,18 @@ jobs:
     # logical place for bump PRs. The `if:` is wrapped in `always() && ...`
     # so the gate still runs on partial upstream failures/skips for
     # non-bump PRs.
+    #
+    # Also skip on the `pull_request` trigger for fork PRs (same condition
+    # as `review`/`security` above) — running `gate` here would otherwise
+    # default the missing (intentionally-skipped, not failed) verdicts to
+    # Approve and silently bypass review for every fork PR. The
+    # `fork-pr-review.yml` maintainer-approval gate dispatches a
+    # `workflow_dispatch` run of THIS workflow instead, which reaches this
+    # same `gate` job with real verdicts from `needs.review`/`needs.security`.
     if: |
       always() &&
-      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
+      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
     # The auto-approve step casts `gh pr review --approve`, which
     # writes to the PR. The default GITHUB_TOKEN is read-only on most
     # operations; grant pull-requests: write so the auto-approve
