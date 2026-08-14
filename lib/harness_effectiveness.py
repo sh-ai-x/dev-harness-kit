@@ -14,12 +14,26 @@ from typing import Any, Dict, Iterable, List, Optional
 from lib.trace_log import EVENT_RECORD_REQUIRED_FIELDS, read_events, validate_event
 
 COMPONENT_WEIGHTS = {
-    "prevention_quality": 0.20,
-    "first_pass_quality": 0.20,
-    "recovery_quality": 0.25,
-    "learning_quality": 0.20,
-    "measurement_integrity": 0.15,
+    # `learning_quality` is intentionally zero until a Phase-4 shadow-mode
+    # control cohort exists. The component is still rendered (visibility)
+    # but contributes nothing to `overall_score`. The remaining 1.00 is
+    # distributed proportionally to the four shippable components based on
+    # their pre-rebalance weights (0.20 / 0.20 / 0.25 / 0.15 → 0.80),
+    # scaled by 1/0.80 so they sum to 1.00.
+    "prevention_quality":      0.25,
+    "first_pass_quality":      0.25,
+    "recovery_quality":        0.31,
+    "learning_quality":        0.00,
+    "measurement_integrity":   0.19,
+    # NOTE: the formula no longer divides by `sum(weights)` because
+    # weights sum to 1.00 by construction (the previous commit did
+    # divide; that step is gone). Zero-weight components and None-scored
+    # components drop out of both the numerator and the divisor so a
+    # partially-scored corpus reports a meaningful overall instead of
+    # collapsing to None.
 }
+
+
 def _ratio(numerator: int, denominator: int) -> Optional[float]:
     return None if denominator == 0 else round(numerator / denominator * 100, 1)
 
@@ -253,8 +267,24 @@ def build_report(root: Path) -> Dict[str, Any]:
         "learning_quality": _learning(events),
         "measurement_integrity": _integrity(root, events),
     }
-    scores = [item["score"] for item in components.values()]
-    overall = None if any(score is None for score in scores) else round(sum(components[name]["score"] * COMPONENT_WEIGHTS[name] for name in components), 1)
+    scored = {name: item for name, item in components.items()
+              if item["score"] is not None}
+    if not scored:
+        overall = None
+    else:
+        # None-scored components drop out of both numerator (their
+        # contribution is 0) and divisor (subtract their weight from the
+        # divisor). Zero-weight components do the same. Weights sum to
+        # 1.00 by construction; the divisor below equals the sum of
+        # weights for the scored set, so the result stays in [0, 100].
+        # The earlier "any score is None ⇒ overall None" guard collapsed
+        # the visible scorecard to INSUFFICIENT_EVIDENCE whenever a
+        # single component lacked evidence; the fix is to honor the
+        # actual evidence instead.
+        numerator = sum(item["score"] * COMPONENT_WEIGHTS[name]
+                        for name, item in scored.items())
+        divisor = sum(COMPONENT_WEIGHTS[name] for name in scored)
+        overall = round(numerator / divisor, 1) if divisor else None
     return {
         "schema_version": 1,
         "contract_version": "harness-effectiveness-v1",
