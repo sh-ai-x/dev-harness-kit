@@ -1,0 +1,54 @@
+name: Fork PR Review Gate
+
+# Fork PRs never get a write-scoped GITHUB_TOKEN or an OIDC token on the
+# `pull_request` trigger, no matter what `permissions:` a job declares —
+# that's GitHub's platform-level anti-abuse restriction, not something a
+# workflow change can lift. review.yml / maintenance.yml already skip
+# their LLM-judge jobs for fork PRs on `pull_request` (see the `if:`
+# conditions there) instead of failing loudly on an unobtainable OIDC
+# token.
+#
+# This workflow is the maintainer-approval gate that unblocks review for
+# a fork PR without weakening that restriction: it runs on
+# `pull_request_target` (workflow file is read from the trusted `main`
+# branch, not the fork, so it is safe to grant it write permissions) and
+# sits behind the `fork-pr-review` GitHub Environment, which requires an
+# explicit maintainer approval click in the Actions tab before the job
+# runs. It never checks out the fork's code and never executes it — its
+# only action is to dispatch review.yml / maintenance.yml via
+# `workflow_dispatch` (a manual-trigger context, not a fork-origin
+# `pull_request` event, so THAT run gets full normal permissions) and post
+# an audit comment.
+#
+# Same-repo PRs (including the repo owner's own) are untouched by this
+# workflow entirely — review.yml / maintenance.yml keep running fully
+# automatically on `pull_request` for those, exactly as before.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  gate:
+    name: fork PR review (awaiting maintainer approval)
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
+    environment: fork-pr-review
+    permissions:
+      actions: write
+      pull-requests: write
+    steps:
+      - name: Dispatch full review (owner-approved)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh workflow run review.yml \
+            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER"
+          gh workflow run maintenance.yml \
+            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER"
+          gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body \
+            "Maintainer approved this fork PR for review (fork-pr-review environment). Dispatching \`/dev-kit:review\`, \`/dev-kit:security\`, and \`/dev-kit:maintenance\` now via workflow_dispatch — check runs will appear shortly under new workflow runs on this PR."

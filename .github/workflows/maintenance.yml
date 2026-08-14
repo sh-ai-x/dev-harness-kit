@@ -58,7 +58,16 @@ jobs:
     # is version-bump.yml-generated and merged by a human; running the
     # maintenance judge on it would only confirm "plugin.json version
     # bumped by 0.0.1" with no reviewable surface change.
-    if: "!startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')"
+    #
+    # Also skip on the `pull_request` trigger for fork PRs: GitHub caps
+    # GITHUB_TOKEN to read-only and withholds OIDC tokens for `pull_request`
+    # runs from forks regardless of the `permissions:` block below, so the
+    # job would just fail on the OIDC fetch step. `fork-pr-review.yml`
+    # dispatches this workflow via `workflow_dispatch` after maintainer
+    # approval instead, which is not fork-restricted.
+    if: |
+      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -221,9 +230,15 @@ jobs:
     name: maintenance gate (verdict + docs-updated)
     runs-on: ubuntu-latest
     needs: [maintenance_judge]
+    # Also skip on the `pull_request` trigger for fork PRs — same rationale
+    # as review.yml's `gate` job: avoid silently defaulting the missing
+    # (intentionally-skipped) judge verdict to Approve. `fork-pr-review.yml`
+    # dispatches a `workflow_dispatch` run after maintainer approval, which
+    # reaches this same `gate` job with a real verdict.
     if: |
       always() &&
-      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
+      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
       pull-requests: read
