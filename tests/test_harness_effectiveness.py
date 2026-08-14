@@ -130,75 +130,41 @@ def test_duplicate_event_is_integrity_finding(tmp_path: Path) -> None:
     assert any("duplicate" in finding for finding in integrity["findings"])
 
 
-def test_overall_score_normalizes_by_weight_sum(tmp_path: Path) -> None:
-    """When one component carries weight 0, overall_score must NOT divide
-    by it; otherwise `learning_quality` would forever null the overall
-    even though it is structurally unscorable until Phase 4 ships.
+def test_weights_sum_to_one(tmp_path: Path) -> None:
+    """Component weights must sum to 1.00 so overall_score stays in
+    [0, 100] without an implicit normalization factor. learning_quality
+    is intentionally 0.00 until a Phase-4 shadow-mode control cohort
+    exists; the remaining 1.00 is redistributed proportionally across the
+    four shippable components.
     """
     from lib.harness_effectiveness import COMPONENT_WEIGHTS
+    assert sum(COMPONENT_WEIGHTS.values()) == 1.0
     assert COMPONENT_WEIGHTS["learning_quality"] == 0.0
-    assert sum(COMPONENT_WEIGHTS.values()) > 0
-
-    # Build a minimal evidence set that scores prevention + recovery +
-    # integrity all 100.0 and leaves first_pass null (no write event).
-    # Expected: overall is None because any null component still nulls,
-    # BUT the weight-sum check runs first so the divisor is not zero.
-    from lib.harness_effectiveness import build_report
-    _event(tmp_path, event_id="g1", event_type="guard.blocked", subject="a1",
-           outcome="blocked", ts="2026-08-12T00:00:00Z", policy_id="scope",
-           ground_truth="unsafe", reason="x")
-    _event(tmp_path, event_id="g2", event_type="guard.allowed", subject="a2",
-           outcome="allowed", ts="2026-08-12T00:00:01Z", policy_id="scope",
-           ground_truth="unsafe", reason="x")
-    _event(tmp_path, event_id="v1", event_type="verify.failed", subject="b1",
-           outcome="failed", ts="2026-08-12T00:00:00Z")
-    _event(tmp_path, event_id="h1", event_type="heal.attempted", subject="b1",
-           outcome="attempted", parent="v1", ts="2026-08-12T00:00:01Z")
-    _event(tmp_path, event_id="vp", event_type="verify.passed", subject="b1",
-           outcome="passed", parent="h1", ts="2026-08-12T00:00:02Z",
-           required_checks_passed=True, independent=True, retry_count=1)
-    _event(tmp_path, event_id="s1", event_type="step.started", subject="c1",
-           outcome="started", ts="2026-08-12T00:00:00Z")
-    _event(tmp_path, event_id="sc", event_type="step.completed", subject="c1",
-           outcome="completed", ts="2026-08-12T00:00:01Z")
-
-    report = build_report(tmp_path)
-    # Weights that are non-zero must dominate the divisor.
-    nonzero_sum = sum(w for w in COMPONENT_WEIGHTS.values() if w > 0)
-    assert nonzero_sum > 0
-    # learning_quality remains None but must not collapse the overall if
-    # everything else scores. Build a minimal evidence set with prevention,
-    # first_pass, recovery, AND integrity all scorable; learning_quality
-    # is left empty and the report must surface it as null without
-    # silently zero-filling the overall.
-    assert report["components"]["learning_quality"]["score"] is None
+    nonzero = [k for k, v in COMPONENT_WEIGHTS.items() if v > 0]
+    assert set(nonzero) == {
+        "prevention_quality", "first_pass_quality",
+        "recovery_quality", "measurement_integrity",
+    }
 
 
 def test_overall_score_excludes_zero_weight_components(tmp_path: Path) -> None:
-    """Even if learning_quality were 100.0, weight=0 must exclude it from
-    both numerator and denominator so re-enabling it later does not
-    silently shift every other component's contribution.
+    """learning_quality must contribute 0 to overall_score when its
+    weight is 0; re-enabling it later is a one-line weight change.
     """
     from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
-    # Ensure the contract holds for the current weights.
     zero_keys = [k for k, v in COMPONENT_WEIGHTS.items() if v == 0.0]
     assert zero_keys == ["learning_quality"]
-    # Build a fully-scored set across the four non-zero components; the
-    # overall_score must therefore be the (unweighted) mean of those four
-    # since their total weight is 0.80.
     _event(tmp_path, event_id="g1", event_type="guard.blocked", subject="a1",
            outcome="blocked", ts="2026-08-12T00:00:00Z", policy_id="scope",
            ground_truth="unsafe", reason="x")
     _event(tmp_path, event_id="g2", event_type="guard.allowed", subject="a2",
            outcome="allowed", ts="2026-08-12T00:00:01Z", policy_id="scope",
            ground_truth="unsafe", reason="x")
-    # first_pass: one write + one passing verify, no retries.
     _event(tmp_path, event_id="w1", event_type="write.observed", subject="d1",
            outcome="written", ts="2026-08-12T00:00:00Z")
     _event(tmp_path, event_id="vv", event_type="verify.passed", subject="d1",
            outcome="passed", parent="w1", ts="2026-08-12T00:00:01Z",
            required_checks_passed=True, retry_count=0)
-    # recovery: same as above path.
     _event(tmp_path, event_id="vf", event_type="verify.failed", subject="d1",
            outcome="failed", ts="2026-08-12T00:00:02Z")
     _event(tmp_path, event_id="hh", event_type="heal.attempted", subject="d1",
@@ -206,18 +172,15 @@ def test_overall_score_excludes_zero_weight_components(tmp_path: Path) -> None:
     _event(tmp_path, event_id="vp2", event_type="verify.passed", subject="d1",
            outcome="passed", parent="hh", ts="2026-08-12T00:00:04Z",
            required_checks_passed=True, independent=True, retry_count=1)
-    # integrity: a clean lifecycle pair.
     _event(tmp_path, event_id="s1", event_type="step.started", subject="e1",
            outcome="started", ts="2026-08-12T00:00:00Z")
     _event(tmp_path, event_id="sc", event_type="step.completed", subject="e1",
            outcome="completed", ts="2026-08-12T00:00:01Z")
 
     report = build_report(tmp_path)
-    scores = report["components"]
-    # All four non-zero-weight components must be present and numeric.
     for key in ("prevention_quality", "first_pass_quality",
                 "recovery_quality", "measurement_integrity"):
-        assert scores[key]["score"] is not None, key
+        assert report["components"][key]["score"] is not None, key
 
 
 def test_trace_event_round_trip(tmp_path: Path) -> None:

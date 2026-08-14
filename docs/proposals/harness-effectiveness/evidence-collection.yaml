@@ -103,10 +103,13 @@ after:
         findings stay visible in `findings` but no longer force
         `INSUFFICIENT_EVIDENCE`. No component may be filled with `0.0`.
         Rebalance `COMPONENT_WEIGHTS` so `learning_quality` is `0.00`
-        (Phase-4 shadow mode deferred), `recovery_quality` is `0.30`,
-        `measurement_integrity` is `0.10`, and `overall_score` is
-        normalized by the actual weight sum (zero-weight components drop
-        out of numerator and divisor).
+        (Phase-4 shadow mode deferred). Redistribute the freed 0.20
+        proportionally across the four shippable components so the
+        weights still sum to 1.00: `prevention_quality` 0.25,
+        `first_pass_quality` 0.25, `recovery_quality` 0.31,
+        `measurement_integrity` 0.19. `overall_score` is a plain
+        weighted average; zero-weight components drop out of the
+        numerator.
     - path: tests/conftest.py
       change: |
         Autouse fixture pointing `DEV_KIT_TRACE_ROOT` at `tmp_path` for the

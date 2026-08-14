@@ -15,15 +15,16 @@ from lib.trace_log import EVENT_RECORD_REQUIRED_FIELDS, read_events, validate_ev
 
 COMPONENT_WEIGHTS = {
     # `learning_quality` is intentionally zero until a Phase-4 shadow-mode
-    # control cohort exists. The component is still rendered (visibility),
-    # but it cannot depress `overall_score` while it is structurally
-    # unscorable. Sum is 0.80 on purpose; `overall_score` is normalized by
-    # the actual weight sum so any future re-balance keeps scores in [0,100].
-    "prevention_quality": 0.20,
-    "first_pass_quality": 0.20,
-    "recovery_quality": 0.30,
-    "learning_quality": 0.00,
-    "measurement_integrity": 0.10,
+    # control cohort exists. The component is still rendered (visibility)
+    # but contributes nothing to `overall_score`. The remaining 1.00 is
+    # distributed proportionally to the four shippable components based on
+    # their pre-rebalance weights (0.20 / 0.20 / 0.25 / 0.15 → 0.80),
+    # scaled by 1/0.80 so they sum to 1.00.
+    "prevention_quality":      0.25,
+    "first_pass_quality":      0.25,
+    "recovery_quality":        0.31,
+    "learning_quality":        0.00,
+    "measurement_integrity":   0.19,
 }
 def _ratio(numerator: int, denominator: int) -> Optional[float]:
     return None if denominator == 0 else round(numerator / denominator * 100, 1)
@@ -259,18 +260,15 @@ def build_report(root: Path) -> Dict[str, Any]:
         "measurement_integrity": _integrity(root, events),
     }
     scores = [item["score"] for item in components.values()]
-    weight_sum = sum(COMPONENT_WEIGHTS.values())
-    if any(score is None for score in scores) or weight_sum == 0:
+    if any(score is None for score in scores):
         overall = None
     else:
-        # Normalize by the actual weight sum so a future re-balance (or the
-        # deliberate zero on `learning_quality`) cannot change the score
-        # scale. Any component with weight 0 is excluded from both sum and
-        # divisor, so it cannot depress the overall.
+        # Weights sum to 1.00 by construction; zero-weight components drop
+        # out of the numerator (learning_quality stays at 0 until Phase 4).
         overall = round(
             sum(components[name]["score"] * COMPONENT_WEIGHTS[name]
                 for name in components
-                if COMPONENT_WEIGHTS[name] > 0) / weight_sum,
+                if COMPONENT_WEIGHTS[name] > 0),
             1,
         )
     return {
