@@ -32,6 +32,8 @@ COMPONENT_WEIGHTS = {
     # partially-scored corpus reports a meaningful overall instead of
     # collapsing to None.
 }
+
+
 def _ratio(numerator: int, denominator: int) -> Optional[float]:
     return None if denominator == 0 else round(numerator / denominator * 100, 1)
 

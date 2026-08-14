@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from lib.harness_effectiveness import build_report
+from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
 from lib.trace_log import append_event, read_events
 
 
@@ -137,7 +137,6 @@ def test_weights_sum_to_one() -> None:
     exists; the remaining 1.00 is redistributed proportionally across the
     four shippable components.
     """
-    from lib.harness_effectiveness import COMPONENT_WEIGHTS
     assert sum(COMPONENT_WEIGHTS.values()) == 1.0
     assert COMPONENT_WEIGHTS["learning_quality"] == 0.0
     nonzero = [k for k, v in COMPONENT_WEIGHTS.items() if v > 0]
@@ -180,7 +179,6 @@ def test_overall_score_equals_weighted_mean_when_all_scorable(tmp_path: Path) ->
     restricted to the four shippable ones (learning_quality weight 0).
     The reducer reports the same number the formula below produces.
     """
-    from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
     _full_event_corpus(tmp_path)
     report = build_report(tmp_path)
     scored = {name: item for name, item in report["components"].items()
@@ -202,7 +200,6 @@ def test_overall_score_excludes_zero_weight_components(tmp_path: Path) -> None:
     weighted mean both with and without learning_quality=100 and
     asserting the values are identical.
     """
-    from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
     assert COMPONENT_WEIGHTS["learning_quality"] == 0.0
     _full_event_corpus(tmp_path)
     report = build_report(tmp_path)
@@ -211,11 +208,6 @@ def test_overall_score_excludes_zero_weight_components(tmp_path: Path) -> None:
         for name, item in report["components"].items()
         if COMPONENT_WEIGHTS[name] > 0 and item["score"] is not None
     )
-    with_lq = sum(
-        item["score"] * COMPONENT_WEIGHTS[name]
-        for name, item in report["components"].items()
-        if item["score"] is not None
-    )  # includes a synthetic learning_quality=100 below
     # Synthetically inject learning_quality=100 into the components dict
     # the formula iterates over; if the formula correctly skips weight-0
     # components, the totals match.
@@ -234,7 +226,6 @@ def test_overall_score_skips_none_scored_components(tmp_path: Path) -> None:
     drop out of both numerator and divisor, the same way zero-weight
     components do. This is the visible-scorecard fix.
     """
-    from lib.harness_effectiveness import build_report
     # Single labeled guard event — only prevention can score; the rest
     # are unsourced. With the old formula, overall_score would be None.
     _event(tmp_path, event_id="g1", event_type="guard.blocked", subject="a1",
