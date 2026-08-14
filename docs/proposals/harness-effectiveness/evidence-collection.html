@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence Collection — why 4 of 5 effectiveness components can never score</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "¹3"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "¹7"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>Evidence Collection — why 4 of 5 effectiveness components can never score</h1>
+<p class="meta">2026-08-13 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">harness-effectiveness</span><span class="tag tag-info">trace-log</span><span class="tag tag-info">hooks</span><span class="tag tag-info">evidence</span><span class="tag tag-info">telemetry</span><span class="tag tag-info">measurement-integrity</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Root-cause table</a></li><li><a href="#sec-1">Phase 1 — make the existing emitter survive (RC-2, RC-5, RC-7)</a></li><li><a href="#sec-2">Phase 2 — emit the interactive lifecycle (RC-1, RC-3)</a></li><li><a href="#sec-3">Phase 3 — labeled prevention + honest integrity (RC-4, RC-6)</a></li><li><a href="#sec-4">Phase 4 — learning cohorts (gated, deferred)</a></li><li><a href="#sec-5">Rejected alternatives</a></li><li><a href="#sec-6">Verification plan</a></li><li><a href="#sec-7">Open questions for the reviewer</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Root-cause table</h2>
+<table><thead><tr><th>#</th><th>Root cause</th><th>Evidence</th><th>Blocks</th></tr></thead><tbody><tr><td>RC-1</td><td>4 of 5 components have no interactive producer</td><td>81/81 events are <code>guard.blocked</code>; <code>learning.outcome</code> has zero producers repo-wide</td><td>first_pass, recovery, learning</td></tr><tr><td>RC-2</td><td>Emitter dies silently outside this repo</td><td><code>ModuleNotFoundError</code> reproduced from <code>/tmp</code>; <code>payload-parse.sh:108-112</code> swallows it</td><td>all</td></tr><tr><td>RC-3</td><td>Guards emit only on deny</td><td><code>emit_guard_event</code> called from <code>deny()</code>; one allow site (<code>worktree-guard.sh:93</code>)</td><td>prevention (recall)</td></tr><tr><td>RC-4</td><td><code>ground_truth</code> read from an env var nobody sets</td><td><code>payload-parse.sh:105</code>; zero writers</td><td>prevention (precision)</td></tr><tr><td>RC-5</td><td>Evidence sharded per worktree</td><td><code>--root $(git rev-parse --show-toplevel)</code>; ~1000 worktrees</td><td>all</td></tr><tr><td>RC-6</td><td>Integrity pinned off by findings-gate + empty <code>step.started</code></td><td><code>harness_effectiveness.py:225-227</code>, <code>:209-220</code></td><td>measurement_integrity</td></tr><tr><td>RC-7</td><td>Only events on disk came from the test suite</td><td>reason strings match test fixtures; <code>test_git_workflow.py:361</code> uses <code>cwd=REPO_ROOT</code></td><td>data trust</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-1">Phase 1 — make the existing emitter survive (RC-2, RC-5, RC-7)</h2>
+<p>Nothing else is worth building until the one producer that already exists stops losing data.</p>
+<ul><li><code>resolve_trace_root()</code> in <code>lib/trace_log.py</code>: <code>DEV_KIT_TRACE_ROOT</code> wins; otherwise resolve the shared checkout through <code>git rev-parse --git-common-dir</code> so all worktrees converge on one <code>.dev-kit/trace/events.jsonl</code>.</li><li><code>PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-$root}"</code> on the emitter call, so consumer projects can import <code>lib.trace_log</code> at all.</li><li>Emitter stderr goes to <code>.dev-kit/trace/emitter-errors.log</code>. Still <code>|| true</code> — telemetry must never change a hook verdict — but the failure becomes diagnosable instead of invisible.</li><li><code>append_event</code> rejects an <code>event_id</code> already present, so a replayed or double-written line cannot corrupt <code>dedupe_integrity</code> again.</li><li>Autouse pytest fixture pins <code>DEV_KIT_TRACE_ROOT</code> to <code>tmp_path</code>.</li><li>Purge the polluted <code>.dev-kit/trace/events.jsonl</code> as part of the cut.</li></ul>
+<p>Exit criterion: a guard block fired from a scratch project outside this repo appears in the shared stream, and <code>pytest -q</code> adds zero events to the developer's real file.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Phase 2 — emit the interactive lifecycle (RC-1, RC-3)</h2>
+<p>Two new PostToolUse producers plus an allow-path emission on the existing guards.</p>
+<ul><li><code>hooks/trace-write.sh</code> (Write|Edit|MultiEdit) → <code>write.observed</code>, <code>subject_id</code> = repo-relative path.</li><li><code>hooks/trace-verify.sh</code> (Bash) → <code>verify.passed</code> / <code>verify.failed</code> from the real exit code, <code>parent_id</code> linked to the last <code>write.observed</code> for the same subject, <code>evidence_ref</code> carrying <code>required_checks_passed</code> + <code>retry_count</code> (which is what <code>_first_pass</code> at <code>harness_effectiveness.py:114-118</code> requires) and <code>independent</code> (which <code>_recovery</code> at <code>:155</code> requires).</li><li><code>heal.attempted</code> when a write lands on a subject that has an open <code>verify.failed</code>, parent-linked to that failure.</li><li><code>allow()</code> helper emitting <code>guard.allowed</code> from every guard's exit-0 path, giving recall a non-empty denominator.</li></ul>
+<p>Exit criterion: one ordinary edit → failing test → fix → passing test session produces a parent-linked chain <code>write.observed → verify.failed → heal.attempted → verify.passed</code>, and <code>first_pass_quality</code> + <code>recovery_quality</code> both report a number.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Phase 3 — labeled prevention + honest integrity (RC-4, RC-6)</h2>
+<p>Prevention labels do not belong in ambient traffic. A session cannot know whether the command it just blocked was genuinely unsafe.</p>
+<ul><li><code>eval/guard-corpus/&lt;guard&gt;.json</code>: labeled payloads, <code>unsafe</code> and <code>legitimate</code>, including near-miss legitimate cases — without those, precision is measured against a population with no false positives in it and is meaningless.</li><li><code>bin/guard-calibrate.sh</code> replays the corpus with <code>DEV_KIT_GROUND_TRUTH</code> set and a dedicated <code>run_id=calibration-&lt;date&gt;</code>, so labeled evidence is separable from real traffic at read time.</li><li><code>_integrity</code> splits findings: blocking (schema or dedupe below threshold) vs advisory (a historical duplicate exists). Advisory findings stay in <code>findings</code> for the reader but stop forcing <code>INSUFFICIENT_EVIDENCE</code> at 100% schema completeness.</li><li><code>event_coverage</code> gets a real denominator once Phase 2's producers emit lifecycle starts and terminals.</li></ul>
+<p>Exit criterion: <code>prevention_quality</code> and <code>measurement_integrity</code> both report a number after one calibration run.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Phase 4 — learning cohorts (gated, deferred)</h2>
+<p><code>learning_quality</code> compares a treatment cohort (guard intervened) against a control cohort (guard did not). A control cohort requires a shadow mode where the guard evaluates and logs but does not block — which is a genuine safety surface, not a telemetry detail.</p>
+<p><strong>Decision (locked):</strong> ship <code>learning_quality</code> with weight <code>0.00</code> and normalize <code>overall_score</code> by the actual weight sum so it cannot depress the overall until Phase 4 lands. The component is still rendered in the table (visibility), but it contributes neither to the numerator nor the divisor. Re-enabling is a one-line weight change when the control cohort ships.</p>
+<p>Proposed shape of Phase 4 itself, explicitly deferred until Phases 1–3 land and are trusted: <code>DEV_KIT_GUARD_SHADOW=1</code> puts named guards in log-only mode for a bounded window; <code>learning.outcome</code> events tag <code>cohort</code> and <code>verified_recovery</code> per subject. Off by default, never enabled on catastrophic-class patterns (<code>rm -rf /</code>, force-push to main).</p>
+<p>Until then <code>learning_quality</code> reports <code>INSUFFICIENT_EVIDENCE</code> and contributes 0 to the overall. That is the honest output, and it is preferable to a placeholder that makes the scorecard look complete.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Rejected alternatives</h2>
+<ul><li><strong>Lower the coverage threshold or default missing components to `0.0`.</strong> Makes <code>overall_score</code> render a number that means nothing. Directly forbidden by the skill contract (<code>skills/harness-effectiveness/SKILL.md</code>, "Forbidden shortcuts").</li><li><strong>Reconstruct evidence from session transcripts post-hoc.</strong> The umbrella proposal already rejected this: parent links, event order, and denominators cannot be recovered reliably from prose.</li><li><strong>Emit everything from `lib/execute.py` only.</strong> That is the current design, and it is why 4 of 5 components are empty — the build runner is not where most harness work happens.</li><li><strong>One trace file per worktree plus a merge step at read time.</strong> Merging ~1000 shards on every report run is slower and re-introduces the duplicate-id problem the idempotency guard is meant to close.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-6">Verification plan</h2>
+<p>Every phase gates on quoted evidence, not on assertion (Iron Law L3):</p>
+<ol><li><code>pytest -q tests/test_trace_log.py tests/test_hooks_trace_producers.py</code> — quoted exit code + test counts.</li><li>Scratch-project probe: fire a guard from a directory with no <code>lib/</code>, then show the appended line in the shared stream.</li><li>Pollution probe: record <code>wc -l</code> of the real trace file, run the full suite, show the count is unchanged.</li><li>End-to-end: run one edit → fail → fix → pass cycle, then quote <code>/dev-kit:harness-effectiveness</code> showing <code>first_pass_quality</code> and <code>recovery_quality</code> with non-null scores.</li><li>Calibration: run <code>bin/guard-calibrate.sh</code>, quote <code>prevention_quality.submetrics.guard_precision</code> and <code>guard_recall</code>.</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-7">Open questions for the reviewer</h2>
+<ol><li><strong>Phase 4 scope.</strong> Resolved: ship <code>learning_quality</code> at weight <code>0.00</code> and re-enable when the control cohort exists. Open follow-up: who owns the shadow-mode spec?</li><li><strong>Verify-command detection.</strong> Resolved: prefer <code>DEV_KIT_VERIFY_COMMAND</code> env var (explicit override), fall back to heuristic pattern-matching against the known test/build set, and report <code>INSUFFICIENT_EVIDENCE</code> honestly when neither is set. The heuristic is silent-but-0-forbidden by Iron Law L4 — it never produces a misleading zero score.</li><li><strong>Hook cost.</strong> Two new PostToolUse producers on the hottest paths. Accept the per-call subprocess, or batch through an append daemon? This proposal assumes the direct subprocess, matching every other hook in the matrix.</li></ol>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p><code>/dev-kit:harness-effectiveness</code> returns <code>overall_score: null</code>, <code>status: INSUFFICIENT_EVIDENCE</code>, with all five components <code>null</code>. The reducer is not at fault — it is doing exactly what its contract says (never convert missing telemetry into a score). The fault is on the producer side: the harness emits one event class and drops the rest.</p>
+<p>A full read of the event stream, the emitter, and every producer call site shows this is not a tuning problem. Four of the five components have no producer that can ever fire in an interactive session, the one producer that does fire is silently lossy outside this repository, and the 81 events currently on disk were written by the test suite, not by real work.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li>Measured: <code>event_count: 81</code>, and 81/81 are <code>guard.blocked</code> — <code>source</code> is <code>hook:GIT GUARD</code> (71) and <code>hook:BASH GUARD (strict)</code> (10). Zero events of any other type exist.</li><li>Producer inventory (grep over <code>lib/ hooks/ bin/ tools/</code>): <code>write.observed</code> + <code>step.*</code> only in <code>lib/execute.py:563-662</code>; <code>verify.*</code> + <code>heal.attempted</code> only in <code>lib/repair_coordinator.py:143-196</code>; <code>learning.outcome</code> has <strong>zero</strong> producers anywhere in the repo.</li><li><code>lib/execute.py</code> runs only under <code>/dev-kit:build</code>; <code>lib/repair_coordinator.py</code> runs only under the babysit-pr repair loop. Neither is reachable from an ordinary Edit → test → fix session, which is where the harness actually spends its time.</li><li>Emitter fragility, reproduced: <code>cd /tmp &amp;&amp; python3 -m lib.trace_log append-event ...</code> → <code>ModuleNotFoundError: No module named 'lib'</code>. <code>hooks/lib/payload-parse.sh:108</code> invokes exactly this, with <code>&gt;/dev/null 2&gt;&amp;1 || true</code> (line 112), so in any consumer project (dev-kit installed as a plugin, no <code>lib/</code> in cwd) 100% of guard events are lost with no error surface.</li><li><code>ground_truth</code> is read from <code>env.DEV_KIT_GROUND_TRUTH</code> (<code>hooks/lib/payload-parse.sh:105</code>). Grep finds zero writers of that variable. Result: 81/81 events carry <code>ground_truth: null</code> → <code>_prevention</code> coverage <code>0.0</code> → permanently <code>INSUFFICIENT_EVIDENCE</code> (<code>lib/harness_effectiveness.py:77-81</code>).</li><li>Guards emit only on the deny path. <code>emit_guard_event</code> is called from <code>deny()</code> (<code>hooks/lib/payload-parse.sh:117</code>, outcome always <code>blocked</code>) and from exactly one allow site (<code>hooks/worktree-guard.sh:93</code>). <code>_prevention</code> computes recall from <code>outcome == "allowed" AND ground_truth == "unsafe"</code> (<code>lib/harness_effectiveness.py:84</code>) — a population that cannot exist.</li><li>Sharding: the emitter passes <code>--root "$(git rev-parse --show-toplevel)"</code>, so events land in <code>&lt;worktree&gt;/.dev-kit/trace/events.jsonl</code>. This repo currently has ~1000 entries under <code>.worktrees/</code>. The reducer reads exactly one root, so work done in a feature worktree is invisible to a report run in the main checkout.</li><li>Integrity is pinned off by two independent bugs: (a) <code>_integrity</code> forces <code>status = INSUFFICIENT_EVIDENCE</code> whenever <code>findings</code> is non-empty (<code>lib/harness_effectiveness.py:225-227</code>), so one historical duplicate id suppresses the component even at 100% schema completeness; (b) <code>event_coverage</code> divides by <code>|step.started|</code>, which is 0, so <code>coverage_pct</code> is <code>None</code> → <code>score</code> is <code>None</code> (<code>lib/harness_effectiveness.py:209-220</code>).</li><li>Measured submetrics today: <code>schema_completeness 100.0 (81/81)</code>, <code>attribution_completeness 100.0 (81/81)</code>, <code>dedupe_integrity 81.5 (66/81)</code>, <code>event_coverage null (0/0)</code>.</li><li>Test pollution: every <code>reason</code> string on disk matches a hook test fixture verbatim (e.g. <code>pattern 'rm -rf /([[:space:]]|$)' blocked.</code> from <code>hooks/bash-guard.sh:44</code> driven by <code>tests/test_hooks_payload.py:278</code>; <code>deleting main/master with -D is forbidden.</code> from <code>hooks/git-guard.sh:194</code>). <code>tests/test_git_workflow.py:361</code> runs the hook with <code>cwd=str(REPO_ROOT)</code>, so <code>git rev-parse --show-toplevel</code> resolves to the real checkout and the test appends to the developer's real trace stream.</li><li>Schema drift on disk: 65 events carry a 16-hex <code>event_id</code> (11:08–11:29) and 16 carry a 32-hex one (11:32 onward), with 15 exact <code>(event_id, ts)</code> duplicates in the 16-hex range. Current <code>new_event_id()</code> is <code>uuid.uuid4().hex</code> (32) — the 16-hex block was written by a different runtime copy of <code>lib/trace_log.py</code>, and <code>append_event</code> has no idempotency check to reject a replayed id.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Treat evidence collection as a first-class producer contract rather than a best-effort side effect of two batch skills. Four changes, in dependency order:</p>
+<ol><li>Make the single existing emitter reliable, single-rooted, and test-isolated — so the events we already produce survive.</li><li>Add hook-level producers for the interactive lifecycle (<code>write.observed</code>, <code>verify.*</code>, <code>heal.attempted</code>, <code>guard.allowed</code>) so first-pass and recovery become measurable from ordinary work.</li><li>Move guard labeling out of ambient traffic into a deterministic replay corpus, so prevention precision/recall come from labeled cases instead of an env var nobody sets.</li><li>Split integrity findings into blocking vs advisory so a historical duplicate cannot pin the component to <code>INSUFFICIENT_EVIDENCE</code>.</li></ol>
+<p><code>learning_quality</code> is deliberately left unscored until a shadow-mode control cohort exists (Phase 4, gated). Honest <code>INSUFFICIENT_EVIDENCE</code> is the correct output until then — it is not filled with a placeholder.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">lib/trace_log.py</span><p>Add <code>resolve_trace_root(start)</code> — honors <code>DEV_KIT_TRACE_ROOT</code>, else resolves the shared checkout via <code>git rev-parse --git-common-dir</code> so every worktree appends to ONE stream. Add an idempotency guard in <code>append_event</code> that rejects an <code>event_id</code> already present in the current file tail. Keep <code>new_event_id()</code> as the single id source.</p></li><li><span class="file-path">hooks/lib/payload-parse.sh</span><p>Invoke the emitter as <code>PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-$root}" python3 -m lib.trace_log append-event</code> so it resolves from the plugin root in consumer projects. Redirect stderr to <code>.dev-kit/trace/emitter-errors.log</code> instead of <code>/dev/null</code>, keeping</p>
+<p><code>|| true</code> so telemetry never changes a hook verdict. Add an</p>
+<p><code>allow()</code> helper mirroring <code>deny()</code> that emits <code>guard.allowed</code>.</p></li><li><span class="file-path">hooks/trace-write.sh</span><p>New PostToolUse <code>Write|Edit|MultiEdit</code> producer. Emits</p>
+<p><code>write.observed</code> with <code>subject_id</code> = repo-relative file path, so the reducer's per-subject join keys on a stable identity.</p></li><li><span class="file-path">hooks/trace-verify.sh</span><p>New PostToolUse <code>Bash</code> producer. When the command matches the verify-command set (pytest / npm test / build), emits <code>verify.passed</code> or <code>verify.failed</code> carrying the real exit code, <code>required_checks_passed</code>, <code>retry_count</code>, and <code>independent</code>, with <code>parent_id</code> = the most recent <code>write.observed</code> for that subject. Emits <code>heal.attempted</code> when a write follows a failed verify on the same subject.</p></li><li><span class="file-path">hooks/git-guard.sh</span><p>Emit <code>guard.allowed</code> on the exit-0 path via the shared <code>allow()</code> helper (currently emits nothing when it lets a command through).</p></li><li><span class="file-path">hooks/bash-guard.sh</span><p>Same allow-path emission as git-guard.sh.</p></li><li><span class="file-path">hooks/hooks.json</span><p>Register <code>trace-write.sh</code> under PostToolUse <code>Write|Edit|MultiEdit</code> and <code>trace-verify.sh</code> under PostToolUse <code>Bash</code>.</p></li><li><span class="file-path">eval/guard-corpus/*.json</span><p>New labeled replay corpus: N payloads per guard with a known <code>ground_truth</code> of <code>unsafe</code> or <code>legitimate</code>, including near-miss legitimate cases (the false-positive population precision needs).</p></li><li><span class="file-path">bin/guard-calibrate.sh</span><p>Replays the corpus against each guard with <code>DEV_KIT_GROUND_TRUTH</code> set and <code>run_id=calibration-&lt;date&gt;</code>, so labeled prevention evidence is produced deterministically and is separable from ambient traffic.</p></li><li><span class="file-path">lib/harness_effectiveness.py</span><p>Split <code>_integrity</code> findings into blocking (schema/dedupe below threshold) and advisory (historical duplicate present). Advisory findings stay visible in <code>findings</code> but no longer force <code>INSUFFICIENT_EVIDENCE</code>. No component may be filled with <code>0.0</code>. Rebalance <code>COMPONENT_WEIGHTS</code> so <code>learning_quality</code> is <code>0.00</code> (Phase-4 shadow mode deferred), <code>recovery_quality</code> is <code>0.30</code>, <code>measurement_integrity</code> is <code>0.10</code>, and <code>overall_score</code> is normalized by the actual weight sum (zero-weight components drop out of numerator and divisor).</p></li><li><span class="file-path">tests/conftest.py</span><p>Autouse fixture pointing <code>DEV_KIT_TRACE_ROOT</code> at <code>tmp_path</code> for the whole suite, so hook tests can never append to the developer's real trace stream again.</p></li><li><span class="file-path">tests/test_trace_log.py</span><p>Cover <code>resolve_trace_root</code> precedence, worktree→common-dir resolution, duplicate-id rejection, and plugin-root import fallback.</p></li><li><span class="file-path">tests/test_hooks_trace_producers.py</span><p>New: assert each producer hook emits the expected event_type / parent_id / evidence_ref keys the reducer requires, driven from tmp roots.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Root causes are measured, not inferred — every claim above cites a file:line or a reproduced command, so the fix list is checkable before any code is written.</li><li>Phase 1 alone stops silent data loss in consumer projects, where the emitter currently drops 100% of events with no error surface.</li><li>Hook-level producers make first-pass and recovery measurable from ordinary sessions instead of only under <code>/dev-kit:build</code> and the babysit repair loop — which is where the metric was always meant to point.</li><li>A labeled replay corpus gives prevention precision/recall a real denominator without asking a human to annotate live traffic, and keeps calibration runs separable by <code>run_id</code>.</li><li>Single-rooted trace resolution collapses ~1000 per-worktree shards into one stream the reducer can actually read.</li><li>The reducer contract is preserved: missing evidence still reports <code>INSUFFICIENT_EVIDENCE</code>; nothing is back-filled with <code>0.0</code> to make the table render a number.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Adds two new PostToolUse hooks on the hottest tool paths (<code>Write|Edit|MultiEdit</code> and <code>Bash</code>); each fires a python subprocess and costs latency on every write and every shell command.</li><li>The verify producer must pattern-match the verify-command set, which is heuristic — a project with a nonstandard test command emits nothing and silently under-reports first-pass quality.</li><li>The guard corpus is a maintenance surface: every new guard pattern needs matching labeled cases, or precision drifts toward whatever the corpus happens to cover.</li><li>Repointing the trace root to the shared checkout means concurrent worktrees contend on one file; <code>flock</code> already exists in <code>append_event</code>, but write volume goes up by roughly the number of active worktrees.</li><li>Phase 4 (learning cohorts) requires a shadow mode where a guard logs but does not block — a real safety surface that must be config-gated and off by default.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>This proposal does not make <code>learning_quality</code> scoreable. Without a control cohort it stays <code>INSUFFICIENT_EVIDENCE</code>, and <code>overall_score</code> therefore stays <code>null</code> until Phase 4 ships or the component weight is renegotiated.</li><li>The 81 events currently on disk are test artifacts and will be purged, not migrated. There is no historical baseline to compare against after the fix.</li><li>The 16-hex event_id block proves a second runtime copy of <code>lib/trace_log.py</code> wrote to this stream; the idempotency guard prevents replay damage but does not identify or remove that writer.</li><li>Hook-emitted <code>verify.*</code> observes the exit code of a command, not whether the command actually tested the thing that was written. <code>first_pass_quality</code> will measure "the suite passed after the write", not semantic correctness.</li><li>Sharding is fixed for git worktrees via <code>--git-common-dir</code>; a consumer project that vendors dev-kit outside git gets no aggregation and falls back to a per-cwd stream.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-14 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

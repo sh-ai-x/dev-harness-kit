@@ -1,0 +1,294 @@
+title: "Evidence Collection — why 4 of 5 effectiveness components can never score"
+status: design-discussion
+date: 2026-08-13
+tags: [harness-effectiveness, trace-log, hooks, evidence, telemetry, measurement-integrity]
+
+before:
+  summary: |
+    `/dev-kit:harness-effectiveness` returns `overall_score: null`,
+    `status: INSUFFICIENT_EVIDENCE`, with all five components `null`. The
+    reducer is not at fault — it is doing exactly what its contract says
+    (never convert missing telemetry into a score). The fault is on the
+    producer side: the harness emits one event class and drops the rest.
+
+    A full read of the event stream, the emitter, and every producer call
+    site shows this is not a tuning problem. Four of the five components
+    have no producer that can ever fire in an interactive session, the one
+    producer that does fire is silently lossy outside this repository, and
+    the 81 events currently on disk were written by the test suite, not by
+    real work.
+  evidence:
+    - 'Measured: `event_count: 81`, and 81/81 are `guard.blocked` — `source` is `hook:GIT GUARD` (71) and `hook:BASH GUARD (strict)` (10). Zero events of any other type exist.'
+    - 'Producer inventory (grep over `lib/ hooks/ bin/ tools/`): `write.observed` + `step.*` only in `lib/execute.py:563-662`; `verify.*` + `heal.attempted` only in `lib/repair_coordinator.py:143-196`; `learning.outcome` has **zero** producers anywhere in the repo.'
+    - '`lib/execute.py` runs only under `/dev-kit:build`; `lib/repair_coordinator.py` runs only under the babysit-pr repair loop. Neither is reachable from an ordinary Edit → test → fix session, which is where the harness actually spends its time.'
+    - 'Emitter fragility, reproduced: `cd /tmp && python3 -m lib.trace_log append-event ...` → `ModuleNotFoundError: No module named ''lib''`. `hooks/lib/payload-parse.sh:108` invokes exactly this, with `>/dev/null 2>&1 || true` (line 112), so in any consumer project (dev-kit installed as a plugin, no `lib/` in cwd) 100% of guard events are lost with no error surface.'
+    - '`ground_truth` is read from `env.DEV_KIT_GROUND_TRUTH` (`hooks/lib/payload-parse.sh:105`). Grep finds zero writers of that variable. Result: 81/81 events carry `ground_truth: null` → `_prevention` coverage `0.0` → permanently `INSUFFICIENT_EVIDENCE` (`lib/harness_effectiveness.py:77-81`).'
+    - 'Guards emit only on the deny path. `emit_guard_event` is called from `deny()` (`hooks/lib/payload-parse.sh:117`, outcome always `blocked`) and from exactly one allow site (`hooks/worktree-guard.sh:93`). `_prevention` computes recall from `outcome == "allowed" AND ground_truth == "unsafe"` (`lib/harness_effectiveness.py:84`) — a population that cannot exist.'
+    - 'Sharding: the emitter passes `--root "$(git rev-parse --show-toplevel)"`, so events land in `<worktree>/.dev-kit/trace/events.jsonl`. This repo currently has ~1000 entries under `.worktrees/`. The reducer reads exactly one root, so work done in a feature worktree is invisible to a report run in the main checkout.'
+    - 'Integrity is pinned off by two independent bugs: (a) `_integrity` forces `status = INSUFFICIENT_EVIDENCE` whenever `findings` is non-empty (`lib/harness_effectiveness.py:225-227`), so one historical duplicate id suppresses the component even at 100% schema completeness; (b) `event_coverage` divides by `|step.started|`, which is 0, so `coverage_pct` is `None` → `score` is `None` (`lib/harness_effectiveness.py:209-220`).'
+    - 'Measured submetrics today: `schema_completeness 100.0 (81/81)`, `attribution_completeness 100.0 (81/81)`, `dedupe_integrity 81.5 (66/81)`, `event_coverage null (0/0)`.'
+    - 'Test pollution: every `reason` string on disk matches a hook test fixture verbatim (e.g. `pattern ''rm -rf /([[:space:]]|$)'' blocked.` from `hooks/bash-guard.sh:44` driven by `tests/test_hooks_payload.py:278`; `deleting main/master with -D is forbidden.` from `hooks/git-guard.sh:194`). `tests/test_git_workflow.py:361` runs the hook with `cwd=str(REPO_ROOT)`, so `git rev-parse --show-toplevel` resolves to the real checkout and the test appends to the developer''s real trace stream.'
+    - 'Schema drift on disk: 65 events carry a 16-hex `event_id` (11:08–11:29) and 16 carry a 32-hex one (11:32 onward), with 15 exact `(event_id, ts)` duplicates in the 16-hex range. Current `new_event_id()` is `uuid.uuid4().hex` (32) — the 16-hex block was written by a different runtime copy of `lib/trace_log.py`, and `append_event` has no idempotency check to reject a replayed id.'
+
+after:
+  summary: |
+    Treat evidence collection as a first-class producer contract rather
+    than a best-effort side effect of two batch skills. Four changes, in
+    dependency order:
+
+    1. Make the single existing emitter reliable, single-rooted, and
+       test-isolated — so the events we already produce survive.
+    2. Add hook-level producers for the interactive lifecycle
+       (`write.observed`, `verify.*`, `heal.attempted`, `guard.allowed`)
+       so first-pass and recovery become measurable from ordinary work.
+    3. Move guard labeling out of ambient traffic into a deterministic
+       replay corpus, so prevention precision/recall come from labeled
+       cases instead of an env var nobody sets.
+    4. Split integrity findings into blocking vs advisory so a historical
+       duplicate cannot pin the component to `INSUFFICIENT_EVIDENCE`.
+
+    `learning_quality` is deliberately left unscored until a shadow-mode
+    control cohort exists (Phase 4, gated). Honest `INSUFFICIENT_EVIDENCE`
+    is the correct output until then — it is not filled with a placeholder.
+  files:
+    - path: lib/trace_log.py
+      change: |
+        Add `resolve_trace_root(start)` — honors `DEV_KIT_TRACE_ROOT`, else
+        resolves the shared checkout via `git rev-parse --git-common-dir`
+        so every worktree appends to ONE stream. Add an idempotency guard
+        in `append_event` that rejects an `event_id` already present in the
+        current file tail. Keep `new_event_id()` as the single id source.
+    - path: hooks/lib/payload-parse.sh
+      change: |
+        Invoke the emitter as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-$root}"
+        python3 -m lib.trace_log append-event` so it resolves from the
+        plugin root in consumer projects. Redirect stderr to
+        `.dev-kit/trace/emitter-errors.log` instead of `/dev/null`, keeping
+        `|| true` so telemetry never changes a hook verdict. Add an
+        `allow()` helper mirroring `deny()` that emits `guard.allowed`.
+    - path: hooks/trace-write.sh
+      change: |
+        New PostToolUse `Write|Edit|MultiEdit` producer. Emits
+        `write.observed` with `subject_id` = repo-relative file path, so
+        the reducer's per-subject join keys on a stable identity.
+    - path: hooks/trace-verify.sh
+      change: |
+        New PostToolUse `Bash` producer. When the command matches the
+        verify-command set (pytest / npm test / build), emits
+        `verify.passed` or `verify.failed` carrying the real exit code,
+        `required_checks_passed`, `retry_count`, and `independent`, with
+        `parent_id` = the most recent `write.observed` for that subject.
+        Emits `heal.attempted` when a write follows a failed verify on the
+        same subject.
+    - path: hooks/git-guard.sh
+      change: 'Emit `guard.allowed` on the exit-0 path via the shared `allow()` helper (currently emits nothing when it lets a command through).'
+    - path: hooks/bash-guard.sh
+      change: 'Same allow-path emission as git-guard.sh.'
+    - path: hooks/hooks.json
+      change: 'Register `trace-write.sh` under PostToolUse `Write|Edit|MultiEdit` and `trace-verify.sh` under PostToolUse `Bash`.'
+    - path: eval/guard-corpus/*.json
+      change: |
+        New labeled replay corpus: N payloads per guard with a known
+        `ground_truth` of `unsafe` or `legitimate`, including near-miss
+        legitimate cases (the false-positive population precision needs).
+    - path: bin/guard-calibrate.sh
+      change: |
+        Replays the corpus against each guard with `DEV_KIT_GROUND_TRUTH`
+        set and `run_id=calibration-<date>`, so labeled prevention evidence
+        is produced deterministically and is separable from ambient traffic.
+    - path: lib/harness_effectiveness.py
+      change: |
+        Split `_integrity` findings into blocking (schema/dedupe below
+        threshold) and advisory (historical duplicate present). Advisory
+        findings stay visible in `findings` but no longer force
+        `INSUFFICIENT_EVIDENCE`. No component may be filled with `0.0`.
+        Rebalance `COMPONENT_WEIGHTS` so `learning_quality` is `0.00`
+        (Phase-4 shadow mode deferred), `recovery_quality` is `0.30`,
+        `measurement_integrity` is `0.10`, and `overall_score` is
+        normalized by the actual weight sum (zero-weight components drop
+        out of numerator and divisor).
+    - path: tests/conftest.py
+      change: |
+        Autouse fixture pointing `DEV_KIT_TRACE_ROOT` at `tmp_path` for the
+        whole suite, so hook tests can never append to the developer's real
+        trace stream again.
+    - path: tests/test_trace_log.py
+      change: 'Cover `resolve_trace_root` precedence, worktree→common-dir resolution, duplicate-id rejection, and plugin-root import fallback.'
+    - path: tests/test_hooks_trace_producers.py
+      change: 'New: assert each producer hook emits the expected event_type / parent_id / evidence_ref keys the reducer requires, driven from tmp roots.'
+
+pros:
+  - 'Root causes are measured, not inferred — every claim above cites a file:line or a reproduced command, so the fix list is checkable before any code is written.'
+  - 'Phase 1 alone stops silent data loss in consumer projects, where the emitter currently drops 100% of events with no error surface.'
+  - 'Hook-level producers make first-pass and recovery measurable from ordinary sessions instead of only under `/dev-kit:build` and the babysit repair loop — which is where the metric was always meant to point.'
+  - 'A labeled replay corpus gives prevention precision/recall a real denominator without asking a human to annotate live traffic, and keeps calibration runs separable by `run_id`.'
+  - 'Single-rooted trace resolution collapses ~1000 per-worktree shards into one stream the reducer can actually read.'
+  - 'The reducer contract is preserved: missing evidence still reports `INSUFFICIENT_EVIDENCE`; nothing is back-filled with `0.0` to make the table render a number.'
+
+cons:
+  - 'Adds two new PostToolUse hooks on the hottest tool paths (`Write|Edit|MultiEdit` and `Bash`); each fires a python subprocess and costs latency on every write and every shell command.'
+  - 'The verify producer must pattern-match the verify-command set, which is heuristic — a project with a nonstandard test command emits nothing and silently under-reports first-pass quality.'
+  - 'The guard corpus is a maintenance surface: every new guard pattern needs matching labeled cases, or precision drifts toward whatever the corpus happens to cover.'
+  - 'Repointing the trace root to the shared checkout means concurrent worktrees contend on one file; `flock` already exists in `append_event`, but write volume goes up by roughly the number of active worktrees.'
+  - 'Phase 4 (learning cohorts) requires a shadow mode where a guard logs but does not block — a real safety surface that must be config-gated and off by default.'
+
+limitations:
+  - 'This proposal does not make `learning_quality` scoreable. Without a control cohort it stays `INSUFFICIENT_EVIDENCE`, and `overall_score` therefore stays `null` until Phase 4 ships or the component weight is renegotiated.'
+  - 'The 81 events currently on disk are test artifacts and will be purged, not migrated. There is no historical baseline to compare against after the fix.'
+  - 'The 16-hex event_id block proves a second runtime copy of `lib/trace_log.py` wrote to this stream; the idempotency guard prevents replay damage but does not identify or remove that writer.'
+  - 'Hook-emitted `verify.*` observes the exit code of a command, not whether the command actually tested the thing that was written. `first_pass_quality` will measure "the suite passed after the write", not semantic correctness.'
+  - 'Sharding is fixed for git worktrees via `--git-common-dir`; a consumer project that vendors dev-kit outside git gets no aggregation and falls back to a per-cwd stream.'
+
+sections:
+  - title: "Root-cause table"
+    body: |
+      | # | Root cause | Evidence | Blocks |
+      |---|---|---|---|
+      | RC-1 | 4 of 5 components have no interactive producer | 81/81 events are `guard.blocked`; `learning.outcome` has zero producers repo-wide | first_pass, recovery, learning |
+      | RC-2 | Emitter dies silently outside this repo | `ModuleNotFoundError` reproduced from `/tmp`; `payload-parse.sh:108-112` swallows it | all |
+      | RC-3 | Guards emit only on deny | `emit_guard_event` called from `deny()`; one allow site (`worktree-guard.sh:93`) | prevention (recall) |
+      | RC-4 | `ground_truth` read from an env var nobody sets | `payload-parse.sh:105`; zero writers | prevention (precision) |
+      | RC-5 | Evidence sharded per worktree | `--root $(git rev-parse --show-toplevel)`; ~1000 worktrees | all |
+      | RC-6 | Integrity pinned off by findings-gate + empty `step.started` | `harness_effectiveness.py:225-227`, `:209-220` | measurement_integrity |
+      | RC-7 | Only events on disk came from the test suite | reason strings match test fixtures; `test_git_workflow.py:361` uses `cwd=REPO_ROOT` | data trust |
+
+  - title: "Phase 1 — make the existing emitter survive (RC-2, RC-5, RC-7)"
+    body: |
+      Nothing else is worth building until the one producer that already
+      exists stops losing data.
+
+      - `resolve_trace_root()` in `lib/trace_log.py`: `DEV_KIT_TRACE_ROOT`
+        wins; otherwise resolve the shared checkout through
+        `git rev-parse --git-common-dir` so all worktrees converge on one
+        `.dev-kit/trace/events.jsonl`.
+      - `PYTHONPATH="${CLAUDE_PLUGIN_ROOT:-$root}"` on the emitter call, so
+        consumer projects can import `lib.trace_log` at all.
+      - Emitter stderr goes to `.dev-kit/trace/emitter-errors.log`. Still
+        `|| true` — telemetry must never change a hook verdict — but the
+        failure becomes diagnosable instead of invisible.
+      - `append_event` rejects an `event_id` already present, so a replayed
+        or double-written line cannot corrupt `dedupe_integrity` again.
+      - Autouse pytest fixture pins `DEV_KIT_TRACE_ROOT` to `tmp_path`.
+      - Purge the polluted `.dev-kit/trace/events.jsonl` as part of the cut.
+
+      Exit criterion: a guard block fired from a scratch project outside
+      this repo appears in the shared stream, and `pytest -q` adds zero
+      events to the developer's real file.
+
+  - title: "Phase 2 — emit the interactive lifecycle (RC-1, RC-3)"
+    body: |
+      Two new PostToolUse producers plus an allow-path emission on the
+      existing guards.
+
+      - `hooks/trace-write.sh` (Write|Edit|MultiEdit) → `write.observed`,
+        `subject_id` = repo-relative path.
+      - `hooks/trace-verify.sh` (Bash) → `verify.passed` / `verify.failed`
+        from the real exit code, `parent_id` linked to the last
+        `write.observed` for the same subject, `evidence_ref` carrying
+        `required_checks_passed` + `retry_count` (which is what
+        `_first_pass` at `harness_effectiveness.py:114-118` requires) and
+        `independent` (which `_recovery` at `:155` requires).
+      - `heal.attempted` when a write lands on a subject that has an open
+        `verify.failed`, parent-linked to that failure.
+      - `allow()` helper emitting `guard.allowed` from every guard's exit-0
+        path, giving recall a non-empty denominator.
+
+      Exit criterion: one ordinary edit → failing test → fix → passing test
+      session produces a parent-linked chain
+      `write.observed → verify.failed → heal.attempted → verify.passed`,
+      and `first_pass_quality` + `recovery_quality` both report a number.
+
+  - title: "Phase 3 — labeled prevention + honest integrity (RC-4, RC-6)"
+    body: |
+      Prevention labels do not belong in ambient traffic. A session cannot
+      know whether the command it just blocked was genuinely unsafe.
+
+      - `eval/guard-corpus/<guard>.json`: labeled payloads, `unsafe` and
+        `legitimate`, including near-miss legitimate cases — without those,
+        precision is measured against a population with no false positives
+        in it and is meaningless.
+      - `bin/guard-calibrate.sh` replays the corpus with
+        `DEV_KIT_GROUND_TRUTH` set and a dedicated
+        `run_id=calibration-<date>`, so labeled evidence is separable from
+        real traffic at read time.
+      - `_integrity` splits findings: blocking (schema or dedupe below
+        threshold) vs advisory (a historical duplicate exists). Advisory
+        findings stay in `findings` for the reader but stop forcing
+        `INSUFFICIENT_EVIDENCE` at 100% schema completeness.
+      - `event_coverage` gets a real denominator once Phase 2's producers
+        emit lifecycle starts and terminals.
+
+      Exit criterion: `prevention_quality` and `measurement_integrity`
+      both report a number after one calibration run.
+
+  - title: "Phase 4 — learning cohorts (gated, deferred)"
+    body: |
+      `learning_quality` compares a treatment cohort (guard intervened)
+      against a control cohort (guard did not). A control cohort requires a
+      shadow mode where the guard evaluates and logs but does not block —
+      which is a genuine safety surface, not a telemetry detail.
+
+      **Decision (locked):** ship `learning_quality` with weight `0.00`
+      and normalize `overall_score` by the actual weight sum so it cannot
+      depress the overall until Phase 4 lands. The component is still
+      rendered in the table (visibility), but it contributes neither to
+      the numerator nor the divisor. Re-enabling is a one-line weight
+      change when the control cohort ships.
+
+      Proposed shape of Phase 4 itself, explicitly deferred until Phases
+      1–3 land and are trusted: `DEV_KIT_GUARD_SHADOW=1` puts named guards
+      in log-only mode for a bounded window; `learning.outcome` events tag
+      `cohort` and `verified_recovery` per subject. Off by default, never
+      enabled on catastrophic-class patterns (`rm -rf /`, force-push to main).
+
+      Until then `learning_quality` reports `INSUFFICIENT_EVIDENCE` and
+      contributes 0 to the overall. That is the honest output, and it is
+      preferable to a placeholder that makes the scorecard look complete.
+
+  - title: "Rejected alternatives"
+    body: |
+      - **Lower the coverage threshold or default missing components to
+        `0.0`.** Makes `overall_score` render a number that means nothing.
+        Directly forbidden by the skill contract
+        (`skills/harness-effectiveness/SKILL.md`, "Forbidden shortcuts").
+      - **Reconstruct evidence from session transcripts post-hoc.** The
+        umbrella proposal already rejected this: parent links, event order,
+        and denominators cannot be recovered reliably from prose.
+      - **Emit everything from `lib/execute.py` only.** That is the current
+        design, and it is why 4 of 5 components are empty — the build
+        runner is not where most harness work happens.
+      - **One trace file per worktree plus a merge step at read time.**
+        Merging ~1000 shards on every report run is slower and re-introduces
+        the duplicate-id problem the idempotency guard is meant to close.
+
+  - title: "Verification plan"
+    body: |
+      Every phase gates on quoted evidence, not on assertion (Iron Law L3):
+
+      1. `pytest -q tests/test_trace_log.py tests/test_hooks_trace_producers.py`
+         — quoted exit code + test counts.
+      2. Scratch-project probe: fire a guard from a directory with no
+         `lib/`, then show the appended line in the shared stream.
+      3. Pollution probe: record `wc -l` of the real trace file, run the
+         full suite, show the count is unchanged.
+      4. End-to-end: run one edit → fail → fix → pass cycle, then quote
+         `/dev-kit:harness-effectiveness` showing `first_pass_quality` and
+         `recovery_quality` with non-null scores.
+      5. Calibration: run `bin/guard-calibrate.sh`, quote
+         `prevention_quality.submetrics.guard_precision` and `guard_recall`.
+
+  - title: "Open questions for the reviewer"
+    body: |
+      1. **Phase 4 scope.** Resolved: ship `learning_quality` at weight
+         `0.00` and re-enable when the control cohort exists. Open follow-up:
+         who owns the shadow-mode spec?
+      2. **Verify-command detection.** Resolved: prefer
+         `DEV_KIT_VERIFY_COMMAND` env var (explicit override), fall back to
+         heuristic pattern-matching against the known test/build set, and
+         report `INSUFFICIENT_EVIDENCE` honestly when neither is set. The
+         heuristic is silent-but-0-forbidden by Iron Law L4 — it never
+         produces a misleading zero score.
+      3. **Hook cost.** Two new PostToolUse producers on the hottest paths.
+         Accept the per-call subprocess, or batch through an append daemon?
+         This proposal assumes the direct subprocess, matching every other
+         hook in the matrix.
