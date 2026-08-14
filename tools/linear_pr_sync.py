@@ -186,12 +186,23 @@ def _team_id() -> str | None:
 
 
 def _issue_by_branch(branch: str, project_id: str | None) -> dict | None:
-    """Find the project issue whose full auto-sync marker names branch."""
-    scope_marker = f"<!-- scope:{branch}::auto-sync -->"
+    """Find the project issue whose scope marker names branch.
+
+    Matches by `<!-- scope:{branch}::` prefix rather than the full
+    literal `{branch}::auto-sync` marker: the client-side session
+    hook (tools/linear_sync.py::_scope_key) writes
+    `{branch}::{first 12 words of the prompt}` as the scope suffix,
+    not the literal `auto-sync` this script itself writes when it
+    creates an issue. A prefix match unifies both writers onto the
+    same issue; the trailing `::` still anchors on the full branch
+    name so `feat/x` cannot match a `feat/x-extra` marker.
+    """
+    prefix = f"<!-- scope:{branch}::"
     for issue in _iter_issues(project_id, only_open=False):
         description = issue.get("description") or ""
-        if scope_marker in description.splitlines():
-            return issue
+        for line in description.splitlines():
+            if line.startswith(prefix):
+                return issue
     return None
 
 

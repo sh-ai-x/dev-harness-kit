@@ -123,6 +123,22 @@ class TestIssueLookup(unittest.TestCase):
         with patch.object(lps, "_iter_issues", return_value=issues):
             self.assertEqual(lps._issue_by_branch("feat/x", "project")["identifier"], "SHO-2")
 
+    def test_matches_client_hook_scope_marker(self):
+        # tools/linear_sync.py::_scope_key writes `{branch}::{prompt words}`,
+        # not the literal `{branch}::auto-sync` this script writes when it
+        # creates an issue itself. The CI-side lookup must still find it.
+        issues = [
+            {"identifier": "SHO-1", "description": "<!-- scope:feat/x-extra::fix the thing -->"},
+            {"identifier": "SHO-2", "description": "<!-- scope:feat/x::add the new endpoint -->"},
+        ]
+        with patch.object(lps, "_iter_issues", return_value=issues):
+            self.assertEqual(lps._issue_by_branch("feat/x", "project")["identifier"], "SHO-2")
+
+    def test_no_match_returns_none(self):
+        issues = [{"identifier": "SHO-1", "description": "<!-- scope:other/branch::auto-sync -->"}]
+        with patch.object(lps, "_iter_issues", return_value=issues):
+            self.assertIsNone(lps._issue_by_branch("feat/x", "project"))
+
 
 class TestIssuePagination(unittest.TestCase):
     def test_follows_cursor_and_scopes_to_project(self):
