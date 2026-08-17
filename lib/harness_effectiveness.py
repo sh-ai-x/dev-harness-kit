@@ -38,22 +38,6 @@ def _ratio(numerator: int, denominator: int) -> Optional[float]:
     return None if denominator == 0 else round(numerator / denominator * 100, 1)
 
 
-def _as_int(value: Any, default: int) -> int:
-    """Coerce a possibly-malformed evidence value to int.
-
-    ``evidence_ref`` is free-form — ``trace_log.validate_event`` checks
-    only that it is a dict, so a producer could record ``retry_count``
-    as a string (e.g. ``"3"`` via the ``append-event`` CLI) or a
-    non-numeric value. The reducer must never crash the whole report on
-    one malformed field; fall back to ``default`` so the cycle-bound
-    metric degrades to "not bounded" instead of raising.
-    """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _status(score: Optional[float], *, coverage: float = 1.0) -> str:
     if score is None or coverage < 0.90:
         return "INSUFFICIENT_EVIDENCE"
@@ -183,7 +167,7 @@ def _recovery(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             linked = bool(heals and heals[0].get("parent_id") == error["event_id"]
                           and terminal.get("parent_id") == heals[0]["event_id"])
             independent += bool(linked and terminal["evidence_ref"].get("independent", False))
-            cycles = _as_int(terminal["evidence_ref"].get("retry_count"), 99)
+            cycles = int(terminal["evidence_ref"].get("retry_count", 99))
             bounded += bool(linked and cycles <= 3)
             no_regression += not any(e["event_type"] == "verify.failed" and e["ts"] > terminal["ts"] for e in values)
             verified += bool(linked)

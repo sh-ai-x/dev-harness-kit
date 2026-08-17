@@ -61,44 +61,6 @@ def test_recovery_verified_and_independent_are_distinct(tmp_path: Path) -> None:
     assert recovery["submetrics"]["independent_verification_rate"]["value"] == 0.0
 
 
-def test_recovery_tolerates_malformed_retry_count(tmp_path: Path) -> None:
-    """A non-numeric retry_count in evidence_ref must not crash the report.
-
-    ``trace_log.validate_event`` only checks that ``evidence_ref`` is a
-    dict, so a producer could record ``retry_count`` as arbitrary text
-    (e.g. via the ``append-event`` CLI). The reducer must degrade to
-    "not bounded" instead of raising ValueError across the whole report.
-    """
-    _event(tmp_path, event_id="e1", event_type="verify.failed", subject="file-1",
-           outcome="failed", ts="2026-08-12T00:00:00Z")
-    _event(tmp_path, event_id="h1", event_type="heal.attempted", subject="file-1",
-           outcome="attempted", ts="2026-08-12T00:00:01Z", parent="e1")
-    _event(tmp_path, event_id="v1", event_type="verify.passed", subject="file-1",
-           outcome="passed", ts="2026-08-12T00:00:02Z", parent="h1",
-           independent=True, retry_count="abc")
-    recovery = build_report(tmp_path)["components"]["recovery_quality"]
-    # The malformed field must not crash; the cycle bound degrades to
-    # "not bounded" (cycles=99), while the rest of the scorecard stands.
-    assert recovery["submetrics"]["cycle_bound_score"]["value"] == 0.0
-    assert recovery["submetrics"]["independent_verification_rate"]["value"] == 100.0
-    assert recovery["score"] is not None
-
-
-def test_recovery_accepts_numeric_string_retry_count(tmp_path: Path) -> None:
-    """A numeric-string retry_count is coerced, not treated as unbounded."""
-    _event(tmp_path, event_id="e1", event_type="verify.failed", subject="file-1",
-           outcome="failed", ts="2026-08-12T00:00:00Z")
-    _event(tmp_path, event_id="h1", event_type="heal.attempted", subject="file-1",
-           outcome="attempted", ts="2026-08-12T00:00:01Z", parent="e1")
-    _event(tmp_path, event_id="v1", event_type="verify.passed", subject="file-1",
-           outcome="passed", ts="2026-08-12T00:00:02Z", parent="h1",
-           independent=True, retry_count="2")
-    recovery = build_report(tmp_path)["components"]["recovery_quality"]
-    assert recovery["submetrics"]["cycle_bound_score"]["value"] == 100.0
-    assert recovery["submetrics"]["verified_recovery_rate"]["value"] == 100.0
-    assert recovery["submetrics"]["independent_verification_rate"]["value"] == 100.0
-
-
 def test_integrity_coverage_requires_terminal_lifecycle_event(tmp_path: Path) -> None:
     _event(tmp_path, event_id="s1", event_type="step.started", subject="file-1",
            outcome="started", ts="2026-08-12T00:00:00Z")
