@@ -440,6 +440,26 @@ def _notes_override(repo: Path) -> str:
     return str(cfg.get("notes", "")).rstrip()
 
 
+_WORK_VERBS = (
+    "implement", "build", "fix", "refactor", "add", "create",
+    "update", "remove", "delete", "ship", "migrate", "wire",
+    "integrate", "sync", "register", "track",
+)
+_WORK_VERB_RE = re.compile(r"\b(?:{})\b".format("|".join(_WORK_VERBS)))
+
+
+def _has_work_verb(text: str) -> bool:
+    """Return True iff ``text`` contains a recognized work verb.
+
+    Shared by ``_should_skip_prompt`` (skip-on-no-verb) and
+    ``_resolve_prompt`` (branch-fallback when commit subject lacks
+    a work verb on a fresh worktree).
+    """
+    if not text:
+        return False
+    return bool(_WORK_VERB_RE.search(text.lower()))
+
+
 def _should_skip_prompt(prompt: str) -> bool:
     """Filter read-only / non-task prompts (per #539: no Linear for
     inspect / review / security / code-viz unless explicit)."""
@@ -452,12 +472,7 @@ def _should_skip_prompt(prompt: str) -> bool:
     if "/dev-kit:linear" in s or "register in linear" in s:
         return False
     # Heuristic: needs at least one verb that looks like work.
-    work_verbs = (
-        "implement", "build", "fix", "refactor", "add", "create",
-        "update", "remove", "delete", "ship", "migrate", "wire",
-        "integrate", "sync", "register", "track",
-    )
-    return not any(re.search(rf"\b{v}\b", s) for v in work_verbs)
+    return not _has_work_verb(s)
 
 
 def _read_handoff(repo: Path) -> dict[str, Any] | None:
@@ -596,9 +611,19 @@ def _resolve_prompt(repo: Path) -> str:
          recent signal of what the operator is actually working on.
          A fresh task within the same worktree (new commit) updates
          this immediately, so the script does not get stuck on the
-         previous task's prompt.
+         previous task's prompt. Returns immediately when it carries
+         a work verb.
       2. The branch name itself (e.g. ``fix/linear-autosync-prompt-source``)
-         — fallback when no commit has been made yet on this branch.
+         — fallback when the commit subject lacks a work verb.
+         Typical case: a fresh worktree still pointing at origin/main's
+         release commit (no work verb in ``chore(release): ...``).
+         Without this fallback the auto-sync silently skipped on
+         every first Edit|Write of every fresh task branch, which
+         read as "Linear auto-update isn't working" — issue #648-era
+         regression. The branch name carries the ``<type>/<slug>``
+         work-signal (``fix``, ``refactor``, ``feat``-style prefixes
+         are not in ``_WORK_VERBS`` but the slug itself often is)
+         so it qualifies as a task description.
       3. The active hand-off's ``prompt`` field is **not** used as
          a source. The handoff is a cache for the issue reference,
          not for the task description; trusting it would mean a stale
@@ -610,9 +635,21 @@ def _resolve_prompt(repo: Path) -> str:
     the previous task's issue after the operator has moved on.
     """
     commit_subject = _latest_commit_subject(repo)
+    branch = _current_branch(repo)
+    # Priority 1: commit subject with a work verb wins immediately.
+    if commit_subject and _has_work_verb(commit_subject):
+        return commit_subject
+    # Priority 2: branch name carries the task signal on a fresh
+    # worktree. Useful even when the commit subject exists (release
+    # bump from origin/main) but lacks a work verb.
+    if branch and _has_work_verb(branch):
+        return branch
+    # Priority 3: any commit subject we have, even without a work verb.
+    # _should_skip_prompt will gate this against the SKIP_MARKERS
+    # list so a release commit on the main checkout still skips.
     if commit_subject:
         return commit_subject
-    return _current_branch(repo)
+    return branch
 
 
 def _linear_query(query: str, variables: dict[str, Any]) -> dict[str, Any]:

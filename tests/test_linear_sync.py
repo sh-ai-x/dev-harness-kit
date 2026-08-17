@@ -489,6 +489,94 @@ class TestLinearSync(unittest.TestCase):
             self.assertEqual(handoff["prompt"], "implement linear auto-sync")
             self.assertIn("DEMO-7", handoff["issue"])
 
+    def test_fresh_worktree_falls_back_to_branch_name(self):
+        """Regression: a fresh worktree cut from origin/main still
+        points at the release commit (``chore(release): ...``), which
+        has no work verb. The pre-fix ``_resolve_prompt`` returned the
+        commit subject verbatim, the skip gate then bailed, and the
+        user observed "Linear auto-update isn't working" on every
+        first Edit|Write of every task branch.
+
+        Post-fix behavior: when the commit subject lacks a work verb
+        but the branch name carries one (e.g. ``fix/...``), the branch
+        name is used as the task description so auto-sync fires.
+        """
+        with _fake_repo(
+            linear_api_key="test-key",
+            branch="fix/linear-autosync-branch-fallback",
+            # Real-world: fresh worktree, latest commit is the
+            # release bump from origin/main (no work verb).
+            commit_subject="chore(release): bump dev-kit to v0.3.277",
+        ) as repo:
+            def handler(payload):
+                q = payload["query"]
+                if "projects(filter:" in q and "projectCreate" not in q:
+                    return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+                if "issues(filter:" in q:
+                    return {"data": {"issues": {"nodes": []}}}
+                if "issueCreate" in q:
+                    return {"data": {"issueCreate": {"issue": {"id": "iss-fb", "identifier": "DEMO-9"}}}}
+                raise AssertionError(f"unexpected query: {q}")
+
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                self.assertEqual(linear_sync.sync(), 0)
+            handoff = json.loads(
+                (repo / ".dev-kit" / "hand-off" / "linear" / "fake-worktree.json").read_text(encoding="utf-8")
+            )
+            # Branch name used as prompt (not the release commit).
+            self.assertEqual(handoff["prompt"], "fix/linear-autosync-branch-fallback")
+            self.assertEqual(handoff["action"], "created")
+            self.assertIn("DEMO-9", handoff["issue"])
+
+    def test_main_checkout_release_commit_still_skips(self):
+        """Regression guard: the branch-fallback must NOT rescue the
+        main checkout. A ``chore(release): ...`` commit on ``main``
+        still produces no work verb in either signal, so the skip
+        gate continues to bail — the fix is worktree-scoped, not
+        a permission to spam Linear from the main checkout.
+        """
+        with _fake_repo(
+            linear_api_key="test-key",
+            branch="main",
+            commit_subject="chore(release): bump dev-kit to v0.3.277",
+            main_checkout=True,
+        ) as repo:
+            with mock.patch("urllib.request.urlopen") as urlopen:
+                self.assertEqual(linear_sync.sync(), 0)
+                urlopen.assert_not_called()
+            handoff_path = repo / ".dev-kit" / "hand-off" / "linear" / "main.json"
+            self.assertFalse(handoff_path.exists(),
+                             f"main checkout must not write a handoff on skip, found: {handoff_path}")
+
+    def test_commit_subject_with_work_verb_wins_over_branch(self):
+        """Priority guard: when the commit subject carries a work verb,
+        it still wins over the branch name. Otherwise a stale
+        ``chore(release): ...`` on a fresh task branch would shadow
+        the operator's new ``implement ...`` commit once they made
+        one.
+        """
+        with _fake_repo(
+            linear_api_key="test-key",
+            branch="feat/anything",
+            commit_subject="implement linear auto-sync",
+        ) as repo:
+            def handler(payload):
+                q = payload["query"]
+                if "projects(filter:" in q and "projectCreate" not in q:
+                    return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+                if "issues(filter:" in q:
+                    return {"data": {"issues": {"nodes": []}}}
+                if "issueCreate" in q:
+                    return {"data": {"issueCreate": {"issue": {"id": "iss-p", "identifier": "DEMO-10"}}}}
+                raise AssertionError(f"unexpected query: {q}")
+
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                self.assertEqual(linear_sync.sync(), 0)
+            handoff = json.loads(
+                (repo / ".dev-kit" / "hand-off" / "linear" / "fake-worktree.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(handoff["prompt"], "implement linear auto-sync")
+
     def test_stale_handoff_prompt_does_not_shadow_new_commit(self):
         """Adversarial review [high]: `_resolve_prompt` must NOT prefer
         a stale `handoff.prompt` from a previous task. When the
