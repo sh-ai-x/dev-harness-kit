@@ -121,17 +121,22 @@ def test_jsonl_no_verdict_emits_parse_failed(tmp_path: Path) -> None:
 
 
 def test_jsonl_only_non_assistant_messages(tmp_path: Path) -> None:
-    """JSONL with only init/result (no assistant messages) → PARSE_FAILED.
+    """JSONL with only init/result (no verdict anywhere) → PARSE_FAILED.
 
     The agent ran (file existed, was parseable JSON) but produced no
-    assistant text at all. Same outcome as no-Verdict: hard-fail.
+    recognisable `Verdict:` line anywhere. Issue #625 widened the trusted
+    message types to include ``result`` (the MINIMAX wrapper summary
+    envelope) — but ``result`` here carries no content, so no verdict
+    match is found and the #612 contract (parseable JSONL with no verdict
+    MUST emit PARSE_FAILED) still holds. User / tool_use messages with
+    verdicts are still ignored (see test_non_assistant_messages_ignored).
     """
     target = tmp_path / "agent.json"
     _write_jsonl(
         target,
         [
             {"type": "init"},
-            {"type": "result"},
+            {"type": "result", "subtype": "success"},  # no content -> no verdict
         ],
     )
     result = _run([str(target)])
@@ -385,3 +390,134 @@ def test_comments_file_missing_returns_empty(tmp_path: Path) -> None:
     result = _run([str(target), str(tmp_path / "missing.json")])
     assert result.returncode == 0
     assert result.stdout == ""
+
+
+
+# ---------------------------------------------------------------------------
+# Issue #625: MINIMAX provider envelope shapes.
+#
+# The MINIMAX wrapper (CI_REVIEW_PROVIDER=minimax, via
+# https://api.minimax.io/anthropic) drops the assistant-message stream from
+# claude-execution-output.json — the file is parseable JSONL but contains
+# only `type=preset`, `type=system` init, and `type=result` summary
+# messages. The verdict IS in one of those result messages, in one of
+# three shapes:
+#
+#   - top-level `result` string  (the canonical MINIMAX envelope)
+#   - top-level `content` list of text blocks  (alternative wrapper)
+#   - nested `message.content` list of text blocks  (the claude-code SDK
+#     shape the parser already supported — sanity-check it still works
+#     on a result-type message that uses the SDK shape)
+#
+# Pre-#625 the parser only scanned `type=assistant` messages, so the
+# MINIMAX envelope always returned PARSE_FAILED even on a clean review,
+# hard-failing the severity gate. These tests pin the post-#625 contract.
+# ---------------------------------------------------------------------------
+
+
+def test_minimax_envelope_with_verdict_in_result_string_content(tmp_path: Path) -> None:
+    """Issue #625: canonical MINIMAX envelope — verdict in top-level `result`.
+
+    Wrapper emits only preset + system + result summary messages. The
+    result message carries the verdict as a bare `result` string (the
+    shape MINIMAX uses in production). Parser must extract it so the
+    severity gate does not hard-fail on a clean review.
+    """
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {"type": "preset", "content": "system preset"},
+            {"type": "system", "subtype": "init"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "Review complete.\nVerdict: Approve",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_minimax_envelope_with_verdict_in_result_content_list(tmp_path: Path) -> None:
+    """Issue #625: alternate wrapper shape — verdict in `content` list.
+
+    Some MINIMAX wrapper versions put the summary in the top-level
+    `content` field as a list of text blocks (same shape as the
+    claude-code SDK `message.content`). Parser must recognise this
+    shape on a `type=result` message.
+    """
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {"type": "preset", "content": "system preset"},
+            {"type": "system", "subtype": "init"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "content": [
+                    {"type": "text", "text": "Review complete.\nVerdict: Changes Requested"},
+                ],
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Changes Requested"
+
+
+def test_minimax_envelope_no_assistant_messages_no_verdict_falls_to_parse_failed(tmp_path: Path) -> None:
+    """Issue #625 + #612: MINIMAX envelope with no verdict anywhere → PARSE_FAILED.
+
+    Preserves the #612 contract — a parseable JSONL with no
+    recognisable `Verdict:` line MUST emit PARSE_FAILED so the severity
+    gate hard-fails with the dedicated remediation message. The new
+    `type=result` trust does NOT weaken this contract: if no candidate
+    message carries a verdict, the sentinel still fires (vs the old
+    silent-Approve consumer bug).
+    """
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {"type": "preset", "content": "system preset"},
+            {"type": "system", "subtype": "init"},
+            {"type": "result", "subtype": "success"},  # no result/content -> no verdict
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == PARSE_FAILED
+
+
+def test_minimax_envelope_last_verdict_in_result_message_wins(tmp_path: Path) -> None:
+    """Issue #625: two `type=result` messages, second carries final verdict → second wins.
+
+    Mirrors the assistant-stream "last assistant message wins" semantic
+    on the result-type stream: when the MINIMAX wrapper emits multiple
+    summary messages (rare but observed), the parser must take the LAST
+    one, which is the final emitted verdict.
+    """
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {"type": "preset", "content": "system preset"},
+            {
+                "type": "result",
+                "subtype": "intermediate",
+                "result": "First pass.\nVerdict: Approve",
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "Revised after follow-up.\nVerdict: Blocked",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Blocked"

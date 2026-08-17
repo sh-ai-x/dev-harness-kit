@@ -33,10 +33,15 @@ PR head-commit timestamp (PR-mode) or pull_request.updated_at
 the PR lifecycle. Older comments from previous pushes are ignored
 to avoid resurrecting stale verdicts (the #244 bug).
 
-The `author.login` field is used (NOT the legacy `user.login` which
-gh CLI dropped for comments in the 2.x release). Author matching is
+Author matching accepts ANY of `author.login` (modern `gh pr view
+--json comments` schema), the legacy `user.login` (older `gh api
+.../issues/.../comments` payloads), or a top-level `login` string on
+the comment (some endpoints flatten it). The matching is
 case-insensitive and uses startswith('claude') to catch both
-`claude[bot]` and any future `claude-something` agent labels.
+`claude[bot]` and any future `claude-something` agent labels. Issue
+#625 surfaced this need because the MINIMAX wrapper posts the verdict
+comment and the fallback parser must work regardless of which gh CLI
+version is installed on the runner.
 
 Usage:
     cat comments.json | VERDICT_COMMENT_CUTOFF=2024-01-01T00:00:00Z \\
@@ -106,14 +111,29 @@ def _after_cutoff(comment: dict, cutoff: datetime | None) -> bool:
 def _is_claude_author(comment: dict) -> bool:
     """True iff author login starts with 'claude' (case-insensitive).
 
-    gh CLI's `gh pr view --json comments` schema emits an `author`
-    object (NOT the legacy `user` field). When the field is missing
-    (e.g. deleted account, scoped token) we treat the comment as
-    non-claude and skip it.
+    gh CLI's JSON shape for comment authors has shifted across major
+    versions:
+
+      - `gh pr view --json comments` (modern, ~2.x) emits an ``author``
+        object with a ``login`` sub-field.
+      - Older `gh api .../issues/.../comments` payloads use a flat
+        ``user`` object with a ``login`` sub-field (the legacy shape).
+      - Some endpoints / future versions flatten it further to a
+        top-level ``login`` string on the comment itself.
+
+    Accept any of the three locations so the caller stays robust across
+    CLI versions. When no login field is present (e.g. deleted account,
+    scoped token) we treat the comment as non-claude and skip it.
     """
     author = comment.get("author") or {}
-    login = (author.get("login") or "").lower()
-    return login.startswith("claude")
+    user = comment.get("user") or {}
+    login = (
+        author.get("login")
+        or user.get("login")
+        or comment.get("login")
+        or ""
+    )
+    return login.lower().startswith("claude")
 
 
 def _verdict_from_body(body: str) -> str:

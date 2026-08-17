@@ -29,7 +29,10 @@ from `claude-execution-output.json` — the file is parseable JSONL but
 contains only `type: "preset"`, `type: "system"` init, and
 `type: "result"` summary messages. The agent DOES post the verdict as
 a PR comment body, but `extract()` returns PARSE_FAILED because there
-is no assistant text block.
+is no assistant text block. This script now also scans `type=result`
+messages (see CANDIDATE_MSG_TYPES) so MINIMAX wrappers can recover the
+verdict directly from the summary envelope when the comments-fallback
+path is unavailable.
 
 This script accepts an optional SECOND argument — a path to a JSON file
 containing the PR comments for the current run (already filtered by
@@ -97,12 +100,78 @@ from pathlib import Path
 
 VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
 
+# Issue #625 (MINIMAX provider): the wrapper drops the assistant-message
+# stream and emits only `type=result` summary messages. The verdict IS
+# in one of those result messages (top-level `result` string, top-level
+# `content` string, top-level `content` list of text blocks, or the
+# nested `message.content` shape the claude-code SDK uses). Scan both
+# `assistant` and `result` so MINIMAX wrappers don't fall through to
+# PARSE_FAILED on a clean review.
+CANDIDATE_MSG_TYPES = ("assistant", "result")
+
 # Sentinel emitted when the agent's output file exists and is parseable
-# JSONL but no assistant message contains a `Verdict:` line. The
+# JSONL but no candidate message contains a `Verdict:` line. The
 # review.yml severity gate has a dedicated branch that hard-fails with
 # a remediation message when this sentinel shows up in the verdict
 # output (see the `PARSE_FAILED` arm of the combined verdict gate).
 PARSE_FAILED = "PARSE_FAILED"
+
+
+def _extract_texts(msg: dict) -> list[str]:
+    """Collect every candidate text string from a message envelope.
+
+    Tries the three shapes the wrappers actually emit, in order:
+
+      1. ``msg["message"]["content"]`` — claude-code SDK and the
+         original /dev-kit:* agent stream. May be a list of
+         ``{"type": "text", "text": ...}`` blocks or a bare string.
+      2. ``msg["content"]`` — some wrappers flatten content to the top
+         level. Same list-or-string contract as (1).
+      3. ``msg["result"]`` — MINIMAX wrapper summary envelope (issue
+         #625). Bare string only.
+
+    Returns a list of strings (possibly empty). Never raises; any
+    unparseable shape is silently skipped so a malformed envelope
+    degrades to ``PARSE_FAILED`` rather than crashing the post-step.
+
+    The verdict regex scans each string in order, so the LAST
+    `Verdict:` line across all three sources within a single message
+    wins. That matches the agent-stream contract ("last assistant
+    message wins") extended one level down to "last text source wins
+    within the last candidate message".
+    """
+    texts: list[str] = []
+
+    # 1. claude-code SDK / original agent stream: message.content
+    message_content = msg.get("message", {}).get("content")
+    if isinstance(message_content, list):
+        for block in message_content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(str(block.get("text", "")))
+            elif isinstance(block, str):
+                texts.append(block)
+    elif isinstance(message_content, str):
+        texts.append(message_content)
+
+    # 2. Top-level content (wrappers that flatten the envelope).
+    content = msg.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(str(block.get("text", "")))
+            elif isinstance(block, str):
+                texts.append(block)
+    elif isinstance(content, str) and content:
+        texts.append(content)
+
+    # 3. MINIMAX wrapper summary (issue #625) — top-level `result`
+    # string. Collected in addition to (1) and (2) so a message that
+    # has BOTH a chat history and a summary envelope is fully scanned.
+    result_text = msg.get("result")
+    if isinstance(result_text, str) and result_text:
+        texts.append(result_text)
+
+    return texts
 
 
 def extract(path: Path) -> str:
@@ -143,37 +212,30 @@ def extract(path: Path) -> str:
             continue
         if not isinstance(msg, dict):
             continue
-        if msg.get("type") != "assistant":
+        # Issue #625: trust both `assistant` (claude-code SDK / original
+        # agent stream) and `result` (MINIMAX wrapper summary envelope).
+        # Other message types — user, tool_use, system, preset, init —
+        # are intentionally ignored; user/tool_use in particular MUST
+        # stay ignored (issue #612 test_non_assistant_messages_ignored
+        # contract) so a user-quoted or tool-echoed verdict line cannot
+        # satisfy the gate. Only the model's actual emitted text counts.
+        if msg.get("type") not in CANDIDATE_MSG_TYPES:
             continue
-        # Content can be in `message.content` (list of content blocks,
-        # claude-code SDK) or directly in `content` (string, some
-        # wrappers).
-        content = msg.get("message", {}).get("content")
-        if content is None:
-            content = msg.get("content")
-        texts: list[str] = []
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    texts.append(str(block.get("text", "")))
-                elif isinstance(block, str):
-                    texts.append(block)
-        elif isinstance(content, str):
-            texts.append(content)
+        texts = _extract_texts(msg)
         for t in texts:
             m = VERDICT_RE.search(t)
             if m:
                 last_verdict = m.group(1)
     # Issue #612 fix: file passed the basic shape checks (exists, not
-    # HTML, has content) but no assistant message contained a
-    # recognizable `Verdict:` line. Either the JSONL was garbled, the
-    # agent didn't emit a verdict, or the wrapper changed format — in
-    # all cases we cannot trust a missing-verdict default. Emit the
-    # PARSE_FAILED sentinel so the gate hard-fails with the dedicated
-    # remediation message instead of silently defaulting to Approve
-    # (the old consumer-facing bug). The no-file / HTML / unreadable
-    # cases above still return "" so the caller can keep its genuine
-    # no-file tolerance path.
+    # HTML, has content) but no candidate message (assistant or result,
+    # see CANDIDATE_MSG_TYPES) contained a recognizable `Verdict:` line.
+    # Either the JSONL was garbled, the agent didn't emit a verdict, or
+    # the wrapper changed format — in all cases we cannot trust a
+    # missing-verdict default. Emit the PARSE_FAILED sentinel so the
+    # gate hard-fails with the dedicated remediation message instead of
+    # silently defaulting to Approve (the old consumer-facing bug). The
+    # no-file / HTML / unreadable cases above still return "" so the
+    # caller can keep its genuine no-file tolerance path.
     if not last_verdict:
         return PARSE_FAILED
     return last_verdict

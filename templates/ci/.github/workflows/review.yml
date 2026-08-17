@@ -404,15 +404,34 @@ jobs:
           # stands and the gate hard-fails with the remediation message.
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
-            comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select(.author.login | startswith("claude")) | {body, createdAt}' 2>/dev/null || true)
-            if [ -n "$comments_json" ]; then
-              comment_verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py" 2>/dev/null || true)
-              if [ -n "$comment_verdict" ]; then
-                verdict="$comment_verdict"
-                verdict_source="comments-fallback"
-                agent_ran="true"
-                echo "::notice::review verdict recovered from PR comments: ${verdict}"
+            comment_verdict=""
+            # Issue #625 retry-loop: claude-code-action posts the agent's
+            # verdict PR comment ASYNCHRONOUSLY after the agent-run step
+            # completes -- there is a ~30s race window in which this
+            # extract step ran but the agent's claude[bot] PR comment isn't
+            # yet visible. A single-shot lookup misses in that window and
+            # the gate hard-fails on what is actually a clean review.
+            # 3 attempts x 5s sleep (10s total budget, well under the 30s
+            # race window) closes the gap without burning CI minutes.
+            # The jq query also falls back to .user.login / top-level
+            # .login (older gh CLI versions / different endpoints) so the
+            # author matcher keeps working across CLI upgrades.
+            for attempt in 1 2 3; do
+              echo "::notice::review PR-comments fallback attempt=${attempt}/3"
+              comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}' 2>/dev/null || true)
+              if [ -n "$comments_json" ]; then
+                comment_verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py" 2>/dev/null || true)
+                if [ -n "$comment_verdict" ]; then
+                  break
+                fi
               fi
+              [ "$attempt" -lt 3 ] && sleep 5
+            done
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+              echo "::notice::review verdict recovered from PR comments: ${verdict}"
             fi
           fi
           echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
@@ -714,15 +733,35 @@ jobs:
           # PR comment. Cutoff filter avoids stale verdicts (issue #244).
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
-            comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select(.author.login | startswith("claude")) | {body, createdAt}' 2>/dev/null || true)
-            if [ -n "$comments_json" ]; then
-              comment_verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py" 2>/dev/null || true)
-              if [ -n "$comment_verdict" ]; then
-                verdict="$comment_verdict"
-                verdict_source="comments-fallback"
-                agent_ran="true"
-                echo "::notice::security verdict recovered from PR comments: ${verdict}"
+            comment_verdict=""
+            # Issue #625 retry-loop (symmetric with the review job above):
+            # claude-code-action posts the agent's verdict PR comment
+            # ASYNCHRONOUSLY after the agent-run step completes -- there
+            # is a ~30s race window in which this extract step ran but
+            # the agent's claude[bot] PR comment isn't yet visible. A
+            # single-shot lookup misses in that window and the gate
+            # hard-fails on what is actually a clean review. 3 attempts
+            # x 5s sleep (10s total budget, well under the 30s race
+            # window) closes the gap without burning CI minutes. The jq
+            # query also falls back to .user.login / top-level .login
+            # (older gh CLI versions / different endpoints) so the
+            # author matcher keeps working across CLI upgrades.
+            for attempt in 1 2 3; do
+              echo "::notice::security PR-comments fallback attempt=${attempt}/3"
+              comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}' 2>/dev/null || true)
+              if [ -n "$comments_json" ]; then
+                comment_verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py" 2>/dev/null || true)
+                if [ -n "$comment_verdict" ]; then
+                  break
+                fi
               fi
+              [ "$attempt" -lt 3 ] && sleep 5
+            done
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+              echo "::notice::security verdict recovered from PR comments: ${verdict}"
             fi
           fi
           echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
