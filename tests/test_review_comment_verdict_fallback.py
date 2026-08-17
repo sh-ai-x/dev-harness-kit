@@ -199,6 +199,93 @@ class TestFallbackUsageErrors(unittest.TestCase):
         self.assertEqual(cp.stdout.strip(), "")
 
 
+class TestFallbackAuthorShapeTolerance(unittest.TestCase):
+    """Issue #625 review (P1): widened author lookup must not crash on
+    odd-shaped `author`/`user`/`login` fields. The pre-fix code did
+    `comment.get("author") or {}` (which only substitutes the default
+    when the KEY is missing) and chained `.get("login")`; a comment with
+    `{"author": None}`, `{"author": "..."}`, or `{"author": 42}` would
+    raise AttributeError mid-loop, abort the whole scan, and surface as
+    a fallback failure on every retry attempt.
+
+    Contract: any non-dict / non-string source MUST be treated as
+    "non-claude, skip" without raising. The helper exits 0 with empty
+    stdout (no verdict recovered) so the caller can fall through to
+    PARSE_FAILED instead of looping on a crash.
+    """
+
+    def test_author_none_is_skipped(self) -> None:
+        """`{"author": None}` must not crash the loop."""
+        comments = [
+            {"author": None, "body": "Verdict: Approve\n", "createdAt": "2024-01-01T00:00:00Z"}
+        ]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "")
+
+    def test_author_scalar_string_is_accepted(self) -> None:
+        """`{"author": "claude[bot]"}` (a flat-string author field used
+        by some gh CLI builds) is accepted as the login itself — the
+        widened lookup treats a scalar string as a direct login. This
+        is a graceful extension of the dict shape; it does not crash
+        and it recovers the verdict when the prefix matches.
+        """
+        comments = [
+            {"author": "claude[bot]", "body": "Verdict: Approve\n", "createdAt": "2024-01-01T00:00:00Z"}
+        ]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "Approve")
+
+    def test_author_integer_is_skipped(self) -> None:
+        """`{"author": 42}` (e.g. a numeric user id) must not crash."""
+        comments = [
+            {"author": 42, "body": "Verdict: Approve\n", "createdAt": "2024-01-01T00:00:00Z"}
+        ]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "")
+
+    def test_user_scalar_does_not_crash_when_author_present(self) -> None:
+        """Both `author` and `user` set with odd types -> still no crash;
+        recovers verdict when author dict has the right shape."""
+        comments = [
+            {
+                "author": {"login": "claude[bot]"},
+                "user": 99,  # odd type — must be ignored, not crashed on
+                "body": "Verdict: Approve\n",
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        ]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "Approve")
+
+    def test_top_level_login_non_string_is_skipped(self) -> None:
+        """`{"login": 12345}` must not crash via `.lower()` later."""
+        comments = [
+            {
+                "author": {"login": 12345},  # int login -> not a string -> skip
+                "body": "Verdict: Approve\n",
+                "createdAt": "2024-01-01T00:00:00Z",
+            }
+        ]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "")
+
+    def test_mixed_odd_and_valid_comments_recover_from_valid(self) -> None:
+        """One odd-shaped comment + one valid claude-prefixed comment ->
+        the valid comment's verdict is recovered; the odd one is skipped."""
+        comments = [
+            {"author": None, "body": "Verdict: Blocked\n", "createdAt": "2024-01-01T00:00:00Z"},
+            _comment("claude[bot]", "Verdict: Approve\n", created_at="2024-01-02T00:00:00Z"),
+        ]
+        cp = _run_helper(json.dumps(comments))
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        self.assertEqual(cp.stdout.strip(), "Approve")
+
+
 class TestFallbackHelperScript(unittest.TestCase):
     """Sanity: the script exists, is executable, and has the right shape."""
 

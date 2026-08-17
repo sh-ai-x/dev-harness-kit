@@ -521,3 +521,147 @@ def test_minimax_envelope_last_verdict_in_result_message_wins(tmp_path: Path) ->
     result = _run([str(target)])
     assert result.returncode == 0
     assert result.stdout.strip() == "Blocked"
+
+
+# ---------------------------------------------------------------------------
+# Issue #625 review (P1): defensive envelope handling.
+#
+# Two distinct P1 findings from the #625 review:
+#   1. `_extract_texts()` does `msg.get("message", {}).get(...)`, which
+#      crashes with AttributeError when `message` is None / a string /
+#      a number — contradicting the docstring's "Never raises" contract.
+#      The widened `type=result` trust is precisely the case where the
+#      envelope shape is unknown by definition.
+#   2. The widened `type=result` trust must NOT swallow aborted runs
+#      that carry `is_error: true` or `subtype: error_max_turns` /
+#      `error_during_execution`. Such messages can carry a partial
+#      summary that happens to contain `Verdict: Approve` (emitted
+#      before the agent was cut off), and trusting them would let an
+#      aborted run slip through the gate (a regression of the
+#      pre-#625 behaviour where such runs resolved to PARSE_FAILED).
+# ---------------------------------------------------------------------------
+
+
+def test_message_field_none_does_not_crash(tmp_path: Path) -> None:
+    """`{"message": null}` on a type=result message must NOT raise.
+
+    Pre-fix: `msg.get("message", {}).get("content")` -> `None.get(...)`
+    raises AttributeError. Post-fix: isinstance guard returns None and
+    the parser falls through to top-level `content` / `result`.
+    """
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {
+                "type": "result",
+                "subtype": "success",
+                "message": None,  # would have raised AttributeError pre-fix
+                "result": "Verdict: Approve",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_message_field_string_does_not_crash(tmp_path: Path) -> None:
+    """`{"message": "..."}` (a string instead of dict) must NOT raise."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {
+                "type": "result",
+                "subtype": "success",
+                "message": "raw chat string, not an object",
+                "result": "Verdict: Changes Requested",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Changes Requested"
+
+
+def test_message_field_missing_falls_through_to_top_level(tmp_path: Path) -> None:
+    """Missing `message` key (no default-substitute surprise) -> top-level content."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {
+                "type": "result",
+                "subtype": "success",
+                # no `message` key at all
+                "content": [{"type": "text", "text": "Verdict: Approve"}],
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_is_error_true_message_is_skipped(tmp_path: Path) -> None:
+    """`is_error: true` on a type=result message must NOT be trusted.
+
+    Pre-#625 an aborted run produced no assistant stream and resolved to
+    PARSE_FAILED. Post-#625 widening must not weaken that: if the agent
+    was cut off mid-flight, the partial summary (which may contain a
+    `Verdict:` line) is NOT a real verdict and MUST be ignored.
+    """
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {
+                "type": "result",
+                "is_error": True,
+                "subtype": "error_max_turns",
+                "result": "I started writing up findings but ran out of turns.\nVerdict: Approve",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    # No verdict extracted -> PARSE_FAILED sentinel (NOT silent Approve).
+    assert result.stdout.strip() == PARSE_FAILED
+
+
+def test_error_subtype_message_is_skipped(tmp_path: Path) -> None:
+    """`subtype: error_during_execution` is treated like `is_error: true`."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {
+                "type": "result",
+                "subtype": "error_during_execution",
+                "result": "Verdict: Approve (best-effort before crash)",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == PARSE_FAILED
+
+
+def test_clean_result_message_still_extracted(tmp_path: Path) -> None:
+    """Regression: a clean (no error flags) `type=result` is still parsed."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "Verdict: Approve",
+            },
+        ],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"

@@ -142,8 +142,14 @@ def _extract_texts(msg: dict) -> list[str]:
     """
     texts: list[str] = []
 
-    # 1. claude-code SDK / original agent stream: message.content
-    message_content = msg.get("message", {}).get("content")
+    # 1. claude-code SDK / original agent stream: message.content.
+    # Guard with isinstance() because `msg.get("message", {})` only
+    # substitutes the default when the KEY is absent — `{"message": null}`
+    # returns None and `{"message": "..."}` returns a str; both then
+    # fail the chained `.get("content")` with AttributeError, contradicting
+    # the "Never raises" docstring contract above. Issue #625 review (P1).
+    message = msg.get("message")
+    message_content = message.get("content") if isinstance(message, dict) else None
     if isinstance(message_content, list):
         for block in message_content:
             if isinstance(block, dict) and block.get("type") == "text":
@@ -220,6 +226,18 @@ def extract(path: Path) -> str:
         # contract) so a user-quoted or tool-echoed verdict line cannot
         # satisfy the gate. Only the model's actual emitted text counts.
         if msg.get("type") not in CANDIDATE_MSG_TYPES:
+            continue
+        # Issue #625 review (P1): a `type=result` envelope may carry
+        # `is_error: true` or `subtype: error_max_turns` /
+        # `error_during_execution` on aborted runs. Trusting such a
+        # message would let a partial summary that happens to contain
+        # `Verdict: Approve` slip through after the agent was cut off.
+        # Skip error-flagged envelopes so an aborted run still resolves
+        # to PARSE_FAILED (the pre-#625 behaviour).
+        if msg.get("is_error") is True:
+            continue
+        subtype = msg.get("subtype")
+        if isinstance(subtype, str) and subtype.startswith("error_"):
             continue
         texts = _extract_texts(msg)
         for t in texts:

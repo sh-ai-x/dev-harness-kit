@@ -125,15 +125,27 @@ def _is_claude_author(comment: dict) -> bool:
     CLI versions. When no login field is present (e.g. deleted account,
     scoped token) we treat the comment as non-claude and skip it.
     """
-    author = comment.get("author") or {}
-    user = comment.get("user") or {}
-    login = (
-        author.get("login")
-        or user.get("login")
-        or comment.get("login")
-        or ""
-    )
-    return login.lower().startswith("claude")
+    # Issue #625 review (P1): the widened author lookup adds unguarded
+    # attribute access. `comment.get("author") or {}` returns {} only
+    # when the key is missing — `{"author": None}` / `{"author": "..."}`
+    # / `{"author": 42}` would all fail `.get("login")` with
+    # AttributeError, aborting the whole comment scan. Same for the
+    # top-level `comment["login"]` (could be int or nested object) and
+    # `login.lower()` (would raise if login is non-string). Wrap each
+    # source in an isinstance guard so a single odd comment object
+    # degrades to "non-claude, skip" instead of crashing the gate.
+    for source in (
+        comment.get("author"),
+        comment.get("user"),
+        comment.get("login"),
+    ):
+        if isinstance(source, dict):
+            login = source.get("login")
+            if isinstance(login, str):
+                return login.lower().startswith("claude")
+        elif isinstance(source, str):
+            return source.lower().startswith("claude")
+    return False
 
 
 def _verdict_from_body(body: str) -> str:
