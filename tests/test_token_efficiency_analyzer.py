@@ -2792,20 +2792,16 @@ class TestCwdHarvest(unittest.TestCase):
         """End-to-end: codex rollout with cwd only on payload survives
         filter_sessions(repo='dev-harness-kit', days=30)."""
         from token_efficiency_analyzer import filter_sessions
-        # Timestamps built relative to now so the session stays inside the
-        # 30-day window regardless of when the suite runs (calendar-rot fix).
-        ts0 = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ts1 = (datetime.now(timezone.utc) - timedelta(days=1, seconds=-1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         p = self._write("sid-payload-cwd", [
             {"type": "session_meta", "payload": {
                 "session_id": "sid-payload-cwd",
                 "cwd": "/Users/sanghee/dev/dev-harness-kit",
-                "timestamp": ts0,
+                "timestamp": "2026-07-15T10:00:00Z",
             }},
             # A model so the session has signal.
             {"type": "turn_context", "payload": {"model": "gpt-5.6-luna",
                 "cwd": "/Users/sanghee/dev/dev-harness-kit"},
-                "timestamp": ts1},
+                "timestamp": "2026-07-15T10:00:01Z"},
         ])
         s = aggregate_session(p)
         self.assertEqual(s["repo"], "dev-harness-kit")

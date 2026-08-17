@@ -156,15 +156,11 @@ class TestMalformedInput(unittest.TestCase):
 
 class TestSkillNameExtraction(unittest.TestCase):
     def test_explicit_skill_tool_use_without_attribution_still_counts(self):
-        # Timestamp built relative to ``_REF_NOW`` (windowed-fixture
-        # reference time) so the record stays inside the 30-day window
-        # regardless of when the suite runs (calendar-rot fix).
-        ts = (_REF_NOW - _dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
             fh.write(json.dumps({
                 "type": "assistant", "isSidechain": False,
                 "sessionId": "x", "cwd": "/r",
-                "timestamp": ts,
+                "timestamp": "2026-07-15T10:00:00.000Z",
                 "message": {"role": "assistant", "content": [
                     {"type": "tool_use", "id": "t1", "name": "Skill",
                      "input": {"skill": "dev-kit:foo"}}
@@ -172,7 +168,7 @@ class TestSkillNameExtraction(unittest.TestCase):
             }) + "\n")
             path = fh.name
         try:
-            agg = skill_usage.aggregate_skill_usage(path, window_days=30, now=_REF_NOW)
+            agg = skill_usage.aggregate_skill_usage(path, window_days=30)
             self.assertEqual(agg["dev-kit:foo"]["invocations"], 1)
             self.assertEqual(agg["dev-kit:foo"]["turns"], 0)
         finally:
@@ -466,15 +462,11 @@ class TestNormalizeToolUses(unittest.TestCase):
         must bump ``invocations`` for that skill, matching the Claude
         contract. Without normalization the Codex kick would silently
         be dropped because ``message.content`` is absent."""
-        # Timestamp built relative to ``_REF_NOW`` (windowed-fixture
-        # reference time) so the record stays inside the 30-day window
-        # regardless of when the suite runs (calendar-rot fix).
-        ts = (_REF_NOW - _dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl",
                                          delete=False) as fh:
             fh.write(json.dumps({
                 "type": "event_msg",
-                "timestamp": ts,
+                "timestamp": "2026-07-15T10:00:00.000Z",
                 "cwd": "/r",
                 "payload": [
                     {"type": "tool_use", "name": "Skill",
@@ -483,7 +475,7 @@ class TestNormalizeToolUses(unittest.TestCase):
             }) + "\n")
             path = fh.name
         try:
-            agg = skill_usage.aggregate_skill_usage(path, window_days=30, now=_REF_NOW)
+            agg = skill_usage.aggregate_skill_usage(path, window_days=30)
             self.assertEqual(agg["dev-kit:codex-only"]["invocations"], 1)
             self.assertEqual(agg["dev-kit:codex-only"]["turns"], 0)
         finally:
