@@ -24,11 +24,5 @@ After the minimum implementation passes:
 python3 -m lib.tdd_cycle green -- <test command>
 ```
 
-The cycle CLI resolves its state root with the same
-`${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}`
-fallback as `tdd-guard.sh` and `tdd-scope-judge.sh`, so RED/GREEN evidence
-lands where the guard reads it even when `DEV_KIT_TDD_ROOT` points outside
-the git toplevel. An explicit `--root` still overrides the resolution.
-
 Unknown paths are deferred to the local subscription-backed LLM judge. The
 judge is a fallback for ambiguity, not the primary policy engine.
