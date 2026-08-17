@@ -37,6 +37,48 @@ to stderr (visible under `LINEAR_DEBUG=1`) but never block the Edit.
 This is the non-blocking contract documented in the parent
 [SKILL.md](../../skills/linear/SKILL.md) and the issue thread (#539).
 
+## Task-description resolution (`_resolve_prompt`)
+
+The Python script resolves the "current task" string via
+`tools/linear_sync.py::_resolve_prompt`. The priority order is
+**commit-subject-first with a branch-name fallback** so a fresh
+worktree cut from `origin/main` still produces a usable prompt on
+its very first Edit|Write (otherwise the skip gate bails on the
+`chore(release): ...` commit subject and the user reads this as
+"Linear auto-update isn't working"):
+
+1. **Latest commit subject with a work verb** (`implement`, `build`,
+   `fix`, `refactor`, `add`, `create`, `update`, `remove`, `delete`,
+   `ship`, `migrate`, `wire`, `integrate`, `sync`, `register`,
+   `track`). The freshest signal of what the operator is actually
+   working on; a new commit in the same worktree updates this
+   immediately so the script never gets stuck on a previous task's
+   prompt.
+2. **Branch name with a work verb**. Falls back here on a fresh
+   worktree still pointing at `origin/main`'s release commit (no
+   work verb). The branch `<type>/<slug>` format carries the signal
+   (e.g. `fix/...`, `refactor/...`). Without this fallback the
+   auto-sync silently skipped on every first Edit|Write of every
+   task branch — closed by [PR #661](https://github.com/sh-ai-x/dev-harness-kit/pull/661).
+3. **Any commit subject** (fall-through to the `_should_skip_prompt`
+   gate below).
+4. **Branch name** as a final fallback (e.g. a brand-new worktree
+   with no commit yet).
+
+The active hand-off's `prompt` field is **not** consulted as a
+resolution source (per adversarial Codex review on [#543](https://github.com/sh-ai-x/dev-harness-kit/issues/543))
+— trusting a cached prompt would let a stale task shadow the
+current one forever. The hand-off caches the issue reference, not
+the task description.
+
+The resolved prompt then runs through
+`tools/linear_sync.py::_should_skip_prompt`, which short-circuits on
+the `_SKIP_MARKERS` prefix list (`/`, `#`, `!`, `ls `, `cat `, `grep `,
+`git status`, …) and on the missing-work-verb case. A release commit
+on the `main` checkout (no work verb in either signal) still skips
+— the fix is worktree-scoped, not a permission to spam Linear from
+the main checkout.
+
 ## Cross-reference
 
 - [skills/linear/SKILL.md](../../skills/linear/SKILL.md) — user-facing

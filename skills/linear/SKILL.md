@@ -36,7 +36,13 @@ Resolve the current repository name and the user's Linear capability before maki
 
 When Linear is configured (`LINEAR_API_KEY` env var OR user-scope `~/.config/dev-kit/.env` OR per-worktree `.dev-kit/.env.linear` OR per-worktree `.dev-kit/linear-config.json:enabled` OR legacy `.dev-kit/.enabled.json:mcp.linear` ∈ {`auto`, `on`}), `hooks/linear-autosync.sh` runs `tools/linear_sync.py auto-sync` before every Edit|Write|MultiEdit. The script:
 
-1. Resolves the task description in priority order: the active hand-off's `prompt` field → the latest commit subject on the current branch → the branch name. The hand-off is keyed by worktree slug, so two parallel sessions in two worktrees never share or overwrite each other's state.
+1. Resolves the task description in priority order:
+   1. **Latest commit subject on the current branch**, when it carries a work verb (`implement`, `build`, `fix`, `refactor`, `add`, `create`, `update`, `remove`, `delete`, `ship`, `migrate`, `wire`, `integrate`, `sync`, `register`, `track`). The freshest signal of what the operator is actually working on — a new commit in the same worktree updates the resolution immediately so the script never gets stuck on a previous task's prompt.
+   2. **Branch name**, when it carries a work verb. Falls back here on a fresh worktree that still points at `origin/main`'s release commit (`chore(release): ...`), which has no work verb — without this fallback the auto-sync silently skipped on every first Edit|Write of every task branch. The branch `<type>/<slug>` format is the work signal (e.g. `fix/...`, `refactor/...`).
+   3. **Any commit subject**, when both commit-subject-with-verb and branch-name-with-verb fail. Falls through to the `_should_skip_prompt` gate below.
+   4. **Branch name** as final fallback (e.g. a brand-new worktree with no commit yet).
+
+   The active hand-off's `prompt` field is **not** used as a resolution source (per adversarial Codex review on #543) — trusting it would let a stale prompt shadow the current task forever. The hand-off is a cache for the issue reference (`issue` field), not for the task description.
 2. Skips read-only / non-task prompts (`/`, `#`, `!`, `ls `, `cat `, `grep `, `git status`, and prompts that lack a work verb).
 3. Finds or creates the project named after the configured project-name (per-worktree override) or the repository basename.
 4. Searches for **every** open issue whose `description` starts with `<!-- scope:<branch>::<prompt-head> -->`. When more than one match exists, the older ones are silently archived via Linear's `issueArchive` mutation and the newest is kept (see "Automatic transitions" below).
