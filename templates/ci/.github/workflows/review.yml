@@ -411,27 +411,45 @@ jobs:
             # extract step ran but the agent's claude[bot] PR comment isn't
             # yet visible. A single-shot lookup misses in that window and
             # the gate hard-fails on what is actually a clean review.
-            # 3 attempts x 5s sleep (10s total budget, well under the 30s
+            # 6 attempts x 5s sleep (30s total budget, spans the full ~30s
             # race window) closes the gap without burning CI minutes.
-            # The jq query also falls back to .user.login / top-level
-            # .login (older gh CLI versions / different endpoints) so the
-            # author matcher keeps working across CLI upgrades.
-            for attempt in 1 2 3; do
-              echo "::notice::review PR-comments fallback attempt=${attempt}/3"
-              comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}' 2>/dev/null || true)
+            # The jq query falls back to .user.login / top-level .login
+            # (older gh CLI versions / different endpoints) so the author
+            # matcher keeps working across CLI upgrades; the WHOLE
+            # selector is wrapped in `[ ... ]` so the output is a JSON
+            # ARRAY (matches `_verdict_from_comment.py`'s stdin contract)
+            # instead of newline-delimited JSON objects (which the helper
+            # would reject with "stdin must decode to a JSON array").
+            # gh stderr is captured once and surfaced as a ::warning::
+            # instead of being silently discarded, so a transient
+            # auth/permission/rate-limit incident is observable rather
+            # than masquerading as an empty comments list across all
+            # retry attempts.
+            for attempt in 1 2 3 4 5 6; do
+              echo "::notice::review PR-comments fallback attempt=${attempt}/6"
+              gh_err=$(gh pr view "$PR_NUMBER" --json comments --jq '[.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}]' 2>&1 >/dev/null) || true
+              comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '[.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}]' 2>/dev/null || true)
+              if [ -n "$gh_err" ]; then
+                echo "::warning::review gh pr view stderr (attempt=${attempt}): ${gh_err}"
+              fi
               if [ -n "$comments_json" ]; then
                 comment_verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py" 2>/dev/null || true)
                 if [ -n "$comment_verdict" ]; then
                   break
                 fi
               fi
-              [ "$attempt" -lt 3 ] && sleep 5
+              [ "$attempt" -lt 6 ] && sleep 5
             done
             if [ -n "$comment_verdict" ]; then
               verdict="$comment_verdict"
               verdict_source="comments-fallback"
               agent_ran="true"
               echo "::notice::review verdict recovered from PR comments: ${verdict}"
+            else
+              # Issue #625 review (P1): surface the loop-exhausted case so
+              # a transient auth/permission/rate-limit incident is
+              # distinguishable from a real missing-verdict incident.
+              echo "::warning::review PR-comments fallback exhausted after 6 attempts; standing verdict remains ${verdict:-MISSING}"
             fi
           fi
           echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
@@ -740,28 +758,42 @@ jobs:
             # is a ~30s race window in which this extract step ran but
             # the agent's claude[bot] PR comment isn't yet visible. A
             # single-shot lookup misses in that window and the gate
-            # hard-fails on what is actually a clean review. 3 attempts
-            # x 5s sleep (10s total budget, well under the 30s race
+            # hard-fails on what is actually a clean review. 6 attempts
+            # x 5s sleep (30s total budget, spans the full ~30s race
             # window) closes the gap without burning CI minutes. The jq
-            # query also falls back to .user.login / top-level .login
-            # (older gh CLI versions / different endpoints) so the
-            # author matcher keeps working across CLI upgrades.
-            for attempt in 1 2 3; do
-              echo "::notice::security PR-comments fallback attempt=${attempt}/3"
-              comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}' 2>/dev/null || true)
+            # query falls back to .user.login / top-level .login (older
+            # gh CLI versions / different endpoints) so the author
+            # matcher keeps working across CLI upgrades; the WHOLE
+            # selector is wrapped in `[ ... ]` so the output is a JSON
+            # ARRAY (matches `_verdict_from_comment.py`'s stdin contract)
+            # instead of newline-delimited JSON objects. gh stderr is
+            # captured once and surfaced as a ::warning:: instead of
+            # being silently discarded.
+            for attempt in 1 2 3 4 5 6; do
+              echo "::notice::security PR-comments fallback attempt=${attempt}/6"
+              gh_err=$(gh pr view "$PR_NUMBER" --json comments --jq '[.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}]' 2>&1 >/dev/null) || true
+              comments_json=$(gh pr view "$PR_NUMBER" --json comments --jq '[.comments[] | select((.author.login // .user.login // .login // "") | startswith("claude")) | {body, createdAt}]' 2>/dev/null || true)
+              if [ -n "$gh_err" ]; then
+                echo "::warning::security gh pr view stderr (attempt=${attempt}): ${gh_err}"
+              fi
               if [ -n "$comments_json" ]; then
                 comment_verdict=$(printf '%s' "$comments_json" | VERDICT_COMMENT_CUTOFF="$CUTOFF" python3 "${{ github.workspace }}/.github/workflows/_verdict_from_comment.py" 2>/dev/null || true)
                 if [ -n "$comment_verdict" ]; then
                   break
                 fi
               fi
-              [ "$attempt" -lt 3 ] && sleep 5
+              [ "$attempt" -lt 6 ] && sleep 5
             done
             if [ -n "$comment_verdict" ]; then
               verdict="$comment_verdict"
               verdict_source="comments-fallback"
               agent_ran="true"
               echo "::notice::security verdict recovered from PR comments: ${verdict}"
+            else
+              # Issue #625 review (P1): surface the loop-exhausted case so
+              # a transient auth/permission/rate-limit incident is
+              # distinguishable from a real missing-verdict incident.
+              echo "::warning::security PR-comments fallback exhausted after 6 attempts; standing verdict remains ${verdict:-MISSING}"
             fi
           fi
           echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
