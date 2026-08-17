@@ -133,9 +133,16 @@ alias claude-dev='claude --plugin-dir /path/to/dev-harness-kit'
 
 ## Quickstart
 
-On a brand-new repo, one command does all the first-time setup:
+On a brand-new repo, publish the empty `main` branch first, then bootstrap the
+project. This gives the generated worktree and hook rules a stable
+`origin/main` reference:
 
 ```bash
+git init -b main
+git remote add origin https://github.com/<owner>/<repo>.git
+git add -A && git commit -m "chore: initialize repository"
+git push -u origin main
+
 /dev-kit:bootstrap
 ```
 
@@ -574,21 +581,23 @@ three sections (why, quickstart, value). Everything else can wait.
 The complete "I have a brand-new repo" flow:
 
 ```bash
-# 1. Create + clone
-gh repo create myorg/myrepo --private --clone && cd myrepo
+# 1. Create the GitHub repository, then initialize and publish main
+gh repo create myorg/myrepo --private
+git init -b main
+git remote add origin https://github.com/myorg/myrepo.git
+git add -A && git commit -m "chore: initialize repository"
+git push -u origin main
 
 # 2. Install the plugin
 claude plugin marketplace add sh-ai-x/dev-harness-kit
 claude plugin install dev-kit
 # (live source instead: claude --plugin-dir /path/to/dev-harness-kit)
 
-# 3. One-shot setup: CLAUDE.md + AGENTS.md + hook config + CI templates
+# 3. Bootstrap after origin/main exists: CLAUDE.md + AGENTS.md + hook config
 /dev-kit:bootstrap (with ci-setup prompt)
-
-# 4. First commit + push
-git add -A && git commit -m "chore: bootstrap dev-kit"
-git push -u origin main
 ```
+
+If the prompt is declined, run `/dev-kit:ci-setup` before `/dev-kit:build`.
 
 **Use `--force` on the very first install** (`/dev-kit:ci-setup --force`, which
 `bootstrap` runs for you). On a fresh repo the result is identical to a
@@ -735,6 +744,43 @@ surfaced as a warning, not an error.
 
 Full detail and the Codex-side setup live in
 [`docs/quality/ci-setup.md`](docs/quality/ci-setup.md).
+
+### CI setup contract
+
+Treat `/dev-kit:ci-setup` as a configuration step, not only a file copier. It
+must run after `/dev-kit:bootstrap` and writes `.dev-kit/ci-config.json`; that
+marker is the precondition checked by `/dev-kit:build`. The default install is
+idempotent. Use `--force` only when refreshing templates, because it overwrites
+files in the installed-path inventory.
+
+Before the first review PR, configure the following in the GitHub repository:
+
+1. Set `CI_REVIEW_PROVIDER` to `minimax`, `anthropic`, or `deepseek`.
+2. Add the matching API secret: `MINIMAX_API_KEY`, `ANTHROPIC_API_KEY`, or
+   `DEEPSEEK_API_KEY`.
+3. If the consumer workflow clones private `sh-ai-x/dev-harness-kit`, add a
+   fine-grained `DEV_KIT_GITHUB_TOKEN` with `contents:read` for that repository.
+4. Enable the local hook path and run the deterministic checks:
+
+```bash
+git config core.hooksPath .githooks
+python3 scripts/validate.py
+bash scripts/ci-local.sh
+```
+
+The exact GitHub commands are:
+
+```bash
+gh variable set CI_REVIEW_PROVIDER --repo <owner>/<repo> --body minimax
+gh secret set MINIMAX_API_KEY --repo <owner>/<repo>
+gh secret set DEV_KIT_GITHUB_TOKEN --repo <owner>/<repo> --app actions
+```
+
+Omit the last command when the upstream plugin is public. Alternatively,
+`/dev-kit:ci-setup --setup-secrets` detects the selected provider and prompts
+for the required secrets without printing their values. Secret setup warnings
+do not make installation fail, so verify the variable and secret names before
+opening the first PR.
 
 **Linear PR sync (optional)** — `tools/linear_pr_sync.py` runs from
 `.github/workflows/linear-pr-sync.yml` to keep the Linear issue tied to a PR
