@@ -90,6 +90,27 @@ jobs:
             gh run watch "$RUN" --exit-status || true
           done
 
+      - name: Post per-judge commit statuses
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
+          for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
+            JOBS_JSON="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs")"
+            for NAME in "/dev-kit:review (3-dim)" "/dev-kit:security (10-dim OWASP)" "/dev-kit:maintenance (code-sanity + docs)"; do
+              CONCL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .conclusion')"
+              if [ -z "$CONCL" ] || [ "$CONCL" = "null" ]; then continue; fi
+              if [ "$CONCL" = "success" ]; then STATE="success"; else STATE="failure"; fi
+              gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
+                -f state="$STATE" \
+                -f context="$NAME" \
+                -f description="judge job conclusion=$CONCL (run=$RUN)" \
+                -f target_url="https://github.com/${{ github.repository }}/actions/runs/$RUN" >/dev/null
+            done
+          done
+
       - name: Post final AI-judge status to PR commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
