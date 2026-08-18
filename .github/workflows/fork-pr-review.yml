@@ -106,6 +106,7 @@ jobs:
           for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
             JOBS_JSON="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs")"
             for NAME in "/dev-kit:review (3-dim)" "/dev-kit:security (10-dim OWASP)" "/dev-kit:maintenance (code-sanity + docs)"; do
+              JOB_URL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .html_url // empty')"
               CONCL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .conclusion')"
               if [ -z "$CONCL" ] || [ "$CONCL" = "null" ]; then continue; fi
               case "$CONCL" in
@@ -113,11 +114,12 @@ jobs:
                 failure|timed_out) STATE="failure" ;;
                 *) continue ;;  # skipped/cancelled/action_required/neutral/stale — non-blocking, don't post
               esac
+              TARGET_URL="${JOB_URL:-https://github.com/${{ github.repository }}/actions/runs/$RUN}"
               gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
                 -f state="$STATE" \
                 -f context="$NAME" \
                 -f description="judge job conclusion=$CONCL (run=$RUN)" \
-                -f target_url="https://github.com/${{ github.repository }}/actions/runs/$RUN" >/dev/null
+                -f target_url="$TARGET_URL" >/dev/null
             done
           done
 
