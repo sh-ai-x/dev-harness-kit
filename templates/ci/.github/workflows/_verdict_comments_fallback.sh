@@ -16,8 +16,12 @@
 #        JOB_NAME (env, label for ::notice:: / ::warning:: lines)
 #        WORKSPACE (env, default $GITHUB_WORKSPACE)
 #   out: prints the recovered verdict to stdout (empty if no match)
-#        emits ::notice:: on every attempt + the success path
-#        emits ::warning:: on gh stderr capture + the exhaustion path
+#        ::notice:: / ::warning:: diagnostics go to STDERR so the
+#        captured ``$(script "$PR_NUMBER")`` value is exactly the
+#        verdict word — review.yml L418 / L727 write that value to
+#        ``$GITHUB_OUTPUT`` and the severity gate parses it as a
+#        single token. Mixing diagnostics into stdout would corrupt
+#        the verdict variable with the diagnostic blob.
 #
 # The jq selector is intentionally minimal — `[.comments[] | {body,
 # createdAt, author, user, login}]` — so the Python helper is the
@@ -39,7 +43,7 @@ HELPER="${WORKSPACE}/.github/workflows/_verdict_from_comment.py"
 comment_verdict=""
 gh_err=""
 for attempt in $(seq 1 "$ATTEMPTS"); do
-  echo "::notice::${JOB_NAME} PR-comments fallback attempt=${attempt}/${ATTEMPTS}"
+  echo "::notice::${JOB_NAME} PR-comments fallback attempt=${attempt}/${ATTEMPTS}" >&2
   # Capture gh stderr once and surface as ::warning:: so a transient
   # auth/permission/rate-limit incident is observable rather than
   # being silently discarded across all retry attempts.
@@ -48,7 +52,7 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     --jq '[.comments[] | {body, createdAt, author, user, login}]' \
     2>/dev/null || true)
   if [ -n "$gh_err" ]; then
-    echo "::warning::${JOB_NAME} gh pr view stderr (attempt=${attempt}): ${gh_err}"
+    echo "::warning::${JOB_NAME} gh pr view stderr (attempt=${attempt}): ${gh_err}" >&2
   fi
   if [ -n "$comments_json" ]; then
     comment_verdict=$(printf '%s' "$comments_json" \
@@ -62,9 +66,12 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
 done
 
 if [ -n "$comment_verdict" ]; then
-  echo "::notice::${JOB_NAME} verdict recovered from PR comments: ${comment_verdict}"
+  echo "::notice::${JOB_NAME} verdict recovered from PR comments: ${comment_verdict}" >&2
 else
-  echo "::warning::${JOB_NAME} PR-comments fallback exhausted after ${ATTEMPTS} attempts"
+  echo "::warning::${JOB_NAME} PR-comments fallback exhausted after ${ATTEMPTS} attempts" >&2
 fi
 
+# Stdout MUST carry only the verdict word (empty on exhaustion). The
+# call sites use ``$(script "$PR_NUMBER")`` so any extra line on stdout
+# corrupts the captured value.
 printf '%s' "$comment_verdict"

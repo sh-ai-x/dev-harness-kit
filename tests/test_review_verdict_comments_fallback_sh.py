@@ -8,9 +8,18 @@ jobs; these tests pin the script's shape so a future edit cannot
 silently regress the loop (e.g. reduce attempts back to 3, drop the
 gh-stderr capture, drop the exhaustion warning, re-introduce the
 author-fallback jq filter).
+
+Behavioral tests at the bottom of this file actually EXECUTE the
+script against a stub `gh` so a stdout/stderr split regression (which
+the static pattern tests cannot catch) is caught at CI time.
 """
 from __future__ import annotations
 
+import json
+import os
+import stat
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -22,6 +31,14 @@ SCRIPT_PATH = (
     / ".github"
     / "workflows"
     / "_verdict_comments_fallback.sh"
+)
+HELPER_PATH = (
+    REPO_ROOT
+    / "templates"
+    / "ci"
+    / ".github"
+    / "workflows"
+    / "_verdict_from_comment.py"
 )
 
 
@@ -117,6 +134,128 @@ class TestFallbackScriptShape(unittest.TestCase):
         in the ::notice:: / ::warning:: lines."""
         text = SCRIPT_PATH.read_text()
         self.assertIn("JOB_NAME", text)
+
+    def test_diagnostic_echoes_redirect_to_stderr(self) -> None:
+        """F1-regression fix: every ``echo ::notice::...`` / ``echo
+        ::warning::...`` in the script MUST redirect to ``>&2``.
+
+        The pre-fix bug emitted those diagnostics on STDOUT, which the
+        ``$(script "$PR_NUMBER")`` call sites captured into the verdict
+        variable — producing a multi-line blob like
+        ``::notice::...attempt=1/6\\\\n::notice::...verdict recovered...\\\\nApprove``
+        that broke ``GITHUB_OUTPUT`` YAML parsing and the severity
+        gate's rank() switch.
+        """
+        text = SCRIPT_PATH.read_text()
+        # Match `echo "::notice::...` or `echo "::warning::...` lines that
+        # are NOT followed by `>&2` on the same line. A regression
+        # pattern is an unredirected diagnostic echo.
+        unredirected = []
+        for i, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if not (stripped.startswith('echo "::notice::')
+                    or stripped.startswith('echo "::warning::')):
+                continue
+            if ">&2" not in line:
+                unredirected.append((i, line))
+        self.assertEqual(
+            unredirected, [],
+            "diagnostic echo missing >&2 redirect (F1 stdout-pollution "
+            "regression risk): " + repr(unredirected),
+        )
+
+
+class TestFallbackScriptBehavior(unittest.TestCase):
+    """Behavioral tests — actually EXECUTE the script with a stub `gh`.
+
+    The static pattern tests above cannot catch a stdout/stderr split
+    regression because they only inspect the script text. These tests
+    pin the actual runtime contract: captured stdout MUST equal the
+    verdict word exactly, with no embedded diagnostic lines.
+    """
+
+    def _make_stub_gh(self, tmpdir: Path, comment_body: str,
+                      created_at: str = "2030-01-01T00:00:00Z") -> Path:
+        """Drop a stub ``gh`` on PATH that returns a fixed comment payload."""
+        bin_dir = tmpdir / "bin"
+        bin_dir.mkdir()
+        gh = bin_dir / "gh"
+        # The script calls `gh pr view --json comments` (full payload)
+        # and `gh pr view --json comments --jq '[...]'` (jq-filtered).
+        # The stub bypasses `jq` by emitting the pre-filtered array
+        # directly on the --jq branch so the Python helper sees exactly
+        # the shape it expects on stdin.
+        comment_obj = {
+            "body": comment_body,
+            "createdAt": created_at,
+            "author": {"login": "claude[bot]"},
+        }
+        full_payload = json.dumps({"comments": [comment_obj]})
+        jq_payload = json.dumps([comment_obj])
+        gh.write_text(
+            "#!/usr/bin/env bash\n"
+            "if [[ \"$*\" == *\"--jq\"* ]]; then\n"
+            "  printf '%s' " + repr(jq_payload) + "\n"
+            "else\n"
+            "  printf '%s' " + repr(full_payload) + "\n"
+            "fi\n"
+            "exit 0\n"
+        )
+        gh.chmod(gh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        return bin_dir
+
+    def test_stdout_is_exactly_the_verdict_word(self) -> None:
+        """Run the script with a stub gh that emits a Claude verdict
+        comment. Captured stdout MUST equal the verdict word exactly —
+        no leading whitespace, no embedded ``::notice::`` lines, no
+        trailing newline. Pre-fix this returned a multi-line blob."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            bin_dir = self._make_stub_gh(
+                tmp_path,
+                comment_body="**Verdict:** Approve\n\n## review\n\nLooks good.",
+            )
+            # The script looks up HELPER at $WORKSPACE/.github/workflows/
+            # _verdict_from_comment.py. In the dev source tree the
+            # helper lives at templates/ci/.github/workflows/, so
+            # WORKSPACE = $REPO_ROOT/templates/ci. In a consumer repo
+            # the templates are installed at the repo root and
+            # WORKSPACE = github.workspace.
+            helper_workspace = REPO_ROOT / "templates" / "ci"
+            self.assertTrue(
+                (helper_workspace / ".github" / "workflows" / "_verdict_from_comment.py").is_file(),
+                f"helper not found at {helper_workspace}/.github/workflows/_verdict_from_comment.py",
+            )
+            env = {
+                **os.environ,
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "WORKSPACE": str(helper_workspace),
+                "JOB_NAME": "review",
+                "CUTOFF": "",
+                "ATTEMPTS": "1",
+                "SLEEP_SECONDS": "0",
+            }
+            result = subprocess.run(
+                [str(SCRIPT_PATH), "123"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"script failed: rc={result.returncode}\n"
+                f"stderr={result.stderr}",
+            )
+            # Captured stdout must be EXACTLY the verdict word.
+            self.assertEqual(
+                result.stdout, "Approve",
+                f"stdout polluted by diagnostics (F1 regression). "
+                f"got: {result.stdout!r}",
+            )
+            # The diagnostic ::notice:: line must be on STDERR, not stdout.
+            self.assertIn("::notice::", result.stderr)
 
 
 if __name__ == "__main__":
