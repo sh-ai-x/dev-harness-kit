@@ -17,12 +17,21 @@ name: Fork PR Review Gate
 # runs. It never checks out the fork's code and never executes it — its
 # only action is to dispatch review.yml / maintenance.yml via
 # `workflow_dispatch` (a manual-trigger context, not a fork-origin
-# `pull_request` event, so THAT run gets full normal permissions) and post
-# an audit comment.
+# `pull_request` event, so THAT run gets full normal permissions).
 #
 # Same-repo PRs (including the repo owner's own) are untouched by this
 # workflow entirely — review.yml / maintenance.yml keep running fully
 # automatically on `pull_request` for those, exactly as before.
+#
+# Why this workflow also writes commit status (not just dispatching):
+# review.yml and maintenance.yml run on `pull_request`, which auto-attaches
+# their job-level checks to the PR commit. When they fire via
+# `workflow_dispatch` instead (this gate's path), GitHub does NOT auto-link
+# the dispatched jobs to the PR commit — so the PR's "Checks" tab keeps
+# showing the original pull_request run's "skipped" verdict indefinitely.
+# To make the AI-judge outcome visible in the PR Checks tab, this gate
+# polls the two dispatched runs and posts an aggregate `fork-pr-review/ai-judges`
+# commit status (`pending` while running, `success`/`failure` after).
 
 on:
   pull_request_target:
@@ -39,16 +48,80 @@ jobs:
     permissions:
       actions: write
       pull-requests: write
+      statuses: write
     steps:
-      - name: Dispatch full review (owner-approved)
+      - name: Dispatch AI review workflows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh workflow run review.yml \
-            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER"
-          gh workflow run maintenance.yml \
-            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER"
+          REVIEW_RUN="$(gh workflow run review.yml \
+            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" \
+            --json databaseId --jq .databaseId)"
+          MAINT_RUN="$(gh workflow run maintenance.yml \
+            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" \
+            --json databaseId --jq .databaseId)"
+          {
+            echo "REVIEW_RUN=$REVIEW_RUN"
+            echo "MAINT_RUN=$MAINT_RUN"
+          } >> "$GITHUB_ENV"
+          echo "Dispatched review.yml run=$REVIEW_RUN maintenance.yml run=$MAINT_RUN"
+
+      - name: Mark PR commit as AI-review-pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
+          gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
+            -f state=pending \
+            -f context='fork-pr-review/ai-judges' \
+            -f description="AI judges dispatched (review=$REVIEW_RUN maintenance=$MAINT_RUN); awaiting verdict" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/$REVIEW_RUN"
+
+      - name: Wait for dispatched AI judges
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
+            gh run watch "$RUN" --exit-status || true
+          done
+
+      - name: Post final AI-judge status to PR commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
+          REVIEW_CONCL="$(gh run view "$REVIEW_RUN" --json conclusion --jq .conclusion)"
+          MAINT_CONCL="$(gh run view "$MAINT_RUN" --json conclusion --jq .conclusion)"
+          if [ "$REVIEW_CONCL" = "success" ] && [ "$MAINT_CONCL" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="AI judges passed (review=$REVIEW_CONCL maintenance=$MAINT_CONCL)"
+          else
+            STATE="failure"
+            DESCRIPTION="AI judge failure (review=$REVIEW_CONCL maintenance=$MAINT_CONCL)"
+          fi
+          gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
+            -f state="$STATE" \
+            -f context='fork-pr-review/ai-judges' \
+            -f description="$DESCRIPTION" \
+            -f target_url="https://github.com/${{ github.repository }}/actions/runs/$REVIEW_RUN"
+
+      - name: Post audit comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          REVIEW_CONCL="$(gh run view "$REVIEW_RUN" --json conclusion --jq .conclusion)"
+          MAINT_CONCL="$(gh run view "$MAINT_RUN" --json conclusion --jq .conclusion)"
           gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body \
-            "Maintainer approved this fork PR for review (fork-pr-review environment). Dispatching \`/dev-kit:review\`, \`/dev-kit:security\`, and \`/dev-kit:maintenance\` now via workflow_dispatch — check runs will appear shortly under new workflow runs on this PR."
+            "Maintainer approved this fork PR for review (fork-pr-review environment). \
+            Dispatched /dev-kit:review (run [$REVIEW_RUN](https://github.com/${{ github.repository }}/actions/runs/$REVIEW_RUN)) \
+            and /dev-kit:maintenance (run [$MAINT_RUN](https://github.com/${{ github.repository }}/actions/runs/$MAINT_RUN)) \
+            via workflow_dispatch. Final: review=$REVIEW_CONCL maintenance=$MAINT_CONCL. \
+            Per-judge verdict comments are posted on each dispatched run."
