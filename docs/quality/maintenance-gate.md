@@ -124,18 +124,6 @@ python3 -m lib.maintenance_gate \
   --docs-reason "ok"
 ```
 
-## Fork PRs
-
-`maintenance_judge` (and `review.yml`'s `review`/`security`) skip
-themselves on the `pull_request` trigger when the PR's head repo is a
-fork — GitHub caps `GITHUB_TOKEN` to read-only and withholds OIDC
-tokens for fork-origin `pull_request` runs unconditionally, regardless
-of the workflow's declared `permissions:`, so running the judge there
-would just fail on the OIDC fetch step. `gate` skips its
-"missing-verdict defaults to Approve" fallback for the same PRs too, so
-a fork PR can't silently reach an Approve-defaulted gate without a
-judge ever having run.
-
 `.github/workflows/fork-pr-review.yml` is the escalation path: on
 `pull_request_target` (workflow file read from trusted `main`, so safe
 to grant write permissions) for fork PRs only, gated behind the
@@ -145,6 +133,28 @@ On approval it dispatches `maintenance.yml` + `review.yml` via
 `maintenance_judge`/`gate` with full normal permissions. Same-repo PRs
 (including the owner's own) are unaffected; they keep running on
 `pull_request` fully automatically.
+
+Because `workflow_dispatch` runs do **not** auto-link their jobs to
+the PR's commit in the PR Checks tab (only `pull_request` /
+`pull_request_target` events do), the gate dispatches run the AI
+judges invisibly from the PR's perspective — the original
+`pull_request` run keeps showing `skipped` for each judge job
+indefinitely. The gate compensates by writing a single
+**`fork-pr-review/ai-judges`** commit status to the PR's HEAD commit
+itself (via `gh api repos/.../statuses/$SHA`):
+
+- `state=pending` immediately after dispatch (with target_url pointing
+  to the dispatched `review.yml` run)
+- `state=success` once both dispatched runs complete with
+  `conclusion=success` (judges passed and PR is mergeable via
+  auto-approve)
+- `state=failure` if either dispatched run fails (judge rejected,
+  infra error, or timeout)
+
+The status lives on the PR commit regardless of which workflow event
+drove it, so the PR Checks tab always shows the aggregate instead of
+the stale per-judge `skipped` verdicts. Per-judge verdict comments are
+still posted on the PR by each dispatched run as before.
 
 ## Related
 
