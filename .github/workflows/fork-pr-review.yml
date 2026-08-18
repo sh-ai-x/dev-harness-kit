@@ -68,13 +68,21 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "Dispatched review.yml run=$REVIEW_RUN maintenance.yml run=$MAINT_RUN"
 
-      - name: Mark PR commit as AI-review-pending
+      - name: Resolve PR commit SHA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+          echo "Resolved PR commit SHA=$SHA"
+
+      - name: Mark PR commit as AI-review-pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
           gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
             -f state=pending \
             -f context='fork-pr-review/ai-judges' \
@@ -93,16 +101,18 @@ jobs:
       - name: Post per-judge commit statuses
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
           for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
             JOBS_JSON="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs")"
             for NAME in "/dev-kit:review (3-dim)" "/dev-kit:security (10-dim OWASP)" "/dev-kit:maintenance (code-sanity + docs)"; do
               CONCL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .conclusion')"
               if [ -z "$CONCL" ] || [ "$CONCL" = "null" ]; then continue; fi
-              if [ "$CONCL" = "success" ]; then STATE="success"; else STATE="failure"; fi
+              case "$CONCL" in
+                success)          STATE="success" ;;
+                failure|timed_out) STATE="failure" ;;
+                *) continue ;;  # skipped/cancelled/action_required/neutral/stale — non-blocking, don't post
+              esac
               gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
                 -f state="$STATE" \
                 -f context="$NAME" \
@@ -114,10 +124,8 @@ jobs:
       - name: Post final AI-judge status to PR commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)"
           REVIEW_CONCL="$(gh run view "$REVIEW_RUN" --json conclusion --jq .conclusion)"
           MAINT_CONCL="$(gh run view "$MAINT_RUN" --json conclusion --jq .conclusion)"
           if [ "$REVIEW_CONCL" = "success" ] && [ "$MAINT_CONCL" = "success" ]; then
