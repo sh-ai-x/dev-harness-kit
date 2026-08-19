@@ -29,6 +29,7 @@ per-runtime wiring differences), see
 | `bash-guard` | Denies destructive `git` / `rm` / shell escapes | Build |
 | `secret-scan` | Redacts credential patterns in tool inputs | All |
 | `slop-detector` | Catches AI-typical patterns across phrase + structure banks (KO+EN) | Build + Review + Security |
+| `l4-todo-scan` | PostToolUse deferred-work marker scan (Iron Law L4): fails closed on TODO/FIXME/'we'll extend later'/starting-point/placeholder markers in `Write`/`Edit`/`MultiEdit` payloads outside allowed paths (`*.md`, `tests/fixtures/**`, `docs/adoption/**`). Strict mode via `L4_STRICT=1`. Marker bank SSOT: `hooks/references/l4/markers.md` | Build + Review + Security |
 | `loop-detect` | Warns after three consecutive identical Bash calls using per-session fingerprints | All |
 | `worktree-guard` | Hard-blocks Edit/Write in the main checkout; on deny, prints the live worktree list via `git worktree list --porcelain` | All |
 | `git-guard` | Enforces branch strategy: blocks commit/push to main, force-push, `gh pr merge`; verifies `plugin.json` slot on `git push` to a feature branch (slot check extracted to `hooks/lib/slot-check.sh` for unit-testable truth table — see *Shared helpers* below) | All |
@@ -57,6 +58,7 @@ useful when you're debugging *why* a hook did or didn't run:
 | `provider-divergence-check.sh` | SessionStart | Nudge when `.env:CI_REVIEW_PROVIDER` is off-list, diverges, or missing | advisory |
 | `secret-scan.sh` | PostToolUse (Write\|Edit) | Detect credentials in edits | hard-block |
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
+| `l4-todo-scan.sh` | PostToolUse (Write\|Edit) | Fail-closed scan for TODO/FIXME deferred-work markers in `Write`/`Edit`/`MultiEdit` payloads; strict-mode via `L4_STRICT=1` (MUST-4) | hard-block (advisory under allowed-path exemption) |
 | `worktree-log-auto-install.sh` | PostToolUse (Bash) | Install loghooks into a newly-added worktree | advisory |
 | `loop-detect.sh` | PostToolUse (Bash) | Warn before another retry after repeated identical Bash calls | advisory (fails open) |
 | `notification-collapse.sh` | UserPromptSubmit | Stderr WARN when 2+ `<task-notification>` envelopes are in the prompt (harness `Monitor` / `run_in_background` bloat signal) | advisory (fails open) |
