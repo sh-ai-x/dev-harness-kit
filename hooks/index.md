@@ -17,6 +17,7 @@
 | linear-session-start  |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |
 | linear-worktree-create|  -    |  ✅*   |  -    |  ✅*   |  -    |  -    |  -    |
 | linear-task-change    |  -    |  ✅*   |  -    |  ✅*   |  -    |  -    |  -    |
+| l4-todo-scan           |  -    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
 | sub-agent-handoff     |  A    |  A    |  A    |  A    |  A    |  A    |  A    |
 ```
 (R = read-only) (* = fires only when Linear is configured.) (A = always-on with per-worktree opt-out via `.dev-kit/.sub-agent-handoff-disabled`.)
@@ -27,6 +28,7 @@
 |------|----------|---------|
 | `tdd-guard` | build | active when `lib/methodology/tdd.py` is loaded (MUST-48). |
 | `bash-guard` | build | blocks dangerous shell patterns (`rm -rf`, force-push, etc.). |
+| `l4-todo-scan` | build / review / security | PostToolUse deferred-work marker scan (Iron Law #4). Fails closed on TODO/FIXME/'we'll extend later' markers in non-allowed paths. Allowed paths: `*.md`, `tests/fixtures/**`, `docs/adoption/**`. `L4_STRICT=1` overrides the allowed-path exemption. |
 | `secret-scan` | build / review / security | PostToolUse credential-pattern grep. |
 | `slop-detector` | build / review / security | KO+EN banned-phrase scan. |
 | `stop-verify` | plan / design / build / review / security / ship | Stop hook: AC claim verification. |
