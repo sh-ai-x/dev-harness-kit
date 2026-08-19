@@ -37,6 +37,16 @@ if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || true
 fi
 
+# Regenerate .dev-kit/.active-hooks.json (MUST-13 SSOT) so any
+# downstream check that consumes the matrix sees a fresh snapshot.
+# This MUST run before any check that depends on the matrix. Cheap
+# (Python over hooks/hooks.json, ~50ms) and idempotent. Best-effort:
+# if python3 or hooks/hooks.json is missing, skip silently — this hook
+# never blocks.
+if command -v python3 >/dev/null 2>&1; then
+  python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$HOOK_CWD" --quiet 2>/dev/null || true
+fi
+
 # Discriminator: already populated by the preamble.
 case "$WORKTREE_DETECT" in
   worktree|outside|"") exit 0 ;;

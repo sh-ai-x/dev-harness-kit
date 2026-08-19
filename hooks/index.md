@@ -2,6 +2,13 @@
 
 > Matrix state lives in `.dev-kit/.active-hooks.json` (MUST-13).
 > Shells live in `hooks/*.sh` and are wired via `hooks/hooks.json`.
+> The matrix file is **auto-regenerated on every SessionStart** by
+> `hooks/session-start-check.sh` (which delegates to
+> `tools/regenerate_active_hooks.py`). The script walks `hooks/hooks.json`
+> and emits `{schema_version, generated_at, hooks: {<event>: [{name, path, when, fail_closed}]}}`.
+> Regeneration is cheap, idempotent (sorted keys + sorted entries), and
+> best-effort (silent skip when `python3` is missing or `hooks/hooks.json`
+> is unreadable). Schema version: `1.0.0`.
 
 ## Hook matrix (per stage)
 
