@@ -89,6 +89,8 @@ _state_id_cache: dict[str, str] | None = None  # name (lowered) -> id
 # exhausted. When we observe a 429, set _paused_until to a monotonic
 # timestamp; subsequent calls in this process return None immediately
 # until the window elapses. Each new process gets a fresh window.
+# (Updated: rollup now reflects 4 caches + 429 backoff after c28ad36;
+# see PR #672 for the full audit.)
 _paused_until: float = 0.0
 _RATE_LIMIT_BACKOFF_SECONDS = 60  # skip window after a single 429
 
