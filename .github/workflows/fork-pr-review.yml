@@ -95,7 +95,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
+          # --repo is required: pull_request_target runs without a checkout, so
+          # the runner has no .git directory. A relative `gh api` URL like
+          # `repos/${{ github.repository }}/statuses/$SHA` would otherwise try
+          # to discover the repo from git context and fail with
+          # "failed to determine base repo: failed to run git: fatal: not a
+          # git repository". Observed on PR #665, run 32245678201.
+          gh api "repos/${{ github.repository }}/statuses/$SHA" \
+            --repo "${{ github.repository }}" -X POST \
             -f state=pending \
             -f context='fork-pr-review/ai-judges' \
             -f description="AI judges dispatched (review=$REVIEW_RUN maintenance=$MAINT_RUN); awaiting verdict" \
@@ -116,7 +123,9 @@ jobs:
         run: |
           set -euo pipefail
           for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
-            JOBS_JSON="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs")"
+            # --repo: see the note on the Mark PR commit step above.
+            JOBS_JSON="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs" \
+              --repo "${{ github.repository }}")"
             for NAME in "/dev-kit:review (3-dim)" "/dev-kit:security (10-dim OWASP)" "/dev-kit:maintenance (code-sanity + docs)"; do
               JOB_URL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .html_url // empty')"
               CONCL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .conclusion')"
@@ -127,7 +136,8 @@ jobs:
                 *) continue ;;  # skipped/cancelled/action_required/neutral/stale — non-blocking, don't post
               esac
               TARGET_URL="${JOB_URL:-https://github.com/${{ github.repository }}/actions/runs/$RUN}"
-              gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
+              gh api "repos/${{ github.repository }}/statuses/$SHA" \
+                --repo "${{ github.repository }}" -X POST \
                 -f state="$STATE" \
                 -f context="$NAME" \
                 -f description="judge job conclusion=$CONCL (run=$RUN)" \
@@ -149,7 +159,8 @@ jobs:
             STATE="failure"
             DESCRIPTION="AI judge failure (review=$REVIEW_CONCL maintenance=$MAINT_CONCL)"
           fi
-          gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST \
+          gh api "repos/${{ github.repository }}/statuses/$SHA" \
+            --repo "${{ github.repository }}" -X POST \
             -f state="$STATE" \
             -f context='fork-pr-review/ai-judges' \
             -f description="$DESCRIPTION" \
