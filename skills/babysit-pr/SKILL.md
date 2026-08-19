@@ -193,13 +193,54 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                           sys.exit(0)   # human-gate fallback
                       elif rc == bpc.EXIT_RATIONALE_REQUIRED:
                           sys.exit(2)
+
+### MUST — re-verify state immediately before acting
+
+Every read of `gh pr view`, `gh pr checks`, `gh run view`, `gh api`,
+or any other PR / workflow / status query is **racy**. The PR state,
+check rollup, review verdict, and individual check conclusions can
+change at any moment because of:
+
+- a maintainer pushing / force-pushing a commit (fires `pull_request`
+  → re-runs workflows → updates check conclusions)
+- another operator running `gh workflow run ...` to dispatch workflows
+- a queued workflow run starting or completing
+- a bot reviewer (claude[bot] / github-actions[bot]) posting a new review
+
+The babysitter MUST re-query the relevant state — `REVIEW_VERDICT`,
+`CHECKS`, the failing-check's `run-id`, the PR `headRefOid`, the
+author-association, anything else the next decision depends on —
+**immediately before acting on it**. A value read at the start of an
+iteration or at the top of a Claude turn MUST NOT be reused as
+"the current state" several turns later; the operator or another
+automation may have changed it in between.
+
+Failure modes this rule prevents:
+
+- claiming a PR is "approved" because REVIEW_VERDICT was APPROVED when
+  the babysitter started, after a new reviewer pushed CHANGES_REQUESTED
+- diagnosing the wrong failing-check run because a fresh `pull_request`
+  run re-rendered the rollup with a different `databaseId` than the
+  one cached from a previous iteration
+- posting a status against a stale SHA because the branch was force-pushed
+  while the babysitter was drafting its comment
+- missing a fresh linear-pr-sync SUCCESS that replaced a stale FAILURE
+  entry in the rollup
+
+The corollary: never act on a `gh pr view` / `gh pr checks` result
+that was returned in a previous turn or by a previous tool call without
+re-issuing the call. Cached responses from sub-agent handoffs and
+parallel tool calls are especially dangerous — they always look fresh.
+
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call).
                     Load the prior iteration's check-state cache from
                     `.dev-kit/babysit-checks.json` (absent on iter 1 —
                     treat as `{}`). Diff it against the fresh CHECKS via
                     `lib/babysit_pr_reliability.py::diff_check_states(prev, curr)`
                     (see §Check-state caching below). The `changed` /
-                    `unchanged` split feeds step 5.
+                    `unchanged` split feeds step 5. Every `gh` call in
+                    this step and the steps that follow is itself subject
+                    to the MUST rule above; do not trust a cached value.
   2. TERMINATE  — if REVIEW_VERDICT == "APPROVED"
                     AND every check.conclusion ∈ {success, skipped, neutral}
                     → print "✅ PR #<n> approved — done" + iterate count

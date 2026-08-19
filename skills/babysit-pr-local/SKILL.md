@@ -103,13 +103,56 @@ Sub-agent delegation + parent-side preflight live in
 
 ```
 LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
+
+### MUST — re-verify state immediately before acting
+
+Every read of `gh pr view`, `gh pr checks`, `gh run view`, `gh api`,
+or any other PR / workflow / status query is **racy**. The PR state,
+check rollup, review verdict, and individual check conclusions can
+change at any moment because of:
+
+- a maintainer pushing / force-pushing a commit (fires `pull_request`
+  → re-runs workflows → updates check conclusions)
+- another operator running `gh workflow run ...` to dispatch workflows
+- a queued workflow run starting or completing
+- the local `bin/review-local.sh` itself finishing and posting a fresh
+  audit comment mid-iteration
+
+The local babysitter MUST re-query the relevant state — REVIEW_VERDICT
+(read from the latest audit comment), CHECKS, the PR headRefOid, the
+operator handle, anything else the next decision depends on — **immediately
+before acting on it**. A value read at the start of an iteration or at
+the top of a Claude turn MUST NOT be reused as "the current state"
+several turns later; the operator or another automation may have changed
+it in between.
+
+Failure modes this rule prevents:
+
+- claiming a PR is "approved" because the most recent local verdict was
+  "Approve" at the start of the turn, after a re-run posted a fresh
+  verdict that's actually "Changes Requested"
+- diagnosing the wrong failing-check because a fresh `pull_request` run
+  re-rendered the rollup with a different `databaseId` than the cached one
+- running `gh run watch $REVIEW_RUN` against a stale run id because the
+  run was force-cancelled and replaced while the babysitter was drafting
+- missing a fresh linear-pr-sync SUCCESS that replaced a stale FAILURE
+  entry in the rollup
+
+The corollary: never act on a `gh pr view` / `gh pr checks` result
+that was returned in a previous turn or by a previous tool call without
+re-issuing the call. Cached responses from sub-agent handoffs and
+parallel tool calls are especially dangerous — they always look fresh.
+
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS via
                   `gh pr view` + `gh pr checks`. The local REVIEW_VERDICT
                   is read from the most recent
                   `<!-- dev-kit-verdict-audit -->` comment posted by
                   `bin/review-local.sh` (source=bin_review_local). The
                   local judge replaces the GH-Actions review verdicts;
-                  CHECKS still reflects the deterministic CI jobs.
+                  CHECKS still reflects the deterministic CI jobs. Every
+                  `gh` call in this step and the steps that follow is
+                  itself subject to the MUST rule above; do not trust a
+                  cached value.
   2. TERMINATE  — if REVIEW_VERDICT == "Approve" (local audit) AND
                   every check.conclusion ∈ {success, skipped, neutral}
                   → print "✅ PR #<n> approved — done (local)" + iterate
