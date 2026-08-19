@@ -101,9 +101,6 @@ Sub-agent delegation + parent-side preflight live in
 
 ## Algorithm
 
-```
-LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
-
 ### MUST — re-verify state immediately before acting
 
 Every read of `gh pr view`, `gh pr checks`, `gh run view`, `gh api`,
@@ -111,7 +108,7 @@ or any other PR / workflow / status query is **racy**. The PR state,
 check rollup, review verdict, and individual check conclusions can
 change at any moment because of:
 
-- a maintainer pushing / force-pushing a commit (fires `pull_request`
+- a maintainer pushing / force-pushing a commit (fires ` `pull_request` `
   → re-runs workflows → updates check conclusions)
 - another operator running `gh workflow run ...` to dispatch workflows
 - a queued workflow run starting or completing
@@ -143,6 +140,8 @@ that was returned in a previous turn or by a previous tool call without
 re-issuing the call. Cached responses from sub-agent handoffs and
 parallel tool calls are especially dangerous — they always look fresh.
 
+```
+LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS via
                   `gh pr view` + `gh pr checks`. The local REVIEW_VERDICT
                   is read from the most recent

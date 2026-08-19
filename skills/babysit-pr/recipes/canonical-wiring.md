@@ -114,7 +114,8 @@ Operate ONLY inside <worktree_path>. Do NOT touch the main checkout.
 
 Algorithm (condensed from the parent skill's Algorithm section):
   1. SNAPSHOT — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS via `gh pr view` /
-     `gh pr checks`.
+     `gh pr checks` (re-issue immediately before acting — see parent
+     SKILL.md "MUST — re-verify state immediately before acting").
   2. TERMINATE — if REVIEW_VERDICT == "APPROVED" AND every check.conclusion
      ∈ {success, skipped, neutral}, print "PR approved" and exit 0.
   3. CLASSIFY — A) CI failing, B) CI pending (wait), C) CHANGES_REQUESTED,

@@ -41,8 +41,8 @@ branch's PR is already closed or merged.
 |------------------|------------------------------------------------------------------------|
 | `PR_NUMBER`      | `gh pr view --json number -q .number` for the current branch          |
 | `PR_STATE`       | `gh pr view --json state -q .state` (`OPEN` required to proceed)       |
-| `REVIEW_VERDICT` | `gh pr view --json reviewDecision -q .reviewDecision` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`) |
-| `CHECKS`         | `gh pr checks --json name,state,conclusion`                            |
+| `REVIEW_VERDICT` | `gh pr view --json reviewDecision -q .reviewDecision` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`) — re-issue immediately before acting (see MUST rule above) |
+| `CHECKS`         | `gh pr checks --json name,state,conclusion` — re-issue immediately before acting (see MUST rule above) |
 | `BRANCH`         | `git rev-parse --abbrev-ref HEAD`                                      |
 | `MAX_ITERS`      | `1000` (high cap; configurable via `BABYSIT_MAX_ITERS` env var; the 3-consecutive-no-progress stuck-loop guard still triggers earlier) |
 | `OPERATOR_HANDLE`| `gh api /user -q .login` (the human running the babysitter)           |
@@ -193,6 +193,7 @@ LOOP iter = 1 .. MAX_ITERS:  (hard increment at end of body — see L82 fallback
                           sys.exit(0)   # human-gate fallback
                       elif rc == bpc.EXIT_RATIONALE_REQUIRED:
                           sys.exit(2)
+```
 
 ### MUST — re-verify state immediately before acting
 
@@ -232,6 +233,7 @@ that was returned in a previous turn or by a previous tool call without
 re-issuing the call. Cached responses from sub-agent handoffs and
 parallel tool calls are especially dangerous — they always look fresh.
 
+```
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call).
                     Load the prior iteration's check-state cache from
                     `.dev-kit/babysit-checks.json` (absent on iter 1 —
