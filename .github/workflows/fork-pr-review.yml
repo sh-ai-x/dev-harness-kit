@@ -56,12 +56,22 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          REVIEW_RUN="$(gh workflow run review.yml \
-            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" \
-            --json databaseId --jq .databaseId)"
-          MAINT_RUN="$(gh workflow run maintenance.yml \
-            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" \
-            --json databaseId --jq .databaseId)"
+          # `gh workflow run` returns the run URL on stdout/stderr across all
+          # supported gh CLI versions; older versions don't accept `--jq`.
+          # Parse the numeric run id out of the URL so we can wait on it.
+          parse_run_id() {
+            grep -oE 'runs/[0-9]+' <<<"$1" | head -n1 | sed 's|runs/||'
+          }
+          REVIEW_URL="$(gh workflow run review.yml \
+            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" 2>&1)"
+          MAINT_URL="$(gh workflow run maintenance.yml \
+            --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" 2>&1)"
+          REVIEW_RUN="$(parse_run_id "$REVIEW_URL")"
+          MAINT_RUN="$(parse_run_id "$MAINT_URL")"
+          if [ -z "$REVIEW_RUN" ] || [ -z "$MAINT_RUN" ]; then
+            echo "::error::failed to parse run id; review_url=$REVIEW_URL maint_url=$MAINT_URL"
+            exit 1
+          fi
           {
             echo "REVIEW_RUN=$REVIEW_RUN"
             echo "MAINT_RUN=$MAINT_RUN"
