@@ -1,7 +1,7 @@
 ---
 name: evaluate
 category: eval
-description: 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components. /dev-kit:evaluate.
+description: 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components plus the nested measurement-integrity  submetric (issue #663). /dev-kit:evaluate.
 alpha: enforcement
 when_to_use:
   - User types /dev-kit:evaluate
@@ -36,7 +36,13 @@ deterministic registry lookup is the part the model cannot self-impose.
 ## Modes
 
 - `/dev-kit:evaluate` (default): run the existing per-dim eval, legacy D1–D7,
-  and the five harness-effectiveness components in one report.
+  and the five harness-effectiveness components in one report. The
+  `measurement_integrity` component now carries a nested `stability`
+  submetric (issue #663) covering agent / model / provider swap
+  behaviour; missing evidence there is reported as `INSUFFICIENT_EVIDENCE`,
+  not `0.0`. `build_report` returns `schema_version: 2` to advertise
+  the new submetric — consumers that ignore unknown versions continue
+  to work unchanged.
 - `/dev-kit:evaluate --harness-quality`: register `harness-quality` rubric +
   judge prompt with `RUBRIC_REGISTRY`, then run per-dim eval against the
   `harness` DIM_AXES tuple.
@@ -116,6 +122,14 @@ A run that contains any `escalate: true` block is reported with verdict
   the skill behaves exactly like the pre-Phase-3 eval.
 - `RUBRIC_REGISTRY` is class-level and starts empty. Existing call
   sites that do not import or call `register()` are unaffected.
+- The harness-effectiveness reducer gains a nested `stability` submetric
+  under `components.measurement_integrity.submetrics.stability` (issue
+  #663). `build_report` returns `schema_version: 2`. The 5-component
+  `overall_score` contract is preserved — `COMPONENT_WEIGHTS` still
+  sums to 1.0 and no top-level weight is added for stability. Missing
+  stability evidence surfaces as `status: INSUFFICIENT_EVIDENCE` with
+  `score: null` (never `0.0`). `INSUFFICIENT_EVIDENCE` is exported
+  from `lib.harness_effectiveness` as a sentinel string constant.
 
 ## Next step
 

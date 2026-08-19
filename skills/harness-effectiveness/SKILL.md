@@ -1,7 +1,7 @@
 ---
 name: harness-effectiveness
 category: eval
-description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict.
+description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested  submetric (issue #663) covering agent / model / provider swap behaviour.
 when_to_use:
   - User types /dev-kit:harness-effectiveness
   - Operator wants the 5-component metric without running the full 12-case `/dev-kit:evaluate` judge pass
@@ -41,7 +41,7 @@ No flags. The slash is 0-arg by design.
 | `first_pass_quality` | 0.20 | write → first-verification-pass rate |
 | `recovery_quality` | 0.25 | median iterations to recover from a verification error |
 | `learning_quality` | 0.20 | treatment-vs-control cohort divergence after guard intervention |
-| `measurement_integrity` | 0.15 | TraceLog event_id uniqueness, schema-version compliance, dedup |
+| `measurement_integrity` | 0.15 | TraceLog event_id uniqueness, schema-version compliance, dedup; nested `stability` submetric (issue #663) reports agent / model / provider swap behaviour |
 
 Each component returns:
 ```
@@ -59,6 +59,33 @@ Each component returns:
 
 `overall_score` is `null` when **any** component is `null` (i.e. when **any** component reports `INSUFFICIENT_EVIDENCE`). Otherwise it is the weighted sum of component scores.
 
+## Stability submetric (issue #663)
+
+Nested under `components.measurement_integrity.submetrics.stability`. It is a
+sixth dimension that is *not* a top-level weight — the five-component
+`overall_score` formula is unchanged. The submetric carries:
+
+- `coverage` (float 0..1) — minimum of the five dimension sub-coverage ratios
+- `score` (`None` when coverage < 0.90 or evidence is missing; otherwise a
+  float in [0, 100]). `None` is distinct from `0.0` — the reducer never
+  collapses missing evidence into a zero score.
+- `status` — one of `OK` / `DRIFT_WARNING` / `ROT` / `INSUFFICIENT_EVIDENCE`
+- `findings` — list of one-line reasons (e.g. "agent/provider/model
+  identity not recorded on any event")
+- `evidence_event_ids` — event_ids the submetric saw, sorted + deduped
+- `submetrics` — per-dimension breakdown:
+  - `agent_identity_coverage`: fraction of events carrying agent / provider / model
+  - `replay_compatibility`: fraction of events with monotonic timestamps
+  - `agent_provider_neutrality`: fraction of events free of agent/provider/model keys in evidence_ref
+  - `gate_portability`: fraction of distinct event_types with at least one neutral event
+  - `contract_test_pass_rate`: fraction of `contract.test` events with outcome=`passed`
+
+A new `INSUFFICIENT_EVIDENCE` constant is exported from
+`lib.harness_effectiveness`; consumer code should compare against the
+constant instead of hardcoding the string. `build_report` also bumps
+`schema_version` from 1 → 2 so consumers can detect the new submetric
+without breaking the 5-component contract.
+
 ## Output
 
 The full reducer JSON is printed to stdout (one line per field, pretty-printed). Exit code is 0 on every successful invocation — this skill does not gate; the gating decision belongs to the caller. The one-line status verdict is **always** present in the JSON; callers that want a hard fail condition can check `status == "ROT"` and exit 1 themselves.
@@ -66,7 +93,7 @@ The full reducer JSON is printed to stdout (one line per field, pretty-printed).
 ```
 $ /dev-kit:harness-effectiveness
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "contract_version": "harness-effectiveness-v1",
   "event_count": 81,
   "overall_score": null,
@@ -76,7 +103,23 @@ $ /dev-kit:harness-effectiveness
     "first_pass_quality":    { "score": null, ..., "findings": ["no write with first verification evidence"] },
     "recovery_quality":      { "score": null, ..., "findings": ["no verification errors observed"] },
     "learning_quality":      { "score": null, ..., "findings": ["comparable treatment and control cohorts missing"] },
-    "measurement_integrity": { "score": null, ..., "findings": ["duplicate event_id"] }
+    "measurement_integrity": {
+      "score": null,
+      "submetrics": {
+        "schema_completeness": ...,
+        "attribution_completeness": ...,
+        "dedupe_integrity": ...,
+        "event_coverage": ...,
+        "stability": {
+          "coverage": 0.0,
+          "score": null,
+          "status": "INSUFFICIENT_EVIDENCE",
+          "findings": ["agent/provider/model identity not recorded on any event"],
+          "evidence_event_ids": ["e1", "e2", ...],
+          "submetrics": { ... }
+        }
+      }
+    }
   }
 }
 ```
@@ -91,7 +134,12 @@ The slash command (canonical `commands/harness-effectiveness.md`) is a thin wrap
 
 ## Backward-compat
 
-- `lib/harness_effectiveness.build_report` is unchanged. Callers that import it directly still work.
+- `lib/harness_effectiveness.build_report` is unchanged for the 5-component
+  contract: `COMPONENT_WEIGHTS` still sums to 1.0, the `overall_score` formula
+  is the same, and `components` / `overall_score` / `status` / `event_count`
+  / `contract_version` still exist. `schema_version` bumps from 1 → 2 to
+  advertise the nested `stability` submetric; consumers that ignore unknown
+  versions continue to work unchanged. Callers that import it directly still work.
 - `/dev-kit:evaluate` keeps emitting the same embedded table — this skill is an additive shortcut, not a replacement.
 - Existing `tests/test_harness_effectiveness.py` continues to cover the reducer; no test renames.
 
@@ -120,6 +168,9 @@ All stdout/stderr messages in **English only**.
 - `eval/rubrics/harness-effectiveness.yaml` — the spec the components conform to.
 - `eval/prompts/judge-harness-effectiveness.md` — the LLM-judge prompt used only by `/dev-kit:evaluate --harness-quality` (NOT used here — this skill is reducer-only).
 - `tests/test_harness_effectiveness.py` — 137 hermetic tests covering the reducer.
+- `tests/test_harness_stability.py` — 14 hermetic tests covering the stability
+  submetric (issue #663): model swap, provider swap, replay compatibility,
+  missing evidence, and backward compat.
 - `/dev-kit:evaluate` — runs the 5-component reducer + the 12-case judge pass in one report. Use that when you want the full picture; use this skill when you want the reducer in isolation.
 - `commands/harness-effectiveness.md` — the slash command registered by `bin/install-commands.sh`.
 
