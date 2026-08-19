@@ -170,6 +170,114 @@ class TestTitleConstruction(unittest.TestCase):
             self.assertEqual(create.call_args.args[3], "PR #570")
 
 
+class TestCaches(unittest.TestCase):
+    """Per-process cache freshness + invalidation contract.
+
+    Each test resets the module-level caches via
+    `cmd_invalidate_cache` so cases don't leak ids into each other
+    (a real concern once the caches are populated — without reset,
+    the second test reuses the first test's network response and
+    misses the assertion entirely).
+    """
+
+    def setUp(self):
+        lps._project_id_cache = None
+        lps._team_id_cache = None
+        lps._state_id_cache = None
+        lps._paused_until = 0.0
+        # _request short-circuits on missing key; tests that exercise
+        # the network branch need a key set. Use `addCleanup` with
+        # `patch.dict` so the env is restored even if the test fails.
+        self._env = patch.dict(os.environ, {"LINEAR_API_KEY": "test-key"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    def test_project_id_caches_after_first_call(self):
+        with patch.object(lps, "_request", return_value={
+            "data": {"projects": {"nodes": [{"id": "P1"}]}}
+        }) as req:
+            self.assertEqual(lps._project_id(), "P1")
+            self.assertEqual(lps._project_id(), "P1")
+            self.assertEqual(lps._project_id(), "P1")
+            self.assertEqual(req.call_count, 1)
+
+    def test_team_id_caches_after_first_call(self):
+        # The cached project_id resolves a project whose `teams`
+        # node carries the team. After the first `_team_id()` call,
+        # the team id is memoized.
+        lps._project_id_cache = "P1"
+        with patch.object(lps, "_request", return_value={
+            "data": {"projects": {"nodes": [{"id": "P1", "teams": {"nodes": [{"id": "T1"}]}}]}}
+        }) as req:
+            self.assertEqual(lps._team_id(), "T1")
+            self.assertEqual(lps._team_id(), "T1")
+            self.assertEqual(req.call_count, 1)
+
+    def test_state_id_batch_fetches_all_states_once(self):
+        # First `_state_id` call populates the whole name->id map
+        # in one request; subsequent calls are dict lookups, no API.
+        lps._team_id_cache = "T1"
+        all_states = {
+            "data": {"workflowStates": {"nodes": [
+                {"id": "S-Backlog", "name": "Backlog"},
+                {"id": "S-Todo", "name": "Todo"},
+                {"id": "S-InProgress", "name": "In Progress"},
+                {"id": "S-InReview", "name": "In Review"},
+                {"id": "S-Done", "name": "Done"},
+                {"id": "S-Canceled", "name": "Canceled"},
+            ]}}
+        }
+        with patch.object(lps, "_request", return_value=all_states) as req:
+            self.assertEqual(lps._state_id("Backlog"), "S-Backlog")
+            self.assertEqual(lps._state_id("Done"), "S-Done")
+            self.assertEqual(lps._state_id("In Progress"), "S-InProgress")
+            self.assertEqual(lps._state_id("Todo"), "S-Todo")
+            # Five distinct name lookups, but the underlying GraphQL
+            # query ran exactly once (batched).
+            self.assertEqual(req.call_count, 1)
+
+    def test_invalidate_cache_clears_all(self):
+        # Seed the caches.
+        lps._project_id_cache = "P1"
+        lps._team_id_cache = "T1"
+        lps._state_id_cache = {"done": "S-Done"}
+        lps._paused_until = 9_999_999.0
+        # One request per cache after reset.
+        with patch.object(lps, "_request", return_value={
+            "data": {
+                "projects": {"nodes": [{"id": "P2", "teams": {"nodes": [{"id": "T2"}]}}]},
+                "workflowStates": {"nodes": [{"id": "S2", "name": "Done"}]},
+            }
+        }) as req:
+            lps.cmd_invalidate_cache(argparse.Namespace())
+            self.assertIsNone(lps._project_id_cache)
+            self.assertIsNone(lps._team_id_cache)
+            self.assertIsNone(lps._state_id_cache)
+            self.assertEqual(lps._paused_until, 0.0)
+            # After reset, calls re-resolve.
+            self.assertEqual(lps._project_id(), "P2")
+            self.assertEqual(lps._team_id(), "T2")
+            self.assertEqual(lps._state_id("Done"), "S2")
+            self.assertGreaterEqual(req.call_count, 2)
+
+    def test_429_response_pauses_subsequent_calls(self):
+        import urllib.error
+        # 429 sets _paused_until; subsequent _request calls return
+        # None immediately without re-hitting the network.
+        lps._paused_until = 0.0
+        err = urllib.error.HTTPError(
+            "https://api.linear.app/graphql", 429, "Too Many Requests",
+            {}, io.BytesIO(b'{"errors":[{"message":"rate limit"}]}'),
+        )
+        with patch.object(lps.urllib.request, "urlopen", side_effect=err):
+            self.assertIsNone(lps._request("{}"))
+        self.assertGreater(lps._paused_until, 0.0)
+        # While paused, even a successful network call would be skipped.
+        with patch.object(lps.urllib.request, "urlopen") as urlopen:
+            self.assertIsNone(lps._request("{}"))
+            urlopen.assert_not_called()
+
+
 class TestSmoke(unittest.TestCase):
     def test_returns_zero_when_a_required_state_is_missing(self):
         # Smoke is graceful-degrade (per minimum-change requirement):

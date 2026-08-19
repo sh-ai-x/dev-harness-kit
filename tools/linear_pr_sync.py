@@ -479,6 +479,27 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_invalidate_cache(args: argparse.Namespace) -> int:
+    """Reset the module-level caches (project / team / state ids).
+
+    Operators run this when the Linear project has been renamed, the
+    team reassigned, or workflow states added/renamed — events that
+    invalidate the cached ids without otherwise telling the script.
+    Tests also call this between cases so the global cache doesn't
+    leak across scenarios.
+
+    Safe to run mid-session: subsequent calls re-resolve on the next
+    `_project_id` / `_team_id` / `_state_id` call.
+    """
+    global _project_id_cache, _team_id_cache, _state_id_cache, _paused_until
+    _project_id_cache = None
+    _team_id_cache = None
+    _state_id_cache = None
+    _paused_until = 0.0
+    print("caches cleared", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -503,6 +524,9 @@ def main() -> int:
 
     p_smoke = sub.add_parser("smoke", help="verify API key + project + state IDs")
     p_smoke.set_defaults(func=cmd_smoke)
+
+    p_inv = sub.add_parser("invalidate-cache", help="reset cached project / team / state ids")
+    p_inv.set_defaults(func=cmd_invalidate_cache)
 
     args = parser.parse_args()
     return args.func(args)
