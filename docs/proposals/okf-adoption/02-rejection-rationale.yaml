@@ -1,0 +1,323 @@
+title: "Reject 사유 상세 — OKF 스펙 요소 9건 개별 판정"
+status: ready-for-review
+date: 2026-08-19
+tags: [okf, adoption, rejection, thin-harness, decision]
+
+before:
+  summary: |
+    "OKF를 도입할까?"는 단일 결정이 아니다. OKF는 conformance 조항 1개(전 파일 `type`)와
+    선택 패밀리 4개(provenance / trust / lifecycle / computation), 예약 파일 규약,
+    소비 툴링으로 구성된다. 각 요소는 dev-kit의 서로 다른 기존 표면과 겹치므로
+    개별 판정 없이 "도입/미도입"으로 답하면 판단 근거가 남지 않는다.
+  evidence:
+    - '기존 판례: `docs/proposals/langfuse-integration/` — 서드파티 도입 검토를 pros/cons + 결정 파일로 분해한 선례'
+    - 'MEMORY 규칙 thin-harness discipline: "Pros/cons analysis per item, written down (not just vibes)"'
+    - '`iron-laws/index.md` L5 — 묻지 않은 대안 나열 금지. 따라서 판정은 항목별 단일 결론으로 고정한다'
+
+after:
+  summary: |
+    9개 요소에 대해 판정 · 실측 비용 · 사유 · dev-kit 대안 · 반증 조건을 기록한다.
+    reject는 "영구 거부"가 아니라 "반증 조건이 충족될 때까지 보류"로 정의한다.
+  files:
+    - path: docs/proposals/okf-adoption/02-rejection-rationale.yaml
+      change: |
+        판정 9건의 상세 근거. 각 항목에 반증 조건(revisit trigger) 필수.
+
+pros:
+  - '항목별 판정이라 다음 재검토가 "스펙 전체 재조사"가 아니라 "반증 조건 1개 확인"으로 끝난다'
+  - 'reject 사유가 dev-kit 기존 표면(ADR·Iron Law·기존 스킬)에 매핑되어 있어, 사유가 취향이 아니라 저장소 불변식에서 도출된다'
+  - '비용이 바이트 실측으로 적혀 있어 thin-harness 게이트를 사후에 검증할 수 있다'
+
+cons:
+  - '항목이 9개로 쪼개져 문서가 길어졌다 — 요약만 필요한 독자는 00-index만 읽으면 된다'
+  - '반증 조건 일부는 정성적이다(예: "재발 3회"). 카운터를 자동 집계하지 않으므로 사람이 기억해야 한다'
+
+limitations:
+  - '`kcmd`를 실행해 부분 채택 bundle이 실제로 어떻게 거부되는지 확인하지 않았다. conformance 판정은 SPEC.md §11 조항 해석에 근거한다'
+  - 'OKF가 대상으로 삼는 데이터 카탈로그 용례(BigQuery 테이블/메트릭 문서화)에 대한 판정은 하지 않는다. 이 저장소에 그런 자산이 없기 때문이다'
+
+sections:
+  - title: 판정 매트릭스
+    body: |
+      | # | 요소 | OKF 조항 | 판정 | 1행 사유 |
+      |---|---|---|---|---|
+      | R1 | 전면 conformance (`type` 전 파일) | §11 | **Reject** | 106파일 순증 · 소비자 0 · 타입 어휘를 자체 발명해야 함 |
+      | R2 | 권장 필드 일괄 부여 | §4.1 | **Reject** | ~17 KB 순증, SKILL.md 스키마가 이미 상위호환 |
+      | R3 | 예약 파일명 규약 채택 | §3.1 §8 §9 §12 | **Reject** | index 4개 이미 존재 · 신규 생성분은 DOC-MAP.md와 SSOT 중복 (L8) |
+      | R4 | `kcmd` MCP 소비 경로 | FAQ | **Reject** | `docs/decisions/0001-no-mcp.md` 정면 충돌 |
+      | R5 | 다중 형제 파일 수용 | 스펙 미규정 | **Reject** | `.md`/`.html`/`.ko.md` 3중 형제를 표현할 규약이 스펙에 없음 |
+      | R6 | `Attested Computation` | §10 | **Reject** | executor receipt / attester 인프라 없음, `.dev-kit/` 상태가 이미 역할 수행 |
+      | D1 | provenance `sources` | §5.1 | **Defer** | v0.1→v0.2 breaking 당사자. 스펙 안정화 전 이전 금지 |
+      | D2 | trust `generated`/`verified` | §5.2 | **Defer** | 자동생성 표시는 주석으로 이미 존재, 기계판독 수요가 아직 없음 |
+      | A1 | lifecycle `status`/`stale_after` | §5.4–5.5 | **Adopt** | 결정론적 만료 게이트 = L7 알파. 상세는 03-cherry-pick |
+
+  - title: R1 — 전면 conformance (Reject)
+    body: |
+      ### 요구사항
+
+      SPEC §11: 모든 비예약 `.md`가 파싱 가능한 frontmatter + non-empty `type`을 가져야 한다.
+      부분 적용은 conformance가 아니므로 공식 validator / visualizer / `kcmd`의 이득이 전혀 없다.
+
+      ### 실측 비용
+
+      `docs/` 107개 중 frontmatter 보유 1개(`docs/architecture/acp-harness.md`).
+      나머지 106개에 최소 형태(`---` + `type: X` + `---` ≈ 22 B)만 넣어도 약 2.3 KB,
+      106개 파일 편집. 제거되는 바이트는 0.
+
+      ### 사유 1 — 소비자가 없다
+
+      `type` 필드를 읽는 런타임이 이 저장소에 존재하지 않는다. Claude Code와 Codex는
+      `CLAUDE.md` / `AGENTS.md`와 그 링크를 따라 읽고, 스킬은 `skills/*/SKILL.md`
+      frontmatter를 읽는다. OKF FAQ가 인정하듯 discovery는 "intentionally explicit"이며,
+      명시적 경로는 이미 899 B 포인터 문서가 담당한다. 즉 106파일 편집의 관측 가능한
+      효과는 0이다.
+
+      ### 사유 2 — 타입 어휘를 자체 발명해야 한다
+
+      스펙은 `type`을 "producer가 정의"로 남긴다. 제공되는 예시는 `BigQuery Table`
+      계열의 데이터 카탈로그 타입이며, 엔지니어링 문서(규칙 / 훅 매트릭스 / ADR /
+      런북 / 스킬 참조)용 표준 타입 어휘는 스펙에 없다. dev-kit이 `Rule`, `HookMatrix`,
+      `ADR` 같은 어휘를 발명하면 그 값은 dev-kit 전용이 되고, **표준을 채택해서
+      상호운용성을 얻는다는 명분이 사라진다.** 남는 것은 스키마 유지 비용뿐이다.
+
+      ### 사유 3 — thin-harness 게이트 실패
+
+      MEMORY thin-harness discipline은 채택 건당 prompt-token delta ≤ 0을 요구한다.
+      R1은 순증 2.3 KB에 상계 0으로, 게이트를 통과할 방법이 구조적으로 없다.
+
+      ### 반증 조건
+
+      다음 중 하나가 성립하면 재검토한다.
+
+      | 조건 | 확인 방법 |
+      |---|---|
+      | Claude Code 또는 Codex가 OKF bundle을 native discovery하기 시작 | 릴리스 노트에 OKF 언급 |
+      | dev-kit 문서를 소비하는 외부 저장소가 3곳 이상 생김 | consumer-repo 요청 카운트 (ADR 0001의 임계와 동일) |
+      | OKF가 엔지니어링 문서용 표준 `type` 어휘를 스펙에 추가 | SPEC.md에 타입 레지스트리 등장 |
+
+  - title: R2 — 권장 필드 일괄 부여 (Reject)
+    body: |
+      ### 요구사항
+
+      §4.1의 `title` / `description` / `resource` / `tags`. 필수는 아니지만 부재 시
+      OKF-aware 소비자가 얻을 정보가 `type`뿐이므로, 실질적으로 R1과 함께 묶여 다닌다.
+
+      ### 실측 비용
+
+      4필드 × 약 40 B × 107파일 ≈ **17 KB 순증**. R1의 2.3 KB보다 7배 크다.
+
+      ### 사유
+
+      `skills/*/SKILL.md` 42개는 이미 `name` / `category` / `description` /
+      `when_to_use` / `alpha` / `allowed-tools` / `model`을 갖는다. OKF 권장 4필드는
+      이 스키마의 **부분집합**이다. 즉 dev-kit의 frontmatter 필요 지점에는 이미 더
+      풍부한 스키마가 있고, 없는 지점(`docs/`)은 세션마다 로드되지 않는 on-demand 층이다.
+
+      `description`을 `docs/` 107개에 넣는 작업은 각 문서 첫 H1과 리드 문단을 요약하는
+      일인데, 그 요약은 `docs/home/DOC-MAP.md`의 "What you get" 열에 이미 존재한다.
+      한 사실을 두 곳에 두는 것은 `iron-laws/index.md` L8(SSOT 중복 금지 취지)에 반한다.
+
+      ### 반증 조건
+
+      `docs/`를 프로그램적으로 색인하는 소비자(사내 검색, 정적 사이트 생성기)가 도입되어
+      DOC-MAP.md 수작업 표를 대체할 때. 그 시점의 판정 주체는 OKF가 아니라 색인기의 요구 스키마다.
+
+  - title: R3 — 예약 파일명 규약 채택 (Reject)
+    body: |
+      ### 요구사항
+
+      §3.1 `index.md`(디렉터리 리스팅) · `log.md`(변경 이력), §12 `okf_version`은
+      bundle-root `index.md` frontmatter에만.
+
+      ### 사유 1 — 이미 있는 것에 이름만 다시 붙이는 일
+
+      `hooks/index.md`, `iron-laws/index.md`, `rules/index.md`, `guidelines/index.md`
+      4개가 이미 OKF와 동일한 파일명 · 동일한 역할(progressive disclosure)로 존재한다.
+      `log.md` 역할은 `CHANGELOG.md`가, bundle-root 역할은 `CLAUDE.md`/`AGENTS.md`
+      포인터가 수행한다. 채택으로 바뀌는 동작이 없다.
+
+      ### 사유 2 — 신규 생성분은 SSOT를 쪼갠다
+
+      progressive disclosure 이득을 실제로 얻으려면 `docs/` 하위 디렉터리 전체
+      (`architecture/`, `quality/`, `observability/`, `adr/`, `hooks/`, `home/`, ...)에
+      `index.md`를 새로 만들어야 한다. 그 내용은 `docs/home/DOC-MAP.md`의 카테고리
+      표를 디렉터리별로 쪼갠 것과 같다. 결과는 **하나의 인덱스가 20여 개로 분열되고,
+      갱신 지점이 늘어나 stale 위험이 오히려 증가**한다.
+
+      ### 사유 3 — `okf_version` 을 박는 것은 알려진 실패 패턴
+
+      §12는 버전을 bundle-root에 선언하게 한다. 스펙이 2개월에 breaking 2건을 낸 상태에서
+      루트 문서에 버전 문자열을 박으면, MEMORY의 "Version from plugin.json at runtime"
+      교훈(런타임 조회 대신 상수를 미러링하면 버전 churn이 발생)의 문서판 재발이 된다.
+
+      ### 반증 조건
+
+      `docs/` 하위 디렉터리가 각각 독립 배포 단위가 되어 DOC-MAP.md 단일 표로
+      다룰 수 없어질 때. 현재 `docs/` md 107개는 단일 표로 충분히 커버된다.
+
+  - title: R4 — kcmd MCP 소비 경로 (Reject)
+    body: |
+      ### 요구사항
+
+      OKF bundle을 에이전트가 능동적으로 조회하는 유일한 공식 경로는 `kcmd`가 제공하는
+      MCP 서버다.
+
+      ### 사유
+
+      `docs/decisions/0001-no-mcp.md` (Accepted, 2026-08-06):
+
+      > This plugin does not ship an MCP server entry. This is intentional, not deferred.
+      > Future contributors should NOT add MCP support without an explicit revisit of this decision.
+
+      이 ADR은 `/dev-kit:config`에서 비기능 MCP 옵션을 제거하고, 소비 저장소 통합을
+      슬래시 커맨드 · 훅 · 라이브러리 함수로 한정했다. OKF 채택이 MCP 의존을 되돌리는
+      근거가 되려면 ADR을 먼저 뒤집어야 하며, 그 판단은 OKF 검토의 범위를 넘는다.
+
+      MCP 없이 남는 경로는 "LLM이 그냥 markdown을 읽는다"뿐인데, 그것은 OKF 도입 전에도
+      이미 동작하는 상태다.
+
+      ### 반증 조건
+
+      ADR 0001이 명시한 재검토 조건과 동일: **소비 저장소로부터 MCP 통합 요청 3건 이상.**
+      OKF는 그 카운터를 올리는 사유 1건으로만 취급한다.
+
+  - title: R5 — 다중 형제 파일 수용 (Reject)
+    body: |
+      ### 문제
+
+      이 저장소의 토픽 문서는 대부분 `X.md` + `X.html` + `X.ko.md` 3중 형제로 배포된다
+      (`docs/home/DOC-MAP.md` 표의 HTML / MD / 한국어 3열이 그 정책의 SSOT).
+
+      OKF는 **파일 경로 = 개념 신원**을 전제한다. i18n 규약도, 동일 개념의 다중 포맷
+      표현 규약도 스펙에 없다.
+
+      ### 결과
+
+      | 시도 | 결과 |
+      |---|---|
+      | `.ko.md`에도 `type` 부여 | 같은 개념이 그래프에서 노드 2개로 중복. visualizer가 중복 표시 |
+      | `.ko.md`를 frontmatter 없이 방치 | §11 위반 → bundle 전체가 non-conformant |
+      | `resource` 필드로 형제 연결 | `resource`는 외부 리소스 URL 슬롯이며 번역본 링크 슬롯이 아니다 (§4.1 용례와 불일치) |
+      | `.html`을 bundle에서 제외 | bundle 경계를 파일 확장자로 쪼개야 함. 스펙에 제외 규약 없음 |
+
+      네 시도 모두 손실이 있고, 그중 어느 것도 스펙이 지지하지 않는다. 다국어 · 다중포맷
+      배포는 이 저장소의 명시적 정책이므로, 정책을 스펙에 맞추는 대신 스펙을 거부한다.
+
+      ### 반증 조건
+
+      OKF가 i18n 또는 alternate-representation 규약을 스펙에 추가할 때
+      (`translations:` / `alternates:` 류 필드).
+
+  - title: R6 — Attested Computation (Reject)
+    body: |
+      ### 요구사항
+
+      §10 `type: Attested Computation`은 `runtime`(필수) · `parameters` · `computation` ·
+      `executor.{resource,receipt}` · `attester.{resource}`를 요구한다. 계산 결과를
+      실행 증명과 함께 문서로 유통하는 용례다.
+
+      ### 사유
+
+      dev-kit에도 "실행 산출물"은 있다 — pytest 결과, cost-gate trailer, eval 점수,
+      security 스코어카드. 그러나 이들의 신뢰 근거는 이미 두 층으로 존재한다.
+
+      | dev-kit 기존 | 역할 |
+      |---|---|
+      | `iron-laws/index.md` L3 | 완료 주장에 exit code / 테스트 수 / 빌드 로그 인용 강제 |
+      | `.dev-kit/` 상태 파일 + `docs/security-metrics/<date>.md` | 산출물 자체의 영속화 |
+      | GH Actions run URL | 실행 증명(receipt) 역할 |
+
+      §10을 채택하려면 `executor.receipt`와 `attester`를 발급하는 인프라가 필요하다.
+      dev-kit은 서명 발급자도, 검증자도 없다. 없는 인프라를 전제한 스키마를 문서에 넣으면
+      필드가 항상 비거나 위조 가능한 자기 신고가 되므로, 신뢰 신호를 오히려 희석한다.
+
+      ### 반증 조건
+
+      dev-kit이 산출물에 대한 서명/검증 인프라(예: sigstore 계열)를 도입할 때.
+      그 시점에도 `Attested Computation`은 표현 형식 후보 1개일 뿐이다.
+
+  - title: D1 — provenance sources (Defer)
+    body: |
+      ### 겹치는 기존 표면
+
+      - `/dev-kit:research` — `enforce_citations()` 로 모든 주장에 출처 강제
+      - `rules/token-pricing.md` (8,619 B) — 가격 데이터의 출처·인용 규약 SSOT
+      - `docs/lessons-token-pricing.md` — 무출처 가격 주장이 실제로 사고를 낸 기록
+
+      즉 dev-kit은 인용 규약을 이미 갖고 있고, 위치만 body-level이다.
+
+      ### Defer 사유
+
+      `sources`는 **v0.1 → v0.2 breaking change의 당사자**다. v0.1은 body의
+      `# Citations` 섹션이었고 v0.2에서 frontmatter `sources`로 이전됐다. 두 달 만에
+      한 번 옮긴 필드로 저장소의 인용 규약을 이전하면, 다음 마이너 버전에서 또 옮길
+      위험을 그대로 인수한다.
+
+      Reject가 아니라 Defer인 이유: 이 필드가 유일하게 **dev-kit이 아직 기계판독으로
+      갖지 못한 것**을 제공한다 — 인용의 구조화(`author` / `usage_count` /
+      `last_modified` 신뢰 신호). 규약이 안정되면 도입 가치가 있다.
+
+      ### 반증 조건 (= 승격 조건)
+
+      OKF가 1.0에 도달하고, `sources` 스키마가 연속된 마이너 버전 2개에서 무변경일 때.
+      그 시점에 `rules/token-pricing.md` 1파일로 파일럿한 뒤 확대 여부를 재판정한다.
+
+  - title: D2 — trust generated / verified (Defer)
+    body: |
+      ### 겹치는 기존 표면
+
+      `AGENTS.md` 첫 두 줄이 이미 생성자 표기를 담고 있다.
+
+      ```
+      <!-- AUTO-GENERATED by lib/write_project_md.py — DO NOT EDIT MANUALLY -->
+      <!-- Use `/dev-kit:bootstrap` to regenerate. -->
+      ```
+
+      이는 OKF `generated: {by: ..., at: ...}`의 주석 버전이다. 사람은 읽지만 기계는 못 읽는다.
+
+      ### Defer 사유
+
+      기계판독 수요가 아직 없다. 자동생성 문서가 소수(`AGENTS.md`, `CLAUDE.md`,
+      `docs/CODEBASE-MAP.md`, `docs/skills/README.md` 계열)이고, 각각의 재생성 경로가
+      스킬에 명시돼 있어 사람이 혼동하지 않는다.
+
+      더 결정적으로, 이 필드가 필요한 문서가 **세션마다 로드되는 층**이다.
+      `CLAUDE.md`/`AGENTS.md`는 899 B이고 전 세션에서 읽힌다. 여기에 frontmatter
+      블록을 추가하는 것은 thin-harness 게이트를 정면으로 때린다 — 상계할 바이트가
+      포인터 문서 안에 없다(이미 최소 형태).
+
+      ### 반증 조건 (= 승격 조건)
+
+      자동생성 문서가 10개를 넘어 "사람이 고친 파일 / 생성기가 덮어쓸 파일"을 도구로
+      구분해야 할 때. 그 시점에 `generated.by`를 frontmatter로 올리고, 상계는 각 파일
+      상단 주석 2줄 제거로 확보한다(주석 제거분 ≈ frontmatter 추가분).
+
+  - title: A1 — lifecycle status / stale_after (Adopt)
+    body: |
+      유일한 채택 항목. 범위 · 실측 delta · 게이트 배선은
+      [03-cherry-pick.html](03-cherry-pick.html)에서 다룬다.
+
+      요약: `stale_after`는 `/dev-kit:docs-maintenance`가 현재 `rg` 검색과 `git log`
+      판단으로 추정하는 staleness를 **결정론적 만료일**로 치환한다.
+      `iron-laws/index.md` L7("알파는 모델이 스스로 부과할 수 없는 부분 —
+      결정론적 enforcement, 상태 프로세스, 감사 산출물 — 에 쓴다")에 정확히 부합한다.
+
+  - title: reject가 "무시"와 다른 점
+    body: |
+      본 문서의 reject 6건은 전부 반증 조건을 갖는다. 재검토 트리거를 한 표로 모으면:
+
+      | # | 재검토 트리거 |
+      |---|---|
+      | R1 | 런타임 native discovery 등장 / 외부 소비 저장소 3곳 / 표준 타입 어휘 추가 |
+      | R2 | `docs/` 프로그램 색인기 도입 (DOC-MAP.md 수작업 표 대체) |
+      | R3 | `docs/` 하위 디렉터리가 독립 배포 단위로 분리 |
+      | R4 | MCP 통합 요청 3건 (ADR 0001 임계) |
+      | R5 | 스펙에 i18n / alternate-representation 규약 추가 |
+      | R6 | 산출물 서명·검증 인프라 도입 |
+      | D1 | OKF 1.0 + `sources` 스키마 2개 마이너 버전 무변경 |
+      | D2 | 자동생성 문서 10개 초과 |
+
+      그때까지 OKF는 **reference-only**로 유지한다: 스펙을 읽고 어휘를 빌리되
+      conformance를 주장하지 않고, 툴링을 도입하지 않는다. 이는 MEMORY
+      thin-harness discipline의 기본 자세("use as reference, cherry-pick where
+      pros clearly outweigh cons")와 동일하다.

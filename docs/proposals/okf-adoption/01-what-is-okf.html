@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OKF 스펙 사실관계 — v0.1(2026-06) / v0.2(main) 실측</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "¹3"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "¹7"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>OKF 스펙 사실관계 — v0.1(2026-06) / v0.2(main) 실측</h1>
+<p class="meta">2026-08-19 · <span class="tag tag-info">ready-for-review</span></p>
+<div class="tags"><span class="tag tag-info">okf</span><span class="tag tag-info">spec</span><span class="tag tag-info">research</span><span class="tag tag-info">citation</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">OKF 한 줄 정의</a></li><li><a href="#sec-1">필수 / 권장 / 선택 필드</a></li><li><a href="#sec-2">예약 파일명 (§3.1)</a></li><li><a href="#sec-3">Conformance (§11) — 도입 비용을 결정하는 조항</a></li><li><a href="#sec-4">누가 실제로 소비하는가</a></li><li><a href="#sec-5">툴링</a></li><li><a href="#sec-6">버전 이력과 안정성</a></li><li><a href="#sec-7">출처</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">OKF 한 줄 정의</h2>
+<p><strong>YAML frontmatter를 가진 UTF-8 Markdown 파일들의 디렉터리 트리.</strong> 이것이 전부다. 파일 1개 = 개념(concept) 1개이고, 파일 경로가 개념의 신원이다. 개념 간 연결은 표준 markdown 링크로 하며, bundle-relative 경로(<code>/tables/customers.md</code>)를 권장한다.</p>
+<p>Google Cloud는 이를 Karpathy가 말한 "LLM-wiki 패턴"의 포터블한 형식화로 설명한다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">필수 / 권장 / 선택 필드</h2>
+<table><thead><tr><th>구분</th><th>필드</th><th>비고</th></tr></thead><tbody><tr><td><strong>필수</strong></td><td><code>type</code></td><td>non-empty string. <strong>항상 필수인 유일한 키</strong></td></tr><tr><td>권장 (§4.1)</td><td><code>title</code>, <code>description</code>, <code>resource</code>, <code>tags</code></td><td>없어도 conformant</td></tr><tr><td>provenance (§5.1)</td><td><code>sources</code> (각 항목 <code>resource</code> 필수), <code>usage_window</code></td><td>v0.2 신규. v0.1의 body <code># Citations</code> 섹션을 대체</td></tr><tr><td>trust (§5.2)</td><td><code>generated{by,at}</code>, <code>verified[{by,at}]</code></td><td>v0.2 신규. <code>generated.at</code>이 v0.1의 <code>timestamp</code>를 대체</td></tr><tr><td>lifecycle (§5.4–5.5)</td><td><code>status</code> (<code>draft</code> / <code>stable</code> / <code>deprecated</code>), <code>stale_after</code> (<code>YYYY-MM-DD</code>)</td><td><code>status</code> 부재 시 <code>stable</code>로 간주</td></tr><tr><td>computation (§10.2)</td><td><code>runtime</code> (필수), <code>parameters</code>, <code>computation</code>, <code>executor</code>, <code>attester</code></td><td><code>type: Attested Computation</code> 전용</td></tr><tr><td>버전 (§12)</td><td><code>okf_version</code></td><td><strong>bundle-root `index.md` frontmatter에만 허용</strong></td></tr></tbody></table>
+<p>생산자가 정의한 임의 키도 허용되며, 소비자는 왕복 시 미지의 키를 보존해야 한다(SHOULD).</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">예약 파일명 (§3.1)</h2>
+<table><thead><tr><th>파일명</th><th>용도</th></tr></thead><tbody><tr><td><code>index.md</code></td><td>디렉터리 리스팅 — 에이전트가 계층을 탐색할 때의 progressive disclosure (§8)</td></tr><tr><td><code>log.md</code></td><td>변경 이력 (§9)</td></tr></tbody></table>
+<p>예약 파일은 <code>type</code> 요구에서 면제된다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Conformance (§11) — 도입 비용을 결정하는 조항</h2>
+<p>bundle이 conformant하려면:</p>
+<ol><li><strong>모든 비예약 `.md` 파일</strong>이 파싱 가능한 YAML frontmatter 블록을 가진다.</li><li>모든 frontmatter 블록이 non-empty <code>type</code> 필드를 가진다.</li><li>예약 파일명이 존재할 경우 §8/§9를 따른다.</li></ol>
+<p>즉 <strong>"일부 파일만 OKF"는 conformance가 아니다.</strong> 부분 채택은 스펙 어휘를 빌려 쓰는 것이고, 공식 validator·visualizer는 통과하지 못한다.</p>
+<p>반대로 소비자 측 요구는 매우 느슨하다. 소비자는 다음을 이유로 bundle을 거부해서는 안 된다(MUST NOT): 선택 필드 누락, 미지의 <code>type</code> 값, 미지의 추가 키, 깨진 상호 링크, <code>index.md</code> 부재, trust frontmatter 부재.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">누가 실제로 소비하는가</h2>
+<p>okf.md FAQ 기준 소비 경로:</p>
+<ul><li>텍스트를 읽는 모든 LLM (Claude / GPT / Gemini) — 즉 <strong>"그냥 markdown이라서" 읽힌다</strong></li><li>코딩 에이전트 — 프로젝트 컨텍스트에 넣는 방식</li><li>MCP 호환 에이전트 — <code>kcmd</code> MCP 서버 경유</li><li>사람 — 아무 에디터나 Obsidian</li></ul>
+<p><strong>자동 discovery 메커니즘은 없다.</strong> FAQ는 "discovery is intentionally explicit" 이라고 명시한다. 즉 frontmatter를 넣는 행위 자체가 어떤 런타임의 동작도 바꾸지 않으며, 이득은 (a) <code>kcmd</code>/validator/visualizer 같은 OKF-aware 툴을 실제로 돌릴 때, 또는 (b) 사람이나 프롬프트가 그 필드를 명시적으로 읽을 때만 발생한다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">툴링</h2>
+<ul><li><code>kcmd</code> — "the OKF CLI", MCP 서버로도 동작</li><li>브라우저 validator — <code>okf.md/validator</code> (클라이언트 사이드)</li><li>static HTML visualizer — bundle을 단일 자기완결 HTML 그래프로 렌더</li><li>enrichment agent — BigQuery 데이터셋을 순회해 테이블/뷰별 OKF 문서 초안 생성 후 LLM 보강</li><li>샘플 bundle 3종 — GA4 e-commerce / Stack Overflow / Bitcoin 공개 데이터셋</li></ul>
+<p>툴링의 무게 중심이 <strong>데이터 카탈로그</strong>에 있다는 점에 주목. FAQ는 OKF가 데이터 카탈로그 전용이 아니라 runbook·ADR·API 등 조직 지식 전반을 위한 것이라고 주장하지만, 레퍼런스 구현은 BigQuery 메타데이터 생성기다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">버전 이력과 안정성</h2>
+<table><thead><tr><th>시점</th><th>상태</th></tr></thead><tbody><tr><td>2026-06-12</td><td>Google Cloud Blog에서 v0.1 발표</td></tr><tr><td>2026-06-19</td><td>W3C Holon Community Group 출범 — 상위 "DataBook" 프로파일 작업</td></tr><tr><td>2026-08-19 (검토 시점)</td><td><code>main</code>의 <code>okf/SPEC.md</code> = <strong>v0.2</strong>, breaking change 2건</td></tr></tbody></table>
+<p>v0.1 → v0.2 breaking change:</p>
+<ol><li><code>timestamp</code> (top-level) → <code>generated: {by, at}</code> (§5.2)</li><li>body의 <code># Citations</code> 플랫 리스트 → <code>sources</code> frontmatter (§5.1)</li></ol>
+<p>추가로 v0.2는 <code>status</code>/<code>stale_after</code> lifecycle, <code>sources</code> 신뢰 신호 (<code>author</code>/<code>usage_count</code>/<code>last_modified</code>), <code>Attested Computation</code> 타입, actor 표기 규약(<code>&lt;producer&gt;/&lt;version&gt;</code>, <code>human:&lt;id&gt;</code>, <code>process:&lt;id&gt;</code>)을 도입했다.</p>
+<p><strong>안정성 보장 없음.</strong> okf.md FAQ는 라이선스(Apache 2.0)를 밝히면서도 "1.0에 도달하기 전에 정체될 수 있다(could stall before reaching 1.0)"고 abandonment risk를 스스로 경고한다. 같은 FAQ가 버전을 아직 "0.1 (Draft)"로 표기하고 있어, 1차 출처 사이에서도 버전 상태가 일치하지 않는다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">출처</h2>
+<ul><li><a href="https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing">Google Cloud Blog — How the Open Knowledge Format can improve data sharing (2026-06-12)</a></li><li><a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md">okf/SPEC.md — GoogleCloudPlatform/knowledge-catalog (main, v0.2)</a></li><li><a href="https://okf.md/faq/">okf.md — FAQ</a></li></ul>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>"AI가 읽을 문서 표준"이라는 이름으로 OKF가 유통되고 있으나, 이 저장소의 판정을 내리기 전에 스펙이 실제로 무엇을 요구하는지, 누가 소비하는지, 버전이 얼마나 안정적인지를 1차 출처에서 확인해야 한다.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li>검토 시점 2026-08-19. <code>GoogleCloudPlatform/knowledge-catalog</code> main의 <code>okf/SPEC.md</code>는 이미 v0.2</li><li>Google Cloud Blog 발표일 2026-06-12 (v0.1)</li><li><code>okf.md/faq</code> 는 같은 시점에도 버전을 "0.1 (Draft)"로 표기 — 1차 출처 간 버전 표기 불일치</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>스펙 요구사항 · 소비 경로 · 툴링 · 버전 이력을 인용 가능한 형태로 고정한다. 이 문서는 판정을 내리지 않는다. 판정은 02-rejection-rationale이 담당한다.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">docs/proposals/okf-adoption/01-what-is-okf.yaml</span><p>스펙 사실관계 전용 문서. 판정·권고 문장 없음.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>1차 출처(SPEC.md, Google Cloud Blog, okf.md FAQ)만 인용하고 2차 해설 블로그는 인용하지 않는다</li><li>버전 이력을 명시해 향후 재검토 시 "무엇이 바뀌었는가"를 diff 가능하게 만든다</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>스펙 원문이 아니라 WebFetch 추출 요약이다 — 인용문은 정확하나 §번호는 v0.2 기준이며, 스펙이 갱신되면 §번호가 밀릴 수 있다</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li><code>kcmd</code> CLI를 실제로 설치·실행해 검증하지 않았다. 툴링 존재 여부는 okf.md FAQ 진술에 의존한다</li><li>W3C Holon Community Group의 DataBook 프로파일은 존재만 확인했고 내용은 검토하지 않았다</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-19 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
