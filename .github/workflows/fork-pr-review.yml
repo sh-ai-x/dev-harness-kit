@@ -68,8 +68,10 @@ jobs:
             --repo "${{ github.repository }}" --ref main -f pr_number="$PR_NUMBER" 2>&1)"
           REVIEW_RUN="$(parse_run_id "$REVIEW_URL")"
           MAINT_RUN="$(parse_run_id "$MAINT_URL")"
-          if [ -z "$REVIEW_RUN" ] || [ -z "$MAINT_RUN" ]; then
-            echo "::error::failed to parse run id; review_url=$REVIEW_URL maint_url=$MAINT_URL"
+          if [ -z "$REVIEW_RUN" ] || [ -z "$MAINT_RUN" ] \
+             || ! [ "$REVIEW_RUN" -gt 0 ] 2>/dev/null \
+             || ! [ "$MAINT_RUN" -gt 0 ] 2>/dev/null; then
+            echo "::error::failed to parse run id; review_url=$REVIEW_URL maint_url=$MAINT_URL review_run=$REVIEW_RUN maint_run=$MAINT_RUN"
             exit 1
           fi
           {
