@@ -199,6 +199,12 @@ jobs:
       - name: Pre-push hook syntax
         run: bash -n .githooks/pre-push
 
+      - name: Doc lifecycle (stale_after gate)
+        # Fails when any rules/*.md has stale_after < today. Mirrors OKF §5.5
+        # semantics: status: deprecated exempt; missing stale_after = pass.
+        # See tools/check_doc_lifecycle.py and tests/test_doc_lifecycle.py.
+        run: python3 tools/check_doc_lifecycle.py
+
       - name: Python module imports
         run: |
           PYTHONPATH=lib python3 -c "

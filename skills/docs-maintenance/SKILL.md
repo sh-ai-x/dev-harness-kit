@@ -45,8 +45,7 @@ Check both directions: every documented path/command/feature must exist (false-p
 
 - Open the project `README.md` (or whichever README the repo uses) and read it end-to-end before touching anything else. Every claim in it is a candidate for the validation pass in step 4.
 - Read the documentation index files, relevant rules, manifests, and the scripts the README names.
-- Search for stale terms, removed paths, old commands, hard-coded inventory counts, and duplicated instructions with `rg`. Start the searches from the README's code blocks — they are the highest-priority targets.
-- Use recent history (`git log` and targeted `git show`) to distinguish an intentional historical record from an outdated current instruction.
+- For staleness, rely on `tools/check_doc_lifecycle.py` (CI). The `rg`/`git log` heuristic that used to live here now lives only in the proposal that introduced the gate; this skill is the audit, not the staleness sniff.
 
 ### 2. Classify before changing
 

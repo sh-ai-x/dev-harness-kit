@@ -1,6 +1,7 @@
 ---
 paths:
   - "**/*"
+stale_after: 2027-05-31
 ---
 
 # Session hygiene rules (dev-harness-kit)
