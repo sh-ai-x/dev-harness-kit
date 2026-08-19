@@ -36,6 +36,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -77,6 +78,20 @@ PROJECT_NAME = _resolved_project_name()
 
 REQUIRED_STATE_NAMES = ("Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled")
 
+# Module-level caches — populated lazily on first call, live for the
+# process lifetime. Avoids re-resolving the same project / team / state
+# ids on every Edit|Write or auto-sync round.
+_project_id_cache: str | None = None
+_team_id_cache: str | None = None
+_state_id_cache: dict[str, str] | None = None  # name (lowered) -> id
+
+# Rate-limit state. Linear returns HTTP 429 when the hourly quota is
+# exhausted. When we observe a 429, set _paused_until to a monotonic
+# timestamp; subsequent calls in this process return None immediately
+# until the window elapses. Each new process gets a fresh window.
+_paused_until: float = 0.0
+_RATE_LIMIT_BACKOFF_SECONDS = 60  # skip window after a single 429
+
 EVENT_STATE_MAP = {
     "opened": "In Progress",
     "ready_for_review": "In Review",
@@ -106,7 +121,13 @@ _required = _has_api_key
 
 
 def _request(query: str, variables: dict | None = None) -> dict | None:
+    global _paused_until
     if not _has_api_key():
+        return None
+    if _paused_until > time.monotonic():
+        # Linear rate limit hit earlier in this process — skip the
+        # round-trip until the cooldown elapses. Each fresh process
+        # starts with a clean window.
         return None
     payload = json.dumps({"query": query, "variables": variables or {}}).encode()
     req = urllib.request.Request(
@@ -123,7 +144,18 @@ def _request(query: str, variables: dict | None = None) -> dict | None:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        print(f"HTTP {e.code} {e.reason}: {body[:200]}", file=sys.stderr)
+        if e.code == 429:
+            # Hourly quota exhausted. Pause all subsequent calls in
+            # this process for the backoff window — calling again
+            # during the window wastes time and triggers 429s.
+            _paused_until = time.monotonic() + _RATE_LIMIT_BACKOFF_SECONDS
+            print(
+                f"HTTP 429 rate limit; pausing Linear calls for "
+                f"{_RATE_LIMIT_BACKOFF_SECONDS}s",
+                file=sys.stderr,
+            )
+        else:
+            print(f"HTTP {e.code} {e.reason}: {body[:200]}", file=sys.stderr)
         return None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         print(f"transport error: {e}", file=sys.stderr)
@@ -131,7 +163,10 @@ def _request(query: str, variables: dict | None = None) -> dict | None:
 
 
 def _project_id() -> str | None:
-    """Resolve the project ID for the canonical project name."""
+    """Resolve the project ID for the canonical project name. Cached."""
+    global _project_id_cache
+    if _project_id_cache is not None:
+        return _project_id_cache
     query = """
     query($name: String!) {
       projects(filter: { name: { eq: $name } }, first: 1) {
@@ -143,11 +178,20 @@ def _project_id() -> str | None:
     if not r:
         return None
     nodes = r.get("data", {}).get("projects", {}).get("nodes", [])
-    return nodes[0]["id"] if nodes else None
+    _project_id_cache = nodes[0]["id"] if nodes else None
+    return _project_id_cache
 
 
 def _state_id(state_name: str) -> str | None:
-    """Resolve a workflow state ID within the project's team."""
+    """Resolve a workflow state ID within the project's team. Cached.
+
+    First call fetches ALL workflow states for the team in a single
+    request and caches the name -> id map. Subsequent calls are dict
+    lookups. Drops the smoke-test call count from `1 + N` to `1`.
+    """
+    global _state_id_cache
+    if _state_id_cache is not None:
+        return _state_id_cache.get(state_name.lower())
     team_id = _team_id()
     if not team_id:
         return None
@@ -159,11 +203,13 @@ def _state_id(state_name: str) -> str | None:
     }
     """
     r = _request(query, {"teamId": team_id})
-    if r:
-        for state in r.get("data", {}).get("workflowStates", {}).get("nodes", []):
-            if state["name"].lower() == state_name.lower():
-                return state["id"]
-    return None
+    if not r:
+        return None
+    mapping: dict[str, str] = {}
+    for state in r.get("data", {}).get("workflowStates", {}).get("nodes", []):
+        mapping[state["name"].lower()] = state["id"]
+    _state_id_cache = mapping
+    return mapping.get(state_name.lower())
 
 
 def _team_id() -> str | None:
