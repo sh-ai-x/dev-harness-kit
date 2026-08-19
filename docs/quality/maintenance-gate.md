@@ -156,6 +156,19 @@ drove it, so the PR Checks tab always shows the aggregate instead of
 the stale per-judge `skipped` verdicts. Per-judge verdict comments are
 still posted on the PR by each dispatched run as before.
 
+> **Implementation note — `--repo` is required on every `gh api` call
+> in `fork-pr-review.yml`.** The workflow runs on `pull_request_target`
+> and deliberately does NOT check out the fork's code, so the runner
+> has no `.git` directory. The relative URL
+> `repos/${{ github.repository }}/statuses/$SHA` would otherwise make
+> `gh` try to discover the repo from git context and fail with
+> `failed to determine base repo: failed to run git: fatal: not a git
+> repository`. Every `gh api` invocation in this workflow passes
+> `--repo "${{ github.repository }}"` to sidestep host discovery
+> entirely. The `tests/test_fork_pr_review_gh_api.py` regression pins
+> this contract — any future call that omits `--repo` (or an absolute
+> URL) fails the test. Observed on PR #665, run 32245678201.
+
 ## Related
 
 - `eval/prompts/judge-code-sanity.md` — the 20-checkbox rubric (the
