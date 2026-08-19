@@ -1,6 +1,8 @@
 """Tests for tools/linear_pr_sync.py — pure logic only (no network)."""
 
 import argparse
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -169,13 +171,32 @@ class TestTitleConstruction(unittest.TestCase):
 
 
 class TestSmoke(unittest.TestCase):
-    def test_returns_failure_when_a_required_state_is_missing(self):
+    def test_returns_zero_when_a_required_state_is_missing(self):
+        # Smoke is graceful-degrade (per minimum-change requirement):
+        # missing workflow states are reported as warnings, not failures.
+        # Operators with a custom Linear workflow (e.g. only Backlog
+        # + Done) are no longer blocked by the smoke gate. The smoke
+        # fails only when the project itself cannot be resolved.
         with (
             patch.object(lps, "_has_api_key", return_value=True),
             patch.object(lps, "_project_id", return_value="project"),
             patch.object(lps, "_state_id", side_effect=lambda name: None if name == "Done" else name),
         ):
-            self.assertEqual(lps.cmd_smoke(argparse.Namespace()), 1)
+            self.assertEqual(lps.cmd_smoke(argparse.Namespace()), 0)
+
+    def test_warns_when_state_missing(self):
+        # The missing-state warning must surface on stderr so operators
+        # notice the workflow drift without the gate hard-failing.
+        with (
+            patch.object(lps, "_has_api_key", return_value=True),
+            patch.object(lps, "_project_id", return_value="project"),
+            patch.object(lps, "_state_id", side_effect=lambda name: None if name == "Done" else name),
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                lps.cmd_smoke(argparse.Namespace())
+            self.assertIn("not configured", buf.getvalue())
+            self.assertIn("Done", buf.getvalue())
 
     def test_returns_one_when_api_key_is_missing(self):
         # Smoke is strict: missing API key is a config drift failure
