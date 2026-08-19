@@ -1,0 +1,135 @@
+title: "OKF 스펙 사실관계 — v0.1(2026-06) / v0.2(main) 실측"
+status: ready-for-review
+date: 2026-08-19
+tags: [okf, spec, research, citation]
+
+before:
+  summary: |
+    "AI가 읽을 문서 표준"이라는 이름으로 OKF가 유통되고 있으나, 이 저장소의
+    판정을 내리기 전에 스펙이 실제로 무엇을 요구하는지, 누가 소비하는지,
+    버전이 얼마나 안정적인지를 1차 출처에서 확인해야 한다.
+  evidence:
+    - '검토 시점 2026-08-19. `GoogleCloudPlatform/knowledge-catalog` main의 `okf/SPEC.md`는 이미 v0.2'
+    - 'Google Cloud Blog 발표일 2026-06-12 (v0.1)'
+    - '`okf.md/faq` 는 같은 시점에도 버전을 "0.1 (Draft)"로 표기 — 1차 출처 간 버전 표기 불일치'
+
+after:
+  summary: |
+    스펙 요구사항 · 소비 경로 · 툴링 · 버전 이력을 인용 가능한 형태로 고정한다.
+    이 문서는 판정을 내리지 않는다. 판정은 02-rejection-rationale이 담당한다.
+  files:
+    - path: docs/proposals/okf-adoption/01-what-is-okf.yaml
+      change: |
+        스펙 사실관계 전용 문서. 판정·권고 문장 없음.
+
+pros:
+  - '1차 출처(SPEC.md, Google Cloud Blog, okf.md FAQ)만 인용하고 2차 해설 블로그는 인용하지 않는다'
+  - '버전 이력을 명시해 향후 재검토 시 "무엇이 바뀌었는가"를 diff 가능하게 만든다'
+
+cons:
+  - '스펙 원문이 아니라 WebFetch 추출 요약이다 — 인용문은 정확하나 §번호는 v0.2 기준이며, 스펙이 갱신되면 §번호가 밀릴 수 있다'
+
+limitations:
+  - '`kcmd` CLI를 실제로 설치·실행해 검증하지 않았다. 툴링 존재 여부는 okf.md FAQ 진술에 의존한다'
+  - 'W3C Holon Community Group의 DataBook 프로파일은 존재만 확인했고 내용은 검토하지 않았다'
+
+sections:
+  - title: OKF 한 줄 정의
+    body: |
+      **YAML frontmatter를 가진 UTF-8 Markdown 파일들의 디렉터리 트리.** 이것이 전부다.
+      파일 1개 = 개념(concept) 1개이고, 파일 경로가 개념의 신원이다. 개념 간 연결은
+      표준 markdown 링크로 하며, bundle-relative 경로(`/tables/customers.md`)를 권장한다.
+
+      Google Cloud는 이를 Karpathy가 말한 "LLM-wiki 패턴"의 포터블한 형식화로 설명한다.
+
+  - title: 필수 / 권장 / 선택 필드
+    body: |
+      | 구분 | 필드 | 비고 |
+      |---|---|---|
+      | **필수** | `type` | non-empty string. **항상 필수인 유일한 키** |
+      | 권장 (§4.1) | `title`, `description`, `resource`, `tags` | 없어도 conformant |
+      | provenance (§5.1) | `sources` (각 항목 `resource` 필수), `usage_window` | v0.2 신규. v0.1의 body `# Citations` 섹션을 대체 |
+      | trust (§5.2) | `generated{by,at}`, `verified[{by,at}]` | v0.2 신규. `generated.at`이 v0.1의 `timestamp`를 대체 |
+      | lifecycle (§5.4–5.5) | `status` (`draft` / `stable` / `deprecated`), `stale_after` (`YYYY-MM-DD`) | `status` 부재 시 `stable`로 간주 |
+      | computation (§10.2) | `runtime` (필수), `parameters`, `computation`, `executor`, `attester` | `type: Attested Computation` 전용 |
+      | 버전 (§12) | `okf_version` | **bundle-root `index.md` frontmatter에만 허용** |
+
+      생산자가 정의한 임의 키도 허용되며, 소비자는 왕복 시 미지의 키를 보존해야 한다(SHOULD).
+
+  - title: 예약 파일명 (§3.1)
+    body: |
+      | 파일명 | 용도 |
+      |---|---|
+      | `index.md` | 디렉터리 리스팅 — 에이전트가 계층을 탐색할 때의 progressive disclosure (§8) |
+      | `log.md` | 변경 이력 (§9) |
+
+      예약 파일은 `type` 요구에서 면제된다.
+
+  - title: Conformance (§11) — 도입 비용을 결정하는 조항
+    body: |
+      bundle이 conformant하려면:
+
+      1. **모든 비예약 `.md` 파일**이 파싱 가능한 YAML frontmatter 블록을 가진다.
+      2. 모든 frontmatter 블록이 non-empty `type` 필드를 가진다.
+      3. 예약 파일명이 존재할 경우 §8/§9를 따른다.
+
+      즉 **"일부 파일만 OKF"는 conformance가 아니다.** 부분 채택은 스펙 어휘를
+      빌려 쓰는 것이고, 공식 validator·visualizer는 통과하지 못한다.
+
+      반대로 소비자 측 요구는 매우 느슨하다. 소비자는 다음을 이유로 bundle을
+      거부해서는 안 된다(MUST NOT): 선택 필드 누락, 미지의 `type` 값, 미지의 추가 키,
+      깨진 상호 링크, `index.md` 부재, trust frontmatter 부재.
+
+  - title: 누가 실제로 소비하는가
+    body: |
+      okf.md FAQ 기준 소비 경로:
+
+      - 텍스트를 읽는 모든 LLM (Claude / GPT / Gemini) — 즉 **"그냥 markdown이라서" 읽힌다**
+      - 코딩 에이전트 — 프로젝트 컨텍스트에 넣는 방식
+      - MCP 호환 에이전트 — `kcmd` MCP 서버 경유
+      - 사람 — 아무 에디터나 Obsidian
+
+      **자동 discovery 메커니즘은 없다.** FAQ는 "discovery is intentionally explicit"
+      이라고 명시한다. 즉 frontmatter를 넣는 행위 자체가 어떤 런타임의 동작도
+      바꾸지 않으며, 이득은 (a) `kcmd`/validator/visualizer 같은 OKF-aware 툴을
+      실제로 돌릴 때, 또는 (b) 사람이나 프롬프트가 그 필드를 명시적으로 읽을 때만 발생한다.
+
+  - title: 툴링
+    body: |
+      - `kcmd` — "the OKF CLI", MCP 서버로도 동작
+      - 브라우저 validator — `okf.md/validator` (클라이언트 사이드)
+      - static HTML visualizer — bundle을 단일 자기완결 HTML 그래프로 렌더
+      - enrichment agent — BigQuery 데이터셋을 순회해 테이블/뷰별 OKF 문서 초안 생성 후 LLM 보강
+      - 샘플 bundle 3종 — GA4 e-commerce / Stack Overflow / Bitcoin 공개 데이터셋
+
+      툴링의 무게 중심이 **데이터 카탈로그**에 있다는 점에 주목. FAQ는 OKF가
+      데이터 카탈로그 전용이 아니라 runbook·ADR·API 등 조직 지식 전반을 위한
+      것이라고 주장하지만, 레퍼런스 구현은 BigQuery 메타데이터 생성기다.
+
+  - title: 버전 이력과 안정성
+    body: |
+      | 시점 | 상태 |
+      |---|---|
+      | 2026-06-12 | Google Cloud Blog에서 v0.1 발표 |
+      | 2026-06-19 | W3C Holon Community Group 출범 — 상위 "DataBook" 프로파일 작업 |
+      | 2026-08-19 (검토 시점) | `main`의 `okf/SPEC.md` = **v0.2**, breaking change 2건 |
+
+      v0.1 → v0.2 breaking change:
+
+      1. `timestamp` (top-level) → `generated: {by, at}` (§5.2)
+      2. body의 `# Citations` 플랫 리스트 → `sources` frontmatter (§5.1)
+
+      추가로 v0.2는 `status`/`stale_after` lifecycle, `sources` 신뢰 신호
+      (`author`/`usage_count`/`last_modified`), `Attested Computation` 타입,
+      actor 표기 규약(`<producer>/<version>`, `human:<id>`, `process:<id>`)을 도입했다.
+
+      **안정성 보장 없음.** okf.md FAQ는 라이선스(Apache 2.0)를 밝히면서도
+      "1.0에 도달하기 전에 정체될 수 있다(could stall before reaching 1.0)"고
+      abandonment risk를 스스로 경고한다. 같은 FAQ가 버전을 아직 "0.1 (Draft)"로
+      표기하고 있어, 1차 출처 사이에서도 버전 상태가 일치하지 않는다.
+
+  - title: 출처
+    body: |
+      - [Google Cloud Blog — How the Open Knowledge Format can improve data sharing (2026-06-12)](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
+      - [okf/SPEC.md — GoogleCloudPlatform/knowledge-catalog (main, v0.2)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+      - [okf.md — FAQ](https://okf.md/faq/)

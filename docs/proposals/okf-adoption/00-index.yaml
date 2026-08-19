@@ -1,0 +1,137 @@
+title: "OKF (Open Knowledge Format) 도입 검토 — 전면 도입 Reject, cherry-pick 1건"
+status: ready-for-review
+date: 2026-08-19
+tags: [okf, docs, adoption, thin-harness, third-party]
+
+before:
+  summary: |
+    dev-harness-kit의 AI-read 문서 층은 이미 "포인터 + on-demand 링크 + index 파일"
+    구조로 동작한다. OKF가 표준화하려는 progressive-disclosure 패턴은 이 저장소에
+    이미 구현되어 있고, OKF가 추가로 요구하는 것은 전 문서 frontmatter(`type`)이다.
+    그 frontmatter를 실제로 소비하는 런타임은 이 저장소에 없다.
+  evidence:
+    - '`CLAUDE.md` = `AGENTS.md` = 899 B 포인터 문서 (`lib/write_project_md.py` auto-generated)'
+    - 'index 파일 4개 실존: `hooks/index.md`, `iron-laws/index.md`, `rules/index.md`, `guidelines/index.md`'
+    - '`docs/` = md 107개 · 656,633 B, 그중 YAML frontmatter 보유 1개 (`docs/architecture/acp-harness.md`)'
+    - 'md 총 231개 (`.worktrees/`, `.claude/worktrees/`, `.venv*` 제외) — `find . -name "*.md" | wc -l`'
+    - '`skills/` SKILL.md 42개는 전부 frontmatter 보유 (`name`/`category`/`description`/`alpha`/`when_to_use`)'
+    - '`docs/decisions/0001-no-mcp.md:15` — "This plugin does not ship an MCP server entry. This is intentional, not deferred."'
+
+after:
+  summary: |
+    OKF 전면 도입은 reject. 스펙 요소 9건을 개별 판정하고 reject 사유를 반증 조건과
+    함께 문서화한다. 채택은 lifecycle 패밀리(`stale_after`) 1건으로 제한하며,
+    적용 범위는 이미 frontmatter를 가진 `rules/*.md` 5개로 한정해 thin-harness
+    게이트(prompt-token delta ≤ 0)를 통과시킨다.
+  files:
+    - path: docs/proposals/okf-adoption/00-index.yaml
+      change: |
+        본 판정 요약 + 측정 기준선 + 하위 문서 네비게이션.
+    - path: docs/proposals/okf-adoption/01-what-is-okf.yaml
+      change: |
+        OKF v0.1/v0.2 스펙 사실관계 + 1차 출처 인용.
+    - path: docs/proposals/okf-adoption/02-rejection-rationale.yaml
+      change: |
+        reject 9건의 상세 사유 · 반증 조건 · 대안 매핑.
+    - path: docs/proposals/okf-adoption/03-cherry-pick.yaml
+      change: |
+        채택 1건(`stale_after`)의 범위 · 바이트 실측 delta · 게이트 배선안.
+
+pros:
+  - '판정 근거가 실측치로 고정된다 — 문서 개수·바이트·frontmatter 보유율을 모두 재현 가능한 명령으로 남긴다'
+  - 'reject 9건에 각각 반증 조건(revisit trigger)이 붙어 있어, 6개월 뒤 재검토가 처음부터 다시 조사하는 일을 막는다'
+  - '채택 범위가 1건 · 5파일로 좁아 thin-harness 게이트를 실측으로 통과한다 (−228 B, `03-cherry-pick` 참조)'
+  - 'OKF를 "reference-only"로 남겨도 lifecycle 어휘(`status`/`stale_after`)는 표준 이름을 그대로 쓰므로, 나중에 OKF가 1.0에 도달하면 재작업 없이 conformance 경로로 승격 가능'
+
+cons:
+  - '부분 채택은 OKF conformance를 주장하지 못한다 — `kcmd` validator / static HTML visualizer / enrichment agent 등 공식 툴링 이득을 전부 포기한다 (의식적 수용)'
+  - 'lifecycle 필드 1건만 들어오면 frontmatter 스키마가 두 갈래가 된다: SKILL.md 계열(dev-kit 자체 스키마)과 rules 계열(dev-kit 스키마 + OKF 어휘 1개). 스키마 검증기가 두 어휘를 모두 알아야 한다'
+  - '2026 Q3 cherry-pick 예산 2건 중 1건을 소모한다'
+
+limitations:
+  - '본 제안은 문서 층(AI-read docs)만 다룬다. `skills/*/SKILL.md` frontmatter 스키마 재설계, `docs/` 107개 파일의 메타데이터 부여, HTML/`.ko.md` 형제 파일 정책은 범위 밖이다'
+  - 'OKF 스펙 자체의 미래는 통제 불가다. 본 판정은 2026-08-19 기준 v0.2(main) 상태에 대한 것이고, 스펙이 breaking change를 또 내면 반증 조건에 따라 재검토가 필요하다'
+  - '`stale_after` 게이트는 "만료일이 지났다"만 결정론적으로 잡는다. 만료일 이전에 내용이 틀려지는 경우(예: 벤더가 예고 없이 가격을 바꿈)는 여전히 `/dev-kit:docs-maintenance`의 LLM 판단 영역이다'
+
+sections:
+  - title: 판정 요약
+    body: |
+      2026-06-12 Google Cloud가 발표한 **OKF (Open Knowledge Format)** 를
+      dev-harness-kit의 AI-read 문서 층에 도입할지 검토했다.
+
+      | 판정 | 건수 | 대상 |
+      |---|---|---|
+      | **Adopt** | 1 | lifecycle `stale_after` (+ 필요 시 `status`), `rules/*.md` 5개 한정 |
+      | **Defer** | 2 | provenance `sources`, trust `generated`/`verified` |
+      | **Reject** | 6 | 전면 conformance, 권장 필드 일괄 부여, 예약 파일명 재배치, `kcmd` MCP 소비 경로, 다중 형제 파일(`.ko.md`/`.html`) 수용, `Attested Computation` |
+
+      **전면 도입 = Reject.** 사유 3줄 요약:
+
+      1. **소비자 부재** — Claude Code / Codex는 OKF bundle을 자동 discovery하지
+         않는다. OKF FAQ 스스로 "discovery is intentionally explicit"이라고 명시한다.
+         실제 소비 경로는 `kcmd` MCP 서버뿐이고, 그 경로는 `docs/decisions/0001-no-mcp.md`
+         로 이미 차단되어 있다.
+      2. **thin-harness 게이트 실패** — conformance §11은 비예약 `.md` 전부에
+         non-empty `type`을 요구한다. `docs/` 106개 파일에 최소 106줄이 순증하고,
+         제거되는 바이트는 0이다.
+      3. **스펙 불안정** — v0.1 발표(2026-06-12) 후 약 2개월 만에 v0.2에서 breaking
+         change 2건(`timestamp` → `generated.at`, body `# Citations` → `sources`).
+         OKF FAQ는 여전히 버전을 "0.1 (Draft)"로 표기하며 abandonment risk를
+         스스로 경고한다.
+
+      상세 사유는 [02-rejection-rationale.html](02-rejection-rationale.html),
+      스펙 사실관계는 [01-what-is-okf.html](01-what-is-okf.html),
+      채택 1건의 설계는 [03-cherry-pick.html](03-cherry-pick.html).
+
+  - title: 측정 기준선 (재현 명령)
+    body: |
+      판정의 모든 수치는 아래 명령으로 재현된다. 2026-08-19, `origin/main` = `222c02b` 기준.
+
+      ```bash
+      # md 총량 (worktree / venv 제외)
+      find . -name "*.md" -not -path "./.worktrees/*" \
+        -not -path "./.claude/worktrees/*" -not -path "*/.venv*/*" | wc -l
+      # → 231
+
+      # 디렉터리별 분포
+      find . -name "*.md" -not -path "./.worktrees/*" \
+        -not -path "./.claude/worktrees/*" -not -path "*/.venv*/*" \
+        | awk -F/ '{print $2}' | sort | uniq -c | sort -rn
+      # → docs 107 / skills 49 / eval 16 / rules 6 / hooks 6 / commands 6 ...
+
+      # docs/ 총 바이트
+      find docs -name "*.md" -exec cat {} + | wc -c
+      # → 656633
+
+      # frontmatter 보유 파일 (첫 줄이 --- 인 것)
+      find . -name "*.md" -not -path "./.worktrees/*" \
+        -not -path "./.claude/worktrees/*" -not -path "*/.venv*/*" -print0 \
+        | xargs -0 awk 'FNR==1 && /^---[[:space:]]*$/ {print FILENAME} FNR>1 {nextfile}'
+      # → skills 42 / .codex 7 / .claude 7 / commands 6 / rules 5 / templates 1 / docs 1 / agents 1
+      ```
+
+      핵심 비대칭: **`skills/`는 이미 frontmatter 100%, `docs/`는 0.9% (1/107).**
+      OKF가 메우겠다는 갭은 `docs/`에만 존재하고, `docs/`는 세션마다 전부 로드되는
+      층이 아니라 링크를 따라 on-demand로 읽히는 층이다.
+
+  - title: 이미 구현된 OKF 패턴
+    body: |
+      OKF의 구조적 핵심(progressive disclosure via `index.md`)은 이 저장소에서
+      OKF 발표 이전부터 동작 중이다. 도입으로 얻을 구조적 이득이 0인 이유다.
+
+      | OKF 규약 | dev-kit 기존 구현 | 상태 |
+      |---|---|---|
+      | bundle-root `index.md` | `CLAUDE.md` / `AGENTS.md` 899 B 포인터 | 동등 |
+      | 하위 디렉터리 `index.md` | `iron-laws/index.md`, `guidelines/index.md`, `rules/index.md`, `hooks/index.md` | 동일 |
+      | 개념 간 markdown 링크 그래프 | `docs/home/DOC-MAP.md` 전체 카테고리 인덱스 | 동등 |
+      | frontmatter `title`/`description`/`tags` | SKILL.md `name`/`description`/`category`/`when_to_use` | 상위호환 |
+      | `log.md` 변경 이력 | `CHANGELOG.md` + git history | 동등 |
+
+  - title: 다음 단계
+    body: |
+      1. 이 PR을 리뷰한다. `status: ready-for-review` → 승인 시 `accepted`.
+      2. `accepted` 이후 [03-cherry-pick.html](03-cherry-pick.html)의 채택 1건만
+         별도 이슈 + 별도 PR로 구현한다. **본 PR은 문서만 추가하며 코드/게이트를
+         변경하지 않는다.**
+      3. reject 6건 · defer 2건은 각 항목의 반증 조건이 충족될 때만 재검토한다.
+         재검토 시 이 문서의 측정 기준선 명령을 다시 돌려 수치를 갱신한다.
