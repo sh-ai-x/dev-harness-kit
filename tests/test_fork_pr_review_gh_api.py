@@ -26,6 +26,9 @@ Background:
   for the `gh run view/watch` calls). This test now pins that contract:
   relative URLs AND `--repo` on `gh api` are both rejected.
 
+This test pins that contract so the workflow cannot drift back to relying on
+.git context discovery or to the rejected `--repo` flag.
+
 Pin tests:
   T1: workflow file exists and parses as YAML.
   T2: every `gh api` invocation in any `run:` block uses an absolute URL
@@ -67,17 +70,19 @@ def _all_run_blocks(doc: dict) -> list[tuple[str, str]]:
 
 def _check_gh_api_call(step_name: str, run_text: str) -> list[str]:
     """Return a list of failure messages for any `gh api` call in the run
-    block that does NOT have either `--repo` or an absolute URL.
+    block that does NOT use an absolute URL.
 
-    A `gh api` call is a line that starts (after shell continuation /
-    indentation stripping) with `gh api`. We accept either:
-      - `--repo "${{ github.repository }}"` (or unquoted equivalent) on the
-        same `gh` invocation (allowing line-continuation splits), OR
-      - the URL argument starts with `https://api.github.com/`.
+    The only acceptable form is the absolute URL — `gh api` does NOT accept
+    `--repo`, and a relative `repos/${{ github.repository }}/...` URL fails
+    on `pull_request_target` because the runner has no `.git` directory for
+    git-context discovery (observed on PR #665, runs 32245678201 / 32255230444).
 
-    The `--repo` argument may be on the same physical line OR on a
-    continuation line of the same `gh` invocation; we collect the
-    continuation into a single virtual command before checking.
+    Earlier commits (#673) added `--repo "${{ github.repository }}"` to every
+    `gh api` call. That looked plausible (the comment even explained the
+    `.git`-less rationale), but `gh api` rejects the flag with
+    `unknown flag: --repo`, so the gate stayed red. This test now pins the
+    only working form: an absolute URL of the form
+    `https://api.github.com/repos/${{ github.repository }}/...`.
     """
     # Collapse line-continuation backslashes so a multi-line `gh api ...\` block
     # becomes one virtual command whose args we can inspect.
