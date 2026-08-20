@@ -278,12 +278,12 @@ a:hover { text-decoration: underline; }
   margin: 0.2rem 0;
 }
 .pros-list li::before {
-  content: "\2713"; /* check */
+  content: "✓"; /* check */
   position: absolute; left: 0;
   color: var(--ok); font-weight: 700;
 }
 .cons-list li::before {
-  content: "\2717"; /* ballot x */
+  content: "✗"; /* ballot x */
   position: absolute; left: 0;
   color: var(--bad); font-weight: 700;
 }

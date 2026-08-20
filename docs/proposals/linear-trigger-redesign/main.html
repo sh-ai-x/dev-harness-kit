@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Linear Trigger Redesign — Gate, Don&#x27;t Sync</title>
+<title>Linear Trigger Redesign — Worktree-Born, Owner-Gated, Scope-Deduped</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -195,12 +195,12 @@ a:hover { text-decoration: underline; }
   margin: 0.2rem 0;
 }
 .pros-list li::before {
-  content: "¹3"; /* check */
+  content: "✓"; /* check */
   position: absolute; left: 0;
   color: var(--ok); font-weight: 700;
 }
 .cons-list li::before {
-  content: "¹7"; /* ballot x */
+  content: "✗"; /* ballot x */
   position: absolute; left: 0;
   color: var(--bad); font-weight: 700;
 }
@@ -221,35 +221,25 @@ a:hover { text-decoration: underline; }
 </head>
 <body>
 
-<h1>Linear Trigger Redesign — Gate, Don&#x27;t Sync</h1>
+<h1>Linear Trigger Redesign — Worktree-Born, Owner-Gated, Scope-Deduped</h1>
 <p class="meta">2026-08-20 · <span class="tag tag-info">design-discussion</span></p>
-<div class="tags"><span class="tag tag-info">linear</span><span class="tag tag-info">hooks</span><span class="tag tag-info">worktree</span><span class="tag tag-info">dedup</span><span class="tag tag-info">race-prevention</span></div>
-<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">TL;DR</a></li><li><a href="#sec-1">배경 — 왜 sync 모델이 실패하는가</a></li><li><a href="#sec-2">핵심 아이디어 (한 문장)</a></li><li><a href="#sec-3">Hook 시퀀스 (before / after)</a></li><li><a href="#sec-4">Race condition 방지 (왜 이게 해결책인가)</a></li><li><a href="#sec-5">Worktree-local canonical handle</a></li><li><a href="#sec-6">삭제할 hook (현재 → 권장 상태)</a></li><li><a href="#sec-7">옵션 비교</a></li><li><a href="#sec-8">비목표 (Out of scope)</a></li><li><a href="#sec-9">트레이드오프 (정직하게)</a></li><li><a href="#sec-10">성공 지표</a></li><li><a href="#sec-11">다음 단계</a></li></ol></div>
+<div class="tags"><span class="tag tag-info">linear</span><span class="tag tag-info">hooks</span><span class="tag tag-info">worktree</span><span class="tag tag-info">dedup</span><span class="tag tag-info">race-prevention</span><span class="tag tag-info">owner-gate</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">TL;DR</a></li><li><a href="#sec-1">배경 — 동기</a></li><li><a href="#sec-2">핵심 아이디어</a></li><li><a href="#sec-3">실제 hook surface (CC-2 수정)</a></li><li><a href="#sec-4">새로운 hook surface</a></li><li><a href="#sec-5">Race 방지 메커니즘</a></li><li><a href="#sec-6">Worktree-local canonical handle</a></li><li><a href="#sec-7">옵션 비교</a></li><li><a href="#sec-8">비목표</a></li><li><a href="#sec-9">트레이드오프 (정직하게)</a></li><li><a href="#sec-10">성공 지표</a></li><li><a href="#sec-11">다음 단계</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
 <h2 id="sec-0">TL;DR</h2>
-<p><strong>Linear 등록은 best-effort sync가 아니라 work의 hard gate여야 한다.</strong></p>
-<p>현재 4개 hook (<code>linear-autosync</code> / <code>linear-prompt-sync</code> / <code>linear-worktree-create</code> / <code>linear-session-start</code>) 은 전부 <strong>반응적</strong> — edit/세션/작업트리 생성 <em>후</em>에 Linear에 반영. 결과:</p>
-<ol><li><strong>deduplication 안 됨</strong> — 같은 dev-harness-kit 가 설치된 다른 저장소에서 동일 작업을 시작해도 서로 모름</li><li><strong>시점 모호</strong> — 이슈가 commit 5개 후에야 생기거나, 안 생기거나</li><li><strong>노이즈/시그널 비율 불리</strong> — edit 단위 trigger는 정보 중복</li></ol>
+<p><strong>Linear 등록을 best-effort sync 에서 work 의 hard gate 로 전환.</strong></p>
+<p>현재 4 hook (PreToolUse Edit / SessionStart / UserPromptSubmit task-change / PostToolUse:Bash <code>git worktree add</code>) 은 전부 <strong>best-effort + owner-gated + silent skip</strong>. <code>tools/linear_sync.py</code> 1개가 진입점.</p>
 <p><strong>핵심 결정</strong>:</p>
-<ul><li><strong>WorktreeCreate 시점에 Linear issue 존재를 강제</strong> (없으면 자동 생성)</li><li><strong>Project-scoped dedup</strong> — 동일 scope (브랜치/PR 제목 후보) 의 기존 issue 가 있으면 새로 만들지 않고 link</li><li><strong>Worktree-local canonical handle</strong> — <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> 1개가 이후 모든 hook 의 단일 진실</li><li><strong>PreToolUse / UserPromptSubmit 기반 sync hook 전부 제거</strong></li><li><strong>PR merge → state: Done</strong> (기존 <code>linear-pr-sync.yml</code> 그대로 유지)</li></ul>
+<ul><li><strong>WorktreeCreate 시점에 Linear issue 존재를 강제</strong> (없으면 자동 생성)</li><li><strong>Project-scoped dedup</strong> — 동일 scope 의 기존 issue 가 있으면 link</li><li><strong>Worktree-local canonical handle</strong> — <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> 1개가 이후 모든 hook 의 단일 진실</li><li><strong>4 hook 전부 제거</strong>, WorktreeCreate 1개로 대체</li><li><strong>PR merge → state: Done</strong> (기존 <code>linear-pr-sync.yml</code> 그대로 유지)</li></ul>
 <hr class="section-divider">
 
-<h2 id="sec-1">배경 — 왜 sync 모델이 실패하는가</h2>
-<p>dev-harness-kit 는 plugin으로 다른 저장소에 설치된다. 같은 hook 시퀀스가 저장소 A, B, C 에서 동시에 돌아간다. 현재 sync 모델은 두 가지를 보장 못 함:</p>
-<ol><li><strong>Race-free 시작</strong> — User A (저장소 X) 가 <code>fix/linear-autosync</code> 작업을 시작해도, User B (저장소 Y) 가 같은 작업을 시작해도 둘 다 자기 hook만 보고 자기 Linear issue 만 만든다. <strong>중복 작업 발생.</strong></li><li><strong>Issue 가 work 보다 먼저 존재</strong> — dev-harness-kit 의 다른 워크플로우 (<code>/dev-kit:plan</code>, <code>/dev-kit:proposal</code>, <code>/dev-kit:build</code>) 가 만든 산출물과 Linear issue 가 매번 사후 동기화. 본문 commit log 로 채워짐.</li></ol>
-<p>본 proposal 은 Linear 등록을 <strong>사후 반영</strong> 에서 <strong>사전 강제</strong> 로 뒤집는다.</p>
+<h2 id="sec-1">배경 — 동기</h2>
+<p>dev-harness-kit 는 plugin으로 여러 repo 에 설치되고, owner 가 한 repo 내에서 여러 worktree 를 동시에 운영한다. 현재 4 hook 의 결정적 약점:</p>
+<ol><li><strong>Race-free 시작 부재</strong> — owner A 가 <code>fix/foo</code> worktree 를 2개 (X, Y) cut 하면 각 hook 이 자기 path 만 보고 issue 2개 생성. <strong>중복 작업.</strong></li><li><strong>시점 모호</strong> — Edit 발생 후에야 Linear 반영. plan/PRD 와 issue 가 매번 사후 sync.</li><li><strong>Edit-time noise</strong> — 5~30 edit / 1 PR = hook 5~30회 발화. commit log 가 issue 본문에 누적.</li></ol>
+<p>본 proposal 은 <strong>반응적 sync → 사전 강제</strong> 로 뒤집는다.</p>
 <hr class="section-divider">
 
-<h2 id="sec-2">핵심 아이디어 (한 문장)</h2>
-<p><strong>worktree = 작업의 원자 단위. worktree 가 cut 되기 전에 Linear project 에 scope 가 등록되어 있어야 한다.</strong></p>
-<hr class="section-divider">
-
-<h2 id="sec-3">Hook 시퀀스 (before / after)</h2>
-<p><strong>Before (현재 — 4 hook, 다 best-effort)</strong>:</p>
-<pre><code>UserPromptSubmit ─┐
-WorktreeCreate ───┤
-SessionStart ─────┼──&gt; linear_sync.py ──&gt; Linear (있으면 update, 없으면 create)
-PreToolUse Edit ──┘                            (silent skip if no key)</code></pre>
-<p><strong>After (제안 — 1 hook, hard gate)</strong>:</p>
+<h2 id="sec-2">핵심 아이디어</h2>
+<p><strong>worktree = 작업의 원자 단위. cut 시점에 Linear project 에 scope 가 등록되어 있어야 한다.</strong></p>
 <pre><code>                                    ┌─ hit ──&gt; link (no create)
 WorktreeCreate ─&gt; scope 추출 ─&gt; Linear project 검색 ─┤
                                     └─ miss ─&gt; create (block until 200 OK)
@@ -258,17 +248,32 @@ WorktreeCreate ─&gt; scope 추출 ─&gt; Linear project 검색 ─┤
                               .worktrees/&lt;slug&gt;/.dev-kit/linear.json
                                       │
                                       ▼
-                            (work proceeds; all hooks READ this file)</code></pre>
-<p>종료는 기존 <code>linear-pr-sync.yml</code> 이 PR merge 시 <code>state: Done</code> 으로 전이. 그 외 별도 hook 없음.</p>
+                            (work proceeds; all downstream hooks READ this file)</code></pre>
+<p>종료는 기존 <code>tools/linear_pr_sync.py</code> + <code>.github/workflows/linear-pr-sync.yml</code> 가 PR merge 시 <code>state: Done</code> 으로 전이. 그 외 별도 hook 없음.</p>
 <hr class="section-divider">
 
-<h2 id="sec-4">Race condition 방지 (왜 이게 해결책인가)</h2>
-<p>dev-harness-kit 가 N개 저장소에 설치된 환경에서, 두 사용자가 같은 scope 로 동시에 worktree 를 cut 하는 시나리오:</p>
-<table><thead><tr><th>시점</th><th>User A (저장소 X)</th><th>User B (저장소 Y)</th><th>Linear 상태</th></tr></thead><tbody><tr><td>t0</td><td><code>fix/foo</code> worktree cut 시작</td><td>(대기)</td><td>없음</td></tr><tr><td>t1</td><td>scope <code>fix/foo</code> 검색 → miss</td><td>(대기)</td><td>없음</td></tr><tr><td>t2</td><td>issue #123 생성 시도 (block)</td><td><code>fix/foo</code> worktree cut 시작</td><td>race</td></tr><tr><td>t3</td><td>(200 OK 받음)</td><td>scope <code>fix/foo</code> 검색 → <strong>hit (#123)</strong></td><td>#123</td></tr><tr><td>t4</td><td>worktree 생성, <code>.dev-kit/linear.json</code> ← #123</td><td>worktree 생성, <code>.dev-kit/linear.json</code> ← #123 (같은 ID)</td><td>#123</td></tr><tr><td>t5</td><td>작업 진행</td><td>작업 진행 (또는 "이미 #123 처리 중" 안내로 cancel)</td><td>#123</td></tr></tbody></table>
-<p><strong>핵심</strong>: Linear project 가 <strong>단일 source of truth</strong> — <code>tools/linear_sync.py:_find_or_create_project()</code> 가 이미 같은 이름의 project 를 보장하므로, dedup 쿼리 (<code>scope eq</code>) 가 항상 같은 결과를 본다. 마지막 create 만 mutex 가 필요 — <code>project_id + scope</code> 를 unique key 로 두고 409 conflict 시 재조회.</p>
+<h2 id="sec-3">실제 hook surface (CC-2 수정)</h2>
+<p>v1 proposal 의 hook surface 가 부정확했음. <strong>실제 코드 확인 결과</strong>:</p>
+<table><thead><tr><th>Hook</th><th>선언된 event</th><th>진입점</th><th>Trigger</th></tr></thead><tbody><tr><td><code>linear-autosync.sh</code></td><td>PreToolUse Edit\</td><td>Write\</td><td>MultiEdit</td><td><code>tools/linear_sync.py: sync()</code> (default)</td><td>모든 edit</td></tr><tr><td><code>linear-session-start.sh</code></td><td>SessionStart</td><td><code>tools/linear_sync.py: sync()</code> (default)</td><td>worktree 에서 session 시작</td></tr><tr><td><code>linear-task-change.sh</code></td><td>UserPromptSubmit</td><td><code>tools/linear_sync.py: task_change_sync()</code></td><td>plan/task change 감지</td></tr><tr><td><code>linear-worktree-create.sh</code></td><td><strong>PostToolUse:Bash</strong> (WorktreeCreate 아님)</td><td><code>tools/linear_sync.py: sync()</code> (default)</td><td><code>git worktree add</code> 가 Bash tool 로 실행된 후</td></tr></tbody></table>
+<p>v1 의 오류:</p>
+<ul><li><code>linear-prompt-sync.sh</code> 라고 적은 것 → 실제로는 <code>linear-task-change.sh</code></li><li><code>linear-worktree-create.sh</code> 가 WorktreeCreate hook 이라고 적은 것 → 실제로는 PostToolUse:Bash (Claude Code 가 <code>git worktree add</code> 명령을 실행한 <em>후</em>에만 발화)</li><li><code>auto-sync</code> / <code>task-change</code> 진입점 제거 권고 → 둘 다 존재하며 호출됨 (전자는 호출자 없음, 후자는 <code>linear-task-change.sh</code> 가 호출)</li></ul>
 <hr class="section-divider">
 
-<h2 id="sec-5">Worktree-local canonical handle</h2>
+<h2 id="sec-4">새로운 hook surface</h2>
+<table><thead><tr><th>Hook</th><th>Event</th><th>역할</th></tr></thead><tbody><tr><td><code>linear-worktree-create.sh</code> (재작성)</td><td><strong>WorktreeCreate</strong></td><td>scope 추출 → dedup-or-create → handle 기록. <strong>hard gate</strong>, fail-closed</td></tr><tr><td><code>linear-pr-sync.yml</code> (workflow, 변경 없음)</td><td>pull_request:closed (merged)</td><td>handle 에서 issue ID 읽어 <code>state: Done</code></td></tr></tbody></table>
+<p>제거:</p>
+<ul><li><code>linear-autosync.sh</code> — Edit-time noise 의 주범</li><li><code>linear-session-start.sh</code> — handle 이 이미 존재, 불필요</li><li><code>linear-task-change.sh</code> — scope 은 cut 시점에 결정</li></ul>
+<p>진입점 정리 (<code>tools/linear_sync.py</code>):</p>
+<ul><li><code>sync()</code> (default) — 제거 (호출자 없음)</li><li><code>auto_sync()</code> — 제거 (호출자 없음)</li><li><code>task_change_sync()</code> — 제거 (호출자 없음)</li><li><code>is_repo_owner()</code>, <code>status</code>, <code>list</code>, <code>on</code>, <code>off</code>, <code>project-name</code>, <code>setup</code> — 유지</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-5">Race 방지 메커니즘</h2>
+<p>dev-harness-kit 가 1개 repo 의 N개 worktree 에 설치된 환경에서, owner 가 같은 scope 로 동시 cut 하는 시나리오:</p>
+<table><thead><tr><th>시점</th><th>Worktree X (owner)</th><th>Worktree Y (owner)</th><th>Linear</th></tr></thead><tbody><tr><td>t0</td><td><code>fix/foo</code> cut 시작</td><td>(대기)</td><td>없음</td></tr><tr><td>t1</td><td>scope <code>fix/foo</code> 검색 → miss</td><td>(대기)</td><td>없음</td></tr><tr><td>t2</td><td>issue #123 생성 시도 (block)</td><td><code>fix/foo</code> cut 시작</td><td>race</td></tr><tr><td>t3</td><td>(200 OK 받음)</td><td>scope <code>fix/foo</code> 검색 → <strong>hit (#123)</strong></td><td>#123</td></tr><tr><td>t4</td><td>worktree 생성, handle ← #123</td><td>worktree 생성, handle ← #123 (같은 ID)</td><td>#123</td></tr><tr><td>t5</td><td>작업 진행</td><td>작업 진행 (또는 "이미 #123 처리 중" 알림으로 cancel)</td><td>#123</td></tr></tbody></table>
+<p><strong>핵심</strong>: Linear project 가 <strong>단일 source of truth</strong>. dedup 쿼리 (<code>filter: { title: { eq: $scope } }</code>) 가 항상 같은 결과를 본다. 단, <strong>t2→t3 사이에 두 번째 cut 도 같은 시점에 miss → create 시도 가능</strong>. 이 same-second race 는 별도 mitigation 필요 (limitations 참조).</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Worktree-local canonical handle</h2>
 <pre><code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json
 {
   &quot;issue_id&quot;: &quot;SHO-306&quot;,
@@ -279,36 +284,38 @@ WorktreeCreate ─&gt; scope 추출 ─&gt; Linear project 검색 ─┤
   &quot;project_id&quot;: &quot;&lt;uuid&gt;&quot;,
   &quot;team_id&quot;: &quot;&lt;uuid&gt;&quot;
 }</code></pre>
-<ul><li><strong>모든 후속 hook</strong> (commit-msg 검증, PR body 생성, pre-push digest, PR merge state 전이) 은 이 파일만 읽는다</li><li><strong>PreToolUse / UserPromptSubmit 기반 sync 불필요</strong> — 정보 중복 제거</li><li><strong>Worktree 가 삭제되면 handle 도 사라짐</strong> — orphan Linear issue 가 안 생김 (단, push 후 merge 안 한 채 worktree 만 rm 하면 orphan — 별도 GC cron 으로 처리, 본 proposal 범위 외)</li></ul>
-<hr class="section-divider">
-
-<h2 id="sec-6">삭제할 hook (현재 → 권장 상태)</h2>
-<table><thead><tr><th>현재</th><th>권장</th><th>이유</th></tr></thead><tbody><tr><td><code>hooks/linear-autosync.sh</code> (PreToolUse)</td><td><strong>제거</strong></td><td>Edit 단위 noise, GitHub 가 activity 보여줌</td></tr><tr><td><code>hooks/linear-prompt-sync.sh</code> (UserPromptSubmit)</td><td><strong>제거</strong></td><td>task-change 감지 불필요, worktree gate 가 대체</td></tr><tr><td><code>hooks/linear-session-start.sh</code> (SessionStart)</td><td><strong>제거</strong></td><td>worktree-local handle 로 대체</td></tr><tr><td><code>hooks/linear-worktree-create.sh</code> (WorktreeCreate)</td><td><strong>재작성</strong></td><td>위 시퀀스대로 (gate + dedup + create)</td></tr><tr><td><code>tools/linear_sync.py: auto-sync</code> 진입점</td><td><strong>제거</strong></td><td>호출자 없음</td></tr><tr><td><code>tools/linear_sync.py: task-change</code> 진입점</td><td><strong>제거</strong></td><td>호출자 없음</td></tr><tr><td><code>tools/linear_pr_sync.py</code> (PR merge state)</td><td><strong>유지</strong></td><td><code>state: Done</code> 전이, 기존 워크플로우 그대로</td></tr><tr><td><code>.github/workflows/linear-pr-sync.yml</code></td><td><strong>유지</strong></td><td>변경 없음</td></tr></tbody></table>
+<ul><li><strong>모든 후속 hook</strong> (commit-msg 검증, PR body 생성, PR merge state 전이) 은 이 파일만 읽는다</li><li><strong>PreToolUse / UserPromptSubmit / SessionStart sync 불필요</strong> — 정보 중복 제거</li><li><strong>Worktree 삭제 시 handle 도 삭제</strong> — orphan issue 는 별도 GC cron 대상</li></ul>
 <hr class="section-divider">
 
 <h2 id="sec-7">옵션 비교</h2>
-<table><thead><tr><th>옵션</th><th>장점</th><th>단점</th><th>채택</th></tr></thead><tbody><tr><td>A. 현행 유지 (4 hook sync)</td><td>변경 없음</td><td>race 가능, 노이즈, dedup 없음</td><td>❌</td></tr><tr><td>B. Pre-push hook only</td><td>shipping 시점 단일 sync</td><td>진행 중 가시성 0, mid-work push 누락</td><td>❌</td></tr><tr><td>C. Post-commit hook</td><td>의도 단위 (commit)</td><td>auto-fix loop 충돌, WIP 노이즈, squash 손실</td><td>❌</td></tr><tr><td>D. Plan-gated (plan 승인 시)</td><td>명시적, intent 캡처</td><td>worktree 가 plan 보다 먼저 생기는 경우 누락</td><td>△ 보완</td></tr><tr><td><strong>E. WorktreeCreate gate + dedup</strong></td><td><strong>race-free, work 가 issue 보다 늦게 생성, worktree=unit</strong></td><td><strong>scope 추출 정확도 의존, plan-less 작업은 branch name 으로 대체</strong></td><td>✅</td></tr></tbody></table>
+<table><thead><tr><th>옵션</th><th>장점</th><th>단점</th><th>채택</th></tr></thead><tbody><tr><td>A. 현행 유지 (4 hook sync)</td><td>변경 없음</td><td>owner 가 동시 worktree 시 중복 issue, Edit noise</td><td>❌</td></tr><tr><td>B. Pre-push hook only</td><td>shipping 시점 단일 sync</td><td>진행 중 가시성 0, push 없는 작업 누락</td><td>❌</td></tr><tr><td>C. Post-commit hook</td><td>의도 단위 (commit)</td><td>auto-fix loop 충돌, WIP noise, squash 손실</td><td>❌</td></tr><tr><td>D. Plan-gated (plan 승인 시)</td><td>명시적 intent</td><td>worktree 가 plan 보다 먼저 생기는 경우 누락</td><td>△ 보완</td></tr><tr><td><strong>E. WorktreeCreate gate + dedup</strong></td><td><strong>race-free (단일 owner 한정), work 가 issue 보다 늦게 생성</strong></td><td><strong>cross-repo dedup 미지원, same-second race 별도 mitigation 필요</strong></td><td>✅</td></tr></tbody></table>
 <p>권장안은 <strong>E (메인) + D (보완)</strong>. WorktreeCreate 시 plan-id 가 <code>.dev-kit/plan-id</code> 로 박혀있으면 (이미 <code>/dev-kit:plan</code> 가 저장) 그 plan 의 PRD 요약을 issue body 로 사용. 없으면 branch + worktree context 에서 scope 추출.</p>
 <hr class="section-divider">
 
-<h2 id="sec-8">비목표 (Out of scope)</h2>
-<ul><li>Linear API 자체 변경 / webhook 인프라 도입 (현재 GraphQL 호출 그대로)</li><li>worktree GC / orphan issue 청소 (별도 cron 작업으로 후속)</li><li>non-git 환경 (본 proposal 은 git worktree 기반 워크플로우 전제)</li><li>기존 <code>.dev-kit/hand-off/linear/main.json</code> 의 마이그레이션 (1회성 migration script 는 rollout 단계에서 별도 PR)</li><li>multi-team / multi-project 환경 (단일 Linear project 가정)</li></ul>
+<h2 id="sec-8">비목표</h2>
+<ul><li><strong>Cross-repo dedup</strong> — dev-harness-kit 가 다른 repo 에 설치되어 있고 같은 scope 의 작업이 두 repo 에서 동시 진행되는 경우. 공유 dedup store (Redis/Lua) 필요. 본 proposal 의 v1 범위 외.</li><li><strong>Linear API 변경</strong> — webhook 인프라 도입. 현재 GraphQL 호출 그대로.</li><li><strong>worktree GC / orphan issue 청소</strong> — 별도 cron 작업.</li><li><strong>non-git 환경</strong> — git worktree 기반 워크플로우 전제.</li><li><strong>기존 `.dev-kit/hand-off/linear/main.json` 마이그레이션</strong> — 1회성 migration script 는 rollout 단계에서 별도 PR.</li><li><strong>multi-team / multi-project 환경</strong> — 단일 Linear project 가정.</li></ul>
 <hr class="section-divider">
 
 <h2 id="sec-9">트레이드오프 (정직하게)</h2>
 <ol><li><strong>false positive — investigation worktree 도 issue 생성됨</strong> <code>investigate/why-foo-fails</code> 같은 브랜치도 Linear issue 가 생긴다. → 해결: branch pattern <code>^(investigate|research|spike)/</code> 은 <code>tracking-only</code> 모드로 강등 (issue body = "investigation, no implementation"). user 가 명시적으로 close 가능.</li></ol>
-<ol><li><strong>scope 추출 실패 시 fallback</strong> — branch name 만으로 issue 제목을 만들면 noise (<code>fix/typo</code> → "Fix: typo"). branch 가 너무 generic 하면 user 에게 prompt 로 제목 받기. → 해결: <code>_extract_scope()</code> 가 branch verb (<code>fix/feat/refactor/chore</code>) + noun (slugified) 만으로 못 만들겠다 판단하면 (length &lt; 3, 동사만 있음 등) hook 이 user prompt 로 제목 요구.</li></ol>
-<ol><li><strong>기존 사용자 워크플로우 breaking</strong> — PreToolUse autosync 에 의존하던 유저 (있다면) 는 즉시 중단. 마이그레이션 가이드 필요. → 해결: 1-release deprecation 경고 후 제거. release notes 에 명시.</li></ol>
+<ol><li><strong>scope 추출 실패 시 fallback</strong> — branch name 만으로 issue 제목을 만들면 noise (<code>fix/typo</code> → "Fix: typo"). branch 가 너무 generic 하면 user 에게 prompt 로 제목 받기. → 해결: <code>_scope_from_branch()</code> 가 12자 미만 / 동사만 있는 경우 <code>LINEAR_REQUIRED=0</code> 모드 + stderr 경고로 강등. v1 에서는 interactive prompt 미지원 (WorktreeCreate 는 server-side hook).</li></ol>
 <ol><li><strong>network failure 시 worktree cut 자체가 block</strong> — Linear API down 이면 작업 시작 못함. 15s timeout 으로 빠지지만 그래도 fail-closed. → 해결: <code>LINEAR_REQUIRED=0</code> env 또는 per-repo config 로 bypass 가능 (warning 만 출력). default 는 fail-closed.</li></ol>
+<ol><li><strong>Edit-time hook 발화 0회</strong> (성공 지표) — 검증 가능: <code>tools/token_efficiency_analyzer.py</code> 의 hook-call 카운트가 <code>linear-*</code> 패턴으로 0 이 되는지 측정 가능. (v1 proposal 의 "unverifiable" 지적은 정정함)</li></ol>
+<ol><li><strong>4 hook 사용자 워크플로우 breaking</strong> — release notes 에 breaking change 명시 + 1 release deprecation 경고.</li></ol>
 <hr class="section-divider">
 
 <h2 id="sec-10">성공 지표</h2>
-<ul><li><strong>중복 작업 0건</strong> — 동일 scope 의 동시 worktree cut 시 1개만 생성되고 나머지는 link</li><li><strong>100% worktree 가 Linear issue 를 가짐</strong> — <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> 존재율</li><li><strong>Edit-time hook 발화 0회</strong> — PreToolUse linear 관련 hook 제거 후 <code>tools/token_efficiency_analyzer.py</code> 의 hook cost 가 감소</li><li><strong>PR merge 시 state 자동 전이 100%</strong> — 기존 <code>linear-pr-sync.yml</code> 그대로</li></ul>
+<ul><li><strong>중복 작업 0건 (단일 owner 한정)</strong> — 동일 scope 의 동시 worktree cut 시 1개만 생성되고 나머지는 link. cross-repo dedup 은 v1 범위 외.</li><li><strong>100% worktree 가 Linear issue 를 가짐</strong> — <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> 존재율 (<code>tools/dev_kit_status.py</code> 로 측정)</li><li><strong>Edit-time hook 발화 0회</strong> — PreToolUse linear-* hook 제거 후 <code>tools/token_efficiency_analyzer.py</code> 의 hook-call 카운트 0</li><li><strong>PR merge 시 state 자동 전이 100%</strong> — 기존 <code>linear-pr-sync.yml</code> 그대로</li></ul>
 <hr class="section-divider">
 
 <h2 id="sec-11">다음 단계</h2>
-<ol><li><code>hooks/linear-worktree-create.sh</code> 재작성 (gate + dedup + auto-create)</li><li><code>tools/linear_sync.py</code> 에 <code>_extract_scope()</code> + <code>_dedup_or_create()</code> 추가, <code>auto-sync</code> / <code>task-change</code> 진입점 제거</li><li><code>.dev-kit/hand-off/linear/main.json</code> → worktree-local 파일로 마이그레이션 (1회성 script)</li><li>기존 3 hook (<code>autosync</code>, <code>prompt-sync</code>, <code>session-start</code>) 제거</li><li>release notes 에 breaking change 명시 + deprecation 경고 1 release</li></ol>
+<ol><li><code>hooks/linear-worktree-create.sh</code> 재작성 (gate + dedup + auto-create)</li><li><code>tools/linear_sync.py</code> 에 <code>_scope_from_branch()</code> + <code>_dedup_or_create()</code> 추가, <code>auto_sync()</code> / <code>task_change_sync()</code> 진입점 제거</li><li>기존 3 hook (<code>autosync</code>, <code>session-start</code>, <code>task-change</code>) 제거</li><li><code>.dev-kit/hand-off/linear/main.json</code> → worktree-local 파일로 마이그레이션 (1회성 script, 별도 PR)</li><li>release notes 에 breaking change 명시 + deprecation 경고 1 release</li></ol>
 <p>본 proposal 승인 후 <code>/dev-kit:linear</code> 으로 tracking issue 등록 → <code>/dev-kit:plan</code> 으로 단계별 실행.</p>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>Today Linear auto-sync runs on 4 best-effort hooks that all delegate to <code>tools/linear_sync.py::auto_sync</code>. The triggers fire <em>during</em> work (PreToolUse Edit, SessionStart, UserPromptSubmit task-change, PostToolUse:Bash on <code>git worktree add</code>). Linear failures are non-blocking (per #539); the script always exits 0 and silently bails when the API key, worktree config, or owner-gate is missing. There is no enforcement that a tracking issue exists <em>before</em> work starts.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>hooks/linear-autosync.sh:1-9</code> declares PreToolUse Edit|Write|MultiEdit</li><li><code>hooks/linear-session-start.sh:2-9</code> declares SessionStart; owner-gated via auto_sync()</li><li><code>hooks/linear-task-change.sh:1-10</code> declares UserPromptSubmit; calls task_change_sync()</li><li><code>hooks/linear-worktree-create.sh:1-7</code> declares PostToolUse:Bash (NOT WorktreeCreate) — fires only when Claude Code runs the <code>git worktree add</code> command</li><li><code>tools/linear_sync.py:1645-1655</code> shows the entry-point dispatch: <code>sync</code> (default), <code>auto-sync</code>, <code>task-change-sync</code>, <code>status</code>, <code>list</code>, <code>on</code>, <code>off</code>, <code>project-name</code>, <code>setup</code></li><li><code>tools/linear_sync.py:344-396</code> implements <code>is_repo_owner()</code> gate; non-owners bail silently from auto_sync()</li><li>Symptom: same owner cutting two worktrees on the same scope (<code>fix/typo</code> in both) registers TWO Linear issues, no dedup</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Replace the 4 best-effort sync hooks with <strong>one WorktreeCreate hook</strong> that is mandatory (not best-effort), owner-gated, and project-scoped dedup-aware. The hook runs at the moment a new worktree is created — whether by Claude Code (<code>worktree-auto-cut.sh</code>) or by a manual <code>git worktree add</code> — and:</p>
+<ol><li>Resolves the scope from branch + (optional) plan-id</li><li>Searches the Linear project for an open issue with the same scope</li><li>Links the existing issue (no create) OR creates a new one (block until 200 OK)</li><li>Writes <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> as the worktree's canonical Linear handle</li><li>Stores issue ID in the worktree config so PR-merge can transition state to Done</li></ol>
+<p>All 4 current sync hooks are removed. The PR-merge state transition (<code>tools/linear_pr_sync.py</code> + <code>.github/workflows/linear-pr-sync.yml</code>) stays untouched.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">hooks/linear-worktree-create.sh</span><p>rewrite as a hard-gate WorktreeCreate hook: scope resolve → project search → link-or-create → write worktree-local linear.json; fail-closed unless LINEAR_REQUIRED=0</p></li><li><span class="file-path">hooks/linear-autosync.sh</span><p>delete; superseded by worktree-local handle + PR-merge sync</p></li><li><span class="file-path">hooks/linear-session-start.sh</span><p>delete; worktree-local handle is the single source of truth at session start</p></li><li><span class="file-path">hooks/linear-task-change.sh</span><p>delete; task-change detection moves into the WorktreeCreate path (scope is decided at cut, not in-session)</p></li><li><span class="file-path">tools/linear_sync.py</span><p>remove auto_sync() and task_change_sync() entry points; keep status/list/on/off/setup; add _scope_from_branch() and _dedup_or_create() helpers</p></li><li><span class="file-path">tools/linear_pr_sync.py</span><p>no change; reads worktree-local .dev-kit/linear.json to find the issue ID for state transition on PR merge</p></li><li><span class="file-path">.github/workflows/linear-pr-sync.yml</span><p>no change</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Catches the same-owner-same-scope case the current 4-hook system misses (two worktrees cut by one owner on the same scope today produce two issues)</li><li>Reduces Edit-time hook fires from N-per-session to 1-per-worktree; token cost drops measurably on long sessions</li><li>Worktree = atomic unit of work; the worktree-local handle removes the "which session owns this issue" ambiguity</li><li>Owner-gate semantics preserved; non-owners still bail silently (no leak of contributor work into the owner's Linear workspace)</li><li>Existing PR-merge state transition is reused unchanged — no new CI surface</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Network failure at worktree-cut time blocks the cut. Mitigation: <code>LINEAR_REQUIRED=0</code> env var bypasses the gate with a warning; default is fail-closed (matches #539 "non-blocking" applies only to the in-session sync path)</li><li>WorktreeCreate fires for ALL <code>git worktree add</code> (not just Claude Code's). Mitigation: hook is scoped to dev-harness-kit installations via the existing config-presence check (<code>linear-config.json:enabled</code>); non-dhk worktrees are unaffected</li><li>Removes a feedback signal operators currently rely on (every-edit sync). Mitigation: PR-merge still publishes a state update; the Linear timeline remains complete for shipped work</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>Linear's <code>issueCreate</code> GraphQL mutation has NO native unique-by-label enforcement. Dedup relies on a <code>filter: { title: { eq: $scope } }</code> query at hook time; same-second race between two cuts can still create two issues. Out of scope: optimistic concurrency on the Linear side. Mitigation: post-create label tagging + a one-shot reconcile cron</li><li>Branch-name-only scope detection fails for generic names (<code>fix/typo</code>, <code>chore/cleanup</code>). Out of scope: a plan-id discovery mechanism for users who don't run <code>/dev-kit:plan</code> first. Mitigation: hook prompts the user via stderr for a better title when scope extraction returns &lt; 12 chars</li><li>Migration of existing <code>.dev-kit/hand-off/linear/main.json</code> to the per-worktree layout is deferred. Out of scope for this proposal. Mitigation: a follow-up one-shot migration script in the rollout PR</li><li>Cross-repo dedup (dev-harness-kit installed in N repos, same scope across two) is NOT supported. Out of scope: that scenario requires a shared dedup store (Redis/Lua). Documented as a future enhancement, not a v1 feature</li></ul></section>
 
 <hr class="section-divider">
 
