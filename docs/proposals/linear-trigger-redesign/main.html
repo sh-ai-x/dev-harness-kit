@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linear Trigger Redesign — Gate, Don&#x27;t Sync</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "¹3"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "¹7"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Linear Trigger Redesign — Gate, Don&#x27;t Sync</h1>
+<p class="meta">2026-08-20 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">linear</span><span class="tag tag-info">hooks</span><span class="tag tag-info">worktree</span><span class="tag tag-info">dedup</span><span class="tag tag-info">race-prevention</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">TL;DR</a></li><li><a href="#sec-1">배경 — 왜 sync 모델이 실패하는가</a></li><li><a href="#sec-2">핵심 아이디어 (한 문장)</a></li><li><a href="#sec-3">Hook 시퀀스 (before / after)</a></li><li><a href="#sec-4">Race condition 방지 (왜 이게 해결책인가)</a></li><li><a href="#sec-5">Worktree-local canonical handle</a></li><li><a href="#sec-6">삭제할 hook (현재 → 권장 상태)</a></li><li><a href="#sec-7">옵션 비교</a></li><li><a href="#sec-8">비목표 (Out of scope)</a></li><li><a href="#sec-9">트레이드오프 (정직하게)</a></li><li><a href="#sec-10">성공 지표</a></li><li><a href="#sec-11">다음 단계</a></li></ol></div>
+<h2 id="sec-0">TL;DR</h2>
+<p><strong>Linear 등록은 best-effort sync가 아니라 work의 hard gate여야 한다.</strong></p>
+<p>현재 4개 hook (<code>linear-autosync</code> / <code>linear-prompt-sync</code> / <code>linear-worktree-create</code> / <code>linear-session-start</code>) 은 전부 <strong>반응적</strong> — edit/세션/작업트리 생성 <em>후</em>에 Linear에 반영. 결과:</p>
+<ol><li><strong>deduplication 안 됨</strong> — 같은 dev-harness-kit 가 설치된 다른 저장소에서 동일 작업을 시작해도 서로 모름</li><li><strong>시점 모호</strong> — 이슈가 commit 5개 후에야 생기거나, 안 생기거나</li><li><strong>노이즈/시그널 비율 불리</strong> — edit 단위 trigger는 정보 중복</li></ol>
+<p><strong>핵심 결정</strong>:</p>
+<ul><li><strong>WorktreeCreate 시점에 Linear issue 존재를 강제</strong> (없으면 자동 생성)</li><li><strong>Project-scoped dedup</strong> — 동일 scope (브랜치/PR 제목 후보) 의 기존 issue 가 있으면 새로 만들지 않고 link</li><li><strong>Worktree-local canonical handle</strong> — <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> 1개가 이후 모든 hook 의 단일 진실</li><li><strong>PreToolUse / UserPromptSubmit 기반 sync hook 전부 제거</strong></li><li><strong>PR merge → state: Done</strong> (기존 <code>linear-pr-sync.yml</code> 그대로 유지)</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-1">배경 — 왜 sync 모델이 실패하는가</h2>
+<p>dev-harness-kit 는 plugin으로 다른 저장소에 설치된다. 같은 hook 시퀀스가 저장소 A, B, C 에서 동시에 돌아간다. 현재 sync 모델은 두 가지를 보장 못 함:</p>
+<ol><li><strong>Race-free 시작</strong> — User A (저장소 X) 가 <code>fix/linear-autosync</code> 작업을 시작해도, User B (저장소 Y) 가 같은 작업을 시작해도 둘 다 자기 hook만 보고 자기 Linear issue 만 만든다. <strong>중복 작업 발생.</strong></li><li><strong>Issue 가 work 보다 먼저 존재</strong> — dev-harness-kit 의 다른 워크플로우 (<code>/dev-kit:plan</code>, <code>/dev-kit:proposal</code>, <code>/dev-kit:build</code>) 가 만든 산출물과 Linear issue 가 매번 사후 동기화. 본문 commit log 로 채워짐.</li></ol>
+<p>본 proposal 은 Linear 등록을 <strong>사후 반영</strong> 에서 <strong>사전 강제</strong> 로 뒤집는다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">핵심 아이디어 (한 문장)</h2>
+<p><strong>worktree = 작업의 원자 단위. worktree 가 cut 되기 전에 Linear project 에 scope 가 등록되어 있어야 한다.</strong></p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Hook 시퀀스 (before / after)</h2>
+<p><strong>Before (현재 — 4 hook, 다 best-effort)</strong>:</p>
+<pre><code>UserPromptSubmit ─┐
+WorktreeCreate ───┤
+SessionStart ─────┼──&gt; linear_sync.py ──&gt; Linear (있으면 update, 없으면 create)
+PreToolUse Edit ──┘                            (silent skip if no key)</code></pre>
+<p><strong>After (제안 — 1 hook, hard gate)</strong>:</p>
+<pre><code>                                    ┌─ hit ──&gt; link (no create)
+WorktreeCreate ─&gt; scope 추출 ─&gt; Linear project 검색 ─┤
+                                    └─ miss ─&gt; create (block until 200 OK)
+                                      │
+                                      ▼
+                              .worktrees/&lt;slug&gt;/.dev-kit/linear.json
+                                      │
+                                      ▼
+                            (work proceeds; all hooks READ this file)</code></pre>
+<p>종료는 기존 <code>linear-pr-sync.yml</code> 이 PR merge 시 <code>state: Done</code> 으로 전이. 그 외 별도 hook 없음.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Race condition 방지 (왜 이게 해결책인가)</h2>
+<p>dev-harness-kit 가 N개 저장소에 설치된 환경에서, 두 사용자가 같은 scope 로 동시에 worktree 를 cut 하는 시나리오:</p>
+<table><thead><tr><th>시점</th><th>User A (저장소 X)</th><th>User B (저장소 Y)</th><th>Linear 상태</th></tr></thead><tbody><tr><td>t0</td><td><code>fix/foo</code> worktree cut 시작</td><td>(대기)</td><td>없음</td></tr><tr><td>t1</td><td>scope <code>fix/foo</code> 검색 → miss</td><td>(대기)</td><td>없음</td></tr><tr><td>t2</td><td>issue #123 생성 시도 (block)</td><td><code>fix/foo</code> worktree cut 시작</td><td>race</td></tr><tr><td>t3</td><td>(200 OK 받음)</td><td>scope <code>fix/foo</code> 검색 → <strong>hit (#123)</strong></td><td>#123</td></tr><tr><td>t4</td><td>worktree 생성, <code>.dev-kit/linear.json</code> ← #123</td><td>worktree 생성, <code>.dev-kit/linear.json</code> ← #123 (같은 ID)</td><td>#123</td></tr><tr><td>t5</td><td>작업 진행</td><td>작업 진행 (또는 "이미 #123 처리 중" 안내로 cancel)</td><td>#123</td></tr></tbody></table>
+<p><strong>핵심</strong>: Linear project 가 <strong>단일 source of truth</strong> — <code>tools/linear_sync.py:_find_or_create_project()</code> 가 이미 같은 이름의 project 를 보장하므로, dedup 쿼리 (<code>scope eq</code>) 가 항상 같은 결과를 본다. 마지막 create 만 mutex 가 필요 — <code>project_id + scope</code> 를 unique key 로 두고 409 conflict 시 재조회.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Worktree-local canonical handle</h2>
+<pre><code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json
+{
+  &quot;issue_id&quot;: &quot;SHO-306&quot;,
+  &quot;issue_uuid&quot;: &quot;ecce38c7-8673-4777-b847-6890f5df0a68&quot;,
+  &quot;branch&quot;: &quot;fix/linear-trigger-redesign&quot;,
+  &quot;scope&quot;: &quot;fix/linear-trigger-redesign::trigger gate not sync&quot;,
+  &quot;created_at&quot;: &quot;2026-08-20T10:00:00Z&quot;,
+  &quot;project_id&quot;: &quot;&lt;uuid&gt;&quot;,
+  &quot;team_id&quot;: &quot;&lt;uuid&gt;&quot;
+}</code></pre>
+<ul><li><strong>모든 후속 hook</strong> (commit-msg 검증, PR body 생성, pre-push digest, PR merge state 전이) 은 이 파일만 읽는다</li><li><strong>PreToolUse / UserPromptSubmit 기반 sync 불필요</strong> — 정보 중복 제거</li><li><strong>Worktree 가 삭제되면 handle 도 사라짐</strong> — orphan Linear issue 가 안 생김 (단, push 후 merge 안 한 채 worktree 만 rm 하면 orphan — 별도 GC cron 으로 처리, 본 proposal 범위 외)</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-6">삭제할 hook (현재 → 권장 상태)</h2>
+<table><thead><tr><th>현재</th><th>권장</th><th>이유</th></tr></thead><tbody><tr><td><code>hooks/linear-autosync.sh</code> (PreToolUse)</td><td><strong>제거</strong></td><td>Edit 단위 noise, GitHub 가 activity 보여줌</td></tr><tr><td><code>hooks/linear-prompt-sync.sh</code> (UserPromptSubmit)</td><td><strong>제거</strong></td><td>task-change 감지 불필요, worktree gate 가 대체</td></tr><tr><td><code>hooks/linear-session-start.sh</code> (SessionStart)</td><td><strong>제거</strong></td><td>worktree-local handle 로 대체</td></tr><tr><td><code>hooks/linear-worktree-create.sh</code> (WorktreeCreate)</td><td><strong>재작성</strong></td><td>위 시퀀스대로 (gate + dedup + create)</td></tr><tr><td><code>tools/linear_sync.py: auto-sync</code> 진입점</td><td><strong>제거</strong></td><td>호출자 없음</td></tr><tr><td><code>tools/linear_sync.py: task-change</code> 진입점</td><td><strong>제거</strong></td><td>호출자 없음</td></tr><tr><td><code>tools/linear_pr_sync.py</code> (PR merge state)</td><td><strong>유지</strong></td><td><code>state: Done</code> 전이, 기존 워크플로우 그대로</td></tr><tr><td><code>.github/workflows/linear-pr-sync.yml</code></td><td><strong>유지</strong></td><td>변경 없음</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-7">옵션 비교</h2>
+<table><thead><tr><th>옵션</th><th>장점</th><th>단점</th><th>채택</th></tr></thead><tbody><tr><td>A. 현행 유지 (4 hook sync)</td><td>변경 없음</td><td>race 가능, 노이즈, dedup 없음</td><td>❌</td></tr><tr><td>B. Pre-push hook only</td><td>shipping 시점 단일 sync</td><td>진행 중 가시성 0, mid-work push 누락</td><td>❌</td></tr><tr><td>C. Post-commit hook</td><td>의도 단위 (commit)</td><td>auto-fix loop 충돌, WIP 노이즈, squash 손실</td><td>❌</td></tr><tr><td>D. Plan-gated (plan 승인 시)</td><td>명시적, intent 캡처</td><td>worktree 가 plan 보다 먼저 생기는 경우 누락</td><td>△ 보완</td></tr><tr><td><strong>E. WorktreeCreate gate + dedup</strong></td><td><strong>race-free, work 가 issue 보다 늦게 생성, worktree=unit</strong></td><td><strong>scope 추출 정확도 의존, plan-less 작업은 branch name 으로 대체</strong></td><td>✅</td></tr></tbody></table>
+<p>권장안은 <strong>E (메인) + D (보완)</strong>. WorktreeCreate 시 plan-id 가 <code>.dev-kit/plan-id</code> 로 박혀있으면 (이미 <code>/dev-kit:plan</code> 가 저장) 그 plan 의 PRD 요약을 issue body 로 사용. 없으면 branch + worktree context 에서 scope 추출.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">비목표 (Out of scope)</h2>
+<ul><li>Linear API 자체 변경 / webhook 인프라 도입 (현재 GraphQL 호출 그대로)</li><li>worktree GC / orphan issue 청소 (별도 cron 작업으로 후속)</li><li>non-git 환경 (본 proposal 은 git worktree 기반 워크플로우 전제)</li><li>기존 <code>.dev-kit/hand-off/linear/main.json</code> 의 마이그레이션 (1회성 migration script 는 rollout 단계에서 별도 PR)</li><li>multi-team / multi-project 환경 (단일 Linear project 가정)</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-9">트레이드오프 (정직하게)</h2>
+<ol><li><strong>false positive — investigation worktree 도 issue 생성됨</strong> <code>investigate/why-foo-fails</code> 같은 브랜치도 Linear issue 가 생긴다. → 해결: branch pattern <code>^(investigate|research|spike)/</code> 은 <code>tracking-only</code> 모드로 강등 (issue body = "investigation, no implementation"). user 가 명시적으로 close 가능.</li></ol>
+<ol><li><strong>scope 추출 실패 시 fallback</strong> — branch name 만으로 issue 제목을 만들면 noise (<code>fix/typo</code> → "Fix: typo"). branch 가 너무 generic 하면 user 에게 prompt 로 제목 받기. → 해결: <code>_extract_scope()</code> 가 branch verb (<code>fix/feat/refactor/chore</code>) + noun (slugified) 만으로 못 만들겠다 판단하면 (length &lt; 3, 동사만 있음 등) hook 이 user prompt 로 제목 요구.</li></ol>
+<ol><li><strong>기존 사용자 워크플로우 breaking</strong> — PreToolUse autosync 에 의존하던 유저 (있다면) 는 즉시 중단. 마이그레이션 가이드 필요. → 해결: 1-release deprecation 경고 후 제거. release notes 에 명시.</li></ol>
+<ol><li><strong>network failure 시 worktree cut 자체가 block</strong> — Linear API down 이면 작업 시작 못함. 15s timeout 으로 빠지지만 그래도 fail-closed. → 해결: <code>LINEAR_REQUIRED=0</code> env 또는 per-repo config 로 bypass 가능 (warning 만 출력). default 는 fail-closed.</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-10">성공 지표</h2>
+<ul><li><strong>중복 작업 0건</strong> — 동일 scope 의 동시 worktree cut 시 1개만 생성되고 나머지는 link</li><li><strong>100% worktree 가 Linear issue 를 가짐</strong> — <code>.worktrees/&lt;slug&gt;/.dev-kit/linear.json</code> 존재율</li><li><strong>Edit-time hook 발화 0회</strong> — PreToolUse linear 관련 hook 제거 후 <code>tools/token_efficiency_analyzer.py</code> 의 hook cost 가 감소</li><li><strong>PR merge 시 state 자동 전이 100%</strong> — 기존 <code>linear-pr-sync.yml</code> 그대로</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-11">다음 단계</h2>
+<ol><li><code>hooks/linear-worktree-create.sh</code> 재작성 (gate + dedup + auto-create)</li><li><code>tools/linear_sync.py</code> 에 <code>_extract_scope()</code> + <code>_dedup_or_create()</code> 추가, <code>auto-sync</code> / <code>task-change</code> 진입점 제거</li><li><code>.dev-kit/hand-off/linear/main.json</code> → worktree-local 파일로 마이그레이션 (1회성 script)</li><li>기존 3 hook (<code>autosync</code>, <code>prompt-sync</code>, <code>session-start</code>) 제거</li><li>release notes 에 breaking change 명시 + deprecation 경고 1 release</li></ol>
+<p>본 proposal 승인 후 <code>/dev-kit:linear</code> 으로 tracking issue 등록 → <code>/dev-kit:plan</code> 으로 단계별 실행.</p>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-20 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
