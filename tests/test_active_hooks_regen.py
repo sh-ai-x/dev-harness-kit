@@ -188,5 +188,47 @@ class TestActiveHooksRegeneration(unittest.TestCase):
             )
 
 
+    def test_regen_refuses_missing_fail_closed_field(self):
+        """Regen MUST hard-exit 1 when a hooks/hooks.json entry lacks fail_closed.
+
+        The `fail_closed: true|false` field is the explicit SSOT for
+        hook fail-mode (issue #676 LLM judge OE-2: replace the prior
+        regex-based header detection). A missing value would re-introduce
+        the silent drift the field replaced — `is_hook_active` and the
+        regen snapshot cannot derive a default without guessing the
+        author's intent. The tool MUST refuse to write a partial
+        snapshot; this test pins that contract.
+        """
+        # Build a copy of hooks/hooks.json with one entry stripped of fail_closed.
+        hooks_path = self.root / "hooks" / "hooks.json"
+        data = json.loads(hooks_path.read_text(encoding="utf-8"))
+        # Strip fail_closed from the first PreToolUse entry's first hook.
+        first_entry = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        first_entry.pop("fail_closed", None)
+        assert "fail_closed" not in first_entry, "precondition: field stripped"
+        hooks_path.write_text(json.dumps(data, indent=2))
+
+        result = _run_regen(self.root)
+        # Exit code must be non-zero — silent accept would re-introduce
+        # the prior regression where the snapshot was written with a
+        # default that the author never chose.
+        self.assertNotEqual(
+            result.returncode, 0,
+            msg=f"regen must exit non-zero when fail_closed is missing; "
+                f"got rc=0 stderr={result.stderr!r}",
+        )
+        # File MUST NOT be written.
+        target = self.root / ".dev-kit" / ".active-hooks.json"
+        self.assertFalse(
+            target.exists(),
+            "regen must NOT write .active-hooks.json when fail_closed "
+            "validation fails (would leave a partial snapshot on disk)",
+        )
+        # Stderr must name the missing field so the operator can fix it.
+        self.assertIn(
+            "fail_closed", result.stderr,
+            f"stderr should name the missing field; got: {result.stderr!r}",
+        )
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
