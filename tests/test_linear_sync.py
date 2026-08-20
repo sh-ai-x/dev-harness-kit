@@ -1442,6 +1442,51 @@ class TestAutoArchiveDuplicates(unittest.TestCase):
                 self.assertEqual(linear_sync.sync(), 0)
 
 
+class TestFreeTierCleanup(unittest.TestCase):
+    def test_cleanup_is_opt_in_and_retries_once_after_limit_error(self):
+        with _fake_repo(linear_config={"enabled": True, "free_tier_cleanup": True}) as repo:
+            calls = []
+
+            def create(*args, **kwargs):
+                calls.append("create")
+                if len(calls) == 1:
+                    raise linear_sync.LinearFreeTierLimitError(
+                        "You've exceeded the free issue limit for this workspace"
+                    )
+                return "DEMO-1 (issue-1)", "Todo"
+
+            with mock.patch.object(linear_sync, "_create_issue", side_effect=create), \
+                 mock.patch.object(linear_sync, "_cleanup_free_tier_issues", return_value=10) as cleanup:
+                result = linear_sync._create_issue_with_free_tier_retry(
+                    repo, "project-1", "team-1", "title", "body", "scope",
+                )
+            self.assertEqual(result, ("DEMO-1 (issue-1)", "Todo"))
+            self.assertEqual(calls, ["create", "create"])
+            cleanup.assert_called_once_with("project-1", limit=10)
+
+    def test_cleanup_disabled_does_not_archive_or_retry(self):
+        with _fake_repo(linear_config={"enabled": True}) as repo:
+            error = linear_sync.LinearFreeTierLimitError("free issue limit")
+            with mock.patch.object(linear_sync, "_create_issue", side_effect=error), \
+                 mock.patch.object(linear_sync, "_cleanup_free_tier_issues") as cleanup:
+                with self.assertRaises(linear_sync.LinearFreeTierLimitError):
+                    linear_sync._create_issue_with_free_tier_retry(
+                        repo, "project-1", "team-1", "title", "body", "scope",
+                    )
+            cleanup.assert_not_called()
+
+    def test_cli_toggle_preserves_existing_config(self):
+        with _fake_repo(linear_config={"enabled": True, "project_name": "demo", "notes": "keep"}) as repo:
+            self.assertEqual(linear_sync.main(["free-tier-cleanup", "on"]), 0)
+            config = json.loads((repo / ".dev-kit" / "linear-config.json").read_text())
+            self.assertTrue(config["free_tier_cleanup"])
+            self.assertEqual(config["project_name"], "demo")
+            self.assertEqual(config["notes"], "keep")
+            self.assertEqual(linear_sync.main(["free-tier-cleanup", "off"]), 0)
+            config = json.loads((repo / ".dev-kit" / "linear-config.json").read_text())
+            self.assertFalse(config["free_tier_cleanup"])
+
+
 class TestEnabledGate(unittest.TestCase):
     """Step 1: hardened `_enabled()` with LINEAR_DEBUG logging."""
 
