@@ -5,7 +5,7 @@ description: Optional Linear task tracker. Reconcile the current repository task
 alpha: state
 when_to_use: |
   - User types /dev-kit:linear
-  - User types /dev-kit:linear on | off | status | setup | project-name <name>
+  - User types /dev-kit:linear on | off | free-tier-cleanup | status | setup | project-name <name>
   - A workflow skill starts a new implementation, debugging, refactor, or plan task
   - The user asks to register, reconcile, or update work in Linear
   - Every Edit|Write|MultiEdit fires the auto-sync hook (when configured)
@@ -100,6 +100,7 @@ Set `LINEAR_DEBUG=1` to surface every activation decision, state transition, and
 | `/dev-kit:linear off` | Disable auto-sync in this worktree. Writes `enabled: false`. Project name and team id are preserved. |
 | `/dev-kit:linear setup` | Print the one-time setup checklist + the current state (whether `LINEAR_API_KEY` is set, what the resolved project name is, whether the worktree config exists). |
 | `/dev-kit:linear project-name <name>` | Override the auto-detected project name for this worktree. Without an argument, prints the resolved name. |
+| `/dev-kit:linear free-tier-cleanup on\|off\|status` | Opt in/out of free-tier recovery. When enabled, a confirmed free issue-limit creation error archives up to the 10 oldest non-terminal issues in the active project, then retries once. Disabled by default. |
 | `/dev-kit:linear list` | Print recent Linear issues (default 25, newest first). Flags: `--state=<name>`, `--team=<key>`, `--project=<name>`, `--all-projects`, `--assignee=me|none|<id>`, `--limit=<N>`. By default the list is scoped to the active repo project (per-worktree override or repo basename); pass `--all-projects` to see every project the team can see. Non-blocking; never raises. |
 | `/dev-kit:linear status` | Print a JSON snapshot of the resolved state (worktree path, slug, config, env-var presence, resolved project + team). |
 
@@ -189,6 +190,7 @@ The MCP server uses the same `LINEAR_*` scope (issues / projects / comments) as 
   "enabled": true,
   "project_name": "My Linear Project",
   "team_id": "",
+  "free_tier_cleanup": false,
   "set_at": "2026-08-03T00:54:03Z"
 }
 ```

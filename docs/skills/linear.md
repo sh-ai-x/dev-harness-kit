@@ -9,7 +9,7 @@
 ## When to use it
 
 - The user types `/dev-kit:linear` (no args) to run one auto-sync round.
-- The user types `/dev-kit:linear on | off | status | setup | project-name <name>` to manage the per-worktree config.
+- The user types `/dev-kit:linear on | off | free-tier-cleanup on|off|status | status | setup | project-name <name>` to manage the per-worktree config.
 - A workflow skill starts a new implementation, debugging, refactor, or plan task and wants the work tracked in Linear.
 - Every `Edit | Write | MultiEdit` should fire the auto-sync hook (only when the worktree config is enabled).
 
@@ -22,13 +22,14 @@
 | `/dev-kit:linear off` | Disable auto-sync in this worktree. Project name and team id are preserved. |
 | `/dev-kit:linear setup` | Print the one-time setup checklist + the current state (whether `LINEAR_API_KEY` is set, the resolved project name, whether the worktree config exists). |
 | `/dev-kit:linear project-name <name>` | Override the auto-detected project name for this worktree. Without an argument, prints the resolved name. |
+| `/dev-kit:linear free-tier-cleanup on\|off\|status` | Optional recovery mode. On a confirmed free issue-limit error, archive up to 10 oldest non-terminal issues in the active project and retry once. Off by default. |
 | `/dev-kit:linear status` | Print a JSON snapshot of the resolved state (worktree path, slug, config, env-var presence, resolved project + team). |
 
 Each subcommand delegates to `tools/linear_sync.py`, which is the authoritative implementation. The skill exists so the user does not have to remember the script path; the script exists so the hook, the skill, and any future caller share one code path.
 
 ## Auto-sync trigger
 
-When Linear is configured (`LINEAR_API_KEY` env var OR per-worktree `.dev-kit/linear-config.json:enabled` OR legacy `.dev-kit/.enabled.json:mcp.linear` ∈ {`auto`, `on`}), `hooks/linear-autosync.sh` runs `tools/linear_sync.py` before every `Edit` / `Write` / `MultiEdit`. The script:
+When Linear is configured (`LINEAR_API_KEY` env var OR per-worktree `.dev-kit/linear-config.json:enabled` OR legacy `.dev-kit/.enabled.json:mcp.linear` ∈ {`auto`, `on`}), `hooks/linear-autosync.sh` runs `tools/linear_sync.py` before every `Edit` / `Write` / `MultiEdit`. The optional `free_tier_cleanup` config flag is disabled by default and only applies to the exact free issue-limit error; it never turns general API failures into archive operations. The script:
 
 1. Resolves the task description in priority order: the active hand-off's `prompt` field → the latest commit subject on the current branch → the branch name. The hand-off is keyed by worktree slug, so two parallel sessions in two worktrees never share or overwrite each other's state.
 2. Skips read-only / non-task prompts (`/`, `#`, `!`, `ls `, `cat `, `grep `, `git status`, and prompts that lack a work verb).

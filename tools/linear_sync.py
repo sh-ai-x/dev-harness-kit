@@ -74,6 +74,31 @@ class LinearTransportError(RuntimeError):
     (non-blocking per #539); CLI surface flow re-raises to stderr."""
 
 
+class LinearFreeTierLimitError(RuntimeError):
+    """Raised when Linear rejects issue creation due to the free-tier cap."""
+
+
+def _is_free_tier_limit_message(message: str) -> bool:
+    """Return True only for the known free-tier issue-cap failure.
+
+    Linear emits one of a handful of canonical phrasings when the free
+    plan's issue-count cap is hit. We accept those exact substrings —
+    NOT a loose 3-token AND-match, which would false-positive on any
+    future Linear policy / limit-change notice that happens to mention
+    "free", "tier", "issue", and "limit" in passing and would archive
+    up to 10 active issues on an opt-in workspace.
+    """
+    normalized = message.lower()
+    canonical = (
+        "free issue limit",
+        "free tier issue limit",
+        "issue limit for the free tier",
+        "issue limit on the free plan",
+        "issue limit reached for the free",
+    )
+    return any(phrase in normalized for phrase in canonical)
+
+
 # Linear API endpoint (https://developers.linear.app/docs/graphql/working-with-the-graphql-api).
 _LINEAR_API_URL = "https://api.linear.app/graphql"
 # 15s absorbs cold DNS/TLS (measured 5.82s on first call vs 3.67s warm on macOS).
@@ -275,6 +300,23 @@ def _write_worktree_config(repo: Path, payload: dict[str, Any]) -> Path:
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
     return path
+
+
+def _free_tier_cleanup_enabled(repo: Path) -> bool:
+    """Return whether opt-in free-tier cleanup is enabled for this worktree."""
+    config = _read_worktree_config(repo) or {}
+    return config.get("free_tier_cleanup") is True
+
+
+def _write_linear_config(repo: Path, **updates: Any) -> Path:
+    """Update Linear config while preserving unrelated operator settings."""
+    config = _read_worktree_config(repo) or {}
+    config.update(updates)
+    config.setdefault("enabled", True)
+    config.setdefault("project_name", "")
+    config.setdefault("team_id", "")
+    config["set_at"] = _utc_now_iso()
+    return _write_worktree_config(repo, config)
 
 
 # Per-repo cache for `is_repo_owner`. Keyed on `str(repo.resolve())`
@@ -680,6 +722,8 @@ def _linear_query(query: str, variables: dict[str, Any]) -> dict[str, Any]:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "ignore") if exc.fp else ""
+        if _is_free_tier_limit_message(body):
+            raise LinearFreeTierLimitError(body[:300]) from exc
         raise RuntimeError(f"linear http {exc.code}: {body[:300] or exc.reason}") from exc
     except urllib.error.URLError as exc:
         # URLError wraps both DNS failures and SSL errors. SSL errors
@@ -703,7 +747,10 @@ def _linear_query(query: str, variables: dict[str, Any]) -> dict[str, Any]:
         raise LinearTransportError(f"linear: {exc}") from exc
     if "errors" in payload and payload["errors"]:
         first = payload["errors"][0]
-        raise RuntimeError(f"linear graphql: {first.get('message', 'unknown')}")
+        message = str(first.get("message", "unknown"))
+        if _is_free_tier_limit_message(message):
+            raise LinearFreeTierLimitError(message)
+        raise RuntimeError(f"linear graphql: {message}")
     return payload.get("data") or {}
 
 
@@ -1083,6 +1130,57 @@ def _archive_issue(issue_ref: str) -> bool:
     return success
 
 
+def _oldest_cleanup_candidates(project_id: str, limit: int = 10) -> list[dict]:
+    """Return oldest non-terminal issues eligible for free-tier cleanup.
+
+    ``orderBy: createdAt`` sorts ascending on the server side so the
+    "oldest N" guarantee holds even when the project has more than 100
+    non-terminal issues. Without it, Linear returns the default
+    ``updatedAt``-desc page and the "10 oldest" silently degrades to
+    "10 oldest of an arbitrary 100-row page".
+    """
+    query = (
+        "query($projectId: ID!) {"
+        "  issues(filter: { project: { id: { eq: $projectId } } },"
+        "         first: 100, orderBy: createdAt) {"
+        "    nodes { id identifier createdAt state { name } }"
+        "  }"
+        "}"
+    )
+    data = _linear_query(query, {"projectId": project_id})
+    terminal = {"Done", "Canceled"}
+    candidates = [
+        node for node in ((data.get("issues") or {}).get("nodes") or [])
+        if str((node.get("state") or {}).get("name") or "") not in terminal
+    ]
+    candidates.sort(key=lambda node: str(node.get("createdAt") or ""))
+    return candidates[:max(0, limit)]
+
+
+def _cleanup_free_tier_issues(project_id: str, limit: int = 10) -> tuple[int, str | None]:
+    """Archive up to ``limit`` oldest eligible issues.
+
+    Returns ``(archived, error_message)``. ``error_message`` is None
+    on the happy path and a short diagnostic string when an exception
+    was swallowed so the retry wrapper can surface a user-visible
+    warning. The exception itself stays swallowed — cleanup must never
+    block the retry path that already raised ``LinearFreeTierLimitError``
+    — but the signal is now distinct from "nothing to clean up".
+    """
+    archived = 0
+    error: str | None = None
+    try:
+        candidates = _oldest_cleanup_candidates(project_id, limit)
+        for issue in candidates:
+            if _archive_issue(str(issue["id"])):
+                archived += 1
+    except Exception as exc:  # noqa: BLE001 - cleanup must not block retry path
+        error = f"{type(exc).__name__}: {exc}"
+        if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
+            print(f"[linear-sync] free-tier cleanup failed: {error}", file=sys.stderr)
+    return archived, error
+
+
 def _find_issue(project_id: str, scope_key: str) -> str | None:
     """Return the issue id (newest match) whose description starts
     with `scope_key`, or None when no open issue matches.
@@ -1139,6 +1237,28 @@ def _create_issue(project_id: str, team_id: str, title: str, body: str, scope_ke
     issue_ref = f"{issue['identifier']} ({issue['id']})"
     state_name = ((issue.get("state") or {}).get("name") if isinstance(issue.get("state"), dict) else None)
     return issue_ref, state_name
+
+
+def _create_issue_with_free_tier_retry(
+    repo: Path, project_id: str, team_id: str, title: str, body: str,
+    scope_key: str, state_id: str | None = None,
+) -> tuple[str, str | None]:
+    """Create once, optionally archive ten old issues, then retry once."""
+    try:
+        return _create_issue(project_id, team_id, title, body, scope_key, state_id)
+    except LinearFreeTierLimitError:
+        if not _free_tier_cleanup_enabled(repo):
+            raise
+        archived, cleanup_error = _cleanup_free_tier_issues(project_id, limit=10)
+        if cleanup_error is not None:
+            print(
+                f"[linear-sync] WARNING: free-tier cleanup raised {cleanup_error}; "
+                f"archived {archived} before failing. Retrying anyway.",
+                file=sys.stderr,
+            )
+        elif os.environ.get("LINEAR_DEBUG", "").strip() == "1":
+            print(f"[linear-sync] free-tier cleanup archived {archived} issue(s)", file=sys.stderr)
+        return _create_issue(project_id, team_id, title, body, scope_key, state_id)
 
 
 def _update_issue(issue_ref: str, body: str, project_id: str | None = None,
@@ -1602,8 +1722,8 @@ def sync() -> int:
             title = f"[{branch}] {summary}"[:250]
             resolved_team = team_id or _resolve_team_id()
             target_state_id = _state_id("Todo") or _state_id("Backlog")
-            issue_ref, returned_state = _create_issue(
-                project_id, resolved_team, title, body, scope,
+            issue_ref, returned_state = _create_issue_with_free_tier_retry(
+                repo, project_id, resolved_team, title, body, scope,
                 state_id=target_state_id,
             )
             action = "created"
@@ -1681,23 +1801,11 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "list":
         return _cmd_list(rest)
     if cmd == "on":
-        existing = _read_worktree_config(repo) or {}
-        path = _write_worktree_config(repo, {
-            "enabled": True,
-            "project_name": existing.get("project_name", ""),
-            "team_id": existing.get("team_id", ""),
-            "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        path = _write_linear_config(repo, enabled=True)
         print(f"linear: on (worktree={_worktree_slug(repo)} config={path})")
         return 0
     if cmd == "off":
-        existing = _read_worktree_config(repo) or {}
-        path = _write_worktree_config(repo, {
-            "enabled": False,
-            "project_name": existing.get("project_name", ""),
-            "team_id": existing.get("team_id", ""),
-            "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        path = _write_linear_config(repo, enabled=False)
         print(f"linear: off (worktree={_worktree_slug(repo)} config={path})")
         return 0
     if cmd == "project-name":
@@ -1705,15 +1813,21 @@ def main(argv: list[str] | None = None) -> int:
             current = _project_name_override(repo) or _repo_name(repo)
             print(f"linear: project-name={current} (set with: linear project-name <name>)")
             return 0
-        existing = _read_worktree_config(repo) or {}
         name = " ".join(rest).strip()
-        path = _write_worktree_config(repo, {
-            "enabled": existing.get("enabled", True),
-            "project_name": name,
-            "team_id": existing.get("team_id", ""),
-            "set_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        path = _write_linear_config(repo, project_name=name)
         print(f"linear: project-name={name} (config={path})")
+        return 0
+    if cmd == "free-tier-cleanup":
+        value = rest[0].strip().lower() if rest else "status"
+        if value not in {"on", "off", "status"}:
+            print("linear: free-tier-cleanup expects on|off|status")
+            return 2
+        enabled = _free_tier_cleanup_enabled(repo)
+        if value == "status":
+            print(f"linear: free-tier-cleanup={'on' if enabled else 'off'}")
+            return 0
+        path = _write_linear_config(repo, free_tier_cleanup=value == "on")
+        print(f"linear: free-tier-cleanup={'on' if value == 'on' else 'off'} (config={path})")
         return 0
     if cmd == "setup":
         # Print the recommended setup steps. The script never reads or
@@ -1724,6 +1838,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"    2. cd {repo}")
         print("    3. python3 tools/linear_sync.py on")
         print("    4. python3 tools/linear_sync.py project-name <name>   # optional")
+        print("    5. python3 tools/linear_sync.py free-tier-cleanup on   # optional, archives 10 oldest issues only on free-tier limit errors")
         print()
         print("  Option B — user-scope env file (recommended for solo dev, shared across repos):")
         print("    1. mkdir -p ~/.config/dev-kit")
@@ -1732,11 +1847,13 @@ def main(argv: list[str] | None = None) -> int:
         print("         Optional: LINEAR_TEAM_ID=..., LINEAR_PROJECT_NAME=...")
         print("    3. python3 tools/linear_sync.py on")
         print("    4. python3 tools/linear_sync.py project-name <name>   # optional")
+        print("    5. python3 tools/linear_sync.py free-tier-cleanup on   # optional")
         print()
         print("  Option C — per-worktree env file (backward compat, Linear-only):")
         print(f"    1. Add to {repo / _ENV_FILE_REL} (untracked, .gitignore'd):")
         print("         LINEAR_API_KEY=<your-token>")
         print("    2. python3 tools/linear_sync.py on")
+        print("    3. python3 tools/linear_sync.py free-tier-cleanup on   # optional")
         env_key = bool(os.environ.get("LINEAR_API_KEY", "").strip())
         env_file = (repo / _ENV_FILE_REL).is_file()
         user_env = _user_env_path()
@@ -1747,8 +1864,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  .dev-kit/.env.linear present:             {env_file}")
         cfg = _read_worktree_config(repo)
         print(f"  worktree config: {cfg or '(none — defaults to env-only)'}")
+        print("  free-tier cleanup: disabled by default; enable with `free-tier-cleanup on`")
         return 0
-    print(f"linear: unknown command {cmd!r} (try: setup|on|off|project-name|status|list|sync)")
+    print(f"linear: unknown command {cmd!r} (try: setup|on|off|free-tier-cleanup|project-name|status|list|sync)")
     return 2
 
 
