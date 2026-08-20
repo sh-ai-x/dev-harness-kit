@@ -141,6 +141,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/slop-detector.sh",
             "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/l4-todo-scan.sh",
+            "fail_closed": true
           }
         ]
       },

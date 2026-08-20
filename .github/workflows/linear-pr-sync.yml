@@ -46,12 +46,21 @@ jobs:
           sparse-checkout: tools/linear_pr_sync.py
 
       - name: sync linear state
+        env:
+          # Move attacker-influenced fields out of the `run:` block. GitHub
+          # Actions substitutes `${{ … }}` textually into the shell source
+          # before bash ever sees it, so a PR title containing `'` could
+          # previously break out of the single-quoted assignment and run
+          # arbitrary code in a step whose env holds `LINEAR_API_KEY`
+          # (env block at lines 39-41 above). env: values are passed via
+          # the step's environment, not spliced into shell source.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BRANCH_FROM_HEAD: ${{ github.event.pull_request.head.ref }}
         run: |
           EVENT='${{ github.event.action }}'
           MERGED='${{ github.event.pull_request.merged }}'
-          BRANCH='${{ github.event.pull_request.head.ref }}'
+          BRANCH="$BRANCH_FROM_HEAD"
           PR_NUMBER='${{ github.event.number }}'
-          PR_TITLE='${{ github.event.pull_request.title }}'
           PR_DRAFT='${{ github.event.pull_request.draft }}'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -83,7 +92,17 @@ jobs:
         # Skip the step entirely when LINEAR_API_KEY is not configured
         # for this repository. Repos without the secret stay green
         # instead of failing every PR; configured-but-misconfigured
-        # cases still fail loudly because the smoke script returns
-        # 1 when the project or any required state is missing.
+        # cases still surface loudly in the step log because the smoke
+        # script prints "project not found" / "state not configured"
+        # before exiting 1, but the step itself does NOT block the
+        # job (continue-on-error). Rationale: a Linear-side rate limit
+        # (HTTP 429 "2500 requests / 1 hour") makes the smoke call fail
+        # with the same "project not found" exit-1 — that's a transient
+        # outage, not a misconfiguration, and must not block every PR
+        # until the hourly window elapses. The earlier hard-fail here
+        # meant the rate-limit window on a busy Linear team shut the
+        # gate red across every PR for up to an hour, which is the
+        # exact non-blocking contract the workflow's header documents.
         if: ${{ env.LINEAR_API_KEY != '' }}
+        continue-on-error: true
         run: python3 tools/linear_pr_sync.py smoke
