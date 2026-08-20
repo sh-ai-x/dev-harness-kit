@@ -1442,6 +1442,139 @@ class TestAutoArchiveDuplicates(unittest.TestCase):
                 self.assertEqual(linear_sync.sync(), 0)
 
 
+class TestFreeTierCleanup(unittest.TestCase):
+    def test_cleanup_is_opt_in_and_retries_once_after_limit_error(self):
+        with _fake_repo(linear_config={"enabled": True, "free_tier_cleanup": True}) as repo:
+            calls = []
+
+            def create(*args, **kwargs):
+                calls.append("create")
+                if len(calls) == 1:
+                    raise linear_sync.LinearFreeTierLimitError(
+                        "You've exceeded the free issue limit for this workspace"
+                    )
+                return "DEMO-1 (issue-1)", "Todo"
+
+            with mock.patch.object(linear_sync, "_create_issue", side_effect=create), \
+                 mock.patch.object(linear_sync, "_cleanup_free_tier_issues", return_value=(10, None)) as cleanup:
+                result = linear_sync._create_issue_with_free_tier_retry(
+                    repo, "project-1", "team-1", "title", "body", "scope",
+                )
+            self.assertEqual(result, ("DEMO-1 (issue-1)", "Todo"))
+            self.assertEqual(calls, ["create", "create"])
+            cleanup.assert_called_once_with("project-1", limit=10)
+
+    def test_cleanup_disabled_does_not_archive_or_retry(self):
+        with _fake_repo(linear_config={"enabled": True}) as repo:
+            error = linear_sync.LinearFreeTierLimitError("free issue limit")
+            with mock.patch.object(linear_sync, "_create_issue", side_effect=error), \
+                 mock.patch.object(linear_sync, "_cleanup_free_tier_issues") as cleanup:
+                with self.assertRaises(linear_sync.LinearFreeTierLimitError):
+                    linear_sync._create_issue_with_free_tier_retry(
+                        repo, "project-1", "team-1", "title", "body", "scope",
+                    )
+            cleanup.assert_not_called()
+
+    def test_cli_toggle_preserves_existing_config(self):
+        with _fake_repo(linear_config={"enabled": True, "project_name": "demo", "notes": "keep"}) as repo:
+            self.assertEqual(linear_sync.main(["free-tier-cleanup", "on"]), 0)
+            config = json.loads((repo / ".dev-kit" / "linear-config.json").read_text())
+            self.assertTrue(config["free_tier_cleanup"])
+            self.assertEqual(config["project_name"], "demo")
+            self.assertEqual(config["notes"], "keep")
+            self.assertEqual(linear_sync.main(["free-tier-cleanup", "off"]), 0)
+            config = json.loads((repo / ".dev-kit" / "linear-config.json").read_text())
+            self.assertFalse(config["free_tier_cleanup"])
+
+    def test_matcher_does_not_false_positive_on_policy_message(self):
+        """Linear's policy / limit-change copy is full of the words
+        "free", "tier", "issue", and "limit" without actually being
+        the issue-cap cliff. The matcher must reject those messages
+        so a future changelog notice doesn't trigger archive on an
+        opt-in workspace."""
+        for body in (
+            "We are changing the free tier pricing — your limit will increase next month",
+            "Policy update: the free tier now supports 5 teams per issue",
+            "We've removed the issue cap on the free tier for new workspaces",
+            "issue limit reached for free tier custom views",  # 'custom views' is a different limit
+        ):
+            with self.subTest(body=body):
+                self.assertFalse(linear_sync._is_free_tier_limit_message(body))
+
+    def test_matcher_accepts_canonical_free_tier_phrasings(self):
+        """The four canonical Linear phrasings must still match."""
+        for body in (
+            "You've exceeded the free issue limit for this workspace",
+            "You have reached the free tier issue limit",
+            "This issue limit for the free tier is hit",
+            "You've hit the issue limit on the free plan",
+        ):
+            with self.subTest(body=body):
+                self.assertTrue(linear_sync._is_free_tier_limit_message(body))
+
+    def test_end_to_end_retry_runs_real_query_and_archive_through_urlopen(self):
+        """Drive the free-tier retry path through the real _linear_query
+        harness (no module-level mocks) and assert:
+
+          1. The first issueCreate returns a GraphQL ``errors[]`` carrying
+             the canonical free-tier message → ``LinearFreeTierLimitError``.
+          2. The cleanup candidate query is sent with
+             ``orderBy: createdAt`` (no client-side sort fallback) and
+             the returned candidates are taken oldest-first.
+          3. Each candidate is archived via ``issueArchive``.
+          4. The retry ``issueCreate`` succeeds.
+
+        This pins the four review-time findings in one path:
+          - CC-5: the matcher doesn't false-positive on arbitrary text
+          - VM-2: server-side ``orderBy: createdAt`` actually surfaces
+          - OE-4: cleanup runs without swallowing an exception here
+          - CC-7: the matcher / candidate query / archive path are
+            exercised end-to-end through ``_mocked_urlopen``.
+        """
+        archived_ids: list[str] = []
+
+        def handler(payload: dict) -> dict:
+            q = payload.get("query", "")
+            if "issueCreate" in q:
+                # First call returns the free-tier limit; subsequent calls succeed.
+                handler.create_calls += 1
+                if handler.create_calls == 1:
+                    return {"errors": [{"message": "You've exceeded the free issue limit for this workspace"}]}
+                return {"data": {"issueCreate": {"issue": {
+                    "id": "new-id", "identifier": "DEMO-2",
+                    "state": {"name": "Todo"},
+                }}}}
+            if "issues(filter:" in q:
+                self.assertIn("orderBy: createdAt", q,
+                              "cleanup candidate query must pin server-side sort")
+                return {"data": {"issues": {"nodes": [
+                    {"id": "old-1", "identifier": "DEMO-A",
+                     "createdAt": "2026-01-01T00:00:00Z", "state": {"name": "Todo"}},
+                    {"id": "old-2", "identifier": "DEMO-B",
+                     "createdAt": "2026-02-01T00:00:00Z", "state": {"name": "In Progress"}},
+                    {"id": "done-1", "identifier": "DEMO-C",
+                     "createdAt": "2026-03-01T00:00:00Z", "state": {"name": "Done"}},
+                ]}}}
+            if "issueArchive" in q:
+                archived_ids.append(payload["variables"]["id"])
+                return {"data": {"issueArchive": {"success": True, "entity": {
+                    "id": payload["variables"]["id"], "identifier": "X", "archivedAt": "now",
+                }}}}
+            return {"data": {}}
+
+        handler.create_calls = 0  # type: ignore[attr-defined]
+
+        with _fake_repo(linear_config={"enabled": True, "free_tier_cleanup": True}) as repo, \
+             mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+            result = linear_sync._create_issue_with_free_tier_retry(
+                repo, "project-1", "team-1", "title", "body", "scope",
+            )
+
+        self.assertEqual(result, ("DEMO-2 (new-id)", "Todo"))
+        # Two non-terminal candidates surfaced; Done was filtered out server-side.
+        self.assertEqual(archived_ids, ["old-1", "old-2"])
+
+
 class TestEnabledGate(unittest.TestCase):
     """Step 1: hardened `_enabled()` with LINEAR_DEBUG logging."""
 

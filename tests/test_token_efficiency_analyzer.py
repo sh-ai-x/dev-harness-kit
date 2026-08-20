@@ -3141,6 +3141,12 @@ class TestSnapshotBuilder(unittest.TestCase):
         derivations happen exactly once."""
         from token_efficiency_analyzer import build_analysis_snapshot
 
+        # Timestamps built relative to now so the fixtures stay inside the
+        # 30-day window regardless of when the suite runs (calendar-rot fix,
+        # same pattern as #601 / #658).
+        ts_main = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        ts_feat = (datetime.now(timezone.utc) - timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
         # Stage two minimal sessions, one on main and one on feat-x.
         # Timestamps are dynamic (5 days ago) so the test never rots at
         # the 30-day window boundary; calendar-rot regression #658.

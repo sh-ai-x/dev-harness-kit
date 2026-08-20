@@ -29,9 +29,18 @@ This is the single user-facing repair entrypoint. GitHub's `auto-fix-pr` workflo
 is only an event adapter; it must use the same repair state and must never create
 a competing repair loop.
 
-By default, monitors the PR associated with the current working branch. Pass
-`--pr N` to target an explicit open PR; this is required when the current
-branch's PR is already closed or merged.
+`CONVERSATION_PR` is set only when the user states a literal PR number or the
+immediately preceding assistant tool result returned a PR number from PR
+creation/listing. Phrases such as "babysit the latest PR" or "babysit the one I
+just made" without a number do not establish a handoff; the operator must use
+`--pr N` or restate the number.
+
+By default, monitors the PR associated with the current working branch. When
+the session is in the main checkout and the conversation explicitly identifies
+one PR (for example, the PR just created in the preceding turn), that PR is a
+conversation handoff candidate and may be used as the target. The skill must
+re-verify that candidate with fresh `gh pr view` data before acting. Pass
+`--pr N` to target an explicit open PR; this remains the strongest override.
 
 ---
 
@@ -40,6 +49,7 @@ branch's PR is already closed or merged.
 | Variable         | Source                                                                 |
 |------------------|------------------------------------------------------------------------|
 | `PR_NUMBER`      | `gh pr view --json number -q .number` for the current branch          |
+| `CONVERSATION_PR`| The explicit PR number established by the current conversation, if any; treated like `--pr N` after fresh validation |
 | `PR_STATE`       | `gh pr view --json state -q .state` (`OPEN` required to proceed)       |
 | `REVIEW_VERDICT` | `gh pr view --json reviewDecision -q .reviewDecision` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`) — re-issue immediately before acting (see MUST rule above) |
 | `CHECKS`         | `gh pr checks --json name,state,conclusion` — re-issue immediately before acting (see MUST rule above) |
@@ -66,8 +76,14 @@ branch's PR is already closed or merged.
 | `--local-verify`           | **Optional additive flag** (default behavior unchanged when absent). After §Algorithm step 7 (APPLY FIX) and **before** step 9 (COMMIT + PUSH), run `--local-test-cmd` (default `pytest -q`) inside the worktree. If the test command exits non-zero, abort the iteration **before** `git add` / `git commit` / `git push` — no commit, no push, no GH-Actions run consumed. The §Algorithm step 8 (VERIFY LOCAL — re-run the specific failing check) is preserved alongside; this flag adds a *broader* pre-commit check, not a replacement. Use when GH-Actions minutes are tight and the operator wants to gate iteration on local test passage without burning CI on a known-failing commit. |
 | `--local-test-cmd "<cmd>"` | Shell command for `--local-verify` to run inside the worktree. Defaults to `pytest -q`. The command's stdout+stderr MUST include a pytest-style tail line (`<N> passed in <Ns>s` or `<N> failed in <Ns>s`) per MUST-L3; if the quoted line is missing, the iteration refuses to flip to "ready to push". |
 
-If `--pr N` is absent and `PR_NUMBER` is empty, print a one-line message and
-exit 1 explaining that an explicit `--pr N` or current-branch PR is required.
+Target precedence is: `--pr N` → an explicitly identified `CONVERSATION_PR` →
+the current branch's PR → main-checkout candidate resolution. A conversation
+handoff is valid only when the number was explicitly stated or returned by the
+immediately preceding PR-creation step; never infer it from the newest PR,
+branch timestamps, or an unrelated issue number. Re-issue `gh pr view` and
+verify the PR is open before entering the loop. If no target is established,
+print a one-line message and exit 1 explaining that an explicit `--pr N`,
+conversation PR, or current-branch PR is required.
 If the resolved `PR_STATE != OPEN`, print a one-line message and exit 1; do
 not silently report success. Never create a PR implicitly.
 
@@ -103,23 +119,39 @@ session cwd already is the PR's owning worktree.
 The parent runs these steps in order, BEFORE spawning the sub-agent.
 
 1. `git fetch origin` — refresh remote refs.
-2. List candidate PRs off main:
+2. Validate a conversation handoff before candidate enumeration:
+   ```bash
+   if [[ -n "${CONVERSATION_PR:-}" ]]; then
+     CONVERSATION_SNAPSHOT=$(gh pr view "$CONVERSATION_PR" \
+       --json number,state,headRefName,headRefOid -q .)
+     CONVERSATION_STATE=$(printf '%s' "$CONVERSATION_SNAPSHOT" \
+       | jq -r '.state // empty')
+     if [[ "$CONVERSATION_STATE" != "OPEN" ]]; then
+       echo "CONVERSATION_PR=#$CONVERSATION_PR is not open; refusing to babysit" >&2
+       exit 1
+     fi
+   fi
+   ```
+   A validated `CONVERSATION_PR` is authoritative and goes directly to
+   worktree resolution; do not replace it with a target selected by count,
+   recency, branch name, worktree mtime, or PR number.
+3. If no conversation handoff, list candidate PRs off main:
    ```bash
    gh pr list --state open --json number,headRefName,headRefOid,title \
      --jq '.[] | select(.headRefName != "main")'
    ```
-3. Zero candidates → print `no open PR off main; nothing to babysit` and exit 0
+4. Zero candidates → print `no open PR off main; nothing to babysit` and exit 0
    (preserves the existing "no PR → exit 0" contract).
-4. Multiple candidates → print a numbered list
-   `number | headRefName | headRefOid | title` and exit 0. Never auto-pick
-   when ambiguous (explicit user action required).
-5. Exactly one candidate → resolve its owning worktree:
+5. Multiple candidates without a conversation handoff → print a numbered list
+   `number | headRefName | headRefOid | title` and exit 0. Never auto-pick.
+6. Exactly one candidate, or a validated conversation handoff → resolve its
+   owning worktree:
    ```bash
    git worktree list --porcelain \
      | awk '/^worktree /{wt=$2; next} /^HEAD [0-9a-f]/{print wt, $2}'
    ```
    Match the line whose second field equals `<pr>.headRefOid`.
-6. If no local worktree owns the candidate branch → create one and verify:
+7. If no local worktree owns the target branch → create one and verify:
    ```bash
    git worktree add -b <headRefName> .worktrees/<headRefName> origin/<headRefName>
    cd .worktrees/<headRefName>
@@ -127,8 +159,8 @@ The parent runs these steps in order, BEFORE spawning the sub-agent.
      || { echo "HEAD mismatch after worktree add"; exit 1; }
    ```
    (the literal `origin/<headRefName>` above is the remote-tracking ref)
-7. If a local worktree owns the branch → use its existing path.
-8. `cd <worktree_path>` once. The parent's Bash cwd persists for the rest of
+8. If a local worktree owns the branch → use its existing path.
+9. `cd <worktree_path>` once. The parent's Bash cwd persists for the rest of
    the parent's session, so the resolved worktree is now the parent cwd.
 
 ### Sub-agent delegation
