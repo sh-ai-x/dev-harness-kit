@@ -5,11 +5,20 @@
 # Three responsibilities, run in order:
 #   1. Block direct push to `main` (PR-only workflow policy).
 #   2. Verify the LOCAL plugin version is >= origin/main's version. If
-#      local is behind, refuse with a clear rebase error. We do NOT
-#      auto-bump — that's owned by .github/workflows/version-bump.yml
-#      which fires after a PR merges to main (single source of truth for
-#      the version field). Auto-bumping here was the root cause of the
-#      parallel-PR cascade (every push incremented, every merge conflicted).
+#      local is behind, AUTO-SYNC (not auto-bump) by calling
+#      `bin/sync-version.sh` to copy origin/main's version field into
+#      both plugin manifests, then commit that single-line change. The
+#      trunk workflow (`.github/workflows/version-bump.yml`) still owns
+#      the next version number — this hook only catches the branch up
+#      to a version that origin/main already published, eliminating the
+#      manual `git fetch && git rebase origin/main` cycle that previously
+#      blocked every PR behind trunk. Auto-SYNC (==) is structurally
+#      distinct from auto-BUMP (+1): only the latter caused the
+#      parallel-PR cascade (every push incremented, every merge
+#      conflicted) the bump-on-merge architecture was built to avoid.
+#      If the sync can't run cleanly (e.g. plugin.json has uncommitted
+#      edits the user is mid-way through), the hook falls back to a
+#      clear error and refuses the push.
 #   3. Opt-in: when DEV_KIT_PUSH_INTENT=1 is set, call
 #      `python3 -m lib.push_intent_judge ...` with the tip commit's
 #      message + `git diff --stat` summary. The judge returns
@@ -69,7 +78,7 @@ while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
             # freshness check — the user is just syncing a tag.
             ;;
         *)
-            # === Version freshness check (no auto-bump) ===
+            # === Version freshness check (auto-SYNC, not auto-BUMP) ===
             # Fetch origin/main so we can read its plugin.json:version as
             # the baseline. If the fetch fails (offline / no remote), skip
             # the check silently — CI freshness check is the backstop.
@@ -95,11 +104,35 @@ while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
             if [ "$HIGHER" = "$LOCAL_VERSION" ]; then
               echo "[pre-push] version $LOCAL_VERSION >= main $MAIN_VERSION; OK"
             else
-              echo "[pre-push] ::error:: local version $LOCAL_VERSION is OLDER than origin/main $MAIN_VERSION" >&2
-              echo "[pre-push] ::error:: Another PR merged first and advanced main past this branch." >&2
-              echo "[pre-push] ::error:: Rebase onto origin/main (or fetch + rebase) and re-push." >&2
-              echo "[pre-push] ::error:: Do NOT auto-bump locally — the trunk workflow owns the version." >&2
-              exit 1
+              # local < origin/main: AUTO-SYNC. The trunk workflow owns
+              # the version advance, so we copy origin/main's version
+              # field into BOTH plugin manifests (single coherent
+              # change) and commit it. This is sync (==), not bump (+1):
+              # only the latter re-introduced the parallel-PR cascade.
+              # If plugin.json has uncommitted edits, the sync would
+              # clobber them; refuse the push and tell the user instead.
+              if ! git diff --quiet -- "$CLAUDE_PLUGIN" 2>/dev/null \
+                 || ! git diff --cached --quiet -- "$CLAUDE_PLUGIN" 2>/dev/null; then
+                echo "[pre-push] ::error:: local $CLAUDE_PLUGIN has uncommitted changes; refusing to auto-sync" >&2
+                echo "[pre-push] ::error:: Commit, stash, or discard your plugin.json edit first, then re-push." >&2
+                echo "[pre-push] ::error:: (Sync target would be v$MAIN_VERSION from origin/main.)" >&2
+                exit 1
+              fi
+              REPO_ROOT="$(git rev-parse --show-toplevel)"
+              SYNC_SCRIPT="$REPO_ROOT/bin/sync-version.sh"
+              if [ ! -x "$SYNC_SCRIPT" ]; then
+                echo "[pre-push] ::error:: $SYNC_SCRIPT not found or not executable; cannot auto-sync" >&2
+                echo "[pre-push] ::error:: Rebase onto origin/main (or fetch + rebase) and re-push." >&2
+                exit 1
+              fi
+              if ! "$SYNC_SCRIPT" --target "$MAIN_VERSION"; then
+                echo "[pre-push] ::error:: bin/sync-version.sh failed; refusing to push" >&2
+                echo "[pre-push] ::error:: Rebase onto origin/main (or fetch + rebase) and re-push." >&2
+                exit 1
+              fi
+              git add "$CLAUDE_PLUGIN" .codex-plugin/plugin.json
+              git commit -m "chore(sync): advance plugin.json from v$LOCAL_VERSION to v$MAIN_VERSION (origin/main drift)"
+              echo "[pre-push] auto-synced v$LOCAL_VERSION -> v$MAIN_VERSION; continuing push"
             fi
 
             # === Opt-in LLM-judge intent check (DEV_KIT_PUSH_INTENT=1) ===

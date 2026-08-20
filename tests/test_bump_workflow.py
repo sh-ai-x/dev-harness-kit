@@ -41,6 +41,7 @@ refactor cannot drift silently:
 """
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -344,13 +345,19 @@ class TestPrePushRefactor(unittest.TestCase):
                          "pre-push must NOT create a chore(release) commit")
 
     def test_pre_push_enforces_freshness(self):
-        """The hook MUST refuse a push when local version is older than
-        origin/main's. This is the only behavior it retains."""
+        """The hook MUST bring the local version up to origin/main's
+        when local is older (auto-SYNC). The old contract refused
+        with a rebase error; the new contract closes the gap
+        automatically by calling bin/sync-version.sh."""
         text = PRE_PUSH_PATH.read_text(encoding="utf-8")
-        self.assertIn("OLDER than origin/main", text,
-                      "pre-push must refuse when local < origin/main")
-        self.assertIn("Rebase onto origin/main", text,
-                      "pre-push error message must tell the user to rebase")
+        # Old assertion: refused with "OLDER than origin/main" error.
+        # New contract: auto-sync via bin/sync-version.sh, falls back
+        # to a rebase-style error only when plugin.json has uncommitted
+        # edits (test_pre_push_falls_back_on_uncommitted_changes).
+        self.assertIn("auto-synced", text,
+                      "pre-push must auto-sync on local<main and print a sync-confirmation line")
+        self.assertIn("auto-SYNC", text,
+                      "pre-push header comment must declare the auto-SYNC contract")
 
     def test_pre_push_blocks_direct_main_push(self):
         """Direct push to main remains forbidden (PR-only workflow)."""
@@ -497,6 +504,131 @@ class TestVersionFreshnessCheck(unittest.TestCase):
         )
         self.assertIn("version-freshness OK", result.stdout,
                       "freshness step must print the OK line on equal versions")
+
+
+class TestPrePushAutoSync(unittest.TestCase):
+    """The pre-push hook must AUTO-SYNC (not auto-bump) when local
+    plugin.json:version is older than origin/main's.
+
+    Background: the post-#439 contract is "trunk owns the version
+    advance", so pre-push must not increment. But feature branches cut
+    at version V drift behind as parallel PRs merge and bump main.
+    The old hook refused to push, forcing the user through a manual
+    `git fetch && git rebase origin/main` cycle on every drift. The
+    new hook calls `bin/sync-version.sh` to copy origin/main's
+    version field into BOTH manifests, then commits the single-line
+    sync. Sync (==) is structurally distinct from bump (+1): only the
+    latter caused the parallel-PR cascade. This test pins the new
+    contract.
+    """
+
+    @staticmethod
+    def _sync_script() -> Path:
+        return PRE_PUSH_PATH.parent.parent / "bin" / "sync-version.sh"
+
+    def test_sync_script_exists_and_executable(self):
+        p = self._sync_script()
+        self.assertTrue(p.exists(), f"bin/sync-version.sh not found at {p}")
+        import os
+        self.assertTrue(os.access(p, os.X_OK),
+                        f"bin/sync-version.sh must be executable: {p}")
+
+    def test_sync_script_idempotent_at_equal_version(self):
+        """When local == target, the script must exit 0 with no
+        changes. The pre-push hook relies on this to pass through
+        without staging anything. We pass a target that matches the
+        current local version so the test is independent of whatever
+        the worktree was cut at."""
+        import subprocess
+        # Read the actual local version so the test works whether
+        # local == 0.3.293 (cut at main) or 0.3.294 (post-bump).
+        local_v = json.loads(
+            (PRE_PUSH_PATH.parent.parent / ".claude-plugin" / "plugin.json").read_text()
+        )["version"]
+        result = subprocess.run(
+            ["bash", str(self._sync_script()), "--target", local_v, "--check"],
+            capture_output=True, text=True,
+        )
+        # --check exits 1 on local < target; equality must still
+        # exit 0 with the no-op message.
+        self.assertEqual(
+            result.returncode, 0,
+            f"--check with target==local({local_v}) must exit 0; got {result.returncode}: {result.stderr}",
+        )
+        self.assertIn("no changes needed", result.stdout,
+                      "idempotent path must print the no-op line")
+
+    def test_sync_script_updates_both_manifests(self):
+        """When local < target, the script must update BOTH
+        .claude-plugin/plugin.json AND .codex-plugin/plugin.json in
+        one pass (so the auto-sync commit is a single coherent change
+        and the freshness check on the next push sees matching
+        versions)."""
+        import json
+        import shutil
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            # Minimal repo layout: both manifests + .git/HEAD
+            (work / ".claude-plugin").mkdir()
+            (work / ".codex-plugin").mkdir()
+            (work / ".git").mkdir()
+            (work / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+            shutil.copy(PRE_PUSH_PATH.parent.parent / ".claude-plugin" / "plugin.json",
+                        work / ".claude-plugin" / "plugin.json")
+            shutil.copy(PRE_PUSH_PATH.parent.parent / ".codex-plugin" / "plugin.json",
+                        work / ".codex-plugin" / "plugin.json")
+
+            result = subprocess.run(
+                ["bash", str(self._sync_script()), "--target", "0.3.400"],
+                capture_output=True, text=True, cwd=work,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"sync to a future target must exit 0; got {result.returncode}: {result.stderr}",
+            )
+
+            claude_v = json.loads((work / ".claude-plugin" / "plugin.json").read_text())["version"]
+            codex_v = json.loads((work / ".codex-plugin" / "plugin.json").read_text())["version"]
+            self.assertEqual(claude_v, "0.3.400",
+                             f".claude-plugin/plugin.json version must be 0.3.400, got {claude_v!r}")
+            self.assertEqual(codex_v, "0.3.400",
+                             f".codex-plugin/plugin.json version must be 0.3.400, got {codex_v!r}")
+
+    def test_pre_push_calls_sync_script(self):
+        """The pre-push hook must call bin/sync-version.sh (not inline
+        jq) when local < origin/main, so the script and the hook stay
+        in lockstep and the same logic is reusable from skills."""
+        text = PRE_PUSH_PATH.read_text(encoding="utf-8")
+        self.assertIn("sync-version.sh", text,
+                      "pre-push must call bin/sync-version.sh on local<main")
+        self.assertIn("--target", text,
+                      "pre-push must pass an explicit --target so the "
+                      "sync lands on origin/main's exact version")
+
+    def test_pre_push_creates_sync_commit(self):
+        """The auto-sync must produce a chore(sync): commit (NOT a
+        chore(release): bump — that's the trunk workflow's job). The
+        commit message format must include both the old and new
+        versions so the audit trail is unambiguous."""
+        text = PRE_PUSH_PATH.read_text(encoding="utf-8")
+        self.assertIn("chore(sync):", text,
+                      "pre-push must commit the sync as chore(sync): (not chore(release): bump)")
+        self.assertNotIn("chore(release): bump", text,
+                         "pre-push must NOT create a chore(release) commit; "
+                         "that would re-introduce the parallel-PR cascade")
+
+    def test_pre_push_falls_back_on_uncommitted_changes(self):
+        """If plugin.json has uncommitted edits, the auto-sync cannot
+        run safely (it would clobber the user's work). The hook must
+        fall back to the old block-with-rebase-error path so the user
+        can either commit, stash, or discard their edit first."""
+        text = PRE_PUSH_PATH.read_text(encoding="utf-8")
+        self.assertIn("uncommitted", text,
+                      "pre-push must detect uncommitted plugin.json changes "
+                      "and refuse the sync (fall back to error path)")
 
 
 if __name__ == "__main__":
