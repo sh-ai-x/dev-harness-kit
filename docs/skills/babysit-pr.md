@@ -6,6 +6,8 @@
 
 `babysit-pr` monitors the PR associated with the **current branch** by default; `--pr N` explicitly targets an open PR when the current branch's PR is closed or merged. When invoked from the main checkout, an explicitly identified PR from the current conversation may be used as a validated conversation handoff. It must never infer a target from recency or PR number. Every iteration is evidence-driven (MUST-L3): the skill quotes exit codes, log snippets, and review verdicts before claiming a step is done, and it never auto-merges — merging into `main` stays a human-only action even in the single-operator opt-out path.
 
+`CONVERSATION_PR` is established only by a literal PR number in the user message or by a PR number returned by the immediately preceding assistant PR-creation/listing result. Vague references such as "the latest PR" do not qualify. A validated conversation handoff is checked with `gh pr view` before any candidate enumeration and goes directly to worktree resolution.
+
 ## When to use it
 
 - The user types `/dev-kit:babysit-pr`.
@@ -20,7 +22,7 @@
 
 ### Worktree-aware execution
 
-The babysitter must run inside the worktree owning the PR's branch, since `worktree-guard` denies edits from the main checkout. It sources `hooks/lib/worktree-detect.sh` and calls `worktree_detect()`, which sets `$WORKTREE_DETECT` to one of `worktree` / `main` / `outside`. `outside` → exit 0. If the cwd is already the worktree (Scenario A), the skill proceeds directly into the Algorithm below. If the cwd is the main checkout (Scenario B), the parent: fetches `origin`; first validates any conversation PR handoff; otherwise lists open PRs off `main` via `gh pr list`; on zero candidates, exits 0 ("nothing to babysit"); on multiple candidates without a conversation handoff, prints a numbered list and exits 0 (never auto-picks); on a validated target, resolves (or creates, verifying the resulting HEAD) the owning worktree via `git worktree list --porcelain`, then `cd`s into it once — the parent's Bash cwd persists for the rest of the session.
+The babysitter must run inside the worktree owning the PR's branch, since `worktree-guard` denies edits from the main checkout. It sources `hooks/lib/worktree-detect.sh` and calls `worktree_detect()`, which sets `$WORKTREE_DETECT` to one of `worktree` / `main` / `outside`. `outside` → exit 0. If the cwd is already the worktree (Scenario A), the skill proceeds directly into the Algorithm below. If the cwd is the main checkout (Scenario B), the parent: fetches `origin`; validates `CONVERSATION_PR` with `gh pr view` before candidate enumeration; uses a validated handoff directly for worktree resolution; otherwise lists open PRs off `main`; on zero candidates, exits 0 ("nothing to babysit"); on multiple candidates without a handoff, prints a numbered list and exits 0 (never auto-picks); on one candidate, resolves (or creates, verifying the resulting HEAD) the owning worktree via `git worktree list --porcelain`, then `cd`s into it once — the parent's Bash cwd persists for the rest of the session.
 
 A sub-agent is then spawned via the `Agent` tool (`subagent_type: "general-purpose"`) with the resolved worktree path as its inherited cwd, carrying a condensed copy of the Algorithm, termination conditions, lock-file path, and Iron Laws L1-L5.
 
