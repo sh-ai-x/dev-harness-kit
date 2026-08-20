@@ -124,15 +124,51 @@ python3 -m lib.maintenance_gate \
   --docs-reason "ok"
 ```
 
-`.github/workflows/fork-pr-review.yml` is the escalation path: on
-`pull_request_target` (workflow file read from trusted `main`, so safe
-to grant write permissions) for fork PRs only, gated behind the
-`fork-pr-review` GitHub Environment (required reviewer = repo owner).
-On approval it dispatches `maintenance.yml` + `review.yml` via
-`workflow_dispatch` — not a fork-origin event, so that run reaches
-`maintenance_judge`/`gate` with full normal permissions. Same-repo PRs
-(including the owner's own) are unaffected; they keep running on
-`pull_request` fully automatically.
+`.github/workflows/fork-pr-review.yml` is the opt-in manual fallback:
+on `pull_request_target` (workflow file read from trusted `main`, so
+safe to grant write permissions) for fork PRs only, **only active
+when the operator has set `vars.AUTO_REVIEW_FORKS=false`** (literal
+string). The job's `if:` block is gated on that variable, so the
+default behavior (variable unset / empty / `true`) skips this
+workflow entirely and routes fork PRs through the auto-review path
+described below.
+
+### Default auto-review path (fork PRs since the pull_request_target migration)
+
+`maintenance.yml` and `review.yml` both trigger on
+`pull_request_target` in addition to `pull_request` /
+`workflow_dispatch`. Their LLM-judge jobs (`maintenance_judge`,
+`review`, `security`) auto-run for fork PRs gated by
+`vars.AUTO_REVIEW_FORKS != 'false'`. The fork-trust model is
+preserved by:
+
+1. The workflow file is read from the trusted `main` branch (not the
+   fork).
+2. `actions/checkout` uses the safe default `ref:` — on
+   `pull_request_target` the default ref is the GitHub-built merge
+   commit (base + head), NOT the PR head SHA. Any future contributor
+   adding `ref: ${{ github.event.pull_request.head.sha }}` would
+   defeat the trust model; `tests/test_fork_pr_auto_review.py` pins
+   this absence.
+3. The LLM judges fetch the diff via `gh pr diff` (GitHub API), so
+   the runner filesystem content cannot influence the judge beyond
+   what the visible PR contents already say. The dev-kit plugin is
+   symlinked from the merge commit, not the fork tree.
+
+Result: PRs like #682 and #687 from external contributors
+(`mybotagent`) no longer need a maintainer click in the Actions tab
+before the AI judges run — the LLM review comment lands on the PR
+automatically on every `synchronize` / `opened` / `reopened` event.
+
+### Manual-fallback path (only when `vars.AUTO_REVIEW_FORKS=false`)
+
+When the operator has explicitly opted out of auto-review (e.g. to
+gate CI-minute spend behind a human approval), `fork-pr-review.yml`
+fires on `pull_request_target` for fork PRs, sits behind the
+`fork-pr-review` GitHub Environment (required reviewer = repo
+owner), and on approval dispatches `maintenance.yml` + `review.yml`
+via `workflow_dispatch` — not a fork-origin event, so that run
+reaches `maintenance_judge` / `gate` with full normal permissions.
 
 Because `workflow_dispatch` runs do **not** auto-link their jobs to
 the PR's commit in the PR Checks tab (only `pull_request` /
@@ -156,18 +192,28 @@ drove it, so the PR Checks tab always shows the aggregate instead of
 the stale per-judge `skipped` verdicts. Per-judge verdict comments are
 still posted on the PR by each dispatched run as before.
 
-> **Implementation note — `--repo` is required on every `gh api` call
-> in `fork-pr-review.yml`.** The workflow runs on `pull_request_target`
-> and deliberately does NOT check out the fork's code, so the runner
-> has no `.git` directory. The relative URL
+Switching between paths is a one-liner:
+
+```bash
+# Re-enable the manual gate (fork PRs sit in approval queue):
+gh variable set AUTO_REVIEW_FORKS --body false
+# Restore the default auto-review path:
+gh variable delete AUTO_REVIEW_FORKS
+```
+
+> **Implementation note — absolute URLs only, no `--repo` flag, in
+> every `gh api` call in `fork-pr-review.yml`.** The workflow runs on
+> `pull_request_target` and deliberately does NOT check out the fork's
+> code, so the runner has no `.git` directory. The relative URL
 > `repos/${{ github.repository }}/statuses/$SHA` would otherwise make
 > `gh` try to discover the repo from git context and fail with
 > `failed to determine base repo: failed to run git: fatal: not a git
-> repository`. Every `gh api` invocation in this workflow passes
-> `--repo "${{ github.repository }}"` to sidestep host discovery
-> entirely. The `tests/test_fork_pr_review_gh_api.py` regression pins
-> this contract — any future call that omits `--repo` (or an absolute
-> URL) fails the test. Observed on PR #665, run 32245678201.
+> repository`. The fix is the absolute form
+> `https://api.github.com/repos/${{ github.repository }}/statuses/$SHA`,
+> which is self-resolving without git context. `--repo` is rejected by
+> `gh api` with `unknown flag: --repo` and must NOT be used as a
+> workaround (observed on PR #665, runs 32245678201 / 32255230444).
+> `tests/test_fork_pr_review_gh_api.py` pins both contracts.
 
 ## Related
 
@@ -183,8 +229,13 @@ still posted on the PR by each dispatched run as before.
   drift).
 - `.github/workflows/review.yml` — the sibling security/correctness
   gate. Both gates share the verdict-extraction pattern so PR
-  comments look identical to operators.
-- `.github/workflows/fork-pr-review.yml` — maintainer-approval gate
-  that dispatches this workflow (+ `review.yml`) for fork PRs. See
+  comments look identical to operators. Also triggers on
+  `pull_request_target` for the fork-PR auto-review path; see
   "Fork PRs" above.
+- `.github/workflows/fork-pr-review.yml` — opt-in manual fallback
+  that dispatches this workflow (+ `review.yml`) for fork PRs. Only
+  active when `vars.AUTO_REVIEW_FORKS=false`. See "Fork PRs" above.
+- `tests/test_fork_pr_auto_review.py` — pins the auto-review
+  contract (pull_request_target trigger, AUTO_REVIEW_FORKS gate,
+  safe-checkout default, no fork-code execution).
 - `docs/stages/STAGES.md` §7 — the pipeline-stage description.

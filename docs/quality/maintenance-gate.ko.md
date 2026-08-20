@@ -129,15 +129,53 @@ repo가 포크일 때 `pull_request` 트리거에서 스스로 스킵한다 — 
 기본값 처리"하는 폴백을 스킵해, judge가 한 번도 실행되지 않은 채로
 Approve로 기본 처리된 게이트를 통과하는 일이 없도록 한다.
 
-`.github/workflows/fork-pr-review.yml`이 이 경우의 에스컬레이션
-경로다. `pull_request_target`(신뢰된 `main`에서 워크플로우 파일을
-읽으므로 write 권한을 부여해도 안전) 트리거로, 포크 PR에 대해서만
-`fork-pr-review` GitHub Environment(필수 리뷰어 = 저장소 오너) 뒤에
-게이트된다. 승인되면 `maintenance.yml` + `review.yml`을
-`workflow_dispatch`로 디스패치한다 — 포크에서 온 이벤트가 아니므로 그
-실행은 `maintenance_judge`/`gate`에 정상 권한으로 도달한다. 같은
-저장소 PR(오너 본인 것 포함)은 영향받지 않고 `pull_request`에서
-그대로 완전 자동으로 실행된다.
+`.github/workflows/fork-pr-review.yml`은 이제 옵트인 수동 폴백이다.
+`pull_request_target`(신뢰된 `main`에서 워크플로우 파일을 읽으므로
+write 권한을 부여해도 안전) 트리거로, 포크 PR에 대해서만 실행되며,
+**운영자가 `vars.AUTO_REVIEW_FORKS=false`(문자열 리터럴)로 명시적으로
+설정한 경우에만 동작한다**. 작업의 `if:` 블록이 이 변수로 게이트되어
+있어, 기본 동작(변수 미설정 / 빈값 / `true`)에서는 이 워크플로우가
+완전히 스킵되고 아래의 자동-리뷰 경로로 라우팅된다.
+
+### 기본 자동-리뷰 경로 (pull_request_target 마이그레이션 이후의 포크 PR)
+
+`maintenance.yml`과 `review.yml`은 `pull_request` / `workflow_dispatch`
+추가로 `pull_request_target`도 트리거한다. 각 워크플로우의 LLM-judge
+작업(`maintenance_judge`, `review`, `security`)은
+`vars.AUTO_REVIEW_FORKS != 'false'` 게이트 뒤에서 포크 PR에 대해
+자동으로 실행된다. 포크 신뢰 모델은 다음으로 유지된다:
+
+1. 워크플로우 파일은 신뢰된 `main` 브랜치에서 읽음(포크가 아님).
+2. `actions/checkout`은 안전한 기본 `ref:` 사용 — `pull_request_target`
+   에서 기본 ref는 GitHub가 만든 머지 커밋(base + head)이며 PR head
+   SHA가 아니다. 향후 누군가가 `ref: ${{ github.event.pull_request.head.sha }}`
+   을 추가하면 신뢰 모델이 무너지며, `tests/test_fork_pr_auto_review.py`
+   가 그 부재를 핀한다.
+3. LLM judge는 `gh pr diff`(GitHub API)로 diff를 가져오므로 러너의
+   파일시스템 내용이 보이는 PR 내용 이상으로 judge에 영향을 줄 수
+   없다. dev-kit 플러그인은 머지 커밋에서 심볼릭 링크되며 포크 트리가
+   아니다.
+
+결과: 외부 기여자(`mybotagent`)의 PR #682, #687처럼 더 이상
+Actions 탭에서 메인테이너 클릭이 필요하지 않다 — AI judge 코멘트가
+모든 `synchronize` / `opened` / `reopened` 이벤트에서 자동으로 PR에
+남는다.
+
+### 수동 폴백 경로 (`vars.AUTO_REVIEW_FORKS=false`인 경우만)
+
+운영자가 자동 리뷰를 명시적으로 옵트아웃한 경우(예: CI-분 단위 사용량을
+사람 승인 뒤에 게이트하기 위해) `fork-pr-review.yml`이 포크 PR에 대해
+`pull_request_target`에서 실행되고 `fork-pr-review` GitHub
+Environment 뒤에 위치하며, 승인 시 `maintenance.yml` + `review.yml`을
+`workflow_dispatch`로 디스패치한다 — 포크-원본 이벤트가 아니므로 그
+실행은 정상 권한으로 도달한다. 모드 전환은 한 줄짜리 명령이다:
+
+```bash
+# 수동 게이트 재활성화(포크 PR이 승인 대기열에 머무름):
+gh variable set AUTO_REVIEW_FORKS --body false
+# 기본 자동-리뷰 경로 복원:
+gh variable delete AUTO_REVIEW_FORKS
+```
 
 ## 관련
 
@@ -151,8 +189,13 @@ Approve로 기본 처리된 게이트를 통과하는 일이 없도록 한다.
 - `eval/golden/maintenance-*.json` — maintenance judge를 위한 세 개의
   회귀 픽스처(가치 정렬, 과도한 엔지니어링, 범위 드리프트).
 - `.github/workflows/review.yml` — 형제 보안/정확성 게이트. 두 게이트가
-  판정-추출 패턴을 공유해 운영자에게 PR 코멘트가 동일하게 보임.
-- `.github/workflows/fork-pr-review.yml` — 포크 PR에 대해 이 워크플로우
-  (+ `review.yml`)를 디스패치하는 메인테이너 승인 게이트. 위 "포크 PR"
-  참고.
+  판정-추출 패턴을 공유해 운영자에게 PR 코멘트가 동일하게 보임. 포크
+  PR 자동-리뷰 경로를 위해 `pull_request_target`도 트리거함 — 위
+  "포크 PR" 참고.
+- `.github/workflows/fork-pr-review.yml` — 이 워크플로우(+ `review.yml`)
+  를 포크 PR에 대해 디스패치하는 옵트인 수동 폴백. 오직
+  `vars.AUTO_REVIEW_FORKS=false`일 때만 동작. 위 "포크 PR" 참고.
+- `tests/test_fork_pr_auto_review.py` — 자동-리뷰 계약을 핀함
+  (pull_request_target 트리거, AUTO_REVIEW_FORKS 게이트, 안전한
+  checkout 기본값, 포크 코드 실행 없음).
 - `docs/stages/STAGES.md` §7 — 파이프라인 단계 설명.

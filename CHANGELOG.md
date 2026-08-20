@@ -4,6 +4,54 @@ All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
 
+### Changed — fork PR auto-review (no more manual approval gate)
+
+Fork PRs no longer wait on a maintainer click in the `fork-pr-review`
+GitHub Environment before the AI judges run. `maintenance.yml` and
+`review.yml` now ALSO trigger on `pull_request_target`; their
+LLM-judge jobs auto-run for fork PRs gated by the new repo variable
+`vars.AUTO_REVIEW_FORKS != 'false'`. The fork-trust model is
+preserved — the workflow file is read from the trusted `main` branch
+(not the fork), `actions/checkout` uses the safe default `ref:` (the
+GitHub-built merge commit, not the PR head SHA), and the LLM judges
+fetch the diff via `gh pr diff` (GitHub API) so the runner filesystem
+content cannot influence the judge beyond the visible PR contents.
+
+- `.github/workflows/review.yml`: added `pull_request_target` trigger;
+  `review` / `security` / `gate` jobs now allow fork PRs via
+  `pull_request_target` with the `vars.AUTO_REVIEW_FORKS != 'false'`
+  opt-out. `actions/checkout` deliberately leaves `ref:` unset (merge
+  commit, not PR head). `track_progress` now also enables for
+  `pull_request_target`.
+- `.github/workflows/maintenance.yml`: same migration. `maintenance_judge`
+  / `gate` mirror `review.yml`'s fork-trust conditions.
+- `.github/workflows/fork-pr-review.yml`: demoted to **opt-in manual
+  fallback**. The `gate` job's `if:` now requires
+  `vars.AUTO_REVIEW_FORKS == 'false'` (literal string) so the default
+  (variable unset / empty / `true`) routes through the new auto path
+  above. Same-repo PRs continue to skip this workflow entirely.
+- `tests/test_fork_pr_review_gh_api.py`: added T07 to pin the new
+  gate (`AUTO_REVIEW_FORKS == 'false'` + retained
+  `environment: fork-pr-review`).
+- `tests/test_fork_pr_auto_review.py` (new): 6 tests pin the
+  review.yml / maintenance.yml side — `pull_request_target` trigger,
+  fork-PR jobs allow it, gate jobs allow fork + AUTO_REVIEW_FORKS,
+  no `actions/checkout` step may set `ref:` to PR head, no step may
+  execute arbitrary fork code.
+- `docs/quality/maintenance-gate.md` (+ `.ko.md`): rewrote the "Fork
+  PRs" section to describe the default auto-review path AND the
+  manual-fallback path (both); documented the one-liner to switch
+  modes (`gh variable set/delete AUTO_REVIEW_FORKS`).
+
+**Operator migration:** no action required for the default
+auto-review path. To re-enable the old manual gate for a particular
+repo: `gh variable set AUTO_REVIEW_FORKS --body false`. To restore
+auto-review: `gh variable delete AUTO_REVIEW_FORKS`.
+
+Fixes the silent review-skip on external-contributor PRs (observed on
+PR #682, #687 from `mybotagent` — judges never ran unless a
+maintainer manually approved the gate).
+
 ### Breaking — slim sweep (PR-1)
 
 - **chore(skills)!:** Slim sweep — drop `user-invocable: true` from `/dev-kit:valuate` (kept as model-use); cut `/dev-kit:audit` slash (folded into `/dev-kit:inspect --secrets` / `--slop`); merge `/dev-kit:bootstrap-full` into `/dev-kit:bootstrap` with runtime Y/n prompt for ci-setup (pass `--skip-ci` to decline); document MCP integration as intentionally out of scope ([decision 0001](docs/decisions/0001-no-mcp.md)). `/dev-kit:config` picker drops the non-functional MCP option. **Breaking:** `/dev-kit:audit` and `/dev-kit:bootstrap-full` removed; `/dev-kit:inspect` gains `--secrets` and `--slop` flags.

@@ -1,15 +1,23 @@
-name: Fork PR Review Gate
+name: Fork PR Review Gate (manual fallback)
 
 # Fork PRs never get a write-scoped GITHUB_TOKEN or an OIDC token on the
 # `pull_request` trigger, no matter what `permissions:` a job declares —
 # that's GitHub's platform-level anti-abuse restriction, not something a
-# workflow change can lift. review.yml / maintenance.yml already skip
-# their LLM-judge jobs for fork PRs on `pull_request` (see the `if:`
-# conditions there) instead of failing loudly on an unobtainable OIDC
-# token.
+# workflow change can lift. review.yml / maintenance.yml skip their
+# LLM-judge jobs for fork PRs on `pull_request` (see the `if:` conditions
+# there) and instead auto-run via `pull_request_target` (which has full
+# permissions and reads the trusted base-branch workflow file).
 #
-# This workflow is the maintainer-approval gate that unblocks review for
-# a fork PR without weakening that restriction: it runs on
+# This workflow is now an OPT-IN MANUAL FALLBACK. Its job is gated on
+# `vars.AUTO_REVIEW_FORKS == 'false'` — i.e. it only fires when an
+# operator has explicitly disabled the default auto-review path on fork
+# PRs and wants the human-in-the-loop approval back. Default behavior
+# (variable unset / empty / any value other than literal `false`) is
+# that this workflow is skipped entirely; review.yml and maintenance.yml
+# run automatically via `pull_request_target` and post their AI-judge
+# verdicts as PR comments without waiting on a maintainer click.
+#
+# When active (AUTO_REVIEW_FORKS=false), this workflow runs on
 # `pull_request_target` (workflow file is read from the trusted `main`
 # branch, not the fork, so it is safe to grant it write permissions) and
 # sits behind the `fork-pr-review` GitHub Environment, which requires an
@@ -32,6 +40,11 @@ name: Fork PR Review Gate
 # To make the AI-judge outcome visible in the PR Checks tab, this gate
 # polls the two dispatched runs and posts an aggregate `fork-pr-review/ai-judges`
 # commit status (`pending` while running, `success`/`failure` after).
+#
+# To re-enable the manual gate after auto-review has been the default:
+#   gh variable set AUTO_REVIEW_FORKS --body false
+# To restore the default auto-review path:
+#   gh variable delete AUTO_REVIEW_FORKS
 
 on:
   pull_request_target:
@@ -41,9 +54,18 @@ jobs:
   gate:
     name: fork PR review (awaiting maintainer approval)
     runs-on: ubuntu-latest
+    # Active only when the operator has explicitly opted OUT of the
+    # default auto-review path by setting `vars.AUTO_REVIEW_FORKS=false`.
+    # On the default path (variable unset / empty / `true` / anything
+    # other than literal `false`), this job is skipped entirely — the
+    # LLM judges run directly in review.yml / maintenance.yml via the
+    # `pull_request_target` event they also trigger on. Same-repo PRs
+    # are filtered out by the `head.repo.full_name` check (they have
+    # their own same-repo auto-review path).
     if: |
       github.event.pull_request.head.repo.full_name != github.repository &&
-      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
+      !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
+      vars.AUTO_REVIEW_FORKS == 'false'
     environment: fork-pr-review
     permissions:
       actions: write

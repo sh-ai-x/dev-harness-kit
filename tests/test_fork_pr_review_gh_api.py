@@ -207,7 +207,16 @@ class TestForkPrReviewGhApi(unittest.TestCase):
 
     def test_02_workflow_parses_as_yaml(self):
         doc = _yaml_doc()
-        self.assertEqual(doc["name"], "Fork PR Review Gate")
+        # The "Manual fallback" suffix in the name reflects the new role:
+        # this workflow is now an opt-in path that fires only when the
+        # operator sets `vars.AUTO_REVIEW_FORKS=false`. Default behavior
+        # (variable unset) is auto-review via review.yml/maintenance.yml
+        # directly. Pin both the prefix and the suffix to catch either
+        # drift.
+        self.assertTrue(
+            doc["name"].startswith("Fork PR Review Gate"),
+            f"workflow name should start with 'Fork PR Review Gate', got {doc['name']!r}",
+        )
         self.assertIn("jobs", doc)
         self.assertEqual(len(doc["jobs"]), 1)
 
@@ -276,6 +285,42 @@ class TestForkPrReviewGhApi(unittest.TestCase):
                         failures, [],
                         f"step {step['name']!r}: "
                         + "\n".join(failures))
+
+    def test_07_manual_fallback_gated_by_auto_review_forks_false(self):
+        """The gate job is the opt-in manual fallback. It must be gated on
+        `vars.AUTO_REVIEW_FORKS == 'false'` so that the default
+        (variable unset) takes the auto-review path in review.yml /
+        maintenance.yml and this workflow is skipped entirely. Without
+        this gate, every fork PR would sit in the `fork-pr-review`
+        Environment approval queue forever (the original pre-PR bug).
+        """
+        doc = _yaml_doc()
+        jobs = doc.get("jobs", {})
+        self.assertEqual(len(jobs), 1,
+                         "expected exactly one job in the manual fallback")
+        gate_job = next(iter(jobs.values()))
+        # The if: block must reference AUTO_REVIEW_FORKS so an unset
+        # variable (the default) skips the job. Use == 'false' (literal
+        # string) so any other value — including unset, empty, true,
+        # typo'd — keeps the auto path active.
+        if_text = gate_job.get("if", "")
+        self.assertIn("AUTO_REVIEW_FORKS", if_text,
+                      "manual-fallback job must reference AUTO_REVIEW_FORKS "
+                      "in its `if:` block; otherwise every fork PR sits in "
+                      "the approval queue (the original pre-PR bug)")
+        self.assertIn("'false'", if_text,
+                      "manual-fallback job must require AUTO_REVIEW_FORKS == "
+                      "'false' (literal string) — a == true check would "
+                      "never fire on the default-unset path")
+        # Also pin that the gate sits behind the fork-pr-review GitHub
+        # Environment — that IS the manual approval gate; if someone
+        # removes the `environment:` block the opt-in path silently
+        # degrades to a no-op (workflow runs but no approval click is
+        # required, defeating the manual-fallback purpose).
+        self.assertEqual(gate_job.get("environment"), "fork-pr-review",
+                         "manual-fallback job must keep `environment: "
+                         "fork-pr-review` so the maintainer approval click "
+                         "is still required when AUTO_REVIEW_FORKS=false")
 
 
 def doc_true_or_str(doc: dict, key: str) -> dict:
