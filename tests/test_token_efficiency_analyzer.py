@@ -3148,8 +3148,12 @@ class TestSnapshotBuilder(unittest.TestCase):
         ts_feat = (datetime.now(timezone.utc) - timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         # Stage two minimal sessions, one on main and one on feat-x.
+        # Timestamps are dynamic (5 days ago) so the test never rots at
+        # the 30-day window boundary; calendar-rot regression #658.
         logs = self.tmpdir / "logs" / "claude-code"
         logs.mkdir(parents=True)
+        ts_main = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        ts_feat = (datetime.now(timezone.utc) - timedelta(days=5, hours=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         main_session = (
             f'{{"timestamp":"{ts_main}",'
             '"message":{"role":"assistant","model":"claude-sonnet-5",'
