@@ -122,14 +122,25 @@ init_matrix = ensure_matrix
 
 
 def is_hook_active(project_root: Path, stage: str, hook_name: str) -> bool:
-    """Return True if hook should fire in this stage."""
+    """Return True if hook should fire in this stage.
+
+    Fresh-checkout safety (issue #676): when the codec slice is missing
+    from `.dev-kit/.active-hooks.json` (the default state on a clone —
+    the regen tool only writes the event-keyed slice), fall back to
+    `DEFAULT_MATRIX` so the documented `stage-gate.sh` fail-open
+    contract is restored. Without this, the regen would create the
+    file with no `matrix` key, `stage-gate.sh` would stop fail-opening,
+    and `is_hook_active` would return False for every stage, silently
+    disabling the five stage-gated hooks (`tdd-guard`, `bash-guard`,
+    `secret-scan`, `slop-detector`, `stop-verify`).
+    """
     data = load_matrix(project_root)
     if hook_name in data.get("override", {}).get("disabled_hooks", []):
         return False
     env_off = os.environ.get("DEV_KIT_HOOK_OFF", "")
     if env_off and hook_name in env_off.split(","):
         return False
-    matrix = data.get("matrix", {})
+    matrix = data.get("matrix") or copy.deepcopy(DEFAULT_MATRIX)
     if stage not in matrix:
         return False
     state = matrix[stage].get(hook_name, False)

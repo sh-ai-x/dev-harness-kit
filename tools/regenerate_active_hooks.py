@@ -64,11 +64,6 @@ from atomic import atomic_write_json, read_json_or_default  # noqa: E402
 
 SCHEMA_VERSION = "1.0.0"
 
-# Top-level keys owned by this tool. The codec-owned keys (`matrix`,
-# `override`) are preserved verbatim across re-runs so the two writers
-# coexist on disk.
-_REGEN_OWNED_KEYS = ("schema_version", "generated_at", "events")
-
 # Path-prefix tokens we strip from a hook command string. The harness
 # substitutes the env var at runtime; we only care about the script path.
 _ENV_PREFIX_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/")
@@ -178,7 +173,6 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
 
 
 def _build_payload(
-    root: Path,
     hooks_by_event: Dict[str, List[Dict[str, object]]],
     existing: Dict[str, object],
 ) -> Dict[str, object]:
@@ -225,7 +219,7 @@ def regenerate(root: Path) -> Path:
     hooks_by_event = _walk_hooks_json(hooks_json)
     target = root / ".dev-kit" / ".active-hooks.json"
     existing = read_json_or_default(target, {})
-    payload = _build_payload(root, hooks_by_event, existing)
+    payload = _build_payload(hooks_by_event, existing)
     atomic_write_json(target, payload)
     return target
 

@@ -300,5 +300,53 @@ class TestCrossCodecCoexistence(unittest.TestCase):
         self.assertEqual(first["matrix"], second["matrix"])
 
 
+    def test_regen_alone_keeps_stage_gated_hooks_active(self):
+        """Regression for issue #676 — fresh-checkout safety.
+
+        After the regen tool creates `.dev-kit/.active-hooks.json`
+        with only the event-keyed slice (the default state on every
+        clone because `.dev-kit/` is gitignored), the codec's
+        `is_hook_active()` must STILL return True for the stage-gated
+        hooks. Without this guarantee, `stage-gate.sh` would stop
+        fail-opening once the file exists, silently disabling
+        `tdd-guard`, `bash-guard`, `secret-scan`, `slop-detector`,
+        and `stop-verify` on every fresh clone.
+
+        The regen tool MUST NOT create the codec slice itself —
+        `is_hook_active` falls back to `DEFAULT_MATRIX` so the
+        documented fail-open behavior of `stage-gate.sh` survives.
+        """
+        # Sanity: precondition is exactly the regression case — regen
+        # created the file, codec has not run yet.
+        self._run_regen()
+        data = json.loads(self._target_path().read_text(encoding="utf-8"))
+        self.assertIn("events", data)
+        self.assertNotIn("matrix", data)
+
+        # All five stage-gated hooks must still answer True for their
+        # default-on stages. If any of these return False, the
+        # fresh-checkout regression has returned.
+        self.assertTrue(
+            active_hooks_codec.is_hook_active(self.root, "build", "tdd-guard"),
+            "regen alone must not disable build/tdd-guard",
+        )
+        self.assertTrue(
+            active_hooks_codec.is_hook_active(self.root, "build", "bash-guard"),
+            "regen alone must not disable build/bash-guard",
+        )
+        self.assertTrue(
+            active_hooks_codec.is_hook_active(self.root, "build", "secret-scan"),
+            "regen alone must not disable build/secret-scan",
+        )
+        self.assertTrue(
+            active_hooks_codec.is_hook_active(self.root, "build", "slop-detector"),
+            "regen alone must not disable build/slop-detector",
+        )
+        self.assertTrue(
+            active_hooks_codec.is_hook_active(self.root, "build", "stop-verify"),
+            "regen alone must not disable build/stop-verify",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

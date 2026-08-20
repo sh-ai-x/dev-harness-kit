@@ -37,6 +37,12 @@ if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || true
 fi
 
+# Re-derive an effective cwd after the cd: an empty HOOK_CWD above
+# would otherwise leave us with the bare "/.dev-kit/logs" path below
+# and `mkdir -p` would target the filesystem root in containers /
+# CI images running as root. Issue #676 review finding (CC-4).
+EFFECTIVE_CWD="${HOOK_CWD:-$PWD}"
+
 # Regenerate .dev-kit/.active-hooks.json (MUST-13 SSOT) so any
 # downstream check that consumes the matrix sees a fresh snapshot.
 # This MUST run before any check that depends on the matrix. Cheap
@@ -47,14 +53,14 @@ fi
 # /dev-kit:hook-doctor has something to read instead of a silent
 # /dev/null swallowing.
 if command -v python3 >/dev/null 2>&1; then
-  DEV_KIT_LOGS="${HOOK_CWD}/.dev-kit/logs"
+  DEV_KIT_LOGS="${EFFECTIVE_CWD}/.dev-kit/logs"
   if [ ! -d "$DEV_KIT_LOGS" ] && command -v mkdir >/dev/null 2>&1; then
     mkdir -p "$DEV_KIT_LOGS" 2>/dev/null || DEV_KIT_LOGS=""
   fi
   if [ -d "$DEV_KIT_LOGS" ]; then
-    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$HOOK_CWD" --quiet 2>>"$DEV_KIT_LOGS/session-start-check.log" || true
+    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>>"$DEV_KIT_LOGS/session-start-check.log" || true
   else
-    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$HOOK_CWD" --quiet 2>/dev/null || true
+    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>/dev/null || true
   fi
 fi
 
