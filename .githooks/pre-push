@@ -130,7 +130,14 @@ while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
                 echo "[pre-push] ::error:: Rebase onto origin/main (or fetch + rebase) and re-push." >&2
                 exit 1
               fi
-              git add "$CLAUDE_PLUGIN" .codex-plugin/plugin.json
+              git add "$CLAUDE_PLUGIN"
+              # Only stage .codex-plugin/plugin.json if it exists — the
+              # sync script silently skips a missing manifest (single-
+              # runtime checkout), and `git add` of a non-existent path
+              # would error out and abort the auto-sync.
+              if [ -f .codex-plugin/plugin.json ]; then
+                git add .codex-plugin/plugin.json
+              fi
               git commit -m "chore(sync): advance plugin.json from v$LOCAL_VERSION to v$MAIN_VERSION (origin/main drift)"
               echo "[pre-push] auto-synced v$LOCAL_VERSION -> v$MAIN_VERSION; continuing push"
             fi

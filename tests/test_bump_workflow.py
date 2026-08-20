@@ -630,6 +630,21 @@ class TestPrePushAutoSync(unittest.TestCase):
                       "pre-push must detect uncommitted plugin.json changes "
                       "and refuse the sync (fall back to error path)")
 
+    def test_pre_push_handles_missing_codex_manifest(self):
+        """bin/sync-version.sh silently skips a missing
+        .codex-plugin/plugin.json (single-runtime checkout). The pre-push
+        hook must do the same: only stage .codex-plugin/plugin.json if
+        it exists, otherwise `git add` would error and abort the sync
+        (defeating the whole point of the auto-sync primitive)."""
+        text = PRE_PUSH_PATH.read_text(encoding="utf-8")
+        self.assertIn(".codex-plugin/plugin.json", text,
+                      "pre-push must mention .codex-plugin/plugin.json")
+        # The fix shape: gate the `git add` on file existence so the
+        # auto-sync does not fail in single-runtime checkouts.
+        self.assertIn('if [ -f .codex-plugin/plugin.json ]', text,
+                      "pre-push must check .codex-plugin/plugin.json exists "
+                      "before `git add` (F4 from the maintenance review)")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
