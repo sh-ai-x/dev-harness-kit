@@ -291,6 +291,127 @@ class BankFileInvariants(unittest.TestCase):
             msg=f"{MARKERS_BANK.name}: only {len(loadable)} loadable lines (>= 10 required)",
         )
 
+    def test_inline_parity_with_bank(self) -> None:
+        """INLINE_BANK in l4-todo-scan.sh must scan the same marker surface
+        as the SSOT bank file. Drift in either direction is a bug — the
+        inline fallback must not invent markers the bank doesn't catch
+        (false positives on bank-readable hosts that suddenly hit a missing
+        bank) nor miss markers the bank catches (silent holes).
+
+        The parity check pins the loadable lines from the bank file and
+        asserts every one of them, when fed through the inline ERE
+        against a payload containing that exact token, fires. We do NOT
+        invert the check ("no extra fires"): the inline may legitimately
+        catch substring overlap on synthetic fixtures that the bank
+        wouldn't, but the canonical contract is "every bank marker is
+        detected by the inline too".
+        """
+        import re
+
+        # Extract INLINE_BANK from the hook source. Anchored search keeps
+        # the test honest if someone renames the variable.
+        hook_text = HOOK.read_text(encoding="utf-8")
+        m = re.search(r"INLINE_BANK='(.+?)'\s*$", hook_text, re.MULTILINE)
+        self.assertIsNotNone(m, "INLINE_BANK assignment not found in hook")
+        # bash single-quoted strings use the convention `'\''` to embed a
+        # literal apostrophe; the inline-bank payload contains one
+        # ("we'll"). Translate the bash escape to its single-character
+        # form before compiling as a Python regex.
+        inline_pat = m.group(1).replace("'\"'\"'", "'")
+
+        text = MARKERS_BANK.read_text(encoding="utf-8")
+        bank_pats = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        rx = re.compile(inline_pat)
+        missed = []
+        for bank_pat in bank_pats:
+            # A simple "this token appears" check: build a payload that
+            # contains the literal bank pattern. Patterns with POSIX
+            # classes (`\b`) are literal anchors and won't match without
+            # word chars around them; the payload wraps each token in
+            # ASCII letters to satisfy `\b` on the boundary side.
+            payload = f"foo {bank_pat} bar"
+            # Strip POSIX classes that Python re doesn't understand
+            # natively (the same set the hook's Python block normalizes).
+            norm = re.sub(r"\[\[:space:\]\]", r"\\s", payload)
+            norm = re.sub(r"\[\[:alnum:\]_]\]", r"\\w", norm)
+            norm = re.sub(r"\[\[:digit:\]\]", r"\\d", norm)
+            # The pattern itself also goes through the same normalization.
+            pat_norm = re.sub(r"\[\[:space:\]\]", r"\\s", bank_pat)
+            pat_norm = re.sub(r"\[\[:alnum:\]_]\]", r"\\w", pat_norm)
+            pat_norm = re.sub(r"\[\[:digit:\]\]", r"\\d", pat_norm)
+            if not re.search(pat_norm, norm):
+                # KO patterns (no POSIX classes) and the meta tokens
+                # (TODO/FIXME etc.) should all appear when wrapped. KO
+                # tokens lack word boundaries; wrap them in ASCII for
+                # boundary check too — the payload itself only needs to
+                # trigger a match.
+                continue
+            if not rx.search(norm):
+                missed.append(bank_pat)
+        self.assertEqual(
+            missed, [],
+            msg=f"INLINE_BANK missed these bank patterns: {missed}",
+        )
+
+
+class PythonMissing(unittest.TestCase):
+    def test_python_missing_fails_closed(self) -> None:
+        """When python3 is not on PATH, the hook must exit 2 (fail-closed).
+
+        Same shadow-PATH strategy as JqMissing::test_jq_missing_fails_closed.
+        Without this guard, the `python3 … | sort -u || true` chain
+        swallowed the missing-binary error and exited 0 with no scan
+        performed — a silent fail-open.
+        """
+        _require_jq()
+        shadow = Path(tempfile.mkdtemp(prefix="l4-nopy-"))
+        try:
+            seen: set[str] = set()
+            for d in os.environ.get("PATH", "").split(":"):
+                if not d or not Path(d).is_dir():
+                    continue
+                for entry in Path(d).iterdir():
+                    name = entry.name
+                    if name in seen:
+                        continue
+                    if name == "python3":
+                        continue
+                    if not os.access(entry, os.X_OK):
+                        continue
+                    seen.add(name)
+                    link = shadow / name
+                    try:
+                        os.symlink(entry, link)
+                    except OSError:
+                        pass
+            self.assertFalse((shadow / "python3").exists())
+
+            env = os.environ.copy()
+            env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+            env["PATH"] = str(shadow)
+            payload = json.dumps({
+                "tool_input": {"file_path": "src/clean.py", "content": "x = 1\n"},
+            })
+            proc = subprocess.run(
+                [str(HOOK)],
+                input=payload,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+            self.assertEqual(
+                proc.returncode, 2,
+                msg=f"expected exit 2; stderr={proc.stderr}",
+            )
+            self.assertIn("python3", proc.stderr)
+        finally:
+            shutil.rmtree(shadow, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

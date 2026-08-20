@@ -46,12 +46,21 @@ jobs:
           sparse-checkout: tools/linear_pr_sync.py
 
       - name: sync linear state
+        env:
+          # Move attacker-influenced fields out of the `run:` block. GitHub
+          # Actions substitutes `${{ … }}` textually into the shell source
+          # before bash ever sees it, so a PR title containing `'` could
+          # previously break out of the single-quoted assignment and run
+          # arbitrary code in a step whose env holds `LINEAR_API_KEY`
+          # (env block at lines 39-41 above). env: values are passed via
+          # the step's environment, not spliced into shell source.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BRANCH_FROM_HEAD: ${{ github.event.pull_request.head.ref }}
         run: |
           EVENT='${{ github.event.action }}'
           MERGED='${{ github.event.pull_request.merged }}'
-          BRANCH='${{ github.event.pull_request.head.ref }}'
+          BRANCH="$BRANCH_FROM_HEAD"
           PR_NUMBER='${{ github.event.number }}'
-          PR_TITLE='${{ github.event.pull_request.title }}'
           PR_DRAFT='${{ github.event.pull_request.draft }}'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

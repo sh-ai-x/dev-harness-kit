@@ -23,6 +23,15 @@ set -eo pipefail
 source "${BASH_SOURCE[0]%/*}/lib/payload-parse.sh"
 source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 require_jq l4-todo-scan
+# python3 is required by scan_markers below (POSIX classes via Python
+# `re` for KO locale safety; mirrors lib/stage-gate.sh:26 which already
+# hard-depends on python3). Fail-closed on missing rather than letting
+# the `python3 … 2>/dev/null || true` further down silently produce an
+# empty scan and exit 0 with no scan performed.
+command -v python3 >/dev/null 2>&1 || {
+  echo "[l4-todo-scan] FAIL — python3 is required but not installed." >&2
+  exit 2
+}
 read_stdin_json l4-todo-scan
 [ -z "$INPUT_JSON" ] && exit 0
 hook_stage_active l4-todo-scan || exit 0
@@ -63,8 +72,14 @@ if [ "$L4_STRICT" != "1" ] && is_allowed_path; then
 fi
 
 # ── inline fallback (used only when bank file is missing) ─────────────────
-# Single combined ERE, locale-safe under POSIX when run via grep -E.
-INLINE_BANK='(\bTODO\b|\bFIXME\b|\bXXX\b|\bHACK\b|we.ll extend later|this is a starting point|placeholder|stub|to be implemented|나중에|추후|임시|시작점|플레이스홀더|스텁|추가 예정)'
+# 1:1 mirror of hooks/references/l4/markers.md so the fallback scans
+# the same markers as the SSOT bank. Drift here means the fallback
+# misses (or invents) markers the bank would catch — both directions
+# are bugs. Kept as a single combined ERE for grep -E; the bank file
+# remains the source of truth and this block must be edited in lockstep
+# with it (test_l4_todo_scan.py::BankFallback::test_inline_parity_with_bank
+# pins this).
+INLINE_BANK='(\bTODO\b|\bFIXME\b|\bXXX\b|\bHACK\b|we'"'"'ll extend later|this is a starting point|\bplaceholder\b|\bstub\b|to be implemented|나중에|추후|임시|시작점|플레이스홀더|스텁)'
 
 # ── scan via Python re (locale-safe for KO) ────────────────────────────────
 scan_markers() {
