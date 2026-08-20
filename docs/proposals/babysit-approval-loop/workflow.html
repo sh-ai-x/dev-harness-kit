@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>babysit-pr · Approval-Convergent Workflow</title>
+  <style>
+    :root{--bg:#f6f8fb;--fg:#172033;--muted:#5d6b82;--card:#fff;--line:#d9e1ec;--blue:#2563eb;--blue-soft:#eaf1ff;--green:#087f5b;--green-soft:#e9f8f1;--amber:#a15c00;--amber-soft:#fff4dd;--red:#b42318;--red-soft:#fff0ee;--purple:#7048e8;--purple-soft:#f1edff;--shadow:0 10px 28px rgba(31,45,72,.08)}
+    @media(prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9da7b0;--card:#161b22;--line:#30363d;--blue:#79a8ff;--blue-soft:#17233d;--green:#4fd1a1;--green-soft:#112d26;--amber:#ffbf69;--amber-soft:#332512;--red:#ff8d83;--red-soft:#351916;--purple:#b197fc;--purple-soft:#211b3a;--shadow:0 10px 28px rgba(0,0,0,.25)}}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:28px;max-width:1500px;margin-inline:auto} h1{margin:0;font-size:2rem;letter-spacing:-.03em} h2{font-size:1.1rem;margin:0 0 14px;border-bottom:1px solid var(--line);padding-bottom:9px} p{margin:7px 0}.sub{color:var(--muted);margin:4px 0 22px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin:16px 0;box-shadow:var(--shadow)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:0 0 14px}.pill{padding:4px 10px;border-radius:999px;font-size:.8rem;border:1px solid var(--line)}.pill.blue{background:var(--blue-soft);color:var(--blue)}.pill.green{background:var(--green-soft);color:var(--green)}.pill.amber{background:var(--amber-soft);color:var(--amber)}.pill.red{background:var(--red-soft);color:var(--red)}.pill.purple{background:var(--purple-soft);color:var(--purple)}svg{width:100%;height:auto;display:block}.node{fill:var(--card);stroke:var(--line);stroke-width:1.5}.node.blue{fill:var(--blue-soft);stroke:var(--blue)}.node.green{fill:var(--green-soft);stroke:var(--green)}.node.amber{fill:var(--amber-soft);stroke:var(--amber)}.node.red{fill:var(--red-soft);stroke:var(--red)}.node.purple{fill:var(--purple-soft);stroke:var(--purple)}.t{fill:var(--fg);font-weight:650;font-size:14px}.s{fill:var(--muted);font-size:11px}.edge{stroke:var(--muted);stroke-width:1.8;fill:none;marker-end:url(#arrow)}.edge.dashed{stroke-dasharray:6 5}.edge.green{stroke:var(--green)}.edge.red{stroke:var(--red)}.edge.purple{stroke:var(--purple)}.section-note{color:var(--muted);font-size:.9rem;margin-top:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:900px){body{padding:16px}.grid{grid-template-columns:1fr}}
+    table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}.callout{border-left:4px solid var(--blue);padding:10px 14px;background:var(--blue-soft);border-radius:6px}.footer{color:var(--muted);font-size:.8rem;text-align:center;padding:14px}
+  </style>
+</head>
+<body>
+  <header class="card">
+    <h1>babysit-pr · Approval-Convergent Workflow</h1>
+    <p class="sub">Long-running coordinator that maximizes the probability of reaching <code>APPROVED + required checks green</code> while preserving human approval.</p>
+    <div class="legend"><span class="pill blue">observe / coordinate</span><span class="pill green">verified progress</span><span class="pill amber">wait / external state</span><span class="pill purple">model capability</span><span class="pill red">human or recovery gate</span></div>
+    <div class="callout"><strong>핵심 원칙:</strong> 프로세스를 오래 붙잡는 것이 아니라, 상태·증거·cursor를 저장하고 이벤트마다 재개한다. 모델이 발전하면 판단 계층만 교체하고 approval·verification·ownership 불변식은 유지한다.</div>
+  </header>
+
+  <section class="card">
+    <h2>1. Runtime lifecycle · 하나의 PR을 승인 상태로 수렴시키는 장기 실행 루프</h2>
+    <svg viewBox="0 0 1280 560" role="img" aria-label="Runtime lifecycle">
+      <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+      <path class="edge" d="M150 92 H250"/><path class="edge" d="M390 92 H490"/><path class="edge" d="M630 92 H730"/><path class="edge" d="M870 92 H970"/><path class="edge" d="M1110 92 V180 H1040"/>
+      <path class="edge green" d="M970 230 H850"/><path class="edge" d="M730 230 H610"/><path class="edge" d="M490 230 H370"/><path class="edge" d="M250 230 H150"/>
+      <path class="edge dashed amber" d="M1040 300 V390 H1120"/><path class="edge dashed" d="M1120 450 H1070 V510 H150 V300"/>
+      <path class="edge red" d="M610 300 V390 H680"/><path class="edge purple" d="M490 300 V390 H420"/>
+      <rect class="node blue" x="30" y="55" width="120" height="74" rx="12"/><text class="t" x="90" y="84" text-anchor="middle">WAKE</text><text class="s" x="90" y="105" text-anchor="middle">event / resume</text>
+      <rect class="node blue" x="250" y="55" width="140" height="74" rx="12"/><text class="t" x="320" y="84" text-anchor="middle">SNAPSHOT</text><text class="s" x="320" y="105" text-anchor="middle">fresh SHA + checks</text>
+      <rect class="node blue" x="490" y="55" width="140" height="74" rx="12"/><text class="t" x="560" y="84" text-anchor="middle">PROJECT</text><text class="s" x="560" y="105" text-anchor="middle">frontier + distance</text>
+      <rect class="node purple" x="730" y="55" width="140" height="74" rx="12"/><text class="t" x="800" y="84" text-anchor="middle">DECIDE</text><text class="s" x="800" y="105" text-anchor="middle">capability contract</text>
+      <rect class="node green" x="970" y="55" width="140" height="74" rx="12"/><text class="t" x="1040" y="84" text-anchor="middle">ACT</text><text class="s" x="1040" y="105" text-anchor="middle">one bounded action</text>
+      <rect class="node green" x="30" y="193" width="120" height="74" rx="12"/><text class="t" x="90" y="222" text-anchor="middle">VERIFY</text><text class="s" x="90" y="243" text-anchor="middle">focused + full</text>
+      <rect class="node green" x="250" y="193" width="140" height="74" rx="12"/><text class="t" x="320" y="222" text-anchor="middle">PERSIST</text><text class="s" x="320" y="243" text-anchor="middle">event + evidence</text>
+      <rect class="node blue" x="490" y="193" width="140" height="74" rx="12"/><text class="t" x="560" y="222" text-anchor="middle">RECLASSIFY</text><text class="s" x="560" y="243" text-anchor="middle">fixed / changed / regressed</text>
+      <rect class="node blue" x="730" y="193" width="140" height="74" rx="12"/><text class="t" x="800" y="222" text-anchor="middle">DISTANCE</text><text class="s" x="800" y="243" text-anchor="middle">approval vector</text>
+      <rect class="node green" x="970" y="193" width="140" height="74" rx="12"/><text class="t" x="1040" y="222" text-anchor="middle">READY?</text><text class="s" x="1040" y="243" text-anchor="middle">all gates explicit</text>
+      <rect class="node purple" x="350" y="390" width="140" height="74" rx="12"/><text class="t" x="420" y="419" text-anchor="middle">REANALYZE</text><text class="s" x="420" y="440" text-anchor="middle">new context epoch</text>
+      <rect class="node red" x="610" y="390" width="140" height="74" rx="12"/><text class="t" x="680" y="419" text-anchor="middle">RECOVERY</text><text class="s" x="680" y="440" text-anchor="middle">policy / secret / conflict</text>
+      <rect class="node amber" x="1050" y="390" width="140" height="74" rx="12"/><text class="t" x="1120" y="419" text-anchor="middle">WAIT</text><text class="s" x="1120" y="440" text-anchor="middle">CI / reviewer event</text>
+      <rect class="node red" x="970" y="490" width="160" height="50" rx="12"/><text class="t" x="1050" y="520" text-anchor="middle">HUMAN GATE</text>
+      <text class="s" x="1040" y="338" text-anchor="middle">all required checks green</text><text class="s" x="800" y="350" text-anchor="middle">new evidence?</text>
+    </svg>
+    <p class="section-note">`WAIT_FOR_APPROVAL`은 정상적인 durable 상태다. 승인되지 않았다고 같은 코드를 반복 수정하지 않는다. 새 review/push/check 이벤트가 들어오면 fresh snapshot부터 재개한다.</p>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>2. Evidence frontier · RCA loop</h2>
+      <svg viewBox="0 0 620 410" role="img" aria-label="Evidence frontier loop">
+        <defs><marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+        <path class="edge" d="M160 75 H280"/><path class="edge" d="M400 75 V155"/><path class="edge" d="M340 215 H220"/><path class="edge" d="M100 215 V295"/><path class="edge green" d="M160 335 H280"/><path class="edge purple" d="M400 335 V255"/>
+        <rect class="node blue" x="30" y="40" width="130" height="70" rx="11"/><text class="t" x="95" y="68" text-anchor="middle">OBSERVE</text><text class="s" x="95" y="89" text-anchor="middle">fresh evidence</text>
+        <rect class="node purple" x="280" y="40" width="120" height="70" rx="11"/><text class="t" x="340" y="68" text-anchor="middle">HYPOTHESES</text><text class="s" x="340" y="89" text-anchor="middle">causal ledger</text>
+        <rect class="node blue" x="280" y="155" width="120" height="70" rx="11"/><text class="t" x="340" y="183" text-anchor="middle">EXPERIMENT</text><text class="s" x="340" y="204" text-anchor="middle">max information gain</text>
+        <rect class="node amber" x="30" y="180" width="130" height="70" rx="11"/><text class="t" x="95" y="208" text-anchor="middle">REPRODUCE</text><text class="s" x="95" y="229" text-anchor="middle">before editing</text>
+        <rect class="node green" x="30" y="295" width="130" height="70" rx="11"/><text class="t" x="95" y="323" text-anchor="middle">VERIFY</text><text class="s" x="95" y="344" text-anchor="middle">expected signal</text>
+        <rect class="node green" x="280" y="295" width="120" height="70" rx="11"/><text class="t" x="340" y="323" text-anchor="middle">UPDATE</text><text class="s" x="340" y="344" text-anchor="middle">frontier moves</text>
+      </svg>
+      <p class="section-note">수정이 아니라 “다음 실험이 어떤 원인을 제거하는가”를 기준으로 루프를 선택한다. 동일 실패라도 가설이 제거되면 진전이다.</p>
+    </section>
+
+    <section class="card">
+      <h2>3. Context epochs · future LLM handoff</h2>
+      <svg viewBox="0 0 620 410" role="img" aria-label="Context epoch flow">
+        <defs><marker id="arrow3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+        <path class="edge" d="M150 80 H270"/><path class="edge" d="M390 80 H500"/><path class="edge dashed" d="M500 125 V220 H390"/><path class="edge purple" d="M270 260 H150"/><path class="edge" d="M150 305 H270"/><path class="edge green" d="M390 305 H500"/>
+        <rect class="node blue" x="30" y="45" width="120" height="70" rx="11"/><text class="t" x="90" y="73" text-anchor="middle">EVENT</text><text class="s" x="90" y="94" text-anchor="middle">new SHA / review</text>
+        <rect class="node blue" x="270" y="45" width="120" height="70" rx="11"/><text class="t" x="330" y="73" text-anchor="middle">EPOCH +1</text><text class="s" x="330" y="94" text-anchor="middle">invalidate affected RCA</text>
+        <rect class="node amber" x="500" y="45" width="100" height="70" rx="11"/><text class="t" x="550" y="73" text-anchor="middle">ARCHIVE</text><text class="s" x="550" y="94" text-anchor="middle">keep evidence</text>
+        <rect class="node purple" x="270" y="225" width="120" height="70" rx="11"/><text class="t" x="330" y="253" text-anchor="middle">FRESH MODEL</text><text class="s" x="330" y="274" text-anchor="middle">compact frontier only</text>
+        <rect class="node blue" x="30" y="270" width="120" height="70" rx="11"/><text class="t" x="90" y="298" text-anchor="middle">REANALYZE</text><text class="s" x="90" y="319" text-anchor="middle">independent RCA</text>
+        <rect class="node green" x="500" y="270" width="100" height="70" rx="11"/><text class="t" x="550" y="298" text-anchor="middle">RESUME</text><text class="s" x="550" y="319" text-anchor="middle">capability-gated</text>
+      </svg>
+      <p class="section-note">미래 LLM은 diagnosis·context planning·recovery를 개선할 수 있지만, stale evidence·verification·human approval 규칙을 대체하지 않는다.</p>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>4. Stepwise adoption · 안전한 도입 순서</h2>
+    <svg viewBox="0 0 1280 250" role="img" aria-label="Stepwise adoption roadmap">
+      <defs><marker id="arrow4" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+      <path class="edge" d="M170 105 H215"/><path class="edge" d="M370 105 H415"/><path class="edge" d="M570 105 H615"/><path class="edge" d="M770 105 H815"/><path class="edge" d="M970 105 H1015"/><path class="edge green" d="M1170 105 H1210"/>
+      <g><rect class="node blue" x="20" y="65" width="150" height="80" rx="12"/><text class="t" x="95" y="95" text-anchor="middle">S0</text><text class="s" x="95" y="117" text-anchor="middle">replay-only</text></g>
+      <g><rect class="node blue" x="220" y="65" width="150" height="80" rx="12"/><text class="t" x="295" y="95" text-anchor="middle">S1</text><text class="s" x="295" y="117" text-anchor="middle">durable observe</text></g>
+      <g><rect class="node purple" x="420" y="65" width="150" height="80" rx="12"/><text class="t" x="495" y="95" text-anchor="middle">S2</text><text class="s" x="495" y="117" text-anchor="middle">RCA + context</text></g>
+      <g><rect class="node green" x="620" y="65" width="150" height="80" rx="12"/><text class="t" x="695" y="95" text-anchor="middle">S3</text><text class="s" x="695" y="117" text-anchor="middle">bounded repair</text></g>
+      <g><rect class="node green" x="820" y="65" width="150" height="80" rx="12"/><text class="t" x="895" y="95" text-anchor="middle">S4</text><text class="s" x="895" y="117" text-anchor="middle">approval readiness</text></g>
+      <g><rect class="node amber" x="1020" y="65" width="150" height="80" rx="12"/><text class="t" x="1095" y="95" text-anchor="middle">S5</text><text class="s" x="1095" y="117" text-anchor="middle">event-first</text></g>
+      <g><rect class="node purple" x="1210" y="65" width="65" height="80" rx="12"/><text class="t" x="1242" y="95" text-anchor="middle">S6</text><text class="s" x="1242" y="117" text-anchor="middle">evolve</text></g>
+      <text class="s" x="640" y="190" text-anchor="middle">각 단계는 artifact + exit gate + rollback을 가진다. 다음 단계가 실패해도 이전 단계의 durable state로 복귀한다.</text>
+    </svg>
+  </section>
+
+  <section class="card">
+    <h2>5. Approval-distance vector · 완료 판정</h2>
+    <table><thead><tr><th>Component</th><th>수렴 조건</th><th>자동화 권한</th></tr></thead><tbody>
+      <tr><td>Required checks</td><td>terminal-green: success / skipped / neutral</td><td>재실행·수정·검증 가능</td></tr>
+      <tr><td>Review findings</td><td>resolved 또는 명시적 dismissal</td><td>수정 및 evidence reply 가능</td></tr>
+      <tr><td>Reproduction / verification</td><td>focused + full verification 통과</td><td>exit code와 test evidence 필수</td></tr>
+      <tr><td>Policy / ownership</td><td>예외 없음 또는 human escalation</td><td>secret·merge는 자동 처리 금지</td></tr>
+      <tr><td>Human decision</td><td><strong>APPROVED</strong></td><td>사람 reviewer만 결정</td></tr>
+    </tbody></table>
+    <p class="section-note">최종 성공은 <code>APPROVED + required checks green</code>이다. approval distance가 0에 가까워졌다는 모델 판단만으로 approval을 생성하지 않는다.</p>
+  </section>
+  <div class="footer">Generated for the babysit-pr approval-convergent proposal · click/zoom is native browser SVG scaling</div>
+</body>
+</html>
