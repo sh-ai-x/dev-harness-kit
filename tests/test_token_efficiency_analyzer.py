@@ -3141,11 +3141,17 @@ class TestSnapshotBuilder(unittest.TestCase):
         derivations happen exactly once."""
         from token_efficiency_analyzer import build_analysis_snapshot
 
+        # Timestamps built relative to now so the fixtures stay inside the
+        # 30-day window regardless of when the suite runs (calendar-rot fix,
+        # same pattern as #601 / #658).
+        ts_main = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        ts_feat = (datetime.now(timezone.utc) - timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
         # Stage two minimal sessions, one on main and one on feat-x.
         logs = self.tmpdir / "logs" / "claude-code"
         logs.mkdir(parents=True)
         main_session = (
-            '{"timestamp":"2026-07-21T10:00:00.000Z",'
+            f'{{"timestamp":"{ts_main}",'
             '"message":{"role":"assistant","model":"claude-sonnet-5",'
             '"content":[{"type":"text","text":"ok"}],'
             '"usage":{"input_tokens":100,"output_tokens":10,'
@@ -3154,7 +3160,7 @@ class TestSnapshotBuilder(unittest.TestCase):
             '"cwd":"/tmp/snap-repo","gitBranch":"main"}\n'
         )
         feat_session = (
-            '{"timestamp":"2026-07-21T11:00:00.000Z",'
+            f'{{"timestamp":"{ts_feat}",'
             '"message":{"role":"assistant","model":"claude-sonnet-5",'
             '"content":[{"type":"text","text":"ok"}],'
             '"usage":{"input_tokens":200,"output_tokens":20,'
