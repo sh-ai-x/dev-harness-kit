@@ -1,14 +1,24 @@
 # Hooks (SSOT)
 
-> Matrix state lives in `.dev-kit/.active-hooks.json` (MUST-13).
+> The active-hooks state lives in `.dev-kit/.active-hooks.json` (MUST-13).
 > Shells live in `hooks/*.sh` and are wired via `hooks/hooks.json`.
-> The matrix file is **auto-regenerated on every SessionStart** by
-> `hooks/session-start-check.sh` (which delegates to
-> `tools/regenerate_active_hooks.py`). The script walks `hooks/hooks.json`
-> and emits `{schema_version, generated_at, hooks: {<event>: [{name, path, when, fail_closed}]}}`.
-> Regeneration is cheap, idempotent (sorted keys + sorted entries), and
-> best-effort (silent skip when `python3` is missing or `hooks/hooks.json`
-> is unreadable). Schema version: `1.0.0`.
+> Two writers share the file via namespaced top-level keys:
+>   - `tools/regenerate_active_hooks.py` owns `schema_version`,
+>     `generated_at`, and `events` (event-keyed snapshot derived from
+>     `hooks/hooks.json`; one entry per `{name, path, when, fail_closed}`).
+>     `fail_closed` is read from the explicit `fail_closed: true|false`
+>     field on each `hooks/hooks.json` entry (no inference from script
+>     headers — the explicit field is the SSOT).
+>   - `lib/active_hooks_codec.py` owns `matrix` (stage-keyed
+>     activation grid) and `override` (override flags). The codec's
+>     `ensure_matrix` writes this slice on a fresh checkout.
+> The regen tool is run on every `SessionStart` by
+> `hooks/session-start-check.sh`. It preserves any pre-existing
+> `matrix` / `override` slice verbatim so neither writer ever clobbers
+> the other's slice — the two schemas coexist on the same file.
+> Regeneration is cheap, idempotent (sorted keys + sorted entries),
+> and best-effort (silent skip when `python3` is missing or
+> `hooks/hooks.json` is unreadable). Schema version: `1.0.0`.
 
 ## Hook matrix (per stage)
 

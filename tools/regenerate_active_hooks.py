@@ -8,23 +8,36 @@ wired for which event. Called from `hooks/session-start-check.sh` so the
 matrix snapshot is always regenerated before any session-start check
 that might depend on it.
 
-Output shape (MUST-13 SSOT, see `hooks/index.md`):
+Output shape (MUST-13 SSOT, see `hooks/index.md`). Schema-coexistence
+(issue #676): the matrix writer (`lib/active_hooks_codec.py`) stores its
+own slice under the top-level `matrix` key. To keep both slices on disk
+without trampling each other, this tool writes the regen slice under
+`events` and preserves any pre-existing `matrix` / `override` slice on
+re-run. The two writers now share one file with two namespaced slices.
 
     {
       "schema_version": "1.0.0",
       "generated_at": "2026-08-19T12:34:56+00:00",
-      "hooks": {
+      "events": {
         "<event_name>": [
           {"name": "<hook_basename>",
            "path": "hooks/<file>.sh",
-           "when": "<matcher>",          // or "" when absent
+           "when": "<matcher>",
            "fail_closed": true|false}
         ]
-      }
+      },
+      "matrix":   { ...codec slice, preserved on re-run...  },
+      "override": { ...codec slice, preserved on re-run...  }
     }
+
+`fail_closed` is read from the explicit `fail_closed: true|false` field
+that hooks.json carries on every entry (mirrored from .codex-plugin).
+The script-text regex detection was removed because it drifted across
+files; the explicit field is the SSOT.
 
 Idempotency: re-running with an unchanged `hooks/hooks.json` produces
 byte-identical output (sorted events, sorted hook entries, sorted keys).
+The codec slice is preserved verbatim from the existing file.
 
 Exit codes:
   0  on success (file created or rewritten)
@@ -45,34 +58,20 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-# Make `lib/` importable when invoked from any cwd (mirrors the bootstrap
-# tools/ — `python3 tools/regenerate_active_hooks.py` works from the repo
-# root without setting PYTHONPATH).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
-from atomic import atomic_write_json  # noqa: E402
+from atomic import atomic_write_json, read_json_or_default  # noqa: E402
 
 SCHEMA_VERSION = "1.0.0"
+
+# Top-level keys owned by this tool. The codec-owned keys (`matrix`,
+# `override`) are preserved verbatim across re-runs so the two writers
+# coexist on disk.
+_REGEN_OWNED_KEYS = ("schema_version", "generated_at", "events")
 
 # Path-prefix tokens we strip from a hook command string. The harness
 # substitutes the env var at runtime; we only care about the script path.
 _ENV_PREFIX_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/")
-
-# Detects the fail mode from a hook script's header comments. Most hooks
-# document their behaviour with a line like
-#   `# Fails closed (exit 2 with deny JSON) when jq is missing.`
-# We pattern-match the comment headers rather than the runtime code so
-# the SSOT stays text-only (avoids importing shell scripts).
-_FAIL_CLOSED_PATTERNS = (
-    re.compile(r"fail[ -]closed", re.IGNORECASE),
-    re.compile(r"fails closed", re.IGNORECASE),
-)
-_FAIL_OPEN_PATTERNS = (
-    re.compile(r"always exit 0", re.IGNORECASE),
-    re.compile(r"fails open", re.IGNORECASE),
-    re.compile(r"never blocks", re.IGNORECASE),
-    re.compile(r"non[- ]blocking", re.IGNORECASE),
-)
 
 
 def _utc_now_iso() -> str:
@@ -123,36 +122,6 @@ def _derive_name(path: str) -> str:
     return base
 
 
-def _detect_fail_closed(script_text: str) -> bool:
-    """Best-effort: True iff the hook script's header says fail-closed.
-
-    Order matters: explicit "fail-closed" wins over generic
-    "non-blocking" wording because some hooks (e.g. `sub-agent-handoff`)
-    are both advisory AND fail-closed on missing jq — see the comment
-    in `sub-agent-handoff.sh`. Default is True (deny on error) because
-    the hook layer leans toward hard blocks.
-    """
-    # Only scan the leading comment block (first 50 lines) — these
-    # markers live in the file header, not in the body.
-    header = "\n".join(script_text.splitlines()[:50])
-    for pat in _FAIL_CLOSED_PATTERNS:
-        if pat.search(header):
-            return True
-    for pat in _FAIL_OPEN_PATTERNS:
-        if pat.search(header):
-            return False
-    return True  # default: fail-closed
-
-
-def _read_hook_script(root: Path, rel_path: str) -> str:
-    """Return the script body for fail-mode detection (best-effort)."""
-    full = root / rel_path
-    try:
-        return full.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
 def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]]:
     """Read hooks/hooks.json and emit the event -> entries mapping.
 
@@ -160,6 +129,11 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
     entries derived from the matcher+hooks lists. Hooks without a
     matcher (`SessionStart`, `UserPromptSubmit`, `Stop`) get `when=""`
     — the harness fires them unconditionally on those events.
+
+    `fail_closed` MUST be present on every entry (explicit field, no
+    inference). Missing entries raise SystemExit(1) — the explicit
+    field is the SSOT and silent defaults would re-introduce the
+    drift the field replaced.
     """
     raw = json.loads(hooks_json_path.read_text(encoding="utf-8"))
     hooks_section = raw.get("hooks", {})
@@ -176,39 +150,71 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
                 if not cmd:
                     continue
                 rel = _normalize_path(cmd)
+                if "fail_closed" not in hook:
+                    print(
+                        f"regenerate_active_hooks: hooks/hooks.json entry "
+                        f"{event}/{rel} is missing explicit `fail_closed` "
+                        f"field. Add `\"fail_closed\": true|false` to the "
+                        f"entry before regenerating.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                if not isinstance(hook["fail_closed"], bool):
+                    print(
+                        f"regenerate_active_hooks: hooks/hooks.json entry "
+                        f"{event}/{rel} has non-boolean `fail_closed` "
+                        f"value: {hook['fail_closed']!r}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
                 entries.append({
                     "name": _derive_name(rel),
                     "path": rel,
                     "when": matcher,
+                    "fail_closed": hook["fail_closed"],
                 })
         out[event] = entries
     return out
 
 
-def _build_payload(root: Path, hooks_by_event: Dict[str, List[Dict[str, object]]]) -> Dict[str, object]:
-    """Attach fail-closed flags (script-text introspection) and wrap."""
+def _build_payload(
+    root: Path,
+    hooks_by_event: Dict[str, List[Dict[str, object]]],
+    existing: Dict[str, object],
+) -> Dict[str, object]:
+    """Attach regen-owned keys while preserving codec-owned keys.
+
+    The codec slice (`matrix`, `override`) is preserved verbatim from
+    the on-disk file when present. If the file does not yet exist,
+    the codec keys are omitted (a fresh `ensure_matrix` call will
+    populate them on the next read).
+    """
+    payload: Dict[str, object] = {}
+    # Codec-owned slice — preserve verbatim when present.
+    if isinstance(existing, dict):
+        for key in ("matrix", "override"):
+            if key in existing:
+                payload[key] = existing[key]
+    # Regen-owned slice — always overwrite.
+    payload["schema_version"] = SCHEMA_VERSION
+    payload["generated_at"] = _utc_now_iso()
     enriched: Dict[str, List[Dict[str, object]]] = {}
     for event, entries in sorted(hooks_by_event.items()):
-        out_entries: List[Dict[str, object]] = []
-        for entry in entries:
-            rel_path = entry["path"]
-            script_text = _read_hook_script(root, rel_path)
-            entry_copy = dict(entry)
-            entry_copy["fail_closed"] = _detect_fail_closed(script_text)
-            out_entries.append(entry_copy)
         # Deterministic ordering — sort by (name, path, when) so the
         # bytes are stable across re-runs.
-        out_entries.sort(key=lambda e: (e["name"], e["path"], e["when"]))
-        enriched[event] = out_entries
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": _utc_now_iso(),
-        "hooks": enriched,
-    }
+        sorted_entries = sorted(entries, key=lambda e: (e["name"], e["path"], e["when"]))
+        enriched[event] = sorted_entries
+    payload["events"] = enriched
+    return payload
 
 
 def regenerate(root: Path) -> Path:
-    """Walk hooks/hooks.json and write .dev-kit/.active-hooks.json. Returns the path."""
+    """Walk hooks/hooks.json and write .dev-kit/.active-hooks.json. Returns the path.
+
+    Reads the existing file (if any) so the codec-owned `matrix` /
+    `override` slice is preserved across re-runs. Both writers now
+    share the same file via namespaced slices.
+    """
     hooks_json = root / "hooks" / "hooks.json"
     if not hooks_json.is_file():
         print(
@@ -217,8 +223,9 @@ def regenerate(root: Path) -> Path:
         )
         sys.exit(1)
     hooks_by_event = _walk_hooks_json(hooks_json)
-    payload = _build_payload(root, hooks_by_event)
     target = root / ".dev-kit" / ".active-hooks.json"
+    existing = read_json_or_default(target, {})
+    payload = _build_payload(root, hooks_by_event, existing)
     atomic_write_json(target, payload)
     return target
 

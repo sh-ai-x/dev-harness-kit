@@ -9,13 +9,15 @@ that consumes the matrix sees a fresh snapshot.
 This test pins:
 
   1. Regenerating from scratch produces a JSON file with the right
-     schema (`schema_version`, `generated_at`, `hooks` keyed by event
+     schema (`schema_version`, `generated_at`, `events` keyed by event
      with `{name, path, when, fail_closed}` entries).
   2. `schema_version` is a string.
-  3. The `hooks` object has at least one entry (sanity — the repo
+  3. The `events` object has at least one entry (sanity — the repo
      currently wires PreToolUse / PostToolUse / SessionStart / Stop).
   4. Re-running the regeneration produces a deterministic output
      (excluding the volatile `generated_at` timestamp).
+  5. A fresh regen refuses to run when `hooks/hooks.json` entries are
+     missing the explicit `fail_closed` field (issue #676 LLM judge).
 
 The test runs `tools/regenerate_active_hooks.py` against a copy of
 `hooks/hooks.json` so we don't need the whole plugin checkout. This
@@ -105,17 +107,17 @@ class TestActiveHooksRegeneration(unittest.TestCase):
         parsed = datetime.fromisoformat(ts)
         self.assertIsNotNone(parsed.tzinfo, "timestamp must carry a tz offset")
 
-    def test_hooks_object_has_at_least_one_entry(self):
-        """Sanity: hooks object MUST contain at least one event entry."""
+    def test_events_object_has_at_least_one_entry(self):
+        """Sanity: events object MUST contain at least one event entry."""
         target = self.root / ".dev-kit" / ".active-hooks.json"
         _run_regen(self.root)
         data = json.loads(target.read_text(encoding="utf-8"))
-        self.assertIn("hooks", data)
-        self.assertIsInstance(data["hooks"], dict)
+        self.assertIn("events", data)
+        self.assertIsInstance(data["events"], dict)
         self.assertGreaterEqual(
-            len(data["hooks"]),
+            len(data["events"]),
             1,
-            "hooks object must describe at least one event's wiring",
+            "events object must describe at least one event's wiring",
         )
 
     def test_hook_entry_shape(self):
@@ -124,7 +126,7 @@ class TestActiveHooksRegeneration(unittest.TestCase):
         _run_regen(self.root)
         data = json.loads(target.read_text(encoding="utf-8"))
         required = {"name", "path", "when", "fail_closed"}
-        for event, entries in data["hooks"].items():
+        for event, entries in data["events"].items():
             self.assertIsInstance(entries, list, f"{event} entries must be a list")
             self.assertGreater(len(entries), 0, f"{event} must have at least one hook")
             for entry in entries:

@@ -75,17 +75,21 @@ def ensure_matrix(project_root: Path) -> Dict:
     """Initialize .dev-kit/.active-hooks.json with default matrix if missing.
 
     Caller MUST intend to write — `load_matrix` is the read-only path.
+
+    Preserves any slice owned by the regen tool (events, generated_at,
+    schema_version) so the two writers can coexist on the same file
+    (issue #676).
     """
     path = project_root / ".dev-kit" / ".active-hooks.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        "schema_version": "1.0.0",
-        "matrix": DEFAULT_MATRIX,
-        "override": {
-            "disabled_hooks": [],
-            "strict_mode": False,
-            "env_override": {},
-        },
+    existing = read_json_or_default(path, {})
+    data: Dict = dict(existing) if isinstance(existing, dict) else {}
+    data["schema_version"] = "1.0.0"
+    data["matrix"] = copy.deepcopy(DEFAULT_MATRIX)
+    data["override"] = {
+        "disabled_hooks": [],
+        "strict_mode": False,
+        "env_override": {},
     }
     atomic_write_json(path, data)
     return data

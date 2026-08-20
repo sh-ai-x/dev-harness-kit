@@ -42,9 +42,20 @@ fi
 # This MUST run before any check that depends on the matrix. Cheap
 # (Python over hooks/hooks.json, ~50ms) and idempotent. Best-effort:
 # if python3 or hooks/hooks.json is missing, skip silently — this hook
-# never blocks.
+# never blocks. Regen failures are routed to .dev-kit/logs/ (the dev-kit
+# error sink, alongside hand-off/) so the next SessionStart or
+# /dev-kit:hook-doctor has something to read instead of a silent
+# /dev/null swallowing.
 if command -v python3 >/dev/null 2>&1; then
-  python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$HOOK_CWD" --quiet 2>/dev/null || true
+  DEV_KIT_LOGS="${HOOK_CWD}/.dev-kit/logs"
+  if [ ! -d "$DEV_KIT_LOGS" ] && command -v mkdir >/dev/null 2>&1; then
+    mkdir -p "$DEV_KIT_LOGS" 2>/dev/null || DEV_KIT_LOGS=""
+  fi
+  if [ -d "$DEV_KIT_LOGS" ]; then
+    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$HOOK_CWD" --quiet 2>>"$DEV_KIT_LOGS/session-start-check.log" || true
+  else
+    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$HOOK_CWD" --quiet 2>/dev/null || true
+  fi
 fi
 
 # Discriminator: already populated by the preamble.
