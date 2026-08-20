@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approval-convergent long-running babysit-pr loop</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Approval-convergent long-running babysit-pr loop</h1>
+<p class="meta">2026-08-20 · <span class="tag tag-info">ready-for-review</span></p>
+<div class="tags"><span class="tag tag-info">babysit-pr</span><span class="tag tag-info">coordinator</span><span class="tag tag-info">event-driven</span><span class="tag tag-info">rca</span><span class="tag tag-info">llm-capability</span><span class="tag tag-info">human-approval</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and scope</a></li><li><a href="#sec-1">Durable and event-driven coordinator</a></li><li><a href="#sec-2">Evidence frontier and RCA contract</a></li><li><a href="#sec-3">Model capability contract</a></li><li><a href="#sec-4">Context epochs and reanalysis</a></li><li><a href="#sec-5">Approval distance and human approval boundary</a></li><li><a href="#sec-6">Rollout phases</a></li><li><a href="#sec-7">Tests and evaluation</a></li><li><a href="#sec-8">Pros, cons, and open acceptance criteria</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Decision and scope</h2>
+<p>Adopt a durable coordinator as the long-running owner of one PR lifecycle. A command invocation and GitHub webhook are both wake-up events into the same state machine. This proposal changes documentation only. The future implementation must preserve one-PR ownership, worktree isolation, bounded repair attempts, fail-closed verdict handling, and the existing human merge boundary.</p>
+<p>Exact future implementation file set (not changed by this proposal PR):</p>
+<ul><li><code>docs/workflows/unified-repair-coordinator.md</code> — durable state, event, lease, and transition contract.</li><li><code>skills/babysit-pr/SKILL.md</code> — operator-facing wake/resume behavior and approval packet contract.</li><li><code>lib/babysit_pr_reliability.py</code> — pure projections for evidence frontier, approval distance, epochs, and deduplication.</li><li><code>tests/test_babysit_pr_reliability.py</code> — deterministic state-machine and projection tests.</li><li><code>tests/test_babysit_pr_cli.py</code> and <code>tests/test_babysit_pr_local_cli.py</code> — human-gate and resume integration tests.</li><li><code>tests/test_babysit_approval_loop.py</code> — event replay, restart, capability, and evaluation fixtures.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-1">Durable and event-driven coordinator</h2>
+<p>Persist a coordinator record keyed by <code>parent_pr</code> with <code>current_pr</code>, <code>attempt</code>, <code>head_sha</code>, <code>cursor</code>, <code>lease</code>, <code>context_epoch</code>, <code>approval_distance</code>, <code>failure_signature</code>, <code>frontier</code>, <code>hypotheses</code>, and <code>last_action</code>. Persist every transition as an append-only event with <code>event_id</code>, provider event id, observed SHA, timestamp, actor, evidence references, model contract, and outcome. Materialized state is a deterministic projection of events; a restart replays from the last acknowledged cursor.</p>
+<p>Wake sources are review submitted/edited/dismissed, check completed or workflow rerun, push, PR reopened/closed, lease expiry, scheduled reconciliation, and an explicit operator resume. Deduplicate provider retries by <code>(provider, event_id)</code> and work claims by <code>(parent_pr, head_sha, context_epoch, failure_signature, action_class)</code>. A lease prevents two workers from mutating one PR; expiry creates a recovery event rather than silently taking over.</p>
+<p>The coordinator waits on events, not an unbounded model turn. Reconciliation may poll only to repair a missing event or stale cursor, and every reconciliation result is recorded as an observed event.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Evidence frontier and RCA contract</h2>
+<p>The evidence frontier is the set of newest, causally relevant observations that constrain the next action: PR head SHA, changed files, review findings, check conclusions and run ids, failing-log excerpts, reproduction output, local verification, independent review, and human decisions. Each item has a stable <code>evidence_id</code>, source, observed SHA, context epoch, freshness, and typed status (<code>observed</code>, <code>reproduced</code>, <code>contradicted</code>, <code>verified</code>, or <code>superseded</code>).</p>
+<p>RCA is a hypothesis ledger, not a prose diagnosis. Each hypothesis records the failure signature, causal claim, supporting evidence ids, disconfirming evidence ids, reproduction command/result, proposed minimal change, and confidence rationale. A worker may act only when the frontier contains a reproducible blocker and one selected hypothesis. After the action, the coordinator requires a new observation and classifies the result as <code>fixed</code>, <code>changed</code>, <code>unchanged</code>, <code>regressed</code>, or <code>inconclusive</code>. <code>unchanged</code> or <code>inconclusive</code> cannot advance approval distance and counts toward the bounded no-progress policy.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Model capability contract</h2>
+<p>Models are replaceable workers behind a versioned contract. Before dispatch, the coordinator records <code>provider</code>, <code>model</code>, <code>capability_version</code>, context budget, tool permissions, and evaluator result. The worker must be able to: consume the compact frontier without inventing missing evidence; state one RCA hypothesis; reproduce before editing; make one bounded patch; run the required verification; emit structured evidence ids and exit codes; and stop with <code>needs_human</code> when policy, secrets, ownership, or contradictory evidence is encountered.</p>
+<p>Capability levels are operational, not brand names: <code>observe</code>, <code>reproduce</code>, <code>patch</code>, <code>verify</code>, <code>independent-review</code>, and <code>multi-step-recovery</code>. A newer model may claim a higher level only after the replay/evaluation suite meets the relevant thresholds for evidence grounding, regression avoidance, structured-output validity, and abstention. Capability improvement changes worker selection and context compression, never the approval boundary or the meaning of a passing human review.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Context epochs and reanalysis</h2>
+<p>Increment <code>context_epoch</code> whenever the PR head SHA changes, a review finding is added/edited/dismissed, a check run id or conclusion changes, a workflow definition changes, a human decision arrives, or a capability contract changes. Epoch changes invalidate hypotheses and planned patches whose evidence was observed in an older causal world; immutable historical evidence remains available for comparison.</p>
+<p>On wake, the coordinator computes the frontier delta, replays only affected hypotheses, and asks the worker for a fresh compact analysis. A no-op event may update the cursor without reanalysis. A new epoch always requires a fresh snapshot immediately before action, matching the current re-verification rule in <code>skills/babysit-pr/SKILL.md:198-234</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Approval distance and human approval boundary</h2>
+<p>Approval distance is a typed vector, not a single optimistic score:</p>
+<p><code>D = (required_checks, unresolved_findings, reproducibility, verification, independent_review, policy_exceptions, human_decision)</code>.</p>
+<p>The coordinator may advance only when a component moves monotonically toward its terminal state: required checks become terminal-green, findings become resolved or explicitly dismissed, the root cause is reproduced, focused and full verification pass, independent review is recorded, policy exceptions are zero or explicitly escalated, and human decision is <code>approved</code>. A new SHA or finding can increase distance by reopening affected components. The approval packet contains the vector history, frontier, RCA ledger, diff/commit SHAs, command exit codes, and unresolved risks.</p>
+<p>Automation may diagnose, patch, verify, comment, create bounded repair PRs, and prepare the packet. Only a human reviewer with the required ownership context may approve the PR for merge. The coordinator must refuse to interpret model output, missing verdicts, stale approvals, or <code>approval_distance</code> reaching zero as authorization to merge; <code>gh pr merge</code> remains outside the implementation.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Rollout phases</h2>
+<p>Phase 0 — replay-only shadow mode: ingest existing babysit events and synthetic GitHub events, project state, calculate distance/frontier/epochs, and compare with current polling decisions. No edits or comments.</p>
+<p>Phase 1 — durable observation: persist cursors, leases, snapshots, and approval packets while the current loop remains the actor. Verify restart, duplicate delivery, stale lease, ghost check, and force-push recovery.</p>
+<p>Phase 2 — bounded repair delegation: allow capability-qualified workers to reproduce, patch, and verify one action per event epoch. Keep attempts 0/1/2 and human-gate behavior unchanged; automatically fall back to observation on contract failure.</p>
+<p>Phase 3 — event-first operation: GitHub events wake the coordinator; reconciliation is a safety net. Enable model-version routing and context compaction based on measured replay performance.</p>
+<p>Phase 4 — review and expand: accept only after evaluation shows no increase in false approvals, lost human gates, duplicate repairs, or unrecoverable state. Any rollback disables repair delegation while preserving the event log and approval packet.</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">Tests and evaluation</h2>
+<p>Unit tests must cover deterministic frontier merging, hypothesis invalidation, monotonic distance transitions, epoch causes, capability gating, duplicate suppression, lease expiry, cursor replay, malformed verdicts, and bounded no-progress behavior. Scenario tests must replay: slow CI, ghost workflows, force-push during diagnosis, review dismissal followed by a new finding, worker crash after push, duplicate webhook delivery, provider outage, model downgrade, and restart between every transition.</p>
+<p>Evaluation uses a fixed corpus of real-shaped traces plus synthetic adversarial traces. Required metrics are: zero automated merges; zero approvals from malformed/stale evidence; event replay equivalence; no lost or duplicated repair actions; time-to-human-approval; evidence-frontier precision; RCA reproduction rate; regression rate; abstention quality; token/cost per approval-distance reduction; and recovery time after worker/provider failure. Future models are compared on the same traces and must not regress safety metrics even when they improve speed or patch success.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">Pros, cons, and open acceptance criteria</h2>
+<p>The design is attractive when a PR may wait hours or days for CI, reviews, provider recovery, or a human decision. It is intentionally conservative about convergence: progress means reduced, verified approval distance, not merely another model response or a changed comment.</p>
+<p>Acceptance requires a documented state schema and migration rule, an event replay proof by test, a recovery procedure for missing events, a capability-evaluation report, a human-readable approval packet, and explicit evidence that runtime changes remain outside this proposal PR. Reviewers should reject the implementation if it weakens the human boundary, allows stale evidence to authorize action, or treats a stronger model as a substitute for verification.</p>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>babysit-pr already has evidence-oriented polling, a worktree lock, check-state caching, ghost-check classification, bounded repair attempts, and a human-only merge boundary. However, its operational contract is still expressed as a synchronous <code>LOOP iter = 1 .. MAX_ITERS</code> with sleep-based waiting. The durable coordinator document records a bounded attempt 0/1/2 lifecycle, but it does not define approval convergence as a measurable distance, an evidence frontier for RCA, model capability requirements, or context-epoch reanalysis when the world changes during a long run.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>skills/babysit-pr/SKILL.md:20-30</code> defines the current behavior as an iterative repair loop and says GitHub Actions is only an event adapter.</li><li><code>skills/babysit-pr/SKILL.md:164-196</code> specifies <code>LOOP iter = 1 .. MAX_ITERS</code>; <code>skills/babysit-pr/SKILL.md:236-270</code> makes snapshot, classify, sleep, fetch logs, and diagnose the loop body.</li><li><code>skills/babysit-pr/SKILL.md:313-336</code> caches <code>{name, conclusion, databaseId}</code> and avoids repeated diagnosis, but does not persist a richer evidence frontier or context epoch.</li><li><code>skills/babysit-pr/SKILL.md:338-358</code> bounds no-progress repair PRs at attempts 0, 1, and 2 and requires deduplication on <code>(parent_pr, attempt, failure_signature)</code>.</li><li><code>docs/workflows/unified-repair-coordinator.md:50-71</code> defines event/state logging and compact context, while <code>:98-105</code> requires deterministic signatures, one worker, verification, and audit events.</li><li><code>skills/babysit-pr/SKILL.md:377-392</code> and <code>docs/workflows/unified-repair-coordinator.md:130-133</code> keep <code>gh pr merge</code> outside the automation and require a human-merge hand-off.</li><li><code>lib/babysit_pr_reliability.py:36-56</code> documents check snapshots and deterministic helper inputs; <code>tests/test_babysit_pr_reliability.py</code> pins stale-lock, ghost-check, and changed/unchanged behavior.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>The proposed lifecycle is a durable, event-driven coordinator that can sleep between GitHub events without losing ownership, evidence, or causal history. Every wake-up advances an explicit approval-distance state machine. The coordinator maintains an evidence frontier and typed RCA hypotheses, invalidates stale conclusions when a new context epoch appears, and dispatches work only when the model capability contract is satisfied. It converges toward a human approval packet, never toward an automated merge.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">docs/proposals/babysit-approval-loop/00-index.yaml</span><p>This proposal source; the only authored source file in this PR.</p></li><li><span class="file-path">docs/proposals/babysit-approval-loop/00-index.html</span><p>Derived, self-contained HTML render of this proposal; regenerated by the proposal renderer.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Survives long waits and process restarts because event cursors, leases, epochs, evidence, and approval distance are durable rather than held in one model context.</li><li>Makes RCA falsifiable: each repair action must move the evidence frontier or be rejected as a duplicate/no-progress action.</li><li>Future model upgrades can improve diagnosis and patch quality behind a stable capability contract without changing approval semantics.</li><li>Preserves the existing human boundary: passing gates produce an auditable approval packet and never invoke <code>gh pr merge</code>.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>A durable coordinator adds state-schema, replay, lease, and migration complexity; mitigation is an append-only event log plus deterministic projections and bounded state transitions.</li><li>Approval distance can be gamed by superficial progress such as a changed check without a causal fix; mitigation is typed evidence, reproduction, independent verification, and a no-regression guard.</li><li>More frequent reanalysis may spend tokens after benign events; mitigation is epoch-triggered invalidation, frontier deltas, and capability-aware escalation.</li><li>A stronger model may produce better patches but cannot remove ambiguity in policy or ownership; the approval boundary remains explicit.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>This PR does not implement the coordinator, change runtime behavior, or provision an event delivery service.</li><li>The design cannot guarantee GitHub event delivery; reconciliation polling or a manually resumed cursor is still required as a recovery path.</li><li>The model capability contract cannot prove semantic correctness; tests, independent review, and human approval remain required.</li><li>Approval distance is a decision aid, not a probability of merge or a permission to merge.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-20 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
