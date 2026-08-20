@@ -68,9 +68,9 @@ sections:
 
   - title: Evidence frontier and RCA contract
     body: |
-      The evidence frontier is the set of newest, causally relevant observations that constrain the next action: PR head SHA, changed files, review findings, check conclusions and run ids, failing-log excerpts, reproduction output, local verification, independent review, and human decisions. Each item has a stable `evidence_id`, source, observed SHA, context epoch, freshness, and typed status (`observed`, `reproduced`, `contradicted`, `verified`, or `superseded`).
+      The normal code-review path uses a compact evidence pack: current PR head SHA, changed files, one or more failing checks or review findings, the smallest useful log excerpt, reproduction output, and verification output. It is intentionally narrower than a full transcript. Each item has a stable `evidence_id`, observed SHA, freshness, and status (`observed`, `reproduced`, `verified`, or `superseded`).
 
-      RCA is a hypothesis ledger, not a prose diagnosis. Each hypothesis records the failure signature, causal claim, supporting evidence ids, disconfirming evidence ids, reproduction command/result, proposed minimal change, and confidence rationale. A worker may act only when the frontier contains a reproducible blocker and one selected hypothesis. After the action, the coordinator requires a new observation and classifies the result as `fixed`, `changed`, `unchanged`, `regressed`, or `inconclusive`. `unchanged` or `inconclusive` cannot advance approval distance and counts toward the bounded no-progress policy.
+      RCA is activated only for a blocker that cannot be fixed from a direct test or review finding. It records one selected causal hypothesis, one expected signal, and one bounded intervention. After the action, the coordinator requires a new observation and classifies the result as `fixed`, `changed`, `unchanged`, `regressed`, or `inconclusive`. `unchanged` or `inconclusive` triggers escalation; it does not add another generic analysis phase to every PR.
 
   - title: Model capability contract
     body: |
@@ -80,9 +80,9 @@ sections:
 
   - title: Context epochs and reanalysis
     body: |
-      Increment `context_epoch` whenever the PR head SHA changes, a review finding is added/edited/dismissed, a check run id or conclusion changes, a workflow definition changes, a human decision arrives, or a capability contract changes. Epoch changes invalidate hypotheses and planned patches whose evidence was observed in an older causal world; immutable historical evidence remains available for comparison.
+      Increment `context_epoch` only when action-relevant state changes: the PR head SHA, a review finding, a check run/conclusion, a workflow definition, or a human decision. A cursor-only or duplicate event must not trigger model analysis. An epoch invalidates only evidence and plans tied to the changed blocker; unrelated review findings remain active.
 
-      On wake, the coordinator computes the frontier delta, replays only affected hypotheses, and asks the worker for a fresh compact analysis. A no-op event may update the cursor without reanalysis. A new epoch always requires a fresh snapshot immediately before action, matching the current re-verification rule in `skills/babysit-pr/SKILL.md:198-234`.
+      Reanalysis is an escalation path, not a normal step. It is required before acting when the current compact evidence pack is stale, contradictory, or tied to an older SHA. The worker receives the new pack and the invalidated references, not the entire historical transcript.
 
   - title: Approval distance and human approval boundary
     body: |
@@ -94,23 +94,21 @@ sections:
 
       Automation may diagnose, patch, verify, comment, create bounded repair PRs, and prepare the packet. Only a human reviewer with the required ownership context may approve the PR for merge. The coordinator must refuse to interpret model output, missing verdicts, stale approvals, or `approval_distance` reaching zero as authorization to merge; `gh pr merge` remains outside the implementation.
 
-  - title: Stepwise adoption plan
+  - title: Code-review-optimized adoption plan
     body: |
-      Adoption is deliberately incremental. Each step has a reversible boundary, a measurable exit gate, and a useful artifact even if the next step is never enabled.
+      Adoption is optimized for the common code-review path: observe once, repair once, verify once, then wait for the next external event. Expensive RCA, context reset, and model routing are activated only on escalation.
 
-      **Step 0 — Instrument and replay (read-only).** Project current `babysit-pr` snapshots into an evidence frontier, approval-distance vector, and context epoch. Replay slow CI, ghost checks, force-push, duplicate webhook, worker crash, and human-review traces. Exit gate: replay is deterministic and produces no edits, comments, approvals, or merges.
+      **Step 0 — Shadow measurement.** Project current runs into compact evidence packs and approval-distance snapshots. Replay slow CI, force-push, duplicate event, worker crash, and human-review traces. Exit gate: deterministic, side-effect-free projection.
 
-      **Step 1 — Durable observation.** Persist event cursors, leases, fresh snapshots, frontier deltas, and approval packets while the existing polling loop remains the only repair actor. Add restart/resume and reconciliation for missed events. Exit gate: restart and duplicate delivery preserve state; stale evidence cannot reduce approval distance.
+      **Step 1 — Durable resume.** Persist the event cursor, lease, current SHA, blocker summary, last action, and approval packet while the existing repair actor remains unchanged. Exit gate: restart/retry safety and reconciliation for missed events.
 
-      **Step 2 — Context and RCA control plane.** Add hypothesis ledgers, evidence freshness, context epochs, independent reanalysis, and no-information classification. The current repair behavior remains unchanged. Exit gate: new head SHA, review finding, or check run invalidates affected hypotheses and is visible in the audit log.
+      **Step 2 — Targeted repair gate.** Route only changed checks or unresolved review findings to reproduce → one bounded fix → focused verification → push. Keep RCA/context epochs as escalation on stale, contradictory, or unchanged results. Exit gate: no duplicate push, no stale-evidence action, no regression in human gating.
 
-      **Step 3 — Capability-qualified bounded repair.** Permit a model worker to perform exactly one reproduce → patch → verify action per epoch. Require the versioned capability contract and independent verification; contract failure falls back to observation. Exit gate: zero unverified pushes, zero duplicate actions, and no regression in human-gate behavior.
+      **Step 3 — Approval-ready wait.** When checks are green and findings are resolved, produce the approval packet, request re-review at most once per SHA, and enter durable `WAIT_FOR_APPROVAL`. Exit gate: no code action is taken while only human approval is pending.
 
-      **Step 4 — Approval-readiness loop.** When required checks are green, generate a human-readable approval packet, request re-review at most once per SHA, and enter durable `WAIT_FOR_APPROVAL` instead of treating review-required as completion. Exit gate: approval distance reaches the external human gate without stale or malformed evidence.
+      **Step 4 — Event-first and capability evolution.** Make GitHub events the primary wake source, retain reconciliation as a safety net, and evaluate newer models against replay traces. Exit gate: event replay equivalence, bounded recovery, and no safety regression.
 
-      **Step 5 — Event-first long-running operation.** Use GitHub events as the primary wake source and reconciliation as a safety net. Apply model-version routing, context compaction, and backoff based on measured evidence gain per cost. Exit gate: event replay equivalence, bounded recovery time, and no lost lifecycle transitions.
-
-      **Step 6 — Capability evolution.** Evaluate newer models against the same replay corpus. Upgrade diagnosis, context planning, and recovery capabilities only when safety metrics do not regress. A model upgrade may remove an old workaround, but cannot weaken evidence, verification, ownership, or human-approval invariants.
+      **Escalation lane (available from Step 2 onward):** stale/contradictory evidence → context epoch refresh; unchanged result → one independent RCA; policy/secret/ownership issue → human recovery. These are not mandatory stages in the healthy path.
 
       **Rollback at every step:** disable the newly enabled actor, preserve the append-only event log and approval packet, and resume from the last durable state. Rollback never converts a human-gate state into success.
 
@@ -122,11 +120,9 @@ sections:
       | --- | --- | --- |
       | 0 | replay report | deterministic, side-effect-free projection |
       | 1 | cursor + lease + snapshot | restart, duplicate, and stale-lease recovery |
-      | 2 | frontier + hypothesis ledger | causal invalidation on context epoch change |
-      | 3 | worker contract + verification record | one bounded, independently verified action |
-      | 4 | approval packet | checks green, findings resolved, human decision pending |
-      | 5 | event cursor + reconciliation record | replay equivalence and recovery SLO |
-      | 6 | capability evaluation report | no safety regression against the prior model |
+      | 2 | blocker evidence pack + verification record | one bounded, independently verified action |
+      | 3 | approval packet | checks green, findings resolved, human decision pending |
+      | 4 | event cursor + capability evaluation report | replay equivalence and no safety regression |
 
       The terminal success remains `APPROVED + required checks green`. `WAIT_FOR_APPROVAL` is a healthy durable state, not a failure or a reason to manufacture an approval.
 
