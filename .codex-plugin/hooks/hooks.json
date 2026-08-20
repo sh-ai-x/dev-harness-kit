@@ -140,7 +140,8 @@
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/l4-todo-scan.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/l4-todo-scan.sh",
+            "fail_closed": true
           }
         ]
       },
