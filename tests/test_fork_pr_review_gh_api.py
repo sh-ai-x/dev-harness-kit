@@ -7,26 +7,29 @@ Background:
   Result: the runner's working directory has no `.git` directory.
 
   The workflow posts commit-status updates via `gh api "repos/${{ github.repository }}/statuses/$SHA" -X POST`.
-  The URL is relative (no `https://api.github.com/` prefix) and no `--repo` flag is passed.
-  When `gh` resolves a relative URL, it walks a discovery chain:
-    1. `--repo` flag — not set
-    2. `GH_REPO` env var — not set
-    3. `git rev-parse` against the current `.git` directory — fails because none exists
-  Symptom: `failed to determine base repo: failed to run git: fatal: not a git
-  repository (or any of the parent directories): .git` (observed on PR #665,
-  run 32245678201, step "Post final AI-judge status to PR commit").
+  When `gh` resolves a relative URL on a runner with no `.git` directory, it
+  fails with "failed to determine base repo: failed to run git: fatal: not a
+  git repository (or any of the parent directories): .git" (observed on
+  PR #665, run 32245678201, step "Post final AI-judge status to PR commit").
 
-  The fix is to either:
-    (a) add `--repo "${{ github.repository }}"` to every `gh api` call, or
-    (b) use the absolute URL `https://api.github.com/repos/${{ github.repository }}/statuses/$SHA`.
-
-This test pins that contract so the workflow cannot drift back to relying on
-.git context discovery.
+  Two wrong attempts to work around the missing `.git`:
+    (a) PR #673 added `--repo "${{ github.repository }}"` to every `gh api`
+        call. `gh api` does NOT accept `--repo` and exits with
+        `unknown flag: --repo` (PR #665, run 32255230444) — so the gate
+        stayed red.
+    (b) The earlier version of this test accepted either form
+        (`--repo` OR absolute URL), which let #673's broken form slip
+        through CI.
+  The ONLY working form, after PR #674, is the absolute URL
+  `https://api.github.com/repos/${{ github.repository }}/...` (with
+  `GH_HOST` + `GH_REPO` set at the job level as a redundant safety net
+  for the `gh run view/watch` calls). This test now pins that contract:
+  relative URLs AND `--repo` on `gh api` are both rejected.
 
 Pin tests:
   T1: workflow file exists and parses as YAML.
-  T2: every `gh api` invocation in any `run:` block has `--repo "${{ github.repository }}"`
-      OR uses an absolute URL starting with `https://api.github.com/`.
+  T2: every `gh api` invocation in any `run:` block uses an absolute URL
+      starting with `https://api.github.com/` AND does NOT pass `--repo`.
   T3: specifically, the four commits-status POST calls (Mark PR commit,
       Post per-judge, Post final) all meet T2.
   T4: workflow still triggers on `pull_request_target` (intentional — that's
@@ -111,19 +114,32 @@ def _check_gh_api_call(step_name: str, run_text: str) -> list[str]:
             if not args:
                 continue
             url = args[0]
-            # If the URL is absolute (https://api.github.com/...), it is
-            # self-resolving and does not need --repo.
-            if url.startswith("https://") or url.startswith("http://"):
-                continue
-            # Otherwise, the relative URL needs an explicit --repo flag.
-            # Walk the remaining args looking for --repo <value>.
-            if not _has_repo_flag(args[1:]):
+            # Hard requirement: the URL must be absolute. A relative URL
+            # like `repos/${{ github.repository }}/...` will fail because
+            # `pull_request_target` has no `.git` directory for
+            # git-context discovery.
+            if not (url.startswith("https://") or url.startswith("http://")):
                 failures.append(
-                    f"step {step_name!r}: `gh api` call to relative URL "
-                    f"{url!r} lacks `--repo \"${{{{ github.repository }}}}\"` "
-                    f"and does not use an absolute URL — pull_request_target "
-                    f"has no .git dir, so the call will fail to determine "
-                    f"base repo (see PR #665, run 32245678201)."
+                    f"step {step_name!r}: `gh api` call uses relative URL "
+                    f"{url!r} — on `pull_request_target` the runner has no "
+                    f".git directory, so git-context discovery fails with "
+                    f"'failed to determine base repo'. Use the absolute "
+                    f"`https://api.github.com/repos/${{ github.repository }}/...` "
+                    f"form instead."
+                )
+                continue
+            # Reject `--repo` on `gh api` explicitly. Earlier PR #673 added
+            # `--repo "${{ github.repository }}"` to every `gh api` call,
+            # but `gh api` rejects the flag with `unknown flag: --repo`,
+            # so the gate stayed red. Pin the contract: never use --repo
+            # on gh api.
+            if _has_repo_flag(args[1:]):
+                failures.append(
+                    f"step {step_name!r}: `gh api` call uses `--repo` flag — "
+                    f"`gh api` does NOT accept `--repo` and exits with "
+                    f"`unknown flag: --repo`. The absolute URL form is "
+                    f"self-resolving; --repo is unnecessary AND rejected "
+                    f"(observed on PR #665, run 32255230444)."
                 )
     return failures
 
@@ -218,12 +234,16 @@ class TestForkPrReviewGhApi(unittest.TestCase):
                                  f"actions/checkout — would execute fork code")
         # Done implicitly — no actions/checkout step exists.
 
-    def test_05_gh_api_calls_have_repo_flag_or_absolute_url(self):
-        """Every `gh api` call in any `run:` block must either:
-          - pass `--repo "${{ github.repository }}"` (or `--repo=${{ ... }}`), OR
-          - use an absolute URL starting with `https://api.github.com/`.
-        Otherwise the call relies on git-context discovery, which fails on
-        pull_request_target (no .git dir). See PR #665 / run 32245678201."""
+    def test_05_gh_api_calls_use_absolute_url_no_repo_flag(self):
+        """Every `gh api` call in any `run:` block must use an absolute
+        `https://api.github.com/...` URL and must NOT pass `--repo`
+        (which `gh api` rejects with `unknown flag: --repo`).
+
+        Relative URLs fail because `pull_request_target` has no `.git`
+        directory for git-context discovery (PR #665 / run 32245678201).
+        `--repo` was added by PR #673 as a workaround but does not work
+        with `gh api` (PR #665 / run 32255230444). The absolute URL is
+        the only form that works."""
         doc = _yaml_doc()
         all_failures: list[str] = []
         for name, run_text in _all_run_blocks(doc):
@@ -233,7 +253,8 @@ class TestForkPrReviewGhApi(unittest.TestCase):
 
     def test_06_specifically_the_three_commit_status_calls(self):
         """Pin the three calls that post commit statuses to the PR commit
-        (the ones that fail on PR #665). They must each have --repo."""
+        (the ones that fail on PR #665). Each must use an absolute URL and
+        not pass --repo."""
         doc = _yaml_doc()
         names_to_pin = [
             "Mark PR commit as AI-review-pending",
