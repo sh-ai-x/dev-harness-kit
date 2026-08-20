@@ -58,6 +58,22 @@ sections:
       - `tests/test_babysit_pr_cli.py` and `tests/test_babysit_pr_local_cli.py` — human-gate and resume integration tests.
       - `tests/test_babysit_approval_loop.py` — event replay, restart, capability, and evaluation fixtures.
 
+  - title: Existing strengths retained by the improved workflow
+    body: |
+      The improved workflow is an extension of the current babysit-pr contract, not a replacement. The healthy path is shorter only because advanced reasoning is conditional; it still passes through the existing safety rails.
+
+      | Existing strength | Preservation in the improved workflow |
+      | --- | --- |
+      | Fresh re-verification before acting | Every wake and action refreshes PR state, checks, run id, head SHA, and review verdict. Cached state is never authority. |
+      | Evidence-driven MUST-L2/MUST-L3 | Reproduction precedes edits; every fix records command, exit code, test count, logs, commit SHA, and push result. |
+      | Worktree isolation and single-process lock | Durable resume remains attached to the PR-owning worktree and preserves lock/lease boundaries. |
+      | Check-state caching | Unchanged checks remain cached; changed conclusion or databaseId forces fresh logs and diagnosis. |
+      | Ghost-check classification | Stale or missing workflows become recovery-required, never success or an infinite wait. |
+      | Bounded repair attempts | Attempt 0/1/2 and deduplication remain the outer repair budget; adaptive RCA chooses actions inside it. |
+      | Safety valves and human gates | No secret removal, no merge, no forced main push, fail-closed verdicts, and explicit human approval remain invariant. |
+
+      The new coordinator adds durable cursors, compact evidence packs, conditional RCA, and approval-ready waiting around these rails. It does not replace them with model confidence or an approval-distance score.
+
   - title: Durable and event-driven coordinator
     body: |
       Persist a coordinator record keyed by `parent_pr` with `current_pr`, `attempt`, `head_sha`, `cursor`, `lease`, `context_epoch`, `approval_distance`, `failure_signature`, `frontier`, `hypotheses`, and `last_action`. Persist every transition as an append-only event with `event_id`, provider event id, observed SHA, timestamp, actor, evidence references, model contract, and outcome. Materialized state is a deterministic projection of events; a restart replays from the last acknowledged cursor.
