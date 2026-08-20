@@ -593,7 +593,7 @@ def _check_marker_payload(target: Path, source_repo: bool = False) -> list[Check
 def _check_templates_current(target: Path, source_repo: bool = False) -> list[Check]:
     """Compare the consumer's installed CI templates against the live dev-kit source.
 
-    Closes the dev-kit � consumer drift gap that motivated `/dev-kit:ci-update`:
+    Closes the dev-kit ⇄ consumer drift gap that motivated `/dev-kit:ci-update`:
     a consumer who ran ci-setup at an older dev-kit version gets a single
     PASS/INFO/WARN/SKIP line that summarizes how their installed templates
     have diverged from the plugin's current source.

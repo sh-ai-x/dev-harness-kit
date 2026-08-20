@@ -7,8 +7,8 @@ as both `python -m unittest tests/test_ci_setup.py` and `pytest tests/test_ci_se
 """
 from __future__ import annotations
 
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess

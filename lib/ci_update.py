@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 import shutil
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -429,10 +428,18 @@ def apply_ci_update(
             if rel in _MERGE_FILES:
                 continue
             target_p = target / rel
+            # Documented contract (SKILL.md:148-149): only back up when the
+            # on-disk bytes differ from what dev-kit will write. An
+            # idempotent re-run whose target file already matches the
+            # source skips the .bak so .bak files of unchanged content
+            # never accumulate on disk.
             if target_p.is_file() and backup:
-                bak_path = _backup(target, rel)
-                if bak_path:
-                    r.backed_up.append(rel + ".bak")
+                target_sha_now = _sha256_file(target_p)
+                template_sha = r.template_shas.get(rel)
+                if target_sha_now != template_sha:
+                    bak_path = _backup(target, rel)
+                    if bak_path:
+                        r.backed_up.append(rel + ".bak")
             ok = _write_from_source(target, rel, root)
             if not ok:
                 r.errors.append(f"{rel}: failed to write from dev-kit source")
@@ -478,9 +485,9 @@ def _self_test() -> int:
     """Quick CLI sanity check; `python3 lib/ci_update.py` exits 0 on OK."""
     print(f"ci_update.py self-test — plugin_root={_resolve_plugin_root(None)}")
     print(f"  EXPECTED_PATHS count: {len(EXPECTED_PATHS)}")
-    print(f"  UpdateReport attrs: new, updated, unchanged, consumer_modified, diverged, "
-          f"backed_up, errors, warnings, elapsed_ms, installed_dev_kit_version, "
-          f"target_version, template_shas")
+    print("  UpdateReport attrs: new, updated, unchanged, consumer_modified, diverged, "
+          "backed_up, errors, warnings, elapsed_ms, installed_dev_kit_version, "
+          "target_version, template_shas")
     return 0
 
 

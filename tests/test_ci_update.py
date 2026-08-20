@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_ci_update.py — Tests for lib/ci_update.py (the /dev-kit:ci-update engine).
 
-The engine closes the dev-kit � consumer drift gap. It classifies every
+The engine closes the dev-kit ⇄ consumer drift gap. It classifies every
 EXPECTED_PATHS file into one of four states (new / updated / consumer_modified
 / diverged) and offers a safe apply path that backs up before overwriting.
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -46,7 +45,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_marks_new_file(self):
         """File in EXPECTED_PATHS but absent at target → `new`."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -58,7 +56,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_marks_unchanged(self):
         """All three SHAs match → `unchanged`."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -77,8 +74,6 @@ class TestCiUpdate(unittest.TestCase):
         Simulated by NOT touching the consumer file and patching the
         marker's `template_shas[rel]` to a synthetic new SHA.
         """
-        import hashlib
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -96,7 +91,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_marks_consumer_modified(self):
         """target_sha != installed_file_shas, but installed_file_shas == template_sha → `consumer_modified`."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -110,8 +104,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_marks_diverged(self):
         """Both consumer and dev-kit changed the same file → `diverged`."""
-        import hashlib
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -130,7 +122,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_handles_v1_marker_without_version(self):
         """Marker without installed_dev_kit_version → warning, not crash."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -145,7 +136,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_handles_missing_template_shas(self):
         """Marker without template_shas → recompute from live source on the fly."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -161,7 +151,6 @@ class TestCiUpdate(unittest.TestCase):
     def test_diff_dry_run_creates_no_files(self):
         """diff_ci_install leaves target filesystem untouched."""
         import hashlib
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -182,7 +171,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_apply_creates_new_files(self):
         """apply mode='apply' writes NEW files; no .bak for new files."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -203,13 +191,11 @@ class TestCiUpdate(unittest.TestCase):
         to a synthetic new SHA; consumer file and installed_file_sha stay
         unchanged.
         """
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
             rel = "scripts/validate.py"
             consumer_path = target / rel
-            original = consumer_path.read_bytes()
             marker_path = target / ".dev-kit" / "ci-config.json"
             marker = json.loads(marker_path.read_text())
             marker["template_shas"][rel] = "f" * 64
@@ -219,8 +205,8 @@ class TestCiUpdate(unittest.TestCase):
             )
             # After apply, file should match dev-kit source (re-fetched
             # from `_resolve_template_source`). The content might equal
-            # the original (the dev-kit source itself didn't change in
-            # this test — only the marker's recorded template_sha was
+            # the pre-test bytes (the dev-kit source itself didn't change
+            # in this test — only the marker's recorded template_sha was
             # patched), but the marker should now reflect the live
             # template_sha and the file should round-trip via the source.
             src = self.plugin_root / "templates" / "ci" / rel
@@ -234,7 +220,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_apply_backs_up_consumer_modified(self):
         """apply mode='force' creates .bak before overwriting consumer edits."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -252,14 +237,13 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_apply_no_backup_when_disabled(self):
         """backup=False skips .bak creation even on consumer_modified."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
             rel = "scripts/validate.py"
             consumer_path = target / rel
             consumer_path.write_bytes(consumer_path.read_bytes() + b"\n# edit\n")
-            report = self.ci_update.apply_ci_update(
+            self.ci_update.apply_ci_update(
                 target, mode="force", backup=False, plugin_root=self.plugin_root,
             )
             self.assertFalse((target / (rel + ".bak")).is_file(),
@@ -267,7 +251,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_apply_refreshes_marker_version(self):
         """After apply, marker records new installed_dev_kit_version."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -287,7 +270,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_apply_atomic_marker_write(self):
         """Marker survives partial crash via atomic_write_json."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -302,8 +284,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_apply_force_required_for_diverged(self):
         """apply mode='apply' refuses to touch DIVERGED files (lists them as warnings)."""
-        import hashlib
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
@@ -342,7 +322,6 @@ class TestCiUpdate(unittest.TestCase):
 
     def test_diff_returns_same_report_shape_as_apply(self):
         """diff_ci_install and apply_ci_update return the same UpdateReport type."""
-        import tempfile
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             self.ci_setup.install_ci_config(target)
