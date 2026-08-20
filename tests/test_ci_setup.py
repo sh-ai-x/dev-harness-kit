@@ -7,6 +7,7 @@ as both `python -m unittest tests/test_ci_setup.py` and `pytest tests/test_ci_se
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -1354,6 +1355,144 @@ class TestInstallCiConfigDispatcher(unittest.TestCase):
             len(logic_lines), 80,
             f"install_ci_config still too long: {len(logic_lines)} lines",
         )
+
+
+class TestMarkerSchemaVersioning(unittest.TestCase):
+    """Schema bump: marker records `installed_dev_kit_version` + `template_shas`.
+
+    Closes the dev-kit ⇄ consumer gap: a consumer who ran /dev-kit:ci-setup
+    at dev-kit v0.3.200 must be able to detect that v0.3.287 has shipped
+    new templates without inspecting the live dev-kit source. The marker
+    becomes the contract that makes drift queryable.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ci_setup = _load_ci_setup()
+
+    def test_marker_records_installed_dev_kit_version_after_install(self):
+        """Fresh install writes `installed_dev_kit_version` from plugin.json."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
+            self.assertIn("installed_dev_kit_version", marker)
+            self.assertTrue(
+                marker["installed_dev_kit_version"],
+                "installed_dev_kit_version must be non-empty",
+            )
+            # The value should equal the runtime plugin_version() reading.
+            self.assertEqual(
+                marker["installed_dev_kit_version"],
+                self.ci_setup.plugin_version(),
+            )
+
+    def test_marker_records_template_shas_for_each_expected_path(self):
+        """Fresh install writes `template_shas` keyed by every EXPECTED_PATHS entry."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
+            self.assertIn("template_shas", marker)
+            self.assertIsInstance(marker["template_shas"], dict)
+            # Every EXPECTED_PATH must have a template_sha (or be skipped if source missing).
+            for rel in self.ci_setup.EXPECTED_PATHS:
+                self.assertIn(rel, marker["template_shas"], f"missing template_sha for {rel}")
+                sha = marker["template_shas"][rel]
+                self.assertEqual(len(sha), 64, f"template_sha for {rel} not 64-hex: {sha!r}")
+
+    def test_template_sha_matches_dev_kit_source_bytes(self):
+        """`template_shas[rel]` is the SHA of the dev-kit source, not the consumer copy.
+
+        The source for `<rel>` is `templates/ci/<rel>` per
+        `_resolve_template_source` — NOT the dev-kit project's own
+        `.github/<rel>`. The templates tree is what ci-setup ships to
+        consumers; the dev-kit repo's own `.github/` is a separate set of
+        files. This test pins the distinction so future refactors cannot
+        silently hash the wrong file.
+        """
+        import hashlib
+        import tempfile
+        plugin_root = PROJECT_ROOT
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            marker = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
+            # Pick one file we know exists in the templates/ci/ source tree
+            rel = ".github/workflows/ci.yml"
+            src_path = plugin_root / "templates" / "ci" / rel
+            if src_path.is_file():
+                expected = hashlib.sha256(src_path.read_bytes()).hexdigest()
+                self.assertEqual(marker["template_shas"][rel], expected)
+                # After a clean install, the consumer copy IS byte-identical
+                # to the template — this is the documented behavior of
+                # ci-setup. Pin it so a future refactor that breaks the
+                # copy step cannot silently desync the two.
+                consumer_sha = hashlib.sha256((target / rel).read_bytes()).hexdigest()
+                self.assertEqual(consumer_sha, expected)
+
+    def test_backfill_writes_version_fields_on_idempotent_reinstall(self):
+        """v1.0.0 marker (no version field) → next install backfills without file changes."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            # Simulate a v1.0.0 marker by stripping the new fields
+            marker_path = target / ".dev-kit" / "ci-config.json"
+            marker = json.loads(marker_path.read_text())
+            marker.pop("installed_dev_kit_version", None)
+            marker.pop("template_shas", None)
+            marker_path.write_text(json.dumps(marker))
+            # Capture file SHAs to confirm no files are touched
+            file_shas = {}
+            for rel in self.ci_setup.EXPECTED_PATHS:
+                p = target / rel
+                if p.is_file():
+                    file_shas[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+            # Reinstall — should be a no-op file-wise but backfill the marker
+            r = self.ci_setup.install_ci_config(target)
+            self.assertEqual(r.errors, [], f"errors: {r.errors}")
+            # Idempotent: no creates, no overwrites, all skipped
+            self.assertEqual(r.created, [])
+            self.assertEqual(r.overwritten, [])
+            self.assertEqual(len(r.skipped), len(self.ci_setup.EXPECTED_PATHS))
+            # Marker now has the new fields
+            new_marker = json.loads(marker_path.read_text())
+            self.assertIn("installed_dev_kit_version", new_marker)
+            self.assertIn("template_shas", new_marker)
+            self.assertEqual(
+                new_marker["installed_dev_kit_version"],
+                self.ci_setup.plugin_version(),
+            )
+            # No files were touched
+            for rel, expected_sha in file_shas.items():
+                p = target / rel
+                if p.is_file():
+                    actual = hashlib.sha256(p.read_bytes()).hexdigest()
+                    self.assertEqual(actual, expected_sha, f"{rel} touched during backfill")
+
+    def test_backfill_preserves_original_installed_at(self):
+        """Backfill must not bump `installed_at` — historical timestamp preserved."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            marker_path = target / ".dev-kit" / "ci-config.json"
+            original = json.loads(marker_path.read_text())
+            original_installed_at = original["installed_at"]
+            # Strip new fields, sleep 1s so any timestamp bump is visible
+            original.pop("installed_dev_kit_version", None)
+            original.pop("template_shas", None)
+            marker_path.write_text(json.dumps(original))
+            import time as _time
+            _time.sleep(1.05)
+            # Backfill
+            self.ci_setup.install_ci_config(target)
+            new_marker = json.loads(marker_path.read_text())
+            self.assertEqual(new_marker["installed_at"], original_installed_at,
+                             "backfill must preserve the original installed_at")
 
 
 if __name__ == "__main__":

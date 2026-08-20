@@ -55,6 +55,17 @@ except ImportError:
         required_secrets_for_provider,
     )
 
+try:
+    from .ci_update import diff_ci_install  # type: ignore  # noqa: E402
+except ImportError:
+    try:
+        from ci_update import diff_ci_install  # type: ignore  # noqa: E402
+    except ImportError:
+        # ci_update may not be installed in the source-repo checkout
+        # (the plugin is its own dev environment; tests still run). The
+        # check returns SKIP in that case so ci-doctor stays usable.
+        diff_ci_install = None  # type: ignore
+
 
 @dataclass
 class Check:
@@ -579,6 +590,82 @@ def _check_marker_payload(target: Path, source_repo: bool = False) -> list[Check
     return out
 
 
+def _check_templates_current(target: Path, source_repo: bool = False) -> list[Check]:
+    """Compare the consumer's installed CI templates against the live dev-kit source.
+
+    Closes the dev-kit ⇄ consumer drift gap that motivated `/dev-kit:ci-update`:
+    a consumer who ran ci-setup at an older dev-kit version gets a single
+    PASS/INFO/WARN/SKIP line that summarizes how their installed templates
+    have diverged from the plugin's current source.
+
+    State mapping:
+      - PASS  — every EXPECTED_PATHS file at target matches the live dev-kit
+                source AND the marker's recorded version is current.
+      - INFO  — drift exists but only NEW files (dev-kit added templates
+                the consumer never installed). Actionable, not blocking.
+      - WARN  — consumer has modified installed files locally, OR a file
+                that dev-kit changed is at the consumer unchanged (consumer
+                is stale). Actionable; surface in the report.
+      - SKIP  — marker lacks `installed_dev_kit_version` (predates schema),
+                ci_update module not available, or source_repo mode.
+      - FAIL  — diff engine raised (template source unreadable).
+
+    In source-repo mode (dev-kit running on itself) the check is a no-op:
+    the source-of-truth and consumer-side are the same tree, so any diff
+    is a self-comparison artefact.
+    """
+    if source_repo:
+        return [Check(
+            "templates current", "SKIP",
+            "source repo: self-comparison not meaningful",
+        )]
+    if diff_ci_install is None:
+        return [Check(
+            "templates current", "SKIP",
+            "ci_update module not importable from this environment",
+        )]
+    marker_path = target / ".dev-kit" / "ci-config.json"
+    if not marker_path.is_file():
+        return [Check(
+            "templates current", "SKIP",
+            "no .dev-kit/ci-config.json marker",
+        )]
+    try:
+        import json as _json
+        marker = _json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, _json.JSONDecodeError) as e:
+        return [Check("templates current", "FAIL", f"marker parse error: {e}")]
+    installed_version = marker.get("installed_dev_kit_version", "")
+    if not installed_version or installed_version == "unknown":
+        return [Check(
+            "templates current", "SKIP",
+            "marker lacks installed_dev_kit_version; run /dev-kit:ci-setup to backfill",
+        )]
+    try:
+        # `diff_ci_install` reads `plugin_version` from `_PLUGIN_ROOT` by
+        # default. In source-repo mode that resolves to the same tree
+        # we're comparing against, so we already returned above.
+        report = diff_ci_install(target)
+    except Exception as e:
+        return [Check("templates current", "FAIL", f"diff engine error: {e}")]
+    n_new = len(report.new)
+    n_updated = len(report.updated)
+    n_consumer_modified = len(report.consumer_modified)
+    n_diverged = len(report.diverged)
+    detail = (
+        f"installed={installed_version}; "
+        f"new={n_new} updated={n_updated} "
+        f"consumer_modified={n_consumer_modified} diverged={n_diverged}"
+    )
+    if n_consumer_modified == 0 and n_diverged == 0 and n_updated == 0 and n_new == 0:
+        return [Check("templates current", "PASS", detail)]
+    if n_consumer_modified == 0 and n_diverged == 0:
+        # Drift exists but only NEW + UPDATED — no consumer-side friction.
+        # Informational; /dev-kit:ci-update can refresh.
+        return [Check("templates current", "INFO", detail)]
+    return [Check("templates current", "WARN", detail)]
+
+
 def _check_provider_declared(target: Path) -> list[Check]:
     """Confirm the provider is declared in env, .env, or .env.example.
 
@@ -1031,6 +1118,7 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
                                    "dev-kit source repo: consumer-only checks skipped"))
     report.checks.extend(_check_required_files(target, source_repo))
     report.checks.extend(_check_marker_payload(target, source_repo))
+    report.checks.extend(_check_templates_current(target, source_repo))
     report.checks.extend(_check_provider_declared(target))
     report.checks.append(_check_gh_auth())
     report.checks.extend(_check_secrets(target, provider, source_repo))

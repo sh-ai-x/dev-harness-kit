@@ -620,14 +620,18 @@ def plugin_version(plugin_root: Path | None = None) -> str:
 def _build_marker() -> dict:
     """Build the `.dev-kit/ci-config.json` payload.
 
-    Content-only marker — no version field. The plugin's version lives
-    solely in `.claude-plugin/plugin.json` (see `plugin_version()`); dev-kit
-    does not gate consumer builds on a version comparison.
+    Records `installed_dev_kit_version` (from `.claude-plugin/plugin.json:version`
+    at install time) so consumer-side `ci-update` can detect "dev-kit shipped
+    a new version since this consumer installed". The full per-file template
+    SHA map is computed separately by `_compute_template_shas()` and merged
+    in by `install_ci_config()` — not part of this base payload because it
+    requires filesystem access to dev-kit's source tree.
     """
     return {
         "schema_version": MARKER_SCHEMA_VERSION,
         "installed_at": _now_utc_iso(),
         "installed_by": "dev-kit:ci-setup",
+        "installed_dev_kit_version": plugin_version(_PLUGIN_ROOT),
         "runners": ["ci.yml", "auto-fix-pr.yml", "review.yml"],
         "provider_env_key": "CI_REVIEW_PROVIDER",
         "scripts": [
@@ -682,6 +686,58 @@ def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     h.update(path.read_bytes())
     return h.hexdigest()
+
+
+def _compute_template_shas(
+    plugin_root: Path | None = None,
+) -> dict[str, str]:
+    """Compute SHA-256 of every EXPECTED_PATHS source as it sits in dev-kit.
+
+    The returned map is recorded in the consumer marker under `template_shas`.
+    On the next consumer-side `ci-update`, the recorded SHAs are compared
+    against a fresh `_compute_template_shas()` reading to detect
+    "dev-kit changed this template since you installed" — closing the gap
+    that previously left consumers blind to plugin upgrades.
+
+    The SHAs are computed against `_resolve_template_source(rel)`, NOT the
+    consumer-side copy — so the consumer's local edits do not pollute the
+    template baseline. A missing source file (e.g. a template that was
+    renamed in dev-kit between releases) is silently skipped rather than
+    raising; that path is a `new` file for the consumer, not an error.
+
+    Args:
+        plugin_root: optional dev-kit plugin checkout root. When `None`
+            (the default), uses `_PLUGIN_ROOT` (this module's
+            parent-of-parent).
+
+    Returns:
+        Dict mapping `rel` → 64-hex-char SHA-256. Subset of EXPECTED_PATHS
+        (entries whose source could not be read are omitted).
+    """
+    root = plugin_root or _PLUGIN_ROOT
+    out: dict[str, str] = {}
+    for rel in EXPECTED_PATHS:
+        try:
+            src = _resolve_template_source(rel)
+        except FileNotFoundError:
+            # Source moved / renamed in dev-kit. Skip — caller treats this
+            # as `new` for the consumer.
+            continue
+        # _resolve_template_source already returns a path inside the
+        # plugin root; verify it actually lives under `root` so a caller
+        # who passes a wrong `plugin_root` cannot be tricked into hashing
+        # an arbitrary path.
+        try:
+            src.relative_to(root)
+        except ValueError:
+            continue
+        if not src.is_file():
+            continue
+        try:
+            out[rel] = _sha256_file(src)
+        except OSError:
+            continue
+    return out
 
 
 def _detect_drift(target_dir: Path, recorded_shas: dict[str, str]) -> List[str]:
@@ -810,6 +866,24 @@ def install_ci_config(
     if _is_already_installed(target, existing_marker, force):
         report.skipped.extend(EXPECTED_PATHS)
         report.marker_path = str(existing_marker)
+        # Backfill new schema fields if missing. A v1.0.0 consumer marker
+        # lacks `installed_dev_kit_version` and `template_shas`; the next
+        # `ci-update` cannot classify drift without them. Backfill here so
+        # the consumer becomes queryable in one zero-touch step. Preserves
+        # `installed_at` so install history is honest. No files are touched.
+        needs_backfill = (
+            "installed_dev_kit_version" not in prior_marker
+            or "template_shas" not in prior_marker
+        )
+        if needs_backfill:
+            backfilled = dict(prior_marker)
+            backfilled["installed_dev_kit_version"] = plugin_version(_PLUGIN_ROOT)
+            backfilled["template_shas"] = _compute_template_shas()
+            atomic_write_json(existing_marker, backfilled)
+            report.warnings.append(
+                f"{MARKER_REL}: backfilled installed_dev_kit_version + "
+                f"template_shas ({len(backfilled['template_shas'])} entries)"
+            )
         report.elapsed_ms = int((time.monotonic() - started) * 1000)
         # Drift detection still runs even on no-op re-installs: the
         # consumer may have modified files locally since the last
@@ -858,6 +932,13 @@ def install_ci_config(
             if rel not in new_shas:
                 new_shas[rel] = sha
     marker_payload["installed_file_shas"] = new_shas
+    # Record SHA-256 of each EXPECTED_PATHS source as it sits in dev-kit
+    # at install time. Distinct from `installed_file_shas` (consumer-side
+    # copy). The consumer-side `ci-update` skill compares the recorded
+    # `template_shas` against a fresh `_compute_template_shas()` reading
+    # to detect "dev-kit changed this template since you installed" —
+    # closing the dev-kit ⇄ consumer drift gap.
+    marker_payload["template_shas"] = _compute_template_shas()
     atomic_write_json(marker, marker_payload)
     report.marker_path = str(marker)
 
