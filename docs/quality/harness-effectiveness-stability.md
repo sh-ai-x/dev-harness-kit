@@ -26,6 +26,13 @@ nested submetric it is opt-in: consumers that don't know about
           "coverage": 0.42,
           "score": null,
           "status": "INSUFFICIENT_EVIDENCE",
+          "submetrics": {
+            "agent_identity_coverage":   {"value": 0.0,   "evidence_event_ids": []},
+            "replay_compatibility":      {"value": 100.0, "evidence_event_ids": ["evt_abc123", "evt_def456"]},
+            "agent_provider_neutrality": {"value": 0.0,   "evidence_event_ids": []},
+            "gate_portability":          {"value": 0.0,   "evidence_event_ids": []},
+            "contract_test_pass_rate":   {"value": null,  "evidence_event_ids": []}
+          },
           "findings": [
             "contract_test_pass_rate=0.0 (no contract.test events)"
           ],
@@ -45,7 +52,7 @@ breaking the legacy 5-component `overall_score`.
 
 ## The five dimensions
 
-Each dimension is rendered as its own key under `submetrics.stability.dimensions`:
+Each dimension is rendered as its own key under `submetrics.stability.submetrics`:
 
 | Dimension | What it measures | Inputs |
 |---|---|---|

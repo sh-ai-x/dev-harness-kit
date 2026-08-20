@@ -108,6 +108,28 @@ def _component(name: str, score: Optional[float], *, submetrics: Dict[str, Any],
     }
 
 
+def _submetric(score: Optional[float], *, submetrics: Dict[str, Any],
+               evidence: Iterable[str], coverage: float = 1.0,
+               findings: Iterable[str] = (),
+               config_version: str = "harness-stability-v1") -> Dict[str, Any]:
+    """Submetric-shaped dict used by measurement_integrity.stability.
+
+    Mirrors the _component shape but omits weight (a submetric does
+    not contribute to the top-level overall_score) and lets callers
+    pick their own config_version so future nested submetrics can be
+    advertised independently. See issue #663.
+    """
+    return {
+        "coverage": round(coverage, 4),
+        "score": None if score is None else round(max(0.0, min(100.0, score)), 1),
+        "status": _status(score, coverage=coverage),
+        "submetrics": submetrics,
+        "findings": list(findings),
+        "evidence_event_ids": sorted(set(evidence)),
+        "config_version": config_version,
+    }
+
+
 def _events_by_subject(events: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for event in events:
@@ -273,17 +295,20 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     identity_ids: List[str] = []
     coupling_ids: List[str] = []
     neutral_ids: List[str] = []
+    neutral_event_ids_by_type: Dict[str, List[str]] = defaultdict(list)
     event_type_counts: Dict[str, int] = defaultdict(int)
     event_type_neutral: Dict[str, int] = defaultdict(int)
     contract_test_ids: List[str] = []
     contract_test_passed = 0
+    replay_event_ids: List[str] = []
     replay_violations = 0
     last_ts: Optional[str] = None
 
     for event in events:
+        event_id = event["event_id"]
         has_identity = any(bool(event.get(key)) for key in STABILITY_IDENTITY_FIELDS)
         if has_identity:
-            identity_ids.append(event["event_id"])
+            identity_ids.append(event_id)
         evidence_ref = event.get("evidence_ref") or {}
         has_coupling = any(
             isinstance(k, str) and (
@@ -292,27 +317,34 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             for k in evidence_ref.keys()
         )
         if has_coupling:
-            coupling_ids.append(event["event_id"])
-        if not has_identity and not has_coupling:
-            neutral_ids.append(event["event_id"])
+            coupling_ids.append(event_id)
         event_type = event.get("event_type", "")
         event_type_counts[event_type] += 1
         if not has_identity and not has_coupling:
+            neutral_ids.append(event_id)
+            neutral_event_ids_by_type[event_type].append(event_id)
             event_type_neutral[event_type] += 1
         if event_type == "contract.test":
-            contract_test_ids.append(event["event_id"])
+            contract_test_ids.append(event_id)
             if event.get("outcome") == "passed":
                 contract_test_passed += 1
         ts = event.get("ts")
-        if last_ts is not None and ts is not None and ts < last_ts:
-            replay_violations += 1
         if ts is not None:
+            replay_event_ids.append(event_id)
+            if last_ts is not None and ts < last_ts:
+                replay_violations += 1
             last_ts = ts
 
     identity_coverage_pct = _ratio(len(identity_ids), total)
     neutrality_coverage_pct = _ratio(len(neutral_ids), total)
     distinct_types = set(event_type_counts.keys())
     portable_types = {t for t in distinct_types if event_type_neutral[t] > 0}
+    # gate_portability evidence: real event IDs that landed in a
+    # portable event_type (one with at least one neutral event), not
+    # the event_type strings themselves.
+    portable_event_ids: List[str] = [
+        eid for t in portable_types for eid in neutral_event_ids_by_type[t]
+    ]
     gate_portability_pct = (
         _ratio(len(portable_types), len(distinct_types)) if distinct_types else None
     )
@@ -323,8 +355,9 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Replay compatibility: every event's ts must be >= the previous
     # one. Empty corpus: coverage 1.0 (vacuously compatible).
     replay_compatible = replay_violations == 0
-    replay_coverage_pct: float = 100.0 if total == 0 else (
-        _ratio(total - replay_violations, total) or 0.0
+    replay_coverage_pct = (
+        _ratio(len(replay_event_ids) - replay_violations, len(replay_event_ids))
+        if replay_event_ids else 100.0
     )
 
     submetrics = {
@@ -333,8 +366,8 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             evidence=identity_ids, value=identity_coverage_pct,
         ),
         "replay_compatibility": _metric(
-            total - replay_violations, total,
-            evidence=neutral_ids, value=replay_coverage_pct,
+            len(replay_event_ids) - replay_violations, len(replay_event_ids),
+            evidence=replay_event_ids, value=replay_coverage_pct,
         ),
         "agent_provider_neutrality": _metric(
             len(neutral_ids), total,
@@ -342,7 +375,7 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         ),
         "gate_portability": _metric(
             len(portable_types), len(distinct_types),
-            evidence=list(portable_types), value=gate_portability_pct,
+            evidence=portable_event_ids, value=gate_portability_pct,
         ),
         "contract_test_pass_rate": _metric(
             contract_test_passed, len(contract_test_ids),
@@ -405,17 +438,13 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         score = None
 
-    return {
-        "coverage": round(coverage, 4),
-        "score": None if score is None else round(max(0.0, min(100.0, score)), 1),
-        "status": _status(score, coverage=coverage),
-        "submetrics": submetrics,
-        "findings": findings,
-        "evidence_event_ids": (
-            identity_ids if identity_ids else neutral_ids
-        ),
-        "config_version": "harness-stability-v1",
-    }
+    return _submetric(
+        score,
+        submetrics=submetrics,
+        evidence=identity_ids if identity_ids else neutral_ids,
+        coverage=coverage,
+        findings=findings,
+    )
 
 
 def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 ---
 name: harness-effectiveness
 category: eval
-description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested  submetric (issue #663) covering agent / model / provider swap behaviour.
+description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested submetric (issue #663) covering agent / model / provider swap behaviour.
 when_to_use:
   - User types /dev-kit:harness-effectiveness
   - Operator wants the 5-component metric without running the full 12-case `/dev-kit:evaluate` judge pass

@@ -302,6 +302,63 @@ def test_overall_score_remains_number_when_only_stability_missing(tmp_path: Path
 
 
 # ---------------------------------------------------------------------------
+# Regression tests pinning the 2 review-major findings
+# ---------------------------------------------------------------------------
+
+def test_gate_portability_evidence_event_ids_contains_real_event_ids(tmp_path):
+    """Regression: gate_portability.evidence_event_ids must be real event IDs,
+    not event_type strings (PR #677 review major #1)."""
+    _full_event_corpus(tmp_path, identity={'agent': 'claude', 'provider': 'anthropic', 'model': 'opus-4.1'})
+    stability = (
+        build_report(tmp_path)['components']['measurement_integrity']['submetrics']['stability']
+    )
+    gate_port = stability['submetrics']['gate_portability']
+    events = read_events(tmp_path)
+    real_event_ids = {e['event_id'] for e in events}
+    event_types_in_corpus = {e['event_type'] for e in events}
+    evidence = gate_port['evidence_event_ids']
+    for eid in evidence:
+        assert eid in real_event_ids, (
+            f'gate_portability.evidence_event_ids entry {eid!r} is not a real event_id'
+        )
+    for et in event_types_in_corpus:
+        assert et not in evidence, (
+            f'gate_portability.evidence_event_ids leaked event_type {et!r}; '
+            'must be event IDs, not event_type strings'
+        )
+
+def test_replay_compatibility_evidence_event_ids_match_events_with_ts(tmp_path):
+    """Regression: replay_compatibility.evidence_event_ids must list the events
+    whose ts contributed to the monotonic-timestamp check (PR #677 review minor #3)."""
+    _full_event_corpus(tmp_path, identity={'agent': 'claude', 'provider': 'anthropic', 'model': 'opus-4.1'})
+    stability = (
+        build_report(tmp_path)['components']['measurement_integrity']['submetrics']['stability']
+    )
+    replay = stability['submetrics']['replay_compatibility']
+    events = read_events(tmp_path)
+    expected_ids = sorted({e['event_id'] for e in events if e.get('ts') is not None})
+    assert replay['evidence_event_ids'] == expected_ids, (
+        f'replay_compatibility.evidence_event_ids must list the events with ts; '
+        f"got {replay['evidence_event_ids']!r}, expected {expected_ids!r}"
+    )
+
+def test_stability_submetric_top_level_shape_uses_submetric_helper(tmp_path):
+    """The stability submetric uses _submetric(): same field set as _component()
+    minus weight (PR #677 review minor #6)."""
+    _full_event_corpus(tmp_path, identity={'agent': 'claude', 'provider': 'anthropic', 'model': 'opus-4.1'})
+    stability = (
+        build_report(tmp_path)['components']['measurement_integrity']['submetrics']['stability']
+    )
+    expected = {
+        'coverage', 'score', 'status', 'submetrics', 'findings',
+        'evidence_event_ids', 'config_version',
+    }
+    assert set(stability.keys()) == expected, (
+        f'stability submetric must use _submetric() shape; got keys {set(stability.keys())}'
+    )
+    assert 'weight' not in stability, 'stability submetric must NOT carry a weight field'
+
+# ---------------------------------------------------------------------------
 # Backward compatibility for the 5-component contract
 # ---------------------------------------------------------------------------
 

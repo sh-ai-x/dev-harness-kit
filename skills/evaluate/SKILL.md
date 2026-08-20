@@ -1,7 +1,7 @@
 ---
 name: evaluate
 category: eval
-description: 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components plus the nested measurement-integrity  submetric (issue #663). /dev-kit:evaluate.
+description: 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components plus the nested measurement-integrity submetric (issue #663). /dev-kit:evaluate.
 alpha: enforcement
 when_to_use:
   - User types /dev-kit:evaluate
