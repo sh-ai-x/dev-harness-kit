@@ -1,6 +1,6 @@
 ---
 name: sync-version
-category: workflow
+category: config
 description: Sync local plugin.json:version to origin/main (or an explicit target). Same operation the pre-push hook runs automatically; use this skill when you want the sync committed before you push, when pre-push is not installed, or when a CI run reports a stale branch.
 alpha: state
 when_to_use: |
