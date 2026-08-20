@@ -90,6 +90,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install pytest + PyYAML
+        # Mirrors the test job's install step. PyYAML is a runtime dep
+        # of tools/check_doc_lifecycle.py (added by the OKF lifecycle gate
+        # PR); pytest is needed because tools/harness_audit.py is invoked
+        # via `python3 -m` from other tooling and shares the same venv.
+        # Keep this in lockstep with the test job's install line so the
+        # two CI jobs cannot drift.
+        run: pip install --quiet -r requirements.lock
+
       - name: Validate plugin manifests
         run: |
           python3 -c "
@@ -198,6 +207,12 @@ jobs:
 
       - name: Pre-push hook syntax
         run: bash -n .githooks/pre-push
+
+      - name: Doc lifecycle (stale_after gate)
+        # Fails when any rules/*.md has stale_after < today. Mirrors OKF §5.5
+        # semantics: status: deprecated exempt; missing stale_after = pass.
+        # See tools/check_doc_lifecycle.py and tests/test_doc_lifecycle.py.
+        run: python3 tools/check_doc_lifecycle.py
 
       - name: Python module imports
         run: |

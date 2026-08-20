@@ -94,6 +94,54 @@ inside a PreToolUse shell script). Each helper carries its own
 
 ---
 
+
+## Active-hooks state file (`.dev-kit/.active-hooks.json`)
+
+The single file `.dev-kit/.active-hooks.json` carries two writer-owned
+slices, namespace-separated by top-level key. Issue #676 originally
+shipped the regen tool writing a single payload that clobbered the
+codec's `matrix` slice on every SessionStart, which silently turned
+off the stage-gated hooks (`tdd-guard`, `bash-guard`, `secret-scan`,
+`slop-detector`, `stop-verify`, `pre_completion_checklist`). The
+current schema is two-slice:
+
+| Top-level key | Owner | Shape | Purpose |
+|---|---|---|---|
+| `schema_version` | regen (`tools/regenerate_active_hooks.py`) | string `"1.0.0"` | bumps only on breaking schema changes |
+| `generated_at` | regen | ISO-8601 UTC with `+00:00` | when the event-wiring slice was last regenerated |
+| `events` | regen | `{<event>: [{name, path, when, fail_closed}]}` | event-keyed snapshot of every entry in `hooks/hooks.json`; one entry per (matcher, command) tuple |
+| `matrix` | codec (`lib/active_hooks_codec.py`) | `{<stage>: {<hook>: bool|"read-only"}}` | stage-keyed activation grid consumed by `is_hook_active()` |
+| `override` | codec | `{disabled_hooks, strict_mode, env_override}` | runtime override flags consumed by `is_hook_active()` |
+
+**Why two writers, one file?** The regen snapshot (event-keyed) and
+the codec matrix (stage-keyed) answer different questions:
+
+- Regen answers *"which hook shells does `hooks/hooks.json` wire into
+  which Claude Code / Codex event?"* — derived purely from the wiring
+  manifest, deterministic across re-runs, used by tooling that walks
+  the wiring (e.g. coverage-gap reports).
+- Codec answers *"for the current dev-kit stage, which of those
+  wired-in hooks should actually run?"* — operator-tunable, mutates
+  across the session as `set_stage` / `disable_override` are called.
+
+**Writer order matters:**
+
+- The regen tool ALWAYS preserves the codec's `matrix` and `override`
+  slice verbatim when re-running. It reads the existing file via
+  `lib.atomic.read_json_or_default` and copies those two keys into
+  the new payload before overwriting.
+- The codec's `set_stage` / `disable_override` / `ensure_matrix`
+  read the file with `read_json_or_default` (defaults to a fresh
+  `matrix` payload) and write back; they do NOT touch `events`,
+  `schema_version`, or `generated_at`.
+
+**Regression coverage:** `tests/test_active_hooks_codec.py::TestCrossCodecCoexistence`
+pins the contract — ensure_matrix → regen → regen keeps the matrix
+slice byte-equal; regen → ensure_matrix → set_stage keeps the events
+slice byte-equal; the stage-gated hooks (`tdd-guard`, `bash-guard`,
+`secret-scan`, `slop-detector`, `stop-verify`) stay active after
+every transition.
+
 ## See also
 
 - [Hook coverage gaps](hook-coverage-gaps.md) — known gaps in this matrix and per-runtime wiring differences (Claude Code vs. Codex).

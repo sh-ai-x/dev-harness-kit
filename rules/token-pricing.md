@@ -3,6 +3,7 @@ paths:
   - "tools/token_efficiency_analyzer.py"
   - "tools/**/pricing*.py"
   - "tools/**/*pricing*.json"
+stale_after: 2026-11-30
 ---
 
 # Token pricing rules (dev-harness-kit)

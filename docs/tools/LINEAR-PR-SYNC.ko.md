@@ -21,7 +21,12 @@
 마커와, 클라이언트 측 세션 훅(`tools/linear_sync.py`)이 쓰는
 `<!-- scope:<branch>::<prompt 단어들> -->` 마커를 모두 매칭시켜, 브랜치의 PR
 라이프사이클 전이가 로컬 훅이 이미 만든 이슈에 반영되고 중복 이슈를 만들지
-않도록 한다. 쿼리는 `LINEAR_PROJECT_NAME`(기본 `dev-harness-kit`)으로
+않도록 한다. 여러 이슈가 같은 브랜치 접두사를 공유할 때(브랜치가 작업 간에
+재사용된 경우) 조회는 가장 최근 **열린** 이슈를 우선한다 — 종료(Done/Canceled)
+이슈는 건너뛰며, 이는 `tools/linear_sync.py::_find_all_issues`와 동일한 규칙 —
+그래서 전이가 낡은 이슈 대신 현재 작업에 반영된다. 열린 이슈가 없을 때만
+종료 상태 매치를 사용하므로 재-close 이벤트가 멱등적으로 처리된다.
+쿼리는 `LINEAR_PROJECT_NAME`(기본 `dev-harness-kit`)으로
 범위화되어 페이지네이션. 워크플로-상태 ID는 프로젝트의 팀 내에서만 해결.
 
 이벤트 동기화 단계는 non-blocking이므로 외부 Linear 장애가 PR을 블록할 수
