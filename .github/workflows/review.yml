@@ -4,6 +4,19 @@ name: PR Review
 # PR, in parallel. dev-kit plugin is installed from this checkout via a
 # local marketplace symlink so the namespaced skills resolve.
 #
+# Fork PR handling:
+#   - `pull_request` from fork: SKIPPED. GitHub caps GITHUB_TOKEN to read-only
+#     and never issues an OIDC token, so the LLM judges can't authenticate.
+#   - `pull_request_target` from fork: AUTO-RUN. The workflow file is read
+#     from the trusted `main` branch (not the fork), and the default
+#     `actions/checkout` ref is the GitHub-built merge commit (not the PR
+#     head). Fork code is therefore never present on the runner filesystem
+#     in an executable form — the dev-kit plugin symlink below reads from
+#     the merge commit, not from the fork's tree.
+#   - Operator opt-out: set `gh variable set AUTO_REVIEW_FORKS --body false`
+#     to disable auto-review on fork PRs and fall back to the manual
+#     `fork-pr-review.yml` approval gate.
+#
 # Severity gate + auto-approve (per claude-review-plugins spec):
 #   Approve            (no critical, no major in BOTH review + security) → success + auto-approve
 #   Changes Requested  (any major in either)                              → failure
@@ -42,6 +55,14 @@ name: PR Review
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # `pull_request_target` is required for the LLM judges to authenticate on
+  # fork PRs — the `pull_request` trigger caps GITHUB_TOKEN/OIDC for forks
+  # regardless of the `permissions:` block. Workflow file is read from the
+  # base branch (not the fork), and the default `actions/checkout` ref is
+  # the merge commit, so fork code never reaches the runner in executable
+  # form. See header comment for the full fork-trust rationale.
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
@@ -130,16 +151,24 @@ jobs:
     # GITHUB_TOKEN to read-only and never issues an OIDC token for
     # `pull_request` runs originating from a fork, regardless of the
     # `permissions:` block below — the job would just fail loudly on the
-    # OIDC fetch step. Fork PRs are reviewed via `fork-pr-review.yml`
-    # instead, which requires maintainer approval (GitHub Environment
-    # `fork-pr-review`) before dispatching THIS workflow via
-    # `workflow_dispatch` — that dispatch is not a fork-origin `pull_request`
-    # event, so it gets full permissions and reaches this same job normally.
+    # OIDC fetch step. Fork PRs are reviewed via `pull_request_target`
+    # instead (the other branch of this `if:`), which has full permissions
+    # and trusts the base-branch workflow file (not the fork's). The
+    # `vars.AUTO_REVIEW_FORKS != 'false'` check is the operator opt-out:
+    # setting the variable to `false` (literal string) routes fork PRs
+    # to the manual `fork-pr-review.yml` approval gate instead. Default
+    # (unset / empty / `true`) → auto-run on fork PRs.
     if: |
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
-      (github.event_name == 'workflow_dispatch' ||
-        (needs.scope.outputs.touches_prod == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' &&
+         needs.scope.outputs.touches_prod == 'true' &&
+         github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'pull_request_target' &&
+         github.event.pull_request.head.repo.full_name != github.repository &&
+         vars.AUTO_REVIEW_FORKS != 'false')
+      )
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -152,6 +181,16 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          # No explicit `ref:` — defaults to `github.sha`, which on
+          # `pull_request_target` is the GitHub-built MERGE COMMIT (base +
+          # head), NOT the PR head SHA. The merge commit is trusted
+          # because GitHub constructs it: any fork-side modifications are
+          # visible in the diff but never executed. The dev-kit plugin
+          # symlink below reads from `$GITHUB_WORKSPACE`, which is this
+          # merge commit — same trust model as `pull_request` from the
+          # same repo. If this `ref:` ever becomes explicit
+          # (`ref: ${{ github.event.pull_request.head.sha }}`), the fork-
+          # trust model breaks and secrets can be exfiltrated.
           fetch-depth: 1
 
       - name: Install dev-kit plugin from local checkout
@@ -210,7 +249,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -235,7 +274,7 @@ jobs:
         with:
           allowed_bots: '*'
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -261,7 +300,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -316,12 +355,19 @@ jobs:
     timeout-minutes: 35
     needs: scope
     # Skip on bump-PRs, docs/tests-only PRs, and fork PRs on the
-    # `pull_request` trigger — same rationale as `review:` above.
+    # `pull_request` trigger. Fork PRs on `pull_request_target` auto-run
+    # (same trust model + AUTO_REVIEW_FORKS opt-out as `review:` above).
     if: |
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
-      (github.event_name == 'workflow_dispatch' ||
-        (needs.scope.outputs.touches_prod == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' &&
+         needs.scope.outputs.touches_prod == 'true' &&
+         github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'pull_request_target' &&
+         github.event.pull_request.head.repo.full_name != github.repository &&
+         vars.AUTO_REVIEW_FORKS != 'false')
+      )
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -334,6 +380,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          # Same fork-trust rationale as the `review:` job's checkout:
+          # default `ref:` (merge commit, not PR head) keeps fork code off
+          # the runner. See `review:` for the full rationale.
           fetch-depth: 1
 
       - name: Install dev-kit plugin from local checkout
@@ -390,7 +439,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -414,7 +463,7 @@ jobs:
         with:
           allowed_bots: '*'
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -439,7 +488,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -496,13 +545,22 @@ jobs:
     # as `review`/`security` above) — running `gate` here would otherwise
     # default the missing (intentionally-skipped, not failed) verdicts to
     # Approve and silently bypass review for every fork PR. The
-    # `fork-pr-review.yml` maintainer-approval gate dispatches a
-    # `workflow_dispatch` run of THIS workflow instead, which reaches this
-    # same `gate` job with real verdicts from `needs.review`/`needs.security`.
+    # `fork-pr-review.yml` opt-in manual gate (only fires when
+    # `vars.AUTO_REVIEW_FORKS=false`) dispatches a `workflow_dispatch` run
+    # of THIS workflow instead, which reaches this same `gate` job with
+    # real verdicts from `needs.review`/`needs.security`. On the new
+    # default path (fork PRs auto-run via `pull_request_target`), `review`
+    # and `security` produce real verdicts directly — the gate below
+    # mirrors the same fork-trust conditions.
     if: |
       always() &&
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
-      (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
+      (
+        github.event_name == 'workflow_dispatch' ||
+        github.event.pull_request.head.repo.full_name == github.repository ||
+        (github.event.pull_request.head.repo.full_name != github.repository &&
+         vars.AUTO_REVIEW_FORKS != 'false')
+      )
     # The auto-approve step casts `gh pr review --approve`, which
     # writes to the PR. The default GITHUB_TOKEN is read-only on most
     # operations; grant pull-requests: write so the auto-approve
