@@ -54,7 +54,7 @@ re-verify that candidate with fresh `gh pr view` data before acting. Pass
 | `REVIEW_VERDICT` | `gh pr view --json reviewDecision -q .reviewDecision` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`) — re-issue immediately before acting (see MUST rule above) |
 | `CHECKS`         | `gh pr checks --json name,state,conclusion` — re-issue immediately before acting (see MUST rule above) |
 | `BRANCH`         | `git rev-parse --abbrev-ref HEAD`                                      |
-| `MAX_ITERS`      | `1000` (high cap; configurable via `BABYSIT_MAX_ITERS` env var; the 3-consecutive-no-progress stuck-loop guard still triggers earlier) |
+| `MAX_ITERS`      | `1000` watchdog (configurable via `BABYSIT_MAX_ITERS`; not an approval timeout or normal completion condition; durable state is saved before fallback) |
 | `OPERATOR_HANDLE`| `gh api /user -q .login` (the human running the babysitter)           |
 | `CODEOWNERS_PATH`| `$REPO_ROOT/.github/CODEOWNERS` (parsed by `lib/babysit_pr_cli.py`)    |
 | `COLLABORATORS`  | `gh api /repos/{owner}/{repo}/collaborators?per_page=100 -q '.[].login'` |
@@ -284,8 +284,11 @@ parallel tool calls are especially dangerous — they always look fresh.
                     B) CI pending      (check.conclusion == null/pending) → wait
                     C) Review changes  (REVIEW_VERDICT == "CHANGES_REQUESTED")
                     D) Review required (REVIEW_VERDICT == "REVIEW_REQUIRED" or "")
-                       → print "waiting for human review" + exit 0 (cannot self-approve)
-  4. WAIT       — if any check is pending and no failures, sleep 30s, continue
+                       → persist WAIT_FOR_APPROVAL and wait/resume (cannot self-approve)
+  4. WAIT       — if any check is pending and no failures, persist WAIT_FOR_CHECKS,
+                  sleep/reconcile, and continue; if checks are green but review
+                  is required, persist WAIT_FOR_APPROVAL and continue until a
+                  fresh review event or approval arrives.
   5. FETCH LOGS — for each failing check IN `changed` (per step 1's diff):
                     `gh run view <run-id> --log-failed`  (via checks databaseId)
                     truncate to last 200 lines; capture exit code + first error.
@@ -341,6 +344,31 @@ parallel tool calls are especially dangerous — they always look fresh.
   14. INCREMENT — `iter = iter + 1`; if `iter > MAX_ITERS`, fall through to
                   the cap-fallback below; otherwise `goto 1`.
 ```
+
+### Durable approval-seeking loop
+
+The loop persists its control-plane state in `.dev-kit/babysit-state.json`
+using `lib/babysit_pr_loop.py`. The durable phases are:
+
+```text
+REPAIRING → WAIT_FOR_CHECKS → REPAIRING
+     │              │
+     ├──────────────┴────→ WAIT_FOR_APPROVAL → DONE
+     └─ unchanged/stale → RECOVERY_REQUIRED → resume on fresh evidence
+```
+
+`DONE` is reserved for `REVIEW_VERDICT=APPROVED` with every required check in
+`{success, skipped, neutral}`. `WAIT_FOR_APPROVAL` is healthy long-running
+state, not exit-0 completion. `RECOVERY_REQUIRED` is also resumable: it stops
+repeating an unproductive patch while retaining the PR, evidence, context
+epoch, repair attempt, and next wake information. A worker restart loads this
+state before taking action and must re-snapshot GitHub immediately.
+
+The pure state machine records context-epoch changes when the head SHA moves,
+and turns repeated no-information outcomes into `continue`, `evolve_step`,
+`change_direction`, `reset_context`, and finally `recover`. These are strategy
+changes, not approval decisions; safety valves, bounded repair attempts,
+fresh verification, and the human-only merge boundary remain unchanged.
 
 ### Check-state caching (efficiency)
 
@@ -399,10 +427,11 @@ helper's default shims raise RuntimeError; without the real
 `subprocess.run`/`print` wiring, the helper cannot post the audit
 comment or schedule the merge.
 
-If `iter == MAX_ITERS` and PR is still blocked → print the unresolved blocker
-list, exit 1. **Never** silently retry past the cap. (The earlier
-3-consecutive-no-progress guard fires first when the loop is genuinely
-stuck and avoids burning the full 1000-iter budget.)
+If `iter == MAX_ITERS` and PR is still blocked → persist the unresolved
+blocker list and exit the current worker with a resumable watchdog status.
+**Never** silently retry past the cap, but do not turn the PR into success or
+discard its state. The next explicit resume or provider event can continue
+from `.dev-kit/babysit-state.json`.
 
 ---
 
@@ -568,10 +597,12 @@ The following are **forbidden** as a means of getting the PR to green:
   (`local:  <command> → <result> (exit <code>)`). A "fixed" claim without the
   evidence line violates MUST-L3 and the no-workaround iron law (MUST-NO-SKIP).
 
-If the same failure recurs after **3 consecutive iterations** with no
-progress, exit 1 and print the unresolved blocker list with quoted log
-snippets — do not silently retry past the cap, do not lower the bar, do
-not skip.
+If the same failure recurs after **3 consecutive iterations** with no new
+information, persist `RECOVERY_REQUIRED` with the unresolved blocker list and
+quoted log snippets, then enter durable recovery wait. Do not silently retry
+the same patch, lower the bar, or skip. A later fresh check/review event,
+explicit resume, or newer model run may continue the same PR. Only
+`APPROVED` plus green required checks is a successful terminal state.
 
 ---
 

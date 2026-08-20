@@ -4,7 +4,7 @@
 
 **Category:** `ship` · **Alpha:** `state` · **Invocation:** `/dev-kit:babysit-pr` (human-invoked)
 
-`babysit-pr` monitors the PR associated with the **current branch** by default; `--pr N` explicitly targets an open PR when the current branch's PR is closed or merged. When invoked from the main checkout, an explicitly identified PR from the current conversation may be used as a validated conversation handoff. It must never infer a target from recency or PR number. Every iteration is evidence-driven (MUST-L3): the skill quotes exit codes, log snippets, and review verdicts before claiming a step is done, and it never auto-merges — merging into `main` stays a human-only action even in the single-operator opt-out path.
+`babysit-pr` monitors the PR associated with the **current branch** by default; `--pr N` explicitly targets an open PR when the current branch's PR is closed or merged. When invoked from the main checkout, an explicitly identified PR from the current conversation may be used as a validated conversation handoff. It must never infer a target from recency or PR number. Every iteration is evidence-driven (MUST-L3): the skill quotes exit codes, log snippets, and review verdicts before claiming a step is done. It persists `WAIT_FOR_CHECKS`, `WAIT_FOR_APPROVAL`, and `RECOVERY_REQUIRED` so a worker restart does not turn an unfinished PR into success, and it never auto-merges.
 
 `CONVERSATION_PR` is established only by a literal PR number in the user message or by a PR number returned by the immediately preceding assistant PR-creation/listing result. Vague references such as "the latest PR" do not qualify. A validated conversation handoff is checked with `gh pr view` before any candidate enumeration and goes directly to worktree resolution.
 
@@ -18,7 +18,7 @@
 
 ### Inputs (resolved at runtime, not user args)
 
-`PR_NUMBER`, `PR_STATE`, `REVIEW_VERDICT` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`), `CHECKS`, and `BRANCH` are all read via `gh pr view` / `gh pr checks` / `git rev-parse`. Target precedence is explicit `--pr N`, then an explicitly identified conversation PR, then the current branch's PR, then main-checkout candidate resolution. A conversation PR is accepted only when the current conversation explicitly established it or the immediately preceding PR-creation step returned it; it is freshly validated with `gh pr view` before use. `MAX_ITERS` defaults to `1000` (configurable via the `BABYSIT_MAX_ITERS` env var — the 3-consecutive-no-progress stuck-loop guard still fires earlier in practice). `OPERATOR_HANDLE` is `gh api /user -q .login`; `CODEOWNERS_PATH` is `.github/CODEOWNERS`; `COLLABORATORS` comes from the GitHub collaborators API. If no target is established, the skill prints a one-line message and exits 1. If the resolved `PR_STATE != OPEN`, the skill prints a one-line message and exits 1 rather than silently reporting success. It never creates a PR implicitly.
+`PR_NUMBER`, `PR_STATE`, `REVIEW_VERDICT` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`), `CHECKS`, and `BRANCH` are all read via `gh pr view` / `gh pr checks` / `git rev-parse`. Target precedence is explicit `--pr N`, then an explicitly identified conversation PR, then the current branch's PR, then main-checkout candidate resolution. A conversation PR is accepted only when the current conversation explicitly established it or the immediately preceding PR-creation step returned it; it is freshly validated with `gh pr view` before use. `MAX_ITERS` is a worker watchdog, not an approval timeout; the durable state file allows a later resume. `OPERATOR_HANDLE` is `gh api /user -q .login`; `CODEOWNERS_PATH` is `.github/CODEOWNERS`; `COLLABORATORS` comes from the GitHub collaborators API. If no target is established, the skill prints a one-line message and exits 1. If the resolved `PR_STATE != OPEN`, the skill prints a one-line message and exits 1 rather than silently reporting success. It never creates a PR implicitly.
 
 ### Worktree-aware execution
 
@@ -40,7 +40,7 @@ On start: `mkdir -p .dev-kit`; if `.dev-kit/babysit.lock` exists, check stalenes
 
 1. **SNAPSHOT** — one `gh` call fetches `PR_NUMBER`, `REVIEW_VERDICT`, `CHECKS`, then diffs it against the prior iteration's cached check-state (`.dev-kit/babysit-checks.json`) via `diff_check_states()` — see "Check-state caching" below.
 2. **TERMINATE** — if `REVIEW_VERDICT == APPROVED` and every check's conclusion is in `{success, skipped, neutral}`, print "PR approved" and exit 0.
-3. **CLASSIFY** — bucket blockers into (A) CI failing, (B) CI pending → wait, (C) review `CHANGES_REQUESTED`, (D) `REVIEW_REQUIRED`/empty → print "waiting for human review" and exit 0 (the skill cannot self-approve).
+3. **CLASSIFY** — bucket blockers into (A) CI failing, (B) CI pending → `WAIT_FOR_CHECKS`, (C) review `CHANGES_REQUESTED`, (D) `REVIEW_REQUIRED`/empty → persist `WAIT_FOR_APPROVAL` and resume (the skill cannot self-approve).
 4. **WAIT** — if any check is pending with no failures, sleep 30s and continue.
 5. **FETCH LOGS** — `gh run view <run-id> --log-failed` per failing check *whose state changed* since the last snapshot; truncate to the last 200 lines; capture exit code and first error. A failing check that is `unchanged` (same databaseId + conclusion as last iteration) is skipped — its log is already diagnosed.
 6. **DIAGNOSE** — one root cause per `changed` failing check: test failure, lint/format, type-check, secret detected (abort — never auto-remove), or review feedback.
@@ -53,7 +53,7 @@ On start: `mkdir -p .dev-kit`; if `.dev-kit/babysit.lock` exists, check stalenes
 13. **SAVE STATE** — overwrites `.dev-kit/babysit-checks.json` with the fresh check-state snapshot for the next iteration's diff.
 14. **INCREMENT** — `iter += 1`; on exceeding `MAX_ITERS`, falls through to the cap-fallback (print the unresolved blocker list, exit 1 — never silently retries past the cap).
 
-**Termination conditions**: approved + green → exit 0; `REVIEW_REQUIRED` → exit 0 ("waiting for human review"); `CHANGES_REQUESTED` → apply and iterate; 3 consecutive iterations with no progress → exit 1 with the blocker list (this guard fires before the full 1000-iteration budget is exhausted).
+**Termination conditions**: approved + green → exit 0; pending checks → persist `WAIT_FOR_CHECKS`; `REVIEW_REQUIRED` → persist `WAIT_FOR_APPROVAL`; `CHANGES_REQUESTED` → apply and iterate; 3 consecutive no-information outcomes → persist `RECOVERY_REQUIRED` and wait for new evidence/resume. Only approved + green is successful completion.
 
 ### Check-state caching (efficiency)
 
