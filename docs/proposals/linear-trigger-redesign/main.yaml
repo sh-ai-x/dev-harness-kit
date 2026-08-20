@@ -72,11 +72,18 @@ limitations:
 sections:
   - title: TL;DR
     body: |
-      **Linear 등록을 best-effort sync 에서 work 의 hard gate 로 전환.**
+      **Single-owner, same-scope race (one repo) → solved.**
+      **Cross-repo dedup (N dev-harness-kit installs, same scope) → out of scope for v1.**
 
-      현재 4 hook (PreToolUse Edit / SessionStart / UserPromptSubmit task-change /
-      PostToolUse:Bash `git worktree add`) 은 전부 **best-effort + owner-gated +
-      silent skip**. `tools/linear_sync.py` 1개가 진입점.
+      Within a single repo, the owner can cut two worktrees on the same scope
+      (`fix/foo` in worktree X and Y) and today's 4-hook system produces two
+      Linear issues because each hook sees only its own path. This proposal
+      closes that hole by gating worktree creation on a Linear check.
+
+      Today: 4 best-effort hooks (PreToolUse Edit / SessionStart /
+      UserPromptSubmit task-change / PostToolUse:Bash `git worktree add`),
+      all owner-gated, all silent-skip on failure. Single Python entry point
+      (`tools/linear_sync.py`).
 
       **핵심 결정**:
       - **WorktreeCreate 시점에 Linear issue 존재를 강제** (없으면 자동 생성)
@@ -85,6 +92,7 @@ sections:
         1개가 이후 모든 hook 의 단일 진실
       - **4 hook 전부 제거**, WorktreeCreate 1개로 대체
       - **PR merge → state: Done** (기존 `linear-pr-sync.yml` 그대로 유지)
+      - **Cross-repo dedup (future work)** — v1 범위 외. 공유 dedup store 필요.
 
   - title: 배경 — 동기
     body: |
@@ -233,10 +241,12 @@ sections:
 
       2. **scope 추출 실패 시 fallback** — branch name 만으로 issue 제목을
          만들면 noise (`fix/typo` → "Fix: typo"). branch 가 너무 generic
-         하면 user 에게 prompt 로 제목 받기.
+         하면 issue 제목이 무의미해진다.
          → 해결: `_scope_from_branch()` 가 12자 미만 / 동사만 있는 경우
-         `LINEAR_REQUIRED=0` 모드 + stderr 경고로 강등. v1 에서는
-         interactive prompt 미지원 (WorktreeCreate 는 server-side hook).
+         `LINEAR_REQUIRED=0` 모드 + stderr 경고로 강등. **v1 에서는
+         interactive prompt 미지원** (WorktreeCreate 는 server-side hook
+         이라 user prompt 불가). 향후 비목표 §1 의 interactive pre-cut
+         prompt UX 로 migration path.
 
       3. **network failure 시 worktree cut 자체가 block** — Linear API down 이면
          작업 시작 못함. 15s timeout 으로 빠지지만 그래도 fail-closed.
