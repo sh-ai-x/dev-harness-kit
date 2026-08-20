@@ -30,6 +30,14 @@ def _load(mod_name: str, file: str):
     return mod
 
 
+def _load_ci_doctor():
+    return _load("ci_doctor", "ci_doctor.py")
+
+
+def _load_ci_setup():
+    return _load("ci_setup", "ci_setup.py")
+
+
 class TestCiDoctor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1161,6 +1169,68 @@ class TestOpenPrState(unittest.TestCase):
         rows = self._diagnostic_rows(r, "open PR ")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].label, "open PR mergeable")
+
+
+class TestCheckTemplatesCurrent(unittest.TestCase):
+    """`templates current` check: PASS/INFO/WARN/SKIP mapping for the
+    consumer's installed CI templates vs the live dev-kit source.
+
+    Wired into `audit()` after `_check_marker_payload` so the new
+    information appears next to the marker read. Lives in its own test
+    class because it needs the real `install_ci_config` machinery (not
+    the `_minimal_install` stub) to populate `template_shas`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cd = _load_ci_doctor()
+        cls.ci_setup = _load_ci_setup()
+        cls.plugin_root = Path(__file__).resolve().parent.parent
+
+    def test_check_passes_on_clean_install(self):
+        """Fresh install → templates match dev-kit source → PASS."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            r = self.cd.audit(target)
+            rows = [c for c in r.checks if "templates current" in c.label]
+            self.assertEqual(len(rows), 1, f"expected one templates-current row; got {rows}")
+            self.assertEqual(rows[0].state, "PASS", f"expected PASS; got {rows[0]}")
+
+    def test_check_warns_on_consumer_drift(self):
+        """Consumer edits a file → ci-doctor surfaces drift as WARN."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            # Simulate consumer modifying an installed file
+            rel = "scripts/validate.py"
+            (target / rel).write_bytes((target / rel).read_bytes() + b"\n# edit\n")
+            r = self.cd.audit(target)
+            rows = [c for c in r.checks if "templates current" in c.label]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].state, "WARN",
+                             f"expected WARN on consumer drift; got {rows[0]}")
+            self.assertIn("consumer_modified", rows[0].detail)
+
+    def test_check_skips_when_marker_lacks_version(self):
+        """v1.0.0 marker (no installed_dev_kit_version) → SKIP."""
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            self.ci_setup.install_ci_config(target)
+            marker_path = target / ".dev-kit" / "ci-config.json"
+            marker = json.loads(marker_path.read_text())
+            marker.pop("installed_dev_kit_version", None)
+            marker.pop("template_shas", None)
+            marker_path.write_text(json.dumps(marker))
+            r = self.cd.audit(target)
+            rows = [c for c in r.checks if "templates current" in c.label]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].state, "SKIP",
+                             f"expected SKIP on unknown version; got {rows[0]}")
 
 
 if __name__ == "__main__":

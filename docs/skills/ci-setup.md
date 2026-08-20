@@ -12,6 +12,7 @@
 - The user wants the same CI shape (branch-policy + validate + test + auto-fix) in a new repo.
 - The user is preparing a repo for `/dev-kit:build` (ci-setup is a precondition).
 - The user wants to re-run to refresh templates (`--force` flag).
+- The user wants to backfill `installed_dev_kit_version` + `template_shas` into an existing v1.0.0 marker (no-op idempotent re-install).
 
 ## How it works
 
@@ -71,6 +72,8 @@ Failure exit codes: `1` = arg error, `2` = marker present + no `--force`, `3` = 
 
 - [bootstrap](bootstrap.md) — typically run before this skill.
 - [bootstrap](bootstrap.md) — composes `bootstrap` + this skill into one call.
+- [`ci-update`](ci-update.md) — for **selective** refresh of templates after dev-kit ships new versions (4-state diff with backup). Use `--force` here only for a full reset; for partial refresh prefer `/dev-kit:ci-update --apply`.
+- [`ci-doctor`](ci-doctor.md) — read-only audit; surfaces `templates current` WARN rows when refresh is needed.
 - `/dev-kit:build` — refuses to start without the `.dev-kit/ci-config.json` marker this skill writes.
 - `docs/quality/ci-setup.md` — full usage docs.
 
