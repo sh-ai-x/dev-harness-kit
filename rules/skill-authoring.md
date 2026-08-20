@@ -1,6 +1,7 @@
 ---
 paths:
   - "skills/**/SKILL.md"
+stale_after: 2027-05-31
 ---
 
 # SKILL.md authoring rules (dev-harness-kit)

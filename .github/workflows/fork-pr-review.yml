@@ -49,10 +49,21 @@ jobs:
       actions: write
       pull-requests: write
       statuses: write
+    # Job-level env so every `gh` invocation knows the API host + repo
+    # without an `actions/checkout` step. Without these, gh falls back
+    # to `git rev-parse` to resolve the host (no `.git` on the runner)
+    # and aborts with `failed to determine base repo: ... fatal: not a
+    # git repository`. Step 6's `Post final AI-judge status to PR
+    # commit` was the visible failure under `set -e`; step 4's
+    # `Wait for dispatched AI judges` swallowed the same error behind
+    # `|| true`.
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_HOST: github.com
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Dispatch AI review workflows
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -82,7 +93,6 @@ jobs:
 
       - name: Resolve PR commit SHA
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -91,26 +101,19 @@ jobs:
           echo "Resolved PR commit SHA=$SHA"
 
       - name: Mark PR commit as AI-review-pending
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # --repo is required: pull_request_target runs without a checkout, so
-          # the runner has no .git directory. A relative `gh api` URL like
-          # `repos/${{ github.repository }}/statuses/$SHA` would otherwise try
-          # to discover the repo from git context and fail with
-          # "failed to determine base repo: failed to run git: fatal: not a
-          # git repository". Observed on PR #665, run 32245678201.
-          gh api "repos/${{ github.repository }}/statuses/$SHA" \
-            --repo "${{ github.repository }}" -X POST \
+          # `gh api` reads GH_HOST + GH_REPO from the job-level env so the
+          # path-only URL can resolve the API endpoint on a runner that has
+          # no .git directory (pull_request_target). See the job-level env
+          # block for the rationale.
+          gh api "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" -X POST \
             -f state=pending \
             -f context='fork-pr-review/ai-judges' \
             -f description="AI judges dispatched (review=$REVIEW_RUN maintenance=$MAINT_RUN); awaiting verdict" \
             -f target_url="https://github.com/${{ github.repository }}/actions/runs/$REVIEW_RUN"
 
       - name: Wait for dispatched AI judges
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
@@ -118,14 +121,10 @@ jobs:
           done
 
       - name: Post per-judge commit statuses
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           for RUN in "$REVIEW_RUN" "$MAINT_RUN"; do
-            # --repo: see the note on the Mark PR commit step above.
-            JOBS_JSON="$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs" \
-              --repo "${{ github.repository }}")"
+            JOBS_JSON="$(gh api "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN/jobs")"
             for NAME in "/dev-kit:review (3-dim)" "/dev-kit:security (10-dim OWASP)" "/dev-kit:maintenance (code-sanity + docs)"; do
               JOB_URL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .html_url // empty')"
               CONCL="$(echo "$JOBS_JSON" | jq -r --arg n "$NAME" '.jobs[] | select(.name==$n) | .conclusion')"
@@ -136,8 +135,7 @@ jobs:
                 *) continue ;;  # skipped/cancelled/action_required/neutral/stale — non-blocking, don't post
               esac
               TARGET_URL="${JOB_URL:-https://github.com/${{ github.repository }}/actions/runs/$RUN}"
-              gh api "repos/${{ github.repository }}/statuses/$SHA" \
-                --repo "${{ github.repository }}" -X POST \
+              gh api "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" -X POST \
                 -f state="$STATE" \
                 -f context="$NAME" \
                 -f description="judge job conclusion=$CONCL (run=$RUN)" \
@@ -146,8 +144,6 @@ jobs:
           done
 
       - name: Post final AI-judge status to PR commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           REVIEW_CONCL="$(gh run view "$REVIEW_RUN" --json conclusion --jq .conclusion)"
@@ -159,8 +155,7 @@ jobs:
             STATE="failure"
             DESCRIPTION="AI judge failure (review=$REVIEW_CONCL maintenance=$MAINT_CONCL)"
           fi
-          gh api "repos/${{ github.repository }}/statuses/$SHA" \
-            --repo "${{ github.repository }}" -X POST \
+          gh api "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" -X POST \
             -f state="$STATE" \
             -f context='fork-pr-review/ai-judges' \
             -f description="$DESCRIPTION" \
@@ -168,7 +163,6 @@ jobs:
 
       - name: Post audit comment
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           REVIEW_CONCL="$(gh run view "$REVIEW_RUN" --json conclusion --jq .conclusion)"

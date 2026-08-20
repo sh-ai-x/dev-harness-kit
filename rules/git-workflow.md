@@ -5,6 +5,7 @@ paths:
   - "docs/adr/ADR-00**-*.md"
   - "tests/test_git_workflow.py"
   - "tests/test_worktree_guard.py"
+stale_after: 2027-05-31
 ---
 
 # Git workflow rules (dev-harness-kit)
