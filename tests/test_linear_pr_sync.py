@@ -141,6 +141,46 @@ class TestIssueLookup(unittest.TestCase):
         with patch.object(lps, "_iter_issues", return_value=issues):
             self.assertIsNone(lps._issue_by_branch("feat/x", "project"))
 
+    def test_branch_reuse_prefers_open_issue_over_completed(self):
+        # A branch reused across tasks leaves a Done issue from the
+        # previous PR. tools/linear_sync.py::_find_all_issues excludes
+        # terminal states, so the local hook created a NEW open issue;
+        # the CI-side lookup must prefer it even when the stale Done
+        # issue appears first in the list.
+        issues = [
+            {"identifier": "SHO-OLD", "description": "<!-- scope:feat/x::first task -->",
+             "state": {"type": "completed"}, "updatedAt": "2026-08-01T00:00:00Z"},
+            {"identifier": "SHO-2", "description": "<!-- scope:feat/x::second task -->",
+             "state": {"type": "started"}, "updatedAt": "2026-08-17T00:00:00Z"},
+        ]
+        with patch.object(lps, "_iter_issues", return_value=issues):
+            self.assertEqual(lps._issue_by_branch("feat/x", "project")["identifier"], "SHO-2")
+
+    def test_newest_open_match_wins_when_multiple(self):
+        # Multiple open issues sharing the branch prefix (e.g. an
+        # auto-sync-created issue plus a PR-sync-created one) resolve
+        # to the most recently updated, mirroring _find_all_issues.
+        issues = [
+            {"identifier": "SHO-1", "description": "<!-- scope:feat/x::older task -->",
+             "state": {"type": "started"}, "updatedAt": "2026-08-01T00:00:00Z"},
+            {"identifier": "SHO-2", "description": "<!-- scope:feat/x::newer task -->",
+             "state": {"type": "started"}, "updatedAt": "2026-08-17T00:00:00Z"},
+        ]
+        with patch.object(lps, "_iter_issues", return_value=issues):
+            self.assertEqual(lps._issue_by_branch("feat/x", "project")["identifier"], "SHO-2")
+
+    def test_completed_only_match_still_returned(self):
+        # No open issue exists (e.g. a re-close event after the issue
+        # was already transitioned). Returning the terminal match lets
+        # cmd_sync hit its idempotent `already Done` early-exit instead
+        # of creating a duplicate issue.
+        issues = [
+            {"identifier": "SHO-1", "description": "<!-- scope:feat/x::auto-sync -->",
+             "state": {"type": "completed"}, "updatedAt": "2026-08-10T00:00:00Z"},
+        ]
+        with patch.object(lps, "_iter_issues", return_value=issues):
+            self.assertEqual(lps._issue_by_branch("feat/x", "project")["identifier"], "SHO-1")
+
 
 class TestIssuePagination(unittest.TestCase):
     def test_follows_cursor_and_scopes_to_project(self):

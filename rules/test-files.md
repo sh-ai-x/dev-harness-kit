@@ -7,6 +7,7 @@ paths:
   - "**/tests/**/*.test.tsx"
   - "**/__tests__/**/*.test.ts"
   - "**/__tests__/**/*.test.tsx"
+stale_after: 2027-08-19
 ---
 
 # Test file authoring rules
