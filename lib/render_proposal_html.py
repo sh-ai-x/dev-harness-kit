@@ -578,9 +578,17 @@ def _render_inline(text: str) -> str:
 
 
 def _split_table_row(row: str) -> List[str]:
-    """Split a GFM table row on `|`, trim, drop leading/trailing empty cells."""
-    cells = [c.strip() for c in row.strip().strip("|").split("|")]
-    return cells
+    """Split a GFM table row on `|`, trim, drop leading/trailing empty cells.
+
+    Honours `\\|` as a literal pipe inside a cell. GFM escapes pipes in
+    table cells by backslash; without this, a cell like
+    ``PreToolUse Edit\\|Write\\|MultiEdit`` is mis-split into 3 cells.
+    """
+    stripped = row.strip().strip("|")
+    # Split on unescaped pipes only.
+    parts = re.split(r"(?<!\\)\|", stripped)
+    # Unescape `\\|` -> `|` inside each cell; trim surrounding whitespace.
+    return [p.replace("\\|", "|").strip() for p in parts]
 
 
 def _render_table(lines: List[str]) -> str:

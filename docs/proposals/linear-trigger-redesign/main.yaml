@@ -65,9 +65,9 @@ cons:
   - 'WorktreeCreate fires for ALL `git worktree add` (not just Claude Code''s). Mitigation: hook is scoped to dev-harness-kit installations via the existing config-presence check (`linear-config.json:enabled`); non-dhk worktrees are unaffected'
   - 'Removes a feedback signal operators currently rely on (every-edit sync). Mitigation: PR-merge still publishes a state update; the Linear timeline remains complete for shipped work'
 limitations:
-  - 'Linear''s `issueCreate` GraphQL mutation has NO native unique-by-label enforcement. Dedup relies on a `filter: { title: { eq: $scope } }` query at hook time; same-second race between two cuts can still create two issues. Out of scope: optimistic concurrency on the Linear side. Mitigation: post-create label tagging + a one-shot reconcile cron'
+  - 'Linear''s `issueCreate` GraphQL mutation has NO native unique-by-label enforcement. Dedup relies on a `filter: { title: { eq: $scope } }` query at hook time; same-second race between two cuts can still create two issues. Out of scope: optimistic concurrency on the Linear side. Mitigation: post-create label tagging (`linear-autosync:<scope-hash>`) + a one-shot reconcile cron (daily via `gh workflow run`) that scans the project for duplicate `title`/`label` tuples and closes the older one with a redirect comment'
   - 'Branch-name-only scope detection fails for generic names (`fix/typo`, `chore/cleanup`). Out of scope: a plan-id discovery mechanism for users who don''t run `/dev-kit:plan` first. Mitigation: hook prompts the user via stderr for a better title when scope extraction returns < 12 chars'
-  - 'Migration of existing `.dev-kit/hand-off/linear/main.json` to the per-worktree layout is deferred. Out of scope for this proposal. Mitigation: a follow-up one-shot migration script in the rollout PR'
+  - 'Migration of existing `.dev-kit/hand-off/linear/main.json` to the per-worktree layout is deferred. Out of scope for this proposal. Mechanism: the rollout PR adds a one-shot migration script (`tools/migrate_linear_handoff.py`) + a deprecation warning emitted by the old `linear-session-start.sh` stub for 1 release (logs `DEPRECATION: .dev-kit/hand-off/linear/main.json layout will be removed; run tools/migrate_linear_handoff.py`); consumer runs the script before upgrading to the v1 gate. Script is idempotent (per-worktree linear.json is the new SSOT; legacy file is moved to `.bak` and never read again)'
   - 'Cross-repo dedup (dev-harness-kit installed in N repos, same scope across two) is NOT supported. Out of scope: that scenario requires a shared dedup store (Redis/Lua). Documented as a future enhancement, not a v1 feature'
 sections:
   - title: TL;DR
@@ -96,8 +96,11 @@ sections:
 
   - title: 배경 — 동기
     body: |
-      dev-harness-kit 는 plugin으로 여러 repo 에 설치되고, owner 가 한 repo 내에서
-      여러 worktree 를 동시에 운영한다. 현재 4 hook 의 결정적 약점:
+      **한 repo 안에서** owner 가 여러 worktree 를 동시에 운영할 때의
+      race condition. dev-harness-kit 가 N개 repo 에 설치되는 사실은
+      배경 정보일 뿐 v1 scope 의 동기 아님 (cross-repo 는 §비목표 #1).
+
+      현재 4 hook 의 결정적 약점 (single-repo 관점):
 
       1. **Race-free 시작 부재** — owner A 가 `fix/foo` worktree 를 2개 (X, Y) cut
          하면 각 hook 이 자기 path 만 보고 issue 2개 생성. **중복 작업.**

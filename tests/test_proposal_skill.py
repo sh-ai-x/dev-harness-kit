@@ -225,6 +225,22 @@ class RenderBodyTests(unittest.TestCase):
         self.assertIn("<td>High</td>", out)
         self.assertIn("</table>", out)
 
+    def test_table_escaped_pipe_in_cell(self):
+        """Regression: a cell with `\\|` must render as ONE cell with a literal `|`."""
+        body = (
+            "| Hook | Event | Entrypoint | Trigger |\n"
+            "|------|-------|------------|---------|\n"
+            "| linear-autosync.sh | PreToolUse Edit\\|Write\\|MultiEdit | sync() | every edit |\n"
+        )
+        out = rph.render_body(body)
+        # 1 header row + 1 body row; each must have 4 cells.
+        self.assertEqual(out.count("<th>"), 4)
+        self.assertEqual(out.count("<td>"), 4)
+        # The escaped pipes must be rendered as a single cell with literal `|`.
+        self.assertIn("<td>PreToolUse Edit|Write|MultiEdit</td>", out)
+        # Sanity: no rogue empty cells from a naive split.
+        self.assertNotIn("<td></td>", out)
+
     def test_fenced_code_block(self):
         out = rph.render_body("```bash\necho hi\n```")
         self.assertIn("<pre>", out)
