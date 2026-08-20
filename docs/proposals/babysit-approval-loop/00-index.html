@@ -224,7 +224,7 @@ a:hover { text-decoration: underline; }
 <h1>Approval-convergent long-running babysit-pr loop</h1>
 <p class="meta">2026-08-20 · <span class="tag tag-info">ready-for-review</span></p>
 <div class="tags"><span class="tag tag-info">babysit-pr</span><span class="tag tag-info">coordinator</span><span class="tag tag-info">event-driven</span><span class="tag tag-info">rca</span><span class="tag tag-info">llm-capability</span><span class="tag tag-info">human-approval</span></div>
-<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and scope</a></li><li><a href="#sec-1">Existing strengths retained by the improved workflow</a></li><li><a href="#sec-2">Durable and event-driven coordinator</a></li><li><a href="#sec-3">Evidence frontier and RCA contract</a></li><li><a href="#sec-4">Model capability contract</a></li><li><a href="#sec-5">Context epochs and reanalysis</a></li><li><a href="#sec-6">Approval distance and human approval boundary</a></li><li><a href="#sec-7">AI-owned completion contract</a></li><li><a href="#sec-8">Code-review-optimized adoption plan</a></li><li><a href="#sec-9">Step transition and success gates</a></li><li><a href="#sec-10">Tests and evaluation</a></li><li><a href="#sec-11">Pros, cons, and open acceptance criteria</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and scope</a></li><li><a href="#sec-1">Existing strengths retained by the improved workflow</a></li><li><a href="#sec-2">Durable and event-driven coordinator</a></li><li><a href="#sec-3">Evidence frontier and RCA contract</a></li><li><a href="#sec-4">Model capability contract</a></li><li><a href="#sec-5">Context epochs and reanalysis</a></li><li><a href="#sec-6">Approval distance and human approval boundary</a></li><li><a href="#sec-7">AI-owned completion contract</a></li><li><a href="#sec-8">AI review architecture and comment-accuracy contract</a></li><li><a href="#sec-9">Human-effort minimization policy</a></li><li><a href="#sec-10">Code-review-optimized adoption plan</a></li><li><a href="#sec-11">Step transition and success gates</a></li><li><a href="#sec-12">Tests and evaluation</a></li><li><a href="#sec-13">Pros, cons, and open acceptance criteria</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
 <h2 id="sec-0">Decision and scope</h2>
 <p>Adopt a durable coordinator as the long-running owner of one PR lifecycle. A command invocation and GitHub webhook are both wake-up events into the same state machine. This proposal changes documentation only. The future implementation must preserve one-PR ownership, worktree isolation, bounded repair attempts, fail-closed verdict handling, and the existing human merge boundary.</p>
 <p>Exact future implementation file set (not changed by this proposal PR):</p>
@@ -270,7 +270,31 @@ a:hover { text-decoration: underline; }
 <p>If any automatable gate is red, pending, stale, contradictory, or unexplained, the coordinator keeps working or enters a typed recovery state. It must not ask the human to perform ordinary diagnosis or testing. Human escalation is reserved for ownership, policy, secret handling, ambiguous product intent, unavailable external authority, or the final approval decision.</p>
 <hr class="section-divider">
 
-<h2 id="sec-8">Code-review-optimized adoption plan</h2>
+<h2 id="sec-8">AI review architecture and comment-accuracy contract</h2>
+<p>The AI work is split into independent roles so the fixer does not authoritatively grade its own patch:</p>
+<pre><code class="language-text">Observer → Reviewer → Verifier → Fixer → Verifier → Comment Gate → Finalizer</code></pre>
+<p><code>Observer</code> captures the fresh PR head, changed files, checks, review state, and relevant logs. <code>Reviewer</code> proposes findings only for changed code and records exact <code>path</code>, <code>line</code>, <code>severity</code>, <code>finding</code>, <code>why</code>, and evidence references. <code>Verifier</code> independently reproduces the finding and checks that the proposed line is still present at the current head SHA. <code>Fixer</code> changes only verified findings. A second verification runs focused and required checks after the patch. <code>Comment Gate</code> publishes a review comment only when the finding is reproducible, line-anchored, non-duplicate, actionable, and supported by current-SHA evidence. <code>Finalizer</code> creates the approval packet after AI review, security, tests, and all required checks are green.</p>
+<p>A comment candidate is rejected rather than softened when any field is missing:</p>
+<pre><code class="language-json">{
+  &quot;path&quot;: &quot;lib/parser.py&quot;,
+  &quot;line&quot;: 42,
+  &quot;severity&quot;: &quot;high&quot;,
+  &quot;finding&quot;: &quot;...&quot;,
+  &quot;reproduction&quot;: {&quot;command&quot;: &quot;pytest -q tests/test_parser.py&quot;, &quot;exit_code&quot;: 1},
+  &quot;evidence_refs&quot;: [&quot;run:123&quot;, &quot;test:456&quot;],
+  &quot;head_sha&quot;: &quot;...&quot;
+}</code></pre>
+<p>Confidence alone never authorizes a comment. The minimum publish gate is: current head SHA, exact file/line, successful reproduction, actionable remediation, no duplicate finding, and independent verification. Medium-confidence candidates remain internal drafts for another analysis pass; low-confidence or policy/product-intent findings go to human recovery. This minimizes false-positive comments while keeping ordinary human work to the final <code>Approve + Merge</code> action.</p>
+<hr class="section-divider">
+
+<h2 id="sec-9">Human-effort minimization policy</h2>
+<p>Human effort is an explicit optimization target, not an accidental outcome. The coordinator should spend additional AI computation before asking for human help. For a non-policy finding, the escalation ladder is:</p>
+<pre><code class="language-text">direct fix → focused reproduction → counterexample search → independent AI review → context refresh → bounded alternative fix → human recovery</code></pre>
+<p>Human recovery is allowed only for ownership/permission, secret handling, irreversible product intent, unavailable external authority, or a safety decision that cannot be made from repository evidence. A merely difficult bug, ambiguous log, or low initial confidence is not sufficient reason to interrupt the human.</p>
+<p>The approval packet is the only normal human-facing artifact. It must be concise and decision-ready: what changed, why it is safe, what AI verified, remaining risk, and the exact action <code>Approve + Merge</code>. Measure <code>human_interruptions_per_PR</code>, <code>human_minutes_per_PR</code>, <code>comment_rework_rate</code>, <code>false_positive_comment_rate</code>, <code>time_to_approval</code>, and <code>AI_compute_cost_per_resolved_blocker</code>. Optimize toward fewer interruptions and minutes without weakening the comment publish gate or safety invariants.</p>
+<hr class="section-divider">
+
+<h2 id="sec-10">Code-review-optimized adoption plan</h2>
 <p>Adoption is optimized for the common code-review path: observe once, repair once, verify once, then wait for the next external event. Expensive RCA, context reset, and model routing are activated only on escalation.</p>
 <p><strong>Step 0 — Shadow measurement.</strong> Project current runs into compact evidence packs and approval-distance snapshots. Replay slow CI, force-push, duplicate event, worker crash, and human-review traces. Exit gate: deterministic, side-effect-free projection.</p>
 <p><strong>Step 1 — Durable resume.</strong> Persist the event cursor, lease, current SHA, blocker summary, last action, and approval packet while the existing repair actor remains unchanged. Exit gate: restart/retry safety and reconciliation for missed events.</p>
@@ -281,18 +305,18 @@ a:hover { text-decoration: underline; }
 <p><strong>Rollback at every step:</strong> disable the newly enabled actor, preserve the append-only event log and approval packet, and resume from the last durable state. Rollback never converts a human-gate state into success.</p>
 <hr class="section-divider">
 
-<h2 id="sec-9">Step transition and success gates</h2>
+<h2 id="sec-11">Step transition and success gates</h2>
 <p>The coordinator must not advance because a timer elapsed or a model produced a plausible explanation. It advances only when the step's artifact and gate are present:</p>
 <table><thead><tr><th>Step</th><th>Durable artifact</th><th>Required gate</th></tr></thead><tbody><tr><td>0</td><td>replay report</td><td>deterministic, side-effect-free projection</td></tr><tr><td>1</td><td>cursor + lease + snapshot</td><td>restart, duplicate, and stale-lease recovery</td></tr><tr><td>2</td><td>blocker evidence pack + verification record</td><td>one bounded, independently verified action</td></tr><tr><td>3</td><td>approval packet</td><td>checks green, findings resolved, human decision pending</td></tr><tr><td>4</td><td>event cursor + capability evaluation report</td><td>replay equivalence and no safety regression</td></tr></tbody></table>
 <p>The terminal success remains <code>APPROVED + required checks green</code>. <code>WAIT_FOR_APPROVAL</code> is a healthy durable state, not a failure or a reason to manufacture an approval.</p>
 <hr class="section-divider">
 
-<h2 id="sec-10">Tests and evaluation</h2>
+<h2 id="sec-12">Tests and evaluation</h2>
 <p>Unit tests must cover deterministic frontier merging, hypothesis invalidation, monotonic distance transitions, epoch causes, capability gating, duplicate suppression, lease expiry, cursor replay, malformed verdicts, and bounded no-progress behavior. Scenario tests must replay: slow CI, ghost workflows, force-push during diagnosis, review dismissal followed by a new finding, worker crash after push, duplicate webhook delivery, provider outage, model downgrade, and restart between every transition.</p>
 <p>Evaluation uses a fixed corpus of real-shaped traces plus synthetic adversarial traces. Required metrics are: zero automated merges; zero approvals from malformed/stale evidence; event replay equivalence; no lost or duplicated repair actions; time-to-human-approval; evidence-frontier precision; RCA reproduction rate; regression rate; abstention quality; token/cost per approval-distance reduction; and recovery time after worker/provider failure. Future models are compared on the same traces and must not regress safety metrics even when they improve speed or patch success.</p>
 <hr class="section-divider">
 
-<h2 id="sec-11">Pros, cons, and open acceptance criteria</h2>
+<h2 id="sec-13">Pros, cons, and open acceptance criteria</h2>
 <p>The design is attractive when a PR may wait hours or days for CI, reviews, provider recovery, or a human decision. It is intentionally conservative about convergence: progress means reduced, verified approval distance, not merely another model response or a changed comment.</p>
 <p>Acceptance requires a documented state schema and migration rule, an event replay proof by test, a recovery procedure for missing events, a capability-evaluation report, a human-readable approval packet, and explicit evidence that runtime changes remain outside this proposal PR. Reviewers should reject the implementation if it weakens the human boundary, allows stale evidence to authorize action, or treats a stronger model as a substitute for verification.</p>
 <hr class="section-divider">

@@ -116,6 +116,44 @@ sections:
 
       If any automatable gate is red, pending, stale, contradictory, or unexplained, the coordinator keeps working or enters a typed recovery state. It must not ask the human to perform ordinary diagnosis or testing. Human escalation is reserved for ownership, policy, secret handling, ambiguous product intent, unavailable external authority, or the final approval decision.
 
+  - title: AI review architecture and comment-accuracy contract
+    body: |
+      The AI work is split into independent roles so the fixer does not authoritatively grade its own patch:
+
+      ```text
+      Observer → Reviewer → Verifier → Fixer → Verifier → Comment Gate → Finalizer
+      ```
+
+      `Observer` captures the fresh PR head, changed files, checks, review state, and relevant logs. `Reviewer` proposes findings only for changed code and records exact `path`, `line`, `severity`, `finding`, `why`, and evidence references. `Verifier` independently reproduces the finding and checks that the proposed line is still present at the current head SHA. `Fixer` changes only verified findings. A second verification runs focused and required checks after the patch. `Comment Gate` publishes a review comment only when the finding is reproducible, line-anchored, non-duplicate, actionable, and supported by current-SHA evidence. `Finalizer` creates the approval packet after AI review, security, tests, and all required checks are green.
+
+      A comment candidate is rejected rather than softened when any field is missing:
+
+      ```json
+      {
+        "path": "lib/parser.py",
+        "line": 42,
+        "severity": "high",
+        "finding": "...",
+        "reproduction": {"command": "pytest -q tests/test_parser.py", "exit_code": 1},
+        "evidence_refs": ["run:123", "test:456"],
+        "head_sha": "..."
+      }
+      ```
+
+      Confidence alone never authorizes a comment. The minimum publish gate is: current head SHA, exact file/line, successful reproduction, actionable remediation, no duplicate finding, and independent verification. Medium-confidence candidates remain internal drafts for another analysis pass; low-confidence or policy/product-intent findings go to human recovery. This minimizes false-positive comments while keeping ordinary human work to the final `Approve + Merge` action.
+
+  - title: Human-effort minimization policy
+    body: |
+      Human effort is an explicit optimization target, not an accidental outcome. The coordinator should spend additional AI computation before asking for human help. For a non-policy finding, the escalation ladder is:
+
+      ```text
+      direct fix → focused reproduction → counterexample search → independent AI review → context refresh → bounded alternative fix → human recovery
+      ```
+
+      Human recovery is allowed only for ownership/permission, secret handling, irreversible product intent, unavailable external authority, or a safety decision that cannot be made from repository evidence. A merely difficult bug, ambiguous log, or low initial confidence is not sufficient reason to interrupt the human.
+
+      The approval packet is the only normal human-facing artifact. It must be concise and decision-ready: what changed, why it is safe, what AI verified, remaining risk, and the exact action `Approve + Merge`. Measure `human_interruptions_per_PR`, `human_minutes_per_PR`, `comment_rework_rate`, `false_positive_comment_rate`, `time_to_approval`, and `AI_compute_cost_per_resolved_blocker`. Optimize toward fewer interruptions and minutes without weakening the comment publish gate or safety invariants.
+
   - title: Code-review-optimized adoption plan
     body: |
       Adoption is optimized for the common code-review path: observe once, repair once, verify once, then wait for the next external event. Expensive RCA, context reset, and model routing are activated only on escalation.
