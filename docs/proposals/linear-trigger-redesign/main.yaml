@@ -137,18 +137,21 @@ sections:
 
       | Hook | 선언된 event | 진입점 | Trigger |
       |---|---|---|---|
-      | `linear-autosync.sh` | PreToolUse Edit\|Write\|MultiEdit | `tools/linear_sync.py: sync()` (default) | 모든 edit |
-      | `linear-session-start.sh` | SessionStart | `tools/linear_sync.py: sync()` (default) | worktree 에서 session 시작 |
-      | `linear-task-change.sh` | UserPromptSubmit | `tools/linear_sync.py: task_change_sync()` | plan/task change 감지 |
-      | `linear-worktree-create.sh` | **PostToolUse:Bash** (WorktreeCreate 아님) | `tools/linear_sync.py: sync()` (default) | `git worktree add` 가 Bash tool 로 실행된 후 |
+      | `linear-autosync.sh` | PreToolUse Edit\|Write\|MultiEdit | `tools/linear_sync.py: auto-sync` | 모든 edit |
+      | `linear-session-start.sh` | SessionStart | `tools/linear_sync.py: auto-sync` | worktree 에서 session 시작 |
+      | `linear-task-change.sh` | UserPromptSubmit | `tools/linear_sync.py: task-change-sync` | plan/task change 감지 |
+      | `linear-worktree-create.sh` | **PostToolUse:Bash** (WorktreeCreate 아님) | `tools/linear_sync.py: auto-sync` | `git worktree add` 가 Bash tool 로 실행된 후 |
 
       v1 의 오류:
       - `linear-prompt-sync.sh` 라고 적은 것 → 실제로는 `linear-task-change.sh`
       - `linear-worktree-create.sh` 가 WorktreeCreate hook 이라고 적은 것 →
         실제로는 PostToolUse:Bash (Claude Code 가 `git worktree add` 명령을
         실행한 *후*에만 발화)
-      - `auto-sync` / `task-change` 진입점 제거 권고 → 둘 다 존재하며 호출됨
-        (전자는 호출자 없음, 후자는 `linear-task-change.sh` 가 호출)
+      - 진입점 `sync()` (default) 가 3 hook 의 호출자라고 적은 것 → 실제는
+        모두 `auto-sync` (1 hook) + `task-change-sync` (1 hook). `sync()` (default)
+        는 ungated manual `/dev-kit:linear` 진입점이라 hook 이 부르지 않음
+        (`hooks/linear-autosync.sh:60-61` 주석 명시: "auto-sync (not bare sync)
+        is the entry point that applies the repo-owner gate")
 
   - title: 새로운 hook surface
     body: |
@@ -163,9 +166,13 @@ sections:
       - `linear-task-change.sh` — scope 은 cut 시점에 결정
 
       진입점 정리 (`tools/linear_sync.py`):
-      - `sync()` (default) — 제거 (호출자 없음)
-      - `auto_sync()` — 제거 (호출자 없음)
-      - `task_change_sync()` — 제거 (호출자 없음)
+      - `sync()` (default) — **제거** (no hook caller; manual `/dev-kit:linear`
+        skill 진입점이라 worktree-create gate 가 대체)
+      - `auto_sync()` — **제거** (callers: `linear-autosync.sh` +
+        `linear-session-start.sh` + `linear-worktree-create.sh` — 3개 hook
+        모두 §hook surface 표에서 삭제됨)
+      - `task_change_sync()` — **제거** (caller: `linear-task-change.sh`
+        1개 hook — §hook surface 표에서 삭제됨)
       - `is_repo_owner()`, `status`, `list`, `on`, `off`, `project-name`, `setup` — 유지
 
   - title: Race 방지 메커니즘
@@ -233,6 +240,12 @@ sections:
       - **기존 `.dev-kit/hand-off/linear/main.json` 마이그레이션** — 1회성
         migration script 는 rollout 단계에서 별도 PR.
       - **multi-team / multi-project 환경** — 단일 Linear project 가정.
+      - **Interactive pre-cut prompt UX** — `git worktree add` 가 server-side
+        동작이라 WorktreeCreate hook 이 user 에게 직접 prompt 를 띄울 수 없음.
+        UX 개선 (v1 에서는 stderr 경고 + `LINEAR_REQUIRED=0` fallback 으로
+        강등): v2 에서 `worktree-auto-cut.sh` UserPromptSubmit 단계에
+        interactive prompt 추가 (브랜치 slug generic 하면 Linear issue 제목
+        직접 입력 받음). §트레이드오프 #2 의 v1 fallback path.
 
   - title: 트레이드오프 (정직하게)
     body: |
@@ -248,8 +261,8 @@ sections:
          → 해결: `_scope_from_branch()` 가 12자 미만 / 동사만 있는 경우
          `LINEAR_REQUIRED=0` 모드 + stderr 경고로 강등. **v1 에서는
          interactive prompt 미지원** (WorktreeCreate 는 server-side hook
-         이라 user prompt 불가). 향후 비목표 §1 의 interactive pre-cut
-         prompt UX 로 migration path.
+         이라 user prompt 불가). 향후 비목표 #7 (Interactive pre-cut prompt UX)
+         로 migration path.
 
       3. **network failure 시 worktree cut 자체가 block** — Linear API down 이면
          작업 시작 못함. 15s timeout 으로 빠지지만 그래도 fail-closed.
