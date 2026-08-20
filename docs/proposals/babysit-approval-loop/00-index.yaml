@@ -108,7 +108,13 @@ sections:
 
       The coordinator may advance only when a component moves monotonically toward its terminal state: required checks become terminal-green, findings become resolved or explicitly dismissed, the root cause is reproduced, focused and full verification pass, independent review is recorded, policy exceptions are zero or explicitly escalated, and human decision is `approved`. A new SHA or finding can increase distance by reopening affected components. The approval packet contains the vector history, frontier, RCA ledger, diff/commit SHAs, command exit codes, and unresolved risks.
 
-      Automation may diagnose, patch, verify, comment, create bounded repair PRs, and prepare the packet. Only a human reviewer with the required ownership context may approve the PR for merge. The coordinator must refuse to interpret model output, missing verdicts, stale approvals, or `approval_distance` reaching zero as authorization to merge; `gh pr merge` remains outside the implementation.
+      AI automation owns diagnosis, patching, local and CI verification, AI review/security checks, review-comment resolution, bounded repair PRs, and the final approval packet. Only the human reviewer with the required ownership context performs the final `Approve` and merge. The coordinator must refuse to interpret model output, missing verdicts, stale approvals, or `approval_distance` reaching zero as human authorization; `gh pr merge` remains outside the implementation.
+
+  - title: AI-owned completion contract
+    body: |
+      The human should encounter a PR only after AI has completed every automatable activity. The hand-off packet must show: current head SHA, all required checks green, AI review and security verdicts, every finding resolved or explicitly escalated, focused and full verification evidence, changed-file summary, risk summary, rollback/recovery status, and the exact remaining human action: `Approve and merge`.
+
+      If any automatable gate is red, pending, stale, contradictory, or unexplained, the coordinator keeps working or enters a typed recovery state. It must not ask the human to perform ordinary diagnosis or testing. Human escalation is reserved for ownership, policy, secret handling, ambiguous product intent, unavailable external authority, or the final approval decision.
 
   - title: Code-review-optimized adoption plan
     body: |
