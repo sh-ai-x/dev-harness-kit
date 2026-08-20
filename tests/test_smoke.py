@@ -47,9 +47,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # skill (40 -> 39).
 # Added skills/evidence-plan/SKILL.md (research -> proposal.html
 # (human confirms) -> /dev-kit:plan hand-off) (39 -> 40).
+# Added skills/sync-version/SKILL.md (pre-push auto-sync primitive,
+# user-facing wrapper around bin/sync-version.sh — see /dev-kit:sync-version
+# SKILL.md for the post-#439 sync (=) vs bump (+) rationale) (42 -> 43).
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 42
+SKILL_COUNT = 43
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",
