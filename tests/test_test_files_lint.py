@@ -91,9 +91,13 @@ CJS_REQUIRE_RE = re.compile(
     r"""require\s*\(\s*['"]([^'"]+)['"]\s*\)"""
 )
 
-# Recognise the `it('...',` header — single source, reused by the
-# walker + the per-test-name lints. The trailing `\s*,` ensures we only
-# match the call-header form, not bare `it` type references.
+# Recognise the `it('...', ...)` header — single source, reused by the
+# walker + the per-test-name lints. The opening quote is captured into
+# group 1 and back-referenced via `\1`, so we only match the
+# call-header form (matching quotes), not bare `it` type references.
+# `it.only` / `it.skip` are filtered out by `_walk_test_blocks` via the
+# preceding-`.` check (the regex itself uses a non-word lookbehind so
+# `it.only` would otherwise also match).
 IT_HEADER_RE = re.compile(
     r"""(?<![A-Za-z0-9_])it\s*\(\s*(['"])([^'"\\]*(?:\\.[^'"\\]*)*)\1"""
 )
