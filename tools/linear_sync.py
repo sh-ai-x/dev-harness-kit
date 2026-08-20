@@ -79,12 +79,24 @@ class LinearFreeTierLimitError(RuntimeError):
 
 
 def _is_free_tier_limit_message(message: str) -> bool:
-    """Return True only for the known free-tier issue-cap failure."""
+    """Return True only for the known free-tier issue-cap failure.
+
+    Linear emits one of a handful of canonical phrasings when the free
+    plan's issue-count cap is hit. We accept those exact substrings —
+    NOT a loose 3-token AND-match, which would false-positive on any
+    future Linear policy / limit-change notice that happens to mention
+    "free", "tier", "issue", and "limit" in passing and would archive
+    up to 10 active issues on an opt-in workspace.
+    """
     normalized = message.lower()
-    return (
-        "free issue limit" in normalized
-        or ("free tier" in normalized and "issue" in normalized and "limit" in normalized)
+    canonical = (
+        "free issue limit",
+        "free tier issue limit",
+        "issue limit for the free tier",
+        "issue limit on the free plan",
+        "issue limit reached for the free",
     )
+    return any(phrase in normalized for phrase in canonical)
 
 
 # Linear API endpoint (https://developers.linear.app/docs/graphql/working-with-the-graphql-api).
@@ -1119,10 +1131,18 @@ def _archive_issue(issue_ref: str) -> bool:
 
 
 def _oldest_cleanup_candidates(project_id: str, limit: int = 10) -> list[dict]:
-    """Return oldest non-terminal issues eligible for free-tier cleanup."""
+    """Return oldest non-terminal issues eligible for free-tier cleanup.
+
+    ``orderBy: createdAt`` sorts ascending on the server side so the
+    "oldest N" guarantee holds even when the project has more than 100
+    non-terminal issues. Without it, Linear returns the default
+    ``updatedAt``-desc page and the "10 oldest" silently degrades to
+    "10 oldest of an arbitrary 100-row page".
+    """
     query = (
         "query($projectId: ID!) {"
-        "  issues(filter: { project: { id: { eq: $projectId } } }, first: 100) {"
+        "  issues(filter: { project: { id: { eq: $projectId } } },"
+        "         first: 100, orderBy: createdAt) {"
         "    nodes { id identifier createdAt state { name } }"
         "  }"
         "}"
@@ -1137,18 +1157,28 @@ def _oldest_cleanup_candidates(project_id: str, limit: int = 10) -> list[dict]:
     return candidates[:max(0, limit)]
 
 
-def _cleanup_free_tier_issues(project_id: str, limit: int = 10) -> int:
-    """Archive up to `limit` oldest eligible issues; return successes."""
+def _cleanup_free_tier_issues(project_id: str, limit: int = 10) -> tuple[int, str | None]:
+    """Archive up to ``limit`` oldest eligible issues.
+
+    Returns ``(archived, error_message)``. ``error_message`` is None
+    on the happy path and a short diagnostic string when an exception
+    was swallowed so the retry wrapper can surface a user-visible
+    warning. The exception itself stays swallowed — cleanup must never
+    block the retry path that already raised ``LinearFreeTierLimitError``
+    — but the signal is now distinct from "nothing to clean up".
+    """
     archived = 0
+    error: str | None = None
     try:
         candidates = _oldest_cleanup_candidates(project_id, limit)
         for issue in candidates:
             if _archive_issue(str(issue["id"])):
                 archived += 1
     except Exception as exc:  # noqa: BLE001 - cleanup must not block retry path
+        error = f"{type(exc).__name__}: {exc}"
         if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
-            print(f"[linear-sync] free-tier cleanup failed: {exc}", file=sys.stderr)
-    return archived
+            print(f"[linear-sync] free-tier cleanup failed: {error}", file=sys.stderr)
+    return archived, error
 
 
 def _find_issue(project_id: str, scope_key: str) -> str | None:
@@ -1219,8 +1249,14 @@ def _create_issue_with_free_tier_retry(
     except LinearFreeTierLimitError:
         if not _free_tier_cleanup_enabled(repo):
             raise
-        archived = _cleanup_free_tier_issues(project_id, limit=10)
-        if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
+        archived, cleanup_error = _cleanup_free_tier_issues(project_id, limit=10)
+        if cleanup_error is not None:
+            print(
+                f"[linear-sync] WARNING: free-tier cleanup raised {cleanup_error}; "
+                f"archived {archived} before failing. Retrying anyway.",
+                file=sys.stderr,
+            )
+        elif os.environ.get("LINEAR_DEBUG", "").strip() == "1":
             print(f"[linear-sync] free-tier cleanup archived {archived} issue(s)", file=sys.stderr)
         return _create_issue(project_id, team_id, title, body, scope_key, state_id)
 
