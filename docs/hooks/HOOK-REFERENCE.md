@@ -48,6 +48,7 @@ useful when you're debugging *why* a hook did or didn't run:
 | `tdd-guard.sh` | PreToolUse (Write\|Edit\|MultiEdit) | TDD test-first enforcement | advisory / `--strict` |
 | `bash-guard.sh` | PreToolUse (Bash) | Block destructive commands | advisory / `--strict` |
 | `git-guard.sh` | PreToolUse (Bash) | Branch strategy enforcement | hard-block |
+| `pre-push` (.githooks/) | pre-push (local) | Block direct push to `main` + auto-SYNC (not auto-bump) `plugin.json:version` from origin/main on `local < origin/main`; refuses on uncommitted `plugin.json` edits; opt-in LLM-judge intent check via `DEV_KIT_PUSH_INTENT=1`. Calls `bin/sync-version.sh` for the actual version-only sync. | hard-block + auto-commit |
 | `worktree-guard.sh` | PreToolUse (Write\|Edit\|MultiEdit) | Block edits in main checkout | hard-block |
 | [`linear-autosync.sh`](linear-autosync.md) | PreToolUse (Write\|Edit\|MultiEdit) | Auto-sync every Edit into the user's Linear workspace via `tools/linear_sync.py` (silent-bail on non-dev-kit project dirs) | advisory (silent exit 0) |
 | `review-yml-isolation.sh` | PreToolUse (Bash) | Force `review.yml` changes into their own commit/PR | hard-block |

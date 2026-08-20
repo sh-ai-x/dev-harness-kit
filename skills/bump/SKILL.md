@@ -1,7 +1,7 @@
 ---
 name: bump
 category: ship
-description: Explicit version bump of `.claude-plugin/plugin.json` + push of `chore/bump-vX.Y.Z`. Mirrors the auto-bump in `.github/workflows/version-bump.yml` but user-triggered for race recovery and pre-PR explicit bumps.
+description: Explicit version bump of `.claude-plugin/plugin.json` + push of `chore/bump-vX.Y.Z`. Mirrors the auto-bump in `.github/workflows/version-bump.yml` but user-triggered for race recovery and pre-PR explicit bumps. For catching a branch up to origin/main (==, not +1) use `/dev-kit:sync-version` instead.
 alpha: state
 when_to_use: |
   - User types /dev-kit:bump [major|minor|patch]
