@@ -75,17 +75,21 @@ def ensure_matrix(project_root: Path) -> Dict:
     """Initialize .dev-kit/.active-hooks.json with default matrix if missing.
 
     Caller MUST intend to write — `load_matrix` is the read-only path.
+
+    Preserves any slice owned by the regen tool (events, generated_at,
+    schema_version) so the two writers can coexist on the same file
+    (issue #676).
     """
     path = project_root / ".dev-kit" / ".active-hooks.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        "schema_version": "1.0.0",
-        "matrix": DEFAULT_MATRIX,
-        "override": {
-            "disabled_hooks": [],
-            "strict_mode": False,
-            "env_override": {},
-        },
+    existing = read_json_or_default(path, {})
+    data: Dict = dict(existing) if isinstance(existing, dict) else {}
+    data["schema_version"] = "1.0.0"
+    data["matrix"] = copy.deepcopy(DEFAULT_MATRIX)
+    data["override"] = {
+        "disabled_hooks": [],
+        "strict_mode": False,
+        "env_override": {},
     }
     atomic_write_json(path, data)
     return data
@@ -118,14 +122,25 @@ init_matrix = ensure_matrix
 
 
 def is_hook_active(project_root: Path, stage: str, hook_name: str) -> bool:
-    """Return True if hook should fire in this stage."""
+    """Return True if hook should fire in this stage.
+
+    Fresh-checkout safety (issue #676): when the codec slice is missing
+    from `.dev-kit/.active-hooks.json` (the default state on a clone —
+    the regen tool only writes the event-keyed slice), fall back to
+    `DEFAULT_MATRIX` so the documented `stage-gate.sh` fail-open
+    contract is restored. Without this, the regen would create the
+    file with no `matrix` key, `stage-gate.sh` would stop fail-opening,
+    and `is_hook_active` would return False for every stage, silently
+    disabling the five stage-gated hooks (`tdd-guard`, `bash-guard`,
+    `secret-scan`, `slop-detector`, `stop-verify`).
+    """
     data = load_matrix(project_root)
     if hook_name in data.get("override", {}).get("disabled_hooks", []):
         return False
     env_off = os.environ.get("DEV_KIT_HOOK_OFF", "")
     if env_off and hook_name in env_off.split(","):
         return False
-    matrix = data.get("matrix", {})
+    matrix = data.get("matrix") or copy.deepcopy(DEFAULT_MATRIX)
     if stage not in matrix:
         return False
     state = matrix[stage].get(hook_name, False)

@@ -250,14 +250,33 @@ def _issue_by_branch(branch: str, project_id: str | None) -> dict | None:
     creates an issue. A prefix match unifies both writers onto the
     same issue; the trailing `::` still anchors on the full branch
     name so `feat/x` cannot match a `feat/x-extra` marker.
+
+    Candidate selection mirrors tools/linear_sync.py::_find_all_issues:
+    terminal (completed/canceled) issues are skipped so a branch
+    reused across tasks lands on the *current* open issue instead of
+    a stale Done one, and the newest (updatedAt) match wins. A
+    terminal match is returned only when nothing open exists, so a
+    re-close event still finds the issue it already transitioned and
+    does not spawn a duplicate.
     """
     prefix = f"<!-- scope:{branch}::"
+    matches: list[dict] = []
     for issue in _iter_issues(project_id, only_open=False):
         description = issue.get("description") or ""
         for line in description.splitlines():
             if line.startswith(prefix):
-                return issue
-    return None
+                matches.append(issue)
+                break
+    if not matches:
+        return None
+    TERMINAL_TYPES = ("completed", "canceled")
+    open_matches = [
+        m for m in matches
+        if (m.get("state") or {}).get("type") not in TERMINAL_TYPES
+    ]
+    pool = open_matches or matches
+    pool.sort(key=lambda m: str(m.get("updatedAt") or ""), reverse=True)
+    return pool[0]
 
 
 def _iter_issues(project_id: str | None, only_open: bool = True) -> list[dict]:
@@ -272,7 +291,7 @@ def _iter_issues(project_id: str | None, only_open: bool = True) -> list[dict]:
         first: 100,
         after: $cursor
       ) {{
-        nodes {{ id identifier title description state {{ id name type }} url }}
+        nodes {{ id identifier title description state {{ id name type }} url updatedAt }}
         pageInfo {{ hasNextPage endCursor }}
       }}
     }}

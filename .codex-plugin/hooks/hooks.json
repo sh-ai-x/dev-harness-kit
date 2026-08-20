@@ -7,7 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/acp-tier-assert.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/acp-tier-assert.sh",
+            "fail_closed": true
           }
         ]
       },
@@ -16,15 +17,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/tdd-guard.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/tdd-guard.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-guard.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-guard.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/linear-autosync.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/linear-autosync.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -33,15 +37,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/bash-guard.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/bash-guard.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/git-guard.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/git-guard.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/review-yml-isolation.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/review-yml-isolation.sh",
+            "fail_closed": true
           }
         ]
       }
@@ -51,25 +58,30 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/tdd-scope-judge.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-auto-cut.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-auto-cut.sh",
+            "fail_closed": false
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/linear-task-change.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/linear-task-change.sh",
+            "fail_closed": false
           },
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/notification-collapse.sh",
-            "timeout": 10
+            "timeout": 10,
+            "fail_closed": false
           },
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/context-window-guard.sh",
-            "timeout": 30
+            "timeout": 30,
+            "fail_closed": false
           }
         ]
       }
@@ -79,7 +91,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-check.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-check.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -87,7 +100,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/log-on-session-start.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/log-on-session-start.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -95,7 +109,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/provider-divergence-check.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/provider-divergence-check.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -103,7 +118,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/linear-session-start.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/linear-session-start.sh",
+            "fail_closed": false
           }
         ]
       }
@@ -114,11 +130,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/secret-scan.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/secret-scan.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/slop-detector.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/slop-detector.sh",
+            "fail_closed": true
           }
         ]
       },
@@ -127,15 +145,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-log-auto-install.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-log-auto-install.sh",
+            "fail_closed": false
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/loop-detect.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/loop-detect.sh",
+            "fail_closed": true
           },
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/linear-worktree-create.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/linear-worktree-create.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -144,7 +165,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/sub-agent-handoff.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/sub-agent-handoff.sh",
+            "fail_closed": true
           }
         ]
       }
@@ -154,7 +176,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/stop-verify.sh"
+            "command": "bash ${PLUGIN_ROOT}/hooks/stop-verify.sh",
+            "fail_closed": true
           }
         ]
       }
