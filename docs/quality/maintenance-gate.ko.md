@@ -139,6 +139,32 @@ Approve로 기본 처리된 게이트를 통과하는 일이 없도록 한다.
 저장소 PR(오너 본인 것 포함)은 영향받지 않고 `pull_request`에서
 그대로 완전 자동으로 실행된다.
 
+> **디스패치 실행 워크어라운드 (2026-08).** `maintenance_judge`와
+> `review.yml`의 형제 `review` / `security` 작업을 백킹하는
+> `anthropics/claude-code-action@v1` 스텝은 `workflow_dispatch`에서
+> silently no-op한다. agent 모드는 `claude-prompt.txt`만 쓰고
+> `claude-user-request.txt`는 쓰지 않아, SDK가 슬래시 커맨드
+> `/dev-kit:maintenance --diff <PR>`를 리터럴 텍스트로 취급한다. dispatch에서
+> `mcp__github_inline_comment__create_inline_comment`을 비활성화하는
+> `isEntityContext()` 게이트와 결합해, 디스패치 실행은
+> `num_turns: 0, duration_ms: 21, is_error: false`로 종료 — 초록색이지만
+> 리뷰 코멘트가 게시되지 않는다. 감사 로그는 `verdict=MISSING`을 기록한다.
+> PR #682 / #687에서 관측됨. 업스트림 이슈:
+> `anthropics/claude-code-action#635` + `#1644`.
+>
+> 수정은 게이트가 아니라 워크플로우 자체에 있다: 각 judge 분기
+> (review / security / maintenance)에 `bin/ci-claude-p.sh <skill> <pr_number>`
+> 새 스텝이 추가되었고 `if: github.event_name == 'workflow_dispatch' && ...`
+> 조건으로 `claude -p`를 직접 호출한다. 기존 `claude-code-action` 스텝의
+> `if:`는 `&& github.event_name == 'pull_request'`로 좁혀져, dispatch에서는
+> 깨진 경로를 건너뛰지만 같은 저장소 PR에서는 정상 실행된다.
+> `fork-pr-review` 게이트 자체는 변경 없음: `fork-pr-review` Environment
+> (수동 승인 필요) 뒤에 위치하고, 여전히 `workflow_dispatch`로 두 judge
+> 워크플로우를 디스패치하며, 여전히 `fork-pr-review/ai-judges` 커밋
+> 상태를 쓴다. 헬퍼 `bin/ci-claude-p.sh`(단일 호출 형태, 9 호출 지점
+> = 3 providers x 3 judges)는 `tests/test_ci_claude_p_sh.py`로 핀되며,
+> 워크플로우 형태는 `tests/test_dispatched_run_uses_claude_p.py`로 핀된다.
+
 ## 관련
 
 - `eval/prompts/judge-code-sanity.md` — 20-체크박스 루브릭(maintenance
