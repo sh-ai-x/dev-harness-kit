@@ -140,11 +140,18 @@ mkdir -p "$HOME/.claude/plugins/marketplaces"
 # -f (force) replaces any stale symlink; -n prevents creating a nested
 # link if the target already exists as a directory.
 ln -sfn "$PLUGIN_SRC" "$HOME/.claude/plugins/marketplaces/dev-kit"
-# Verify the symlink resolves to a valid plugin.
-if [ ! -d "$HOME/.claude/plugins/marketplaces/dev-kit/skills/$SKILL" ]; then
-  echo "::error::dev-kit plugin symlinked but skills/$SKILL/ not found at $HOME/.claude/plugins/marketplaces/dev-kit/skills/" >&2
+# Verify the symlink resolves to a valid plugin (manifest present).
+if [ ! -f "$HOME/.claude/plugins/marketplaces/dev-kit/.claude-plugin/plugin.json" ]; then
+  echo "::error::dev-kit plugin symlinked but .claude-plugin/plugin.json missing" >&2
   exit 1
 fi
+# Note: we deliberately do NOT verify skills/$SKILL/ exists. Some
+# workflow prompts (e.g. maintenance) reference /dev-kit:<skill>
+# slash commands that historically don't have a corresponding
+# skills/<skill>/ directory — the rubric instructions in the prompt
+# body are sufficient for the judge to complete the task even when
+# the slash command itself doesn't resolve. The upstream claude-code-action
+# silently tolerates this same case; we mirror that behavior here.
 
 # -----------------------------------------------------------------------------
 # Build the prompt. The slash command syntax is required because the
