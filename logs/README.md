@@ -11,6 +11,13 @@ Conversation transcripts captured by the `/dev-kit:log` hooks.
 
 Captured files are gitignored (`logs/.gitignore` ignores `*.jsonl`). Only the empty subdirs are tracked, via `.gitkeep`. The transcripts stay local — they are NOT shipped, NOT pushed, NOT indexed by the eval harness.
 
+For cleanup-safe retention, set `AGENT_LOG_ROOT` before enabling the hooks. The
+canonical path becomes `$AGENT_LOG_ROOT/<repository>/...`, outside the main
+checkout and all worktrees. Each capture is written atomically and gets a
+`<session>.meta.json` sidecar containing repository, branch, worktree, session,
+tool, and timestamp metadata. The default remains the main-checkout `logs/`
+path for backward compatibility.
+
 The `<branch>` bucket is one of:
 
 - `<branch-name>` — attached HEAD on a real branch (e.g. `main`, `feature-x`).
