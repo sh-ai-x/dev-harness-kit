@@ -1834,8 +1834,9 @@ def _worktree_state_pill(state: str) -> str:
 
     Fresh worktrees are "good" (neutral blue/info tone via ``pill-good``)
     because they are the user's most useful state, not a cleanup target.
-    Merged + gone are cleanup candidates (warn / bad). Unknown is bad
-    because the user can't tell what state the worktree is in.
+    Merged + gone are retention/cleanup review candidates (warn / bad), not
+    automatic deletion instructions. Unknown is bad because the user can't
+    tell what state the worktree is in.
     """
     cls = {
         "main": "pill-good",
