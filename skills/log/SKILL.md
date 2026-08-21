@@ -98,6 +98,9 @@ branch, worktree, session, tool, and timestamp metadata. Common credentials
 (API keys, bearer tokens, passwords, and GitHub/OpenAI token-shaped values) are
 redacted before persistence. Without the variable, the existing main-checkout
 `logs/` path and worktree attribution mirror remain unchanged.
+`/dev-kit:token-analyzer` automatically scans the external repository bucket
+and reads the sidecar's `worktree` field, so Cost by Worktree attribution still
+works after the source worktree is removed.
 
 `off` deliberately leaves `tools/save_log.py` + `logs/` in place — they
 cost nothing and a future `on` skips the setup step. Remove them

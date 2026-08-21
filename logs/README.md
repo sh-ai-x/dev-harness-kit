@@ -17,6 +17,9 @@ checkout and all worktrees. Each capture is written atomically and gets a
 `<session>.meta.json` sidecar containing repository, branch, worktree, session,
 tool, and timestamp metadata. The default remains the main-checkout `logs/`
 path for backward compatibility.
+When `AGENT_LOG_ROOT` is set, `/dev-kit:token-analyzer` also discovers the
+external repository bucket and uses the sidecar `worktree` value for Cost by
+Worktree attribution, even after the originating worktree is removed.
 
 The `<branch>` bucket is one of:
 

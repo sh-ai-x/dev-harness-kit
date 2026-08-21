@@ -118,6 +118,9 @@ session has a `.meta.json` sidecar with repository, branch, worktree, session,
 tool, and timestamp metadata. Common API keys, bearer tokens, passwords, and
 GitHub/OpenAI token-shaped values are redacted before persistence. The default
 main-checkout `logs/` path remains unchanged for compatibility.
+When `AGENT_LOG_ROOT` is set, `/dev-kit:token-analyzer` automatically discovers
+the repository's external log bucket and uses the sidecar's `worktree` field for
+Cost by Worktree attribution, including after the source worktree is removed.
 
 ## Output
 
