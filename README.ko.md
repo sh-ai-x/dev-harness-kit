@@ -680,9 +680,10 @@ test, branch-policy, ci-local), pre-push 훅, 워크트리 규칙 파일을 복�
 
 초기 설치 이후 dev-kit이 새 템플릿이나 수정된 템플릿을 출시하면 `--force`
 대신 [`/dev-kit:ci-update`](docs/skills/ci-update.md)를 사용한다 — 각
-배포 파일을 `installed` / `new` / `updated` / `consumer_modified` / `diverged`
-로 분류하고, 덮어쓰기 전 백업하며, 파괴적인 무적용-블래스트는 없다. 전체
-계약은 [`docs/quality/ci-update.md`](docs/quality/ci-update.md).
+배포 파일을 `new` / `updated` / `consumer_modified` / `diverged`
+(`unchanged`는 작업 없음)로 분류하고, 덮어쓰기 전 백업하며,
+파괴적인 무적용-블래스트는 없다. 전체 계약은
+[`docs/quality/ci-update.md`](docs/quality/ci-update.md).
 
 ```bash
 bin/devkit-refresh.sh                                              # 1. 캐시 새로 고침
