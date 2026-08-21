@@ -51,6 +51,9 @@ class LoopState:
     last_action: str = ""
     next_wake_at: str = ""
     updated_at: str = ""
+    github_tracker_issue: int | None = None
+    linear_issue: str = ""
+    last_synced_transition: str = ""
 
     def validate(self) -> None:
         if self.parent_pr <= 0 or self.current_pr <= 0:
@@ -65,6 +68,8 @@ class LoopState:
             raise ValueError(f"unknown strategy: {self.strategy}")
         if self.context_epoch < 0 or self.iteration < 0 or self.repair_attempt < 0:
             raise ValueError("state counters cannot be negative")
+        if self.github_tracker_issue is not None and self.github_tracker_issue <= 0:
+            raise ValueError("github_tracker_issue must be positive")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -211,3 +216,19 @@ def next_wake_seconds(state: LoopState) -> int:
     if state.phase in {WAIT_FOR_CHECKS, WAIT_FOR_APPROVAL}:
         return DEFAULT_WAKE_SECONDS
     return 0
+
+
+def transition_key(state: LoopState) -> str:
+    """Return the stable external-audit key for the current state."""
+    return f"{state.parent_pr}:{state.head_sha}:{state.context_epoch}:{state.phase}"
+
+
+def mark_transition_synced(state: LoopState, *, now_iso: str) -> LoopState:
+    """Record that the current phase transition was published externally."""
+    result = replace(
+        state,
+        last_synced_transition=transition_key(state),
+        updated_at=now_iso,
+    )
+    result.validate()
+    return result

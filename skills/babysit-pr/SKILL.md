@@ -376,6 +376,13 @@ fresh GitHub snapshot and `persist_loop_outcome()` after repair verification.
 Both load the prior state, apply `observe()` or `record_outcome()`, and call
 `save_state()` atomically; the canonical wiring recipe shows the exact calls.
 
+When `BABYSIT_GITHUB_TRACKER_ISSUE` and optional `BABYSIT_LINEAR_ISSUE` are
+configured, `tools/babysit_tracker_sync.py` publishes one marked comment per
+`PR + head SHA + context epoch + phase`. It checks the marker before posting,
+so a restarted worker retries safely without creating duplicate stage records.
+Tracker failures never replace the local state or block repair; the next run
+reconciles the same transition.
+
 The pure state machine records context-epoch changes when the head SHA moves,
 and turns repeated no-information outcomes into `continue`, `evolve_step`,
 `change_direction`, `reset_context`, and finally `recover`. These are strategy

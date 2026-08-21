@@ -22,11 +22,13 @@ from babysit_pr_loop import (  # noqa: E402
     WAIT_FOR_CHECKS,
     LoopState,
     load_state,
+    mark_transition_synced,
     new_state,
     next_wake_seconds,
     observe,
     record_outcome,
     save_state,
+    transition_key,
 )
 
 
@@ -160,9 +162,13 @@ def test_production_snapshot_seam_loads_and_persists_state(tmp_path: Path) -> No
         checks=[approved_check()],
         now_epoch=1_700_000_000,
         now_iso="2026-08-20T12:00:00Z",
+        github_tracker_issue=696,
+        linear_issue="SHO-316",
         state_path=path,
     )
     assert state.phase == WAIT_FOR_APPROVAL
+    assert state.github_tracker_issue == 696
+    assert state.linear_issue == "SHO-316"
     assert load_state(path) == state
 
 
@@ -185,3 +191,18 @@ def test_production_outcome_seam_resumes_from_saved_state(tmp_path: Path) -> Non
     )
     assert state.strategy == CHANGE_DIRECTION
     assert load_state(path) == state
+
+
+def test_transition_key_and_sync_marker_are_restart_safe() -> None:
+    state = observe(
+        new_state(695),
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+    )
+    key = transition_key(state)
+    synced = mark_transition_synced(state, now_iso="2026-08-20T12:01:00Z")
+    assert key == "695:abc:0:wait_for_approval"
+    assert synced.last_synced_transition == key

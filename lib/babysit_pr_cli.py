@@ -38,7 +38,7 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -522,6 +522,8 @@ def persist_loop_snapshot(
     now_iso: str,
     current_pr: int | None = None,
     failure_signature: str = "",
+    github_tracker_issue: int | None = None,
+    linear_issue: str = "",
     state_path: PathLike = STATE_FILE,
 ) -> LoopState:
     """Persist one fresh GitHub snapshot and return its resumable phase.
@@ -533,6 +535,12 @@ def persist_loop_snapshot(
     state = _load_or_create_loop_state(
         parent_pr, current_pr=current_pr, state_path=state_path
     )
+    if github_tracker_issue is not None or linear_issue:
+        state = replace(
+            state,
+            github_tracker_issue=github_tracker_issue or state.github_tracker_issue,
+            linear_issue=linear_issue or state.linear_issue,
+        )
     state = observe(
         state,
         head_sha=head_sha,
@@ -552,12 +560,20 @@ def persist_loop_outcome(
     outcome: str,
     now_iso: str,
     current_pr: int | None = None,
+    github_tracker_issue: int | None = None,
+    linear_issue: str = "",
     state_path: PathLike = STATE_FILE,
 ) -> LoopState:
     """Persist repair verification evidence and the next strategy."""
     state = _load_or_create_loop_state(
         parent_pr, current_pr=current_pr, state_path=state_path
     )
+    if github_tracker_issue is not None or linear_issue:
+        state = replace(
+            state,
+            github_tracker_issue=github_tracker_issue or state.github_tracker_issue,
+            linear_issue=linear_issue or state.linear_issue,
+        )
     state = record_outcome(state, outcome=outcome, now_iso=now_iso)
     save_state(state, state_path)
     return state
