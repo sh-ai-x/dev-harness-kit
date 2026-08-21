@@ -119,6 +119,34 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 # -----------------------------------------------------------------------------
+# Install the dev-kit plugin into the freshly-installed Claude Code's
+# plugin directory. The action normally installs the plugin via the
+# `claude-code-action` step; we're bypassing the action so we have to
+# do it ourselves. Without this, Claude Code prints "Unknown command:
+# /dev-kit:<skill>" and exits with num_turns=0.
+#
+# The plugin source is $GITHUB_WORKSPACE (the workflow's checkout of
+# the PR head). The plugin must contain a `.claude-plugin/plugin.json`
+# manifest. We symlink to ~/.claude/plugins/marketplaces/dev-kit/ so the
+# standard Claude Code marketplace plugin loader picks it up.
+# -----------------------------------------------------------------------------
+PLUGIN_SRC="${GITHUB_WORKSPACE:-}"
+if [ -z "$PLUGIN_SRC" ] || [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  echo "::error::GITHUB_WORKSPACE not set or missing .claude-plugin/plugin.json ($PLUGIN_SRC)" >&2
+  exit 1
+fi
+
+mkdir -p "$HOME/.claude/plugins/marketplaces"
+# -f (force) replaces any stale symlink; -n prevents creating a nested
+# link if the target already exists as a directory.
+ln -sfn "$PLUGIN_SRC" "$HOME/.claude/plugins/marketplaces/dev-kit"
+# Verify the symlink resolves to a valid plugin.
+if [ ! -d "$HOME/.claude/plugins/marketplaces/dev-kit/skills/$SKILL" ]; then
+  echo "::error::dev-kit plugin symlinked but skills/$SKILL/ not found at $HOME/.claude/plugins/marketplaces/dev-kit/skills/" >&2
+  exit 1
+fi
+
+# -----------------------------------------------------------------------------
 # Build the prompt. The slash command syntax is required because the
 # downstream skill (/dev-kit:review / /dev-kit:security / /dev-kit:maintenance)
 # is the actual reviewer; we just feed it the PR diff URL. The verdict
