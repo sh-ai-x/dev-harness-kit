@@ -20,9 +20,17 @@ _CODEX_SYSTEM_PREFIXES = ("<permissions", "<environment_context", "<user_instruc
 
 _INVALID_BRANCH_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)(\b(?:api[_-]?key|access[_-]?token|password|secret|authorization)\b\s*[:=]\s*)([^\s,;]+)"),
-    re.compile(r"\b(?:ghp|gho|ghs|ghr|github_pat|sk)-[A-Za-z0-9_\-]{12,}\b"),
-    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{12,}\b"),
+    re.compile(r"(?i)\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9+/._=-]{12,}(?=$|[\s,;])"),
+    re.compile(
+        r"(?i)(\b[A-Za-z_]*(?:api[_-]?key|access[_-]?token|client[_-]?secret|"
+        r"auth(?:orization)?|pass(?:word|wd)?|secret(?:[_-]?key)?|private[_-]?key|"
+        r"connection[_-]?string|token|pwd)[A-Za-z_]*\b\s*[:=]\s*['\"]?"
+        r")([^\s,;'\"]+)"
+    ),
+    re.compile(r"\b(?:ghp|gho|ghs|ghr|github_pat|sk)[-_][A-Za-z0-9_\-]{12,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{12,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
 )
 
 
@@ -489,10 +497,10 @@ def main() -> int:
     def _write(dest_dir: str, *, include_metadata: bool = False) -> None:
         dest = Path(dest_dir) / f"{safe_session}.jsonl"
         try:
-            payload = content_bytes
-            if payload is None:
-                payload = raw.encode("utf-8")
-            _atomic_write_bytes(dest, payload)
+            body = content_bytes
+            if body is None:
+                body = raw.encode("utf-8")
+            _atomic_write_bytes(dest, body)
             if include_metadata:
                 _atomic_write_bytes(
                     dest.with_suffix(".meta.json"),

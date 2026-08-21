@@ -271,7 +271,13 @@ class TestSaveLogBranch(unittest.TestCase):
         transcript = self.tmpdir / "secret-transcript.jsonl"
         transcript.write_text(json.dumps({
             "type": "user",
-            "message": {"content": "use api_key=super-secret-token now"},
+            "message": {"content": (
+                "use OPENAI_API_KEY=myCustomValueThatDoesNotStartWithSk, "
+                "ghp_abc123def456ghi789, sk-abc123def456ghi789, "
+                "Authorization: Bearer abc123def456ghi789, "
+                "Basic YWJjZGVmZ2hpamtsbW5vcA==, "
+                "AKIAIOSFODNN7EXAMPLE, xoxb-1234567890ab, "
+                "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature" )},
         }) + "\n")
         external = self.tmpdir / "agent-logs"
         env = os.environ.copy()
@@ -282,7 +288,18 @@ class TestSaveLogBranch(unittest.TestCase):
         meta = external / "main-external" / "claude-code" / "fix-x" / "sid.meta.json"
         self.assertTrue(log.exists())
         self.assertTrue(meta.exists())
-        self.assertNotIn("super-secret-token", log.read_text())
+        captured = log.read_text()
+        for secret in (
+            "myCustomValueThatDoesNotStartWithSk",
+            "ghp_abc123def456ghi789",
+            "sk-abc123def456ghi789",
+            "abc123def456ghi789",
+            "YWJjZGVmZ2hpamtsbW5vcA==",
+            "AKIAIOSFODNN7EXAMPLE",
+            "xoxb-1234567890ab",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature",
+        ):
+            self.assertNotIn(secret, captured)
         self.assertEqual(json.loads(meta.read_text())["branch"], "fix-x")
         self.assertEqual(json.loads(meta.read_text())["experiment_id"], "exp-42")
         _git(main, "worktree", "remove", "--force", str(wt))
