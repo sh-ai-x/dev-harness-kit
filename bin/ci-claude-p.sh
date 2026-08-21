@@ -154,14 +154,20 @@ fi
 # silently tolerates this same case; we mirror that behavior here.
 
 # -----------------------------------------------------------------------------
-# Build the prompt. The slash command syntax is required because the
-# downstream skill (/dev-kit:review / /dev-kit:security / /dev-kit:maintenance)
-# is the actual reviewer; we just feed it the PR diff URL. The verdict
-# format requirement is what the workflow's verdict-extraction step
-# expects (it scans for `**Verdict:**` on the first line of any claude
-# PR comment).
+# Build the prompt. We deliberately omit the `/dev-kit:${SKILL}` slash
+# command prefix that the workflow uses — some skill names (notably
+# `maintenance`) have no corresponding `skills/<skill>/SKILL.md` in the
+# dev-kit plugin, so the slash command resolves to "Unknown command"
+# and aborts the run. The skill's rubric instructions are passed
+# inline below; Claude Code treats that as a plain-text task. For
+# review/security the slash command also works, so the inline form
+# is a strict superset.
+#
+# The verdict format requirement is what the workflow's verdict-
+# extraction step expects (it scans for `**Verdict:**` on the first
+# line of any claude/github-actions PR comment).
 # -----------------------------------------------------------------------------
-PROMPT="/dev-kit:${SKILL} --diff ${GITHUB_REPOSITORY}/pull/${PR_NUMBER}
+PROMPT="Apply the /dev-kit:${SKILL} skill to PR ${GITHUB_REPOSITORY}/pull/${PR_NUMBER}.
 
 The first line of your final PR comment MUST be exactly one of:
 
