@@ -274,14 +274,29 @@ def test_overall_score_skips_none_scored_components(tmp_path: Path) -> None:
            ground_truth="unsafe", reason="x")
     report = build_report(tmp_path)
     assert report["components"]["prevention_quality"]["score"] is not None
-    # Other components must be None — that is the precondition for the
-    # contract under test.
+    # first_pass / recovery / learning must be None — that is the
+    # precondition for the contract under test. (measurement_integrity
+    # is NOT None any more: issue #702's subject_observability fallback
+    # gives it a low score from the symmetric ratio with no step.*
+    # events in the corpus. The None-skipped invariant still holds for
+    # the components that genuinely have no evidence.)
     for key in ("first_pass_quality", "recovery_quality", "learning_quality"):
         assert report["components"][key]["score"] is None, key
-    # With the fix, overall_score must be a number (the prevention
-    # score) and NOT None — the visible scorecard no longer collapses.
+    # With the fix, overall_score must be a number and NOT None — the
+    # visible scorecard no longer collapses. The exact value is the
+    # weighted mean of every component whose score is not None.
     assert report["overall_score"] is not None
-    assert report["overall_score"] == report["components"]["prevention_quality"]["score"]
+    scored = {k: v["score"] for k, v in report["components"].items()
+              if v["score"] is not None}
+    expected = round(
+        sum(s * COMPONENT_WEIGHTS[k] for k, s in scored.items())
+        / sum(COMPONENT_WEIGHTS[k] for k in scored),
+        1,
+    )
+    assert report["overall_score"] == expected, (
+        f"overall_score {report['overall_score']} != expected {expected} "
+        f"(scored={sorted(scored)})"
+    )
 
 
 def test_trace_event_round_trip(tmp_path: Path) -> None:
@@ -289,3 +304,89 @@ def test_trace_event_round_trip(tmp_path: Path) -> None:
            outcome="started", ts="2026-08-12T00:00:00Z")
     events = read_events(tmp_path)
     assert events[0]["event_id"] == "e1"
+
+
+# --- Issue #702: subject_observability submetric -----------------------
+
+def test_subject_observability_reports_meaningful_number_with_only_terminal(tmp_path: Path) -> None:
+    """Issue #702: subject_observability must report a meaningful symmetric
+    ratio even when only terminal events exist (no step.started)."""
+    _event(tmp_path, event_id="c1", event_type="step.completed", subject="file-1",
+           outcome="completed", ts="2026-08-12T00:00:00Z")
+    sub = (
+        build_report(tmp_path)["components"]["measurement_integrity"]
+        ["submetrics"]["subject_observability"]
+    )
+    # Symmetric ratio: |started ∩ terminal| / |started ∪ terminal| = 0/1 = 0.0
+    assert sub["submetrics"]["started_subjects"]["value"] == 0.0
+    assert sub["submetrics"]["terminal_subjects"]["value"] == 100.0
+    assert sub["coverage"] == 0.0
+    assert any("no step.started events" in f for f in sub["findings"])
+
+
+def test_subject_observability_reports_pair_when_started_and_terminal_present(tmp_path: Path) -> None:
+    """Issue #702: with a started+terminal pair, the symmetric ratio is 1.0."""
+    _event(tmp_path, event_id="s1", event_type="step.started", subject="session:abc",
+           outcome="started", ts="2026-08-12T00:00:00Z")
+    _event(tmp_path, event_id="c1", event_type="step.completed", subject="session:abc",
+           outcome="completed", ts="2026-08-12T00:00:01Z", parent="s1")
+    sub = (
+        build_report(tmp_path)["components"]["measurement_integrity"]
+        ["submetrics"]["subject_observability"]
+    )
+    assert sub["coverage"] == 1.0
+    assert sub["score"] == 100.0
+    assert sub["status"] == "OK"
+    assert sub["findings"] == []
+
+
+def test_subject_observability_detects_orphan_started(tmp_path: Path) -> None:
+    """Issue #702: started-without-terminal emits a finding naming the cause."""
+    _event(tmp_path, event_id="s1", event_type="step.started", subject="session:abc",
+           outcome="started", ts="2026-08-12T00:00:00Z")
+    sub = (
+        build_report(tmp_path)["components"]["measurement_integrity"]
+        ["submetrics"]["subject_observability"]
+    )
+    assert sub["coverage"] == 0.0
+    assert any("no terminal event observed" in f for f in sub["findings"])
+
+
+def test_empty_worktree_reports_non_null_measurement_integrity_score(tmp_path: Path) -> None:
+    """Issue #702 acceptance criterion: a worktree with only guard.blocked
+    events must report a non-null measurement_integrity.score (the
+    subject_observability fallback rescues the metric)."""
+    for i in range(10):
+        _event(tmp_path, event_id=f"g{i}", event_type="guard.blocked", subject=f"a{i}",
+               outcome="blocked", ts=f"2026-08-12T00:00:0{i}Z",
+               policy_id="scope", reason="out-of-scope")
+    integrity = build_report(tmp_path)["components"]["measurement_integrity"]
+    assert integrity["score"] is not None, (
+        "measurement_integrity.score must be non-null even with no step.* events; "
+        "the subject_observability fallback should rescue the metric"
+    )
+    sub = integrity["submetrics"]["subject_observability"]
+    assert any("no step.started events" in f for f in sub["findings"])
+
+
+def test_subject_observability_uses_submetric_shape(tmp_path: Path) -> None:
+    """Issue #702: subject_observability uses _submetric() — no weight field."""
+    sub = (
+        build_report(tmp_path)["components"]["measurement_integrity"]
+        ["submetrics"]["subject_observability"]
+    )
+    expected = {"coverage", "score", "status", "submetrics", "findings",
+                "evidence_event_ids", "config_version"}
+    assert set(sub.keys()) == expected
+    assert "weight" not in sub
+    assert sub["config_version"] == "harness-subject-observability-v1"
+
+
+def test_schema_version_bumped_to_three(tmp_path: Path) -> None:
+    """Issue #702: schema_version bumps from 2 to 3 to advertise the new
+    nested submetric. The top-level 5-component shape is unchanged."""
+    report = build_report(tmp_path)
+    assert report["schema_version"] == 3
+    for key in ("components", "overall_score", "status", "event_count",
+                "contract_version"):
+        assert key in report

@@ -65,6 +65,21 @@ if command -v python3 >/dev/null 2>&1; then
 fi
 
 # Discriminator: already populated by the preamble.
+# Issue #702: emit a session-scoped step.started so the harness-effectiveness
+# reducer's event_coverage denominator is non-zero in every worktree.
+# Best-effort: never blocks session start. Mirrors the append-event
+# pattern at hooks/lib/payload-parse.sh:108.
+SESSION_ID=$(printf '%s' "${INPUT:-}" | jq -r '.session_id // .sessionId // empty' 2>/dev/null || true)
+if [ -n "$SESSION_ID" ] && [ -n "$EFFECTIVE_CWD" ]; then
+  python3 -m lib.trace_log append-event \
+    --root "$EFFECTIVE_CWD" --type step.started \
+    --run-id "session:${SESSION_ID}" --workflow-id "session-lifecycle" \
+    --stage session --subject-id "session:${SESSION_ID}" \
+    --outcome started --source "hook:trace-session-start" \
+    --evidence-json "$(jq -nc --arg sid "$SESSION_ID" '{session_id:$sid, hook_event:"SessionStart"}')" \
+    >/dev/null 2>&1 || true
+fi
+
 case "$WORKTREE_DETECT" in
   worktree|outside|"") exit 0 ;;
   main) ;;
