@@ -587,11 +587,11 @@ def _step_pre_spawn(
 def _safe_duration_seconds(started_at_iso: str, end_iso: str) -> float:
     """Compute (end - start) total seconds with a non-negative floor.
 
-    Returns 0.0 when either ISO string is unparseable, mirroring the
-    legacy inline-block contract inside `_step_post_collect`. The
-    exception list is intentionally narrow — only ValueError (malformed
-    ISO) and TypeError (non-string input) are realistic; anything else
-    propagates.
+    Raises ``ValueError`` (malformed ISO) or ``TypeError`` (non-string
+    input) on unparseable input. The narrow ``except (ValueError,
+    TypeError)`` in ``_step_post_collect`` catches those and falls
+    back to 0.0; the helper itself stays narrow so anything else
+    (programmer errors, BaseException) propagates.
     """
     started = datetime.fromisoformat(started_at_iso)
     ended = datetime.fromisoformat(end_iso)
