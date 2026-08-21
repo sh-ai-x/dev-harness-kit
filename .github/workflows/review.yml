@@ -197,7 +197,7 @@ jobs:
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:review via MiniMax
-        if: steps.provider.outputs.provider == 'minimax'
+        if: steps.provider.outputs.provider == 'minimax' && github.event_name == 'pull_request'
         # MiniMax channel: env-only (no with.anthropic_api_key to avoid mixed auth).
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
@@ -230,7 +230,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:review via Claude Code opt-in
-        if: steps.provider.outputs.provider == 'anthropic'
+        if: steps.provider.outputs.provider == 'anthropic' && github.event_name == 'pull_request'
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
@@ -248,7 +248,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:review via DeepSeek
-        if: steps.provider.outputs.provider == 'deepseek'
+        if: steps.provider.outputs.provider == 'deepseek' && github.event_name == 'pull_request'
         # DeepSeek channel: env-only, same pattern as MiniMax above.
         env:
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
@@ -273,6 +273,35 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
+      - name: Run /dev-kit:review via MiniMax (workflow_dispatch workaround)
+        if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == 'minimax'
+        env:
+          ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bin/ci-claude-p.sh review "${{ steps.provider.outputs.pr_number }}"
+
+      - name: Run /dev-kit:review via Claude Code opt-in (workflow_dispatch workaround)
+        if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == 'anthropic'
+        env:
+          ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bin/ci-claude-p.sh review "${{ steps.provider.outputs.pr_number }}"
+
+      - name: Run /dev-kit:review via DeepSeek (workflow_dispatch workaround)
+        if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == 'deepseek'
+        env:
+          ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic'
+          ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_MODEL: 'deepseek-v4-pro'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bin/ci-claude-p.sh review "${{ steps.provider.outputs.pr_number }}"
       - name: Extract review verdict
         id: extract_verdict
         if: always()
@@ -378,7 +407,7 @@ jobs:
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:security via MiniMax
-        if: steps.provider.outputs.provider == 'minimax'
+        if: steps.provider.outputs.provider == 'minimax' && github.event_name == 'pull_request'
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
@@ -409,7 +438,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:security via Claude Code opt-in
-        if: steps.provider.outputs.provider == 'anthropic'
+        if: steps.provider.outputs.provider == 'anthropic' && github.event_name == 'pull_request'
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
@@ -427,7 +456,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:security via DeepSeek
-        if: steps.provider.outputs.provider == 'deepseek'
+        if: steps.provider.outputs.provider == 'deepseek' && github.event_name == 'pull_request'
         env:
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
           ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -451,6 +480,35 @@ jobs:
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
+      - name: Run /dev-kit:security via MiniMax (workflow_dispatch workaround)
+        if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == 'minimax'
+        env:
+          ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bin/ci-claude-p.sh security "${{ steps.provider.outputs.pr_number }}"
+
+      - name: Run /dev-kit:security via Claude Code opt-in (workflow_dispatch workaround)
+        if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == 'anthropic'
+        env:
+          ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: 'MiniMax-M3[1m]'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bin/ci-claude-p.sh security "${{ steps.provider.outputs.pr_number }}"
+
+      - name: Run /dev-kit:security via DeepSeek (workflow_dispatch workaround)
+        if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == 'deepseek'
+        env:
+          ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic'
+          ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_MODEL: 'deepseek-v4-pro'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bin/ci-claude-p.sh security "${{ steps.provider.outputs.pr_number }}"
       - name: Extract security verdict
         id: extract_verdict
         if: always()

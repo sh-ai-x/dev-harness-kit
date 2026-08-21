@@ -134,6 +134,34 @@ On approval it dispatches `maintenance.yml` + `review.yml` via
 (including the owner's own) are unaffected; they keep running on
 `pull_request` fully automatically.
 
+> **Dispatched-run workaround (2026-08).** The `anthropics/claude-code-action@v1`
+> step that backs `maintenance_judge` (and the sibling `review` /
+> `security` jobs in `review.yml`) silently no-ops on `workflow_dispatch`:
+> agent mode writes only `claude-prompt.txt` (no `claude-user-request.txt`),
+> so the SDK treats the slash command `/dev-kit:maintenance --diff <PR>` as
+> literal text. Combined with the `isEntityContext()` gate that disables
+> `mcp__github_inline_comment__create_inline_comment` on dispatch, the
+> dispatched run exits with `num_turns: 0, duration_ms: 21, is_error: false`
+> — green but no review comments posted. Audit logs record `verdict=MISSING`.
+> Observed against PRs #682 / #687. Upstream issues:
+> `anthropics/claude-code-action#635` + `#1644`.
+>
+> The fix lives in the workflows themselves, not in the gate: each judge
+> branch (review / security / maintenance) has a new `bin/ci-claude-p.sh <skill> <pr_number>`
+> step with `if: github.event_name == 'workflow_dispatch' && steps.provider.outputs.provider == '<provider>'`
+> that invokes `claude -p` directly. The existing `claude-code-action`
+> step's `if:` was tightened to `&& github.event_name == 'pull_request'`
+> so the broken path is skipped on dispatch but still runs for same-repo
+> PRs. The fork-pr-review gate itself is unchanged: it still gates on
+> the `fork-pr-review` Environment (manual approval required), still
+> dispatches the two judge workflows via `workflow_dispatch`, and still
+> writes the aggregate `fork-pr-review/ai-judges` commit status. The
+> helper `bin/ci-claude-p.sh` (single invocation shape, 9 call sites =
+> 3 providers x 3 judges) is pinned by `tests/test_ci_claude_p_sh.py`;
+> the workflow shape is pinned by
+> `tests/test_dispatched_run_uses_claude_p.py`.
+`pull_request` fully automatically.
+
 Because `workflow_dispatch` runs do **not** auto-link their jobs to
 the PR's commit in the PR Checks tab (only `pull_request` /
 `pull_request_target` events do), the gate dispatches run the AI
