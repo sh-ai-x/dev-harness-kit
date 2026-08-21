@@ -102,6 +102,26 @@ others stay untouched (shared CI machines, restricted sandboxes).
 --global` strips only the global managed entries, and a per-project
 `log off --target <dir>` is unaffected.
 
+### Cleanup-safe external retention
+
+Set `AGENT_LOG_ROOT` in the hook environment to move canonical captures
+outside the repository and every worktree:
+
+```bash
+export AGENT_LOG_ROOT="$HOME/.agent_logs"
+/dev-kit:log on --global
+```
+
+Captures are stored under `AGENT_LOG_ROOT/<repository>/<tool>/<branch>/`.
+Writes use a same-directory temporary file plus `fsync`/`os.replace`, and each
+session has a `.meta.json` sidecar with repository, branch, worktree, session,
+tool, and timestamp metadata. Common API keys, bearer tokens, passwords, and
+GitHub/OpenAI token-shaped values are redacted before persistence. The default
+main-checkout `logs/` path remains unchanged for compatibility.
+When `AGENT_LOG_ROOT` is set, `/dev-kit:token-analyzer` automatically discovers
+the repository's external log bucket and uses the sidecar's `worktree` field for
+Cost by Worktree attribution, including after the source worktree is removed.
+
 ## Output
 
 No file artifact of its own beyond the scaffolded `logs/{claude-code,codex}/`

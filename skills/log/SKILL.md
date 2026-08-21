@@ -82,6 +82,26 @@ Transcripts are grouped by `gitBranch` — one subdir per branch (`main`,
 `no-git` for non-git cwd. The token analyzer reads branch from the
 `gitBranch` wire field and renders a "Cost by Branch" panel.
 
+### Cleanup-safe external retention
+
+Set `AGENT_LOG_ROOT` before enabling hooks to store canonical telemetry outside
+the repository and every worktree:
+
+```bash
+export AGENT_LOG_ROOT="$HOME/.agent_logs"
+/dev-kit:log on --global
+```
+
+The path is `AGENT_LOG_ROOT/<repository>/<tool>/<branch>/`. Each capture is
+written atomically and receives a `.meta.json` sidecar containing repository,
+branch, worktree, session, tool, and timestamp metadata. Common credentials
+(API keys, bearer tokens, passwords, and GitHub/OpenAI token-shaped values) are
+redacted before persistence. Without the variable, the existing main-checkout
+`logs/` path and worktree attribution mirror remain unchanged.
+`/dev-kit:token-analyzer` automatically scans the external repository bucket
+and reads the sidecar's `worktree` field, so Cost by Worktree attribution still
+works after the source worktree is removed.
+
 `off` deliberately leaves `tools/save_log.py` + `logs/` in place — they
 cost nothing and a future `on` skips the setup step. Remove them
 manually if you really want a clean slate.

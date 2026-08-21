@@ -27,6 +27,8 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
+import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -44,6 +46,22 @@ import llm_pricing  # noqa: E402 — shared SSOT pricing loader (see rules/token
 # `.worktrees/` is client-neutral. Keep legacy roots discoverable so older
 # Claude/Codex sessions remain visible after the migration.
 WORKTREE_ROOT_NAMES = (".worktrees", ".claude/worktrees", ".codex/worktrees")
+
+
+def _repository_label(repo_root: Path) -> str:
+    """Match save_log.py's safe repository segment for external telemetry."""
+    label = re.sub(r"[^A-Za-z0-9._-]+", "-", repo_root.name).strip("-")
+    return (label or "detached")[:120]
+
+
+def _external_logs_dir(repo_root: Path | None) -> Path | None:
+    configured = os.environ.get("AGENT_LOG_ROOT", "").strip()
+    if not configured or repo_root is None:
+        return None
+    root = Path(configured).expanduser()
+    if not root.is_absolute():
+        root = (Path.cwd() / root).resolve()
+    return root / _repository_label(repo_root)
 
 
 #: Hard cap on how deep ``_walk_all_worktree_logs`` recurses into nested
@@ -321,6 +339,9 @@ def discover_logs(logs_dir: Path, *, repo_root: Path | None = None) -> list[Path
     """
     out = _discover_one_logs_dir(logs_dir)
     if repo_root is not None:
+        external_dir = _external_logs_dir(repo_root)
+        if external_dir is not None and external_dir != logs_dir:
+            out.extend(_discover_one_logs_dir(external_dir))
         for root_name in WORKTREE_ROOT_NAMES:
             wt_root = repo_root / root_name
             if wt_root.exists():
@@ -547,6 +568,13 @@ def worktree_from_path(path: Path | str | None) -> str:
     """
     if not path:
         return "(main)"
+    metadata_path = Path(path).with_suffix(".meta.json")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        metadata = None
+    if isinstance(metadata, dict) and metadata.get("worktree"):
+        return Path(str(metadata["worktree"])).name or "(main)"
     parts = Path(path).parts
     marker = _worktree_marker(parts)
     if marker:

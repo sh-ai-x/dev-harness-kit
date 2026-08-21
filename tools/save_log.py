@@ -9,9 +9,9 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -19,6 +19,19 @@ _CODEX_CONV_EVENTS = ("user_message", "agent_message")
 _CODEX_SYSTEM_PREFIXES = ("<permissions", "<environment_context", "<user_instructions")
 
 _INVALID_BRANCH_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(?:Bearer|Basic|Token)\s+[A-Za-z0-9+/._=-]{12,}(?=$|[\s,;])"),
+    re.compile(
+        r"(?i)(\b[A-Za-z_]*(?:api[_-]?key|access[_-]?token|client[_-]?secret|"
+        r"auth(?:orization)?|pass(?:word|wd)?|secret(?:[_-]?key)?|private[_-]?key|"
+        r"connection[_-]?string|token|pwd)[A-Za-z_]*\b\s*[:=]\s*['\"]?"
+        r")([^\s,;'\"]+)"
+    ),
+    re.compile(r"\b(?:ghp|gho|ghs|ghr|github_pat|sk)[-_][A-Za-z0-9_\-]{12,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{12,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+)
 
 
 def _sanitize_branch(name: str) -> str:
@@ -35,6 +48,66 @@ def _sanitize_branch(name: str) -> str:
     if not cleaned:
         return "detached"
     return cleaned[:120]
+
+
+def _redact_secrets(text: str) -> str:
+    """Redact common credential-shaped values before telemetry persistence."""
+    redacted = text
+    for pattern in _SECRET_PATTERNS:
+        if pattern.groups:
+            redacted = pattern.sub(lambda match: f"{match.group(1)}[REDACTED]", redacted)
+        else:
+            redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+def _repository_label(main_root: str) -> str:
+    return _sanitize_branch(Path(main_root).name)
+
+
+def resolve_log_root(main_root: str) -> tuple[Path, bool]:
+    """Resolve the durable root and whether it is externally configured.
+
+    The default keeps the existing main-checkout ``logs/`` contract. Setting
+    ``AGENT_LOG_ROOT`` moves canonical telemetry outside both the main checkout
+    and all worktrees, which is the cleanup-safe deployment mode.
+    """
+    configured = os.environ.get("AGENT_LOG_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser() / _repository_label(main_root), True
+    return Path(main_root) / "logs", False
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _metadata_payload(*, tool: str, session_id: str, experiment_id: str | None,
+                      cwd: str, main_root: str, branch: str,
+                      worktree_dir: str | None, log_path: Path) -> bytes:
+    metadata = {
+        "schema_version": "1.0",
+        "session_id": session_id,
+        "experiment_id": experiment_id,
+        "tool": tool,
+        "repository": _repository_label(main_root),
+        "branch": branch,
+        "cwd": cwd,
+        "worktree": worktree_dir,
+        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "log_path": str(log_path),
+    }
+    return (json.dumps(metadata, sort_keys=True) + "\n").encode("utf-8")
 
 
 def find_worktree_for_cwd(cwd: str, main_root: str) -> str | None:
@@ -390,6 +463,7 @@ def main() -> int:
     transcript_path = payload.get("transcript_path")
     cwd = payload.get("cwd") or os.getcwd()
     session_id = payload.get("session_id") or "session"
+    experiment_id = payload.get("experiment_id") or payload.get("prompt_id")
 
     if not transcript_path or not os.path.isfile(transcript_path):
         print(
@@ -412,31 +486,48 @@ def main() -> int:
     except OSError as exc:
         print(f"save_log: cannot read transcript: {exc}", file=sys.stderr)
         return 0
+    # Redact before slimming so dropped records cannot accidentally be copied
+    # by the raw-transcript fallback path.
+    raw = _redact_secrets(raw)
     slim = slim_transcript(raw, args.tool)
     content_bytes = slim.encode("utf-8") if slim is not None else None
 
-    def _write(dest_dir: str) -> None:
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, f"{safe_session}.jsonl")
+    log_root, external_root = resolve_log_root(main_root)
+
+    def _write(dest_dir: str, *, include_metadata: bool = False) -> None:
+        dest = Path(dest_dir) / f"{safe_session}.jsonl"
         try:
-            if content_bytes is None:
-                shutil.copyfile(transcript_path, dest)
-            else:
-                with open(dest, "wb") as out:
-                    out.write(content_bytes)
+            body = content_bytes
+            if body is None:
+                body = raw.encode("utf-8")
+            _atomic_write_bytes(dest, body)
+            if include_metadata:
+                _atomic_write_bytes(
+                    dest.with_suffix(".meta.json"),
+                    _metadata_payload(
+                        tool=args.tool,
+                        session_id=safe_session,
+                        experiment_id=str(experiment_id) if experiment_id else None,
+                        cwd=cwd,
+                        main_root=main_root,
+                        branch=branch,
+                        worktree_dir=worktree_dir,
+                        log_path=dest,
+                    ),
+                )
         except OSError as exc:  # noqa: BLE001 - non-fatal
             print(f"save_log: write failed for {dest}: {exc}", file=sys.stderr)
 
     # Primary write: the main checkout's logs/<tool>/<branch>/. Every
     # session — main or worktree — converges here so the analyzer has
     # one canonical location to scan.
-    _write(os.path.join(main_root, "logs", args.tool, branch))
+    _write(str(log_root / args.tool / branch), include_metadata=external_root)
     # Secondary write: the worktree's own logs/<tool>/<branch>/ when the
     # session actually started in a worktree. Lets the analyzer's
     # worktree_from_path() bucket the session under the right worktree
     # name. Without this, every worktree session falls back to (main)
     # attribution via the cwd field.
-    if worktree_dir and os.path.realpath(worktree_dir) != os.path.realpath(main_root):
+    if not external_root and worktree_dir and os.path.realpath(worktree_dir) != os.path.realpath(main_root):
         if args.archive_stale and not _is_worktree_active(worktree_dir, main_root):
             # Stale worktree: route to a dated archive subdir so the
             # analyzer can ignore it cleanly (the analyzer only walks

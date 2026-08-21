@@ -31,13 +31,17 @@ sys.path.insert(0, str(TOOL_PY.parent))
 
 
 def _run_save_log(cwd: Path, *, session_id: str = "sid",
-                  transcript: Path, env: dict | None = None) -> subprocess.CompletedProcess:
+                  transcript: Path, env: dict | None = None,
+                  experiment_id: str | None = None) -> subprocess.CompletedProcess:
     """Invoke save_log.py with a minimal payload, returning the CompletedProcess."""
-    payload = json.dumps({
+    payload_data = {
         "session_id": session_id,
         "transcript_path": str(transcript),
         "cwd": str(cwd),
-    })
+    }
+    if experiment_id:
+        payload_data["experiment_id"] = experiment_id
+    payload = json.dumps(payload_data)
     return subprocess.run(
         [sys.executable, str(TOOL_PY), "--tool", "claude-code"],
         input=payload, capture_output=True, text=True,
@@ -254,6 +258,52 @@ class TestSaveLogBranch(unittest.TestCase):
         self.assertTrue(
             (main / "logs" / "claude-code" / "main" / "sid.jsonl").exists(),
         )
+
+    def test_external_root_survives_worktree_removal_and_redacts_metadata(self):
+        main = self.tmpdir / "main-external"
+        main.mkdir()
+        _git(main, "init", "-q", "-b", "main")
+        (main / "f").write_text("x")
+        _git(main, "add", ".")
+        _git(main, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init")
+        wt = main / "wt"
+        _git(main, "worktree", "add", "-q", "-b", "fix-x", str(wt))
+        transcript = self.tmpdir / "secret-transcript.jsonl"
+        transcript.write_text(json.dumps({
+            "type": "user",
+            "message": {"content": (
+                "use OPENAI_API_KEY=myCustomValueThatDoesNotStartWithSk, "
+                "ghp_abc123def456ghi789, sk-abc123def456ghi789, "
+                "Authorization: Bearer abc123def456ghi789, "
+                "Basic YWJjZGVmZ2hpamtsbW5vcA==, "
+                "AKIAIOSFODNN7EXAMPLE, xoxb-1234567890ab, "
+                "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature" )},
+        }) + "\n")
+        external = self.tmpdir / "agent-logs"
+        env = os.environ.copy()
+        env["AGENT_LOG_ROOT"] = str(external)
+        rc = _run_save_log(wt, transcript=transcript, env=env, experiment_id="exp-42")
+        self.assertEqual(rc.returncode, 0, msg=rc.stderr)
+        log = external / "main-external" / "claude-code" / "fix-x" / "sid.jsonl"
+        meta = external / "main-external" / "claude-code" / "fix-x" / "sid.meta.json"
+        self.assertTrue(log.exists())
+        self.assertTrue(meta.exists())
+        captured = log.read_text()
+        for secret in (
+            "myCustomValueThatDoesNotStartWithSk",
+            "ghp_abc123def456ghi789",
+            "sk-abc123def456ghi789",
+            "abc123def456ghi789",
+            "YWJjZGVmZ2hpamtsbW5vcA==",
+            "AKIAIOSFODNN7EXAMPLE",
+            "xoxb-1234567890ab",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature",
+        ):
+            self.assertNotIn(secret, captured)
+        self.assertEqual(json.loads(meta.read_text())["branch"], "fix-x")
+        self.assertEqual(json.loads(meta.read_text())["experiment_id"], "exp-42")
+        _git(main, "worktree", "remove", "--force", str(wt))
+        self.assertTrue(log.exists(), "central telemetry must outlive worktree removal")
 
     def test_find_worktree_for_cwd_returns_wt_dir(self):
         from save_log import find_worktree_for_cwd

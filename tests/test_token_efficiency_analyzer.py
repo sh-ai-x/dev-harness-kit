@@ -15,6 +15,7 @@ Tests:
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -627,6 +628,24 @@ class TestDiscoverLogsWorktree(unittest.TestCase):
             files = discover_logs(root / "logs", repo_root=root)
             self.assertEqual(files, [main_file])
 
+    def test_external_agent_log_root_is_included(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            external = Path(td) / "agent-logs" / root.name
+            external_file = self._touch(
+                external / "claude-code" / "fix-x" / "sid.jsonl"
+            )
+            old = os.environ.get("AGENT_LOG_ROOT")
+            os.environ["AGENT_LOG_ROOT"] = str(external.parent)
+            try:
+                files = discover_logs(root / "logs", repo_root=root)
+            finally:
+                if old is None:
+                    os.environ.pop("AGENT_LOG_ROOT", None)
+                else:
+                    os.environ["AGENT_LOG_ROOT"] = old
+            self.assertIn(external_file, files)
+
 
 class TestEndToEndDashboard(unittest.TestCase):
     """Run main() against a tmp logs dir, assert HTML + summary."""
@@ -1170,6 +1189,17 @@ class TestWorktreeAwareness(unittest.TestCase):
             s = aggregate_session(p)
             self.assertEqual(s["worktree"], "cost-gate")
             self.assertEqual(s["branch"], "feat/cost-gate")
+
+    def test_worktree_from_external_metadata_sidecar(self):
+        with tempfile.TemporaryDirectory(prefix="external-meta-") as td:
+            log = Path(td) / "claude-code" / "fix-x" / "sid.jsonl"
+            log.parent.mkdir(parents=True)
+            log.write_text("{}\n")
+            log.with_suffix(".meta.json").write_text(json.dumps({
+                "schema_version": "1.0",
+                "worktree": "/tmp/removed-worktree/fix-x",
+            }))
+            self.assertEqual(worktree_from_path(log), "fix-x")
 
     def test_aggregate_session_main_path_uses_cwd_fallback(self):
         # When the file is under the main logs/ dir, fall back to the
