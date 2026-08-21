@@ -4,6 +4,67 @@ All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
 
+### Fixed — fork-PR review comments now post (dispatched-run workaround)
+
+Fork PRs that the maintainer approved via the `fork-pr-review`
+GitHub Environment previously sat through a green-but-empty AI
+review: the dispatched `review.yml` / `maintenance.yml` runs
+completed with `conclusion=success` but posted NO AI review
+comments. Every audit log recorded `verdict=MISSING`. Observed
+against PRs #682 and #687 in August 2026.
+
+Root cause: `anthropics/claude-code-action@v1` (pinned at
+`558b1d6cab4085c7753fe402c10bef0fbb92ac7a`) silently no-ops on
+`workflow_dispatch` events. Agent mode writes only
+`claude-prompt.txt`, NOT `claude-user-request.txt`, so the SDK
+treats the slash command `/dev-kit:review --diff <PR>` as literal
+text. Combined with the `isEntityContext()` gate that disables
+`mcp__github_inline_comment__create_inline_comment` for
+workflow_dispatch, the dispatched run exits with `num_turns: 0,
+duration_ms: 21, is_error: false` — the run is GREEN but no AI
+review comments are posted. Upstream issues
+`anthropics/claude-code-action#635` + `#1644`.
+
+Workaround: skip `claude-code-action` on `workflow_dispatch` and
+invoke `claude -p` directly via the new helper
+`bin/ci-claude-p.sh <skill> <pr_number>`. The script installs
+Claude Code CLI if missing, then runs `claude -p` with the
+provider-specific env vars the workflow controls. The existing
+`claude-code-action` step's `if:` is tightened to
+`&& github.event_name == 'pull_request'` so the broken path is
+skipped on dispatch but still runs for same-repo `pull_request`.
+
+The `fork-pr-review.yml` gate itself is INTENTIONALLY unchanged: it
+still gates on the `fork-pr-review` Environment (manual approval
+required), still dispatches review.yml / maintenance.yml via
+`workflow_dispatch`, and still writes the aggregate
+`fork-pr-review/ai-judges` commit status. Only the downstream
+workflows' judge steps changed.
+
+- `bin/ci-claude-p.sh` (new) — single helper for the `claude -p`
+  invocation shape; 9 call sites (3 judges x 3 providers) all
+  share it. Header comment explains the upstream issue references.
+- `.github/workflows/review.yml` — `pull_request_target` added to
+  triggers; 6 new `claude -p` workaround steps (review + security,
+  one per provider); 6 existing `claude-code-action` steps tightened
+  with `&& github.event_name == 'pull_request'`.
+- `.github/workflows/maintenance.yml` — same treatment for the
+  `maintenance_judge` job (3 workaround steps + 3 tightened
+  `claude-code-action` steps).
+- `.github/workflows/fork-pr-review.yml` — header comment expanded
+  to document the workaround; gate behavior unchanged.
+- `tests/test_ci_claude_p_sh.py` (new) — 14 hermetic subprocess
+  tests for the helper (static checks, arg validation, required
+  env vars).
+- `tests/test_dispatched_run_uses_claude_p.py` (new) — 5
+  YAML-parsing pin tests for the workflow shape (9 workaround
+  steps present, 9 `claude-code-action` steps tightened, gate
+  unchanged, helper executable, helper references upstream
+  issues).
+- `docs/quality/maintenance-gate.{md,ko.md}` — "Fork PRs" section
+  documents both the gate (unchanged) and the dispatched-run
+  workaround (new), with a pointer to the upstream issues.
+
 ### Breaking — slim sweep (PR-1)
 
 - **chore(skills)!:** Slim sweep — drop `user-invocable: true` from `/dev-kit:valuate` (kept as model-use); cut `/dev-kit:audit` slash (folded into `/dev-kit:inspect --secrets` / `--slop`); merge `/dev-kit:bootstrap-full` into `/dev-kit:bootstrap` with runtime Y/n prompt for ci-setup (pass `--skip-ci` to decline); document MCP integration as intentionally out of scope ([decision 0001](docs/decisions/0001-no-mcp.md)). `/dev-kit:config` picker drops the non-functional MCP option. **Breaking:** `/dev-kit:audit` and `/dev-kit:bootstrap-full` removed; `/dev-kit:inspect` gains `--secrets` and `--slop` flags.
