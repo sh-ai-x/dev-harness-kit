@@ -8,6 +8,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
+from babysit_pr_cli import (  # noqa: E402
+    persist_loop_outcome,
+    persist_loop_snapshot,
+)
 from babysit_pr_loop import (  # noqa: E402
     CHANGE_DIRECTION,
     DONE,
@@ -145,3 +149,39 @@ def test_state_round_trips_atomically(tmp_path: Path) -> None:
 def test_invalid_phase_is_rejected() -> None:
     with pytest.raises(ValueError):
         LoopState(1, 1, phase="finished").validate()
+
+
+def test_production_snapshot_seam_loads_and_persists_state(tmp_path: Path) -> None:
+    path = tmp_path / ".dev-kit" / "babysit-state.json"
+    state = persist_loop_snapshot(
+        parent_pr=7,
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+        state_path=path,
+    )
+    assert state.phase == WAIT_FOR_APPROVAL
+    assert load_state(path) == state
+
+
+def test_production_outcome_seam_resumes_from_saved_state(tmp_path: Path) -> None:
+    path = tmp_path / ".dev-kit" / "babysit-state.json"
+    persist_loop_snapshot(
+        parent_pr=7,
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+        state_path=path,
+    )
+    state = persist_loop_outcome(
+        parent_pr=7,
+        outcome="unchanged",
+        now_iso="2026-08-20T12:01:00Z",
+        state_path=path,
+    )
+    assert state.strategy == CHANGE_DIRECTION
+    assert load_state(path) == state

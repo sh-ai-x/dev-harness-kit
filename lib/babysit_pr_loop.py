@@ -154,7 +154,10 @@ def observe(
         phase=phase,
         head_sha=head_sha,
         context_epoch=state.context_epoch + int(epoch_bump),
-        failure_signature=failure_signature or state.failure_signature,
+        # A new commit invalidates the diagnosis attached to the old
+        # context. Keeping it would let a restarted worker act on stale
+        # evidence from a different head SHA.
+        failure_signature="" if epoch_bump else failure_signature or state.failure_signature,
         iteration=state.iteration + 1,
         no_information=0 if epoch_bump else state.no_information,
         strategy=CONTINUE if epoch_bump else state.strategy,

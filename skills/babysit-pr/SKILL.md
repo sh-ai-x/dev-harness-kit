@@ -266,7 +266,9 @@ re-issuing the call. Cached responses from sub-agent handoffs and
 parallel tool calls are especially dangerous — they always look fresh.
 
 ```
-  1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call).
+  1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call),
+                  call `lib.babysit_pr_cli.persist_loop_snapshot(...)`, and
+                  atomically save the observed phase before acting.
                     Load the prior iteration's check-state cache from
                     `.dev-kit/babysit-checks.json` (absent on iter 1 —
                     treat as `{}`). Diff it against the fresh CHECKS via
@@ -333,6 +335,11 @@ parallel tool calls are especially dangerous — they always look fresh.
                       `iter` on its own; it counts toward the 3-consecutive-
                       no-progress guard the same way a pushed-and-still-
                       failing CI run would.
+  8.5 OUTCOME   — after verification, call
+                  `lib.babysit_pr_cli.persist_loop_outcome(...)` with
+                  `progress`, `partial_progress`, `unchanged`, `regressed`,
+                  or `inconclusive`; it saves the strategy transition before
+                  commit/push.
   9. COMMIT     — `git add <specific paths>` of the file(s) just modified (NEVER `git add -p` — interactive, hangs without TTY; the skill runs unattended) + conventional commit
   10. PUSH     — `git push origin HEAD`
   11. LOG     — append one line to `.dev-kit/babysit.log`:
@@ -363,6 +370,11 @@ state, not exit-0 completion. `RECOVERY_REQUIRED` is also resumable: it stops
 repeating an unproductive patch while retaining the PR, evidence, context
 epoch, repair attempt, and next wake information. A worker restart loads this
 state before taking action and must re-snapshot GitHub immediately.
+
+The runtime seams are `lib/babysit_pr_cli.persist_loop_snapshot()` for every
+fresh GitHub snapshot and `persist_loop_outcome()` after repair verification.
+Both load the prior state, apply `observe()` or `record_outcome()`, and call
+`save_state()` atomically; the canonical wiring recipe shows the exact calls.
 
 The pure state machine records context-epoch changes when the head SHA moves,
 and turns repeated no-information outcomes into `continue`, `evolve_step`,

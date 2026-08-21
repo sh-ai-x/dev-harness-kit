@@ -38,7 +38,7 @@ On start: `mkdir -p .dev-kit`; if `.dev-kit/babysit.lock` exists, check stalenes
 
 **Step 0 — opt-out check**: if `--operator-is-only-human` was passed, this runs *before* step 1's snapshot (see "Single-operator bypass" below).
 
-1. **SNAPSHOT** — one `gh` call fetches `PR_NUMBER`, `REVIEW_VERDICT`, `CHECKS`, then diffs it against the prior iteration's cached check-state (`.dev-kit/babysit-checks.json`) via `diff_check_states()` — see "Check-state caching" below.
+1. **SNAPSHOT** — one `gh` call fetches `PR_NUMBER`, `REVIEW_VERDICT`, `CHECKS`, then calls `lib.babysit_pr_cli.persist_loop_snapshot()` to load/observe/atomically save the durable phase before diffing the cached check-state (`.dev-kit/babysit-checks.json`) via `diff_check_states()` — see "Check-state caching" below.
 2. **TERMINATE** — if `REVIEW_VERDICT == APPROVED` and every check's conclusion is in `{success, skipped, neutral}`, print "PR approved" and exit 0.
 3. **CLASSIFY** — bucket blockers into (A) CI failing, (B) CI pending → `WAIT_FOR_CHECKS`, (C) review `CHANGES_REQUESTED`, (D) `REVIEW_REQUIRED`/empty → persist `WAIT_FOR_APPROVAL` and resume (the skill cannot self-approve).
 4. **WAIT** — if any check is pending with no failures, sleep 30s and continue.
@@ -46,6 +46,7 @@ On start: `mkdir -p .dev-kit`; if `.dev-kit/babysit.lock` exists, check stalenes
 6. **DIAGNOSE** — one root cause per `changed` failing check: test failure, lint/format, type-check, secret detected (abort — never auto-remove), or review feedback.
 7. **APPLY FIX** — Edit/Write, one logical change per iteration.
 8. **VERIFY LOCAL** (hard gate) — re-run the failing command; quote the result in the exact format `local:  <command> → <result> (exit <code>)`. On failure, do NOT commit/push — loop back to DIAGNOSE within the same iteration instead of pushing a fix that would just fail CI again ~1-10 minutes later.
+8.5 **OUTCOME** — call `lib.babysit_pr_cli.persist_loop_outcome()` after verification so strategy changes and recovery state survive worker restarts.
 9. **COMMIT** — `git add <specific paths>` of the just-modified file(s); never `git add -p` (interactive, hangs without a TTY).
 10. **PUSH** — pushes the branch (`push origin HEAD`).
 11. **LOG** — appends one line to `.dev-kit/babysit.log`: `<ISO-8601> iter=<n> check=<name> fix=<one-line> exit=<code>`.

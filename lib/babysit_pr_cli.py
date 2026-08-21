@@ -42,6 +42,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from babysit_pr_loop import (  # noqa: E402
+    STATE_FILE,
+    LoopState,
+    load_state,
+    new_state,
+    observe,
+    record_outcome,
+    save_state,
+)
+
 PathLike = str | Path
 
 # MUST-L3 pytest tail line: the iteration records the command's quoted
@@ -485,6 +495,74 @@ def run_local_verify(
 # ---------------------------------------------------------------------------
 # Orchestrator.
 # ---------------------------------------------------------------------------
+def _load_or_create_loop_state(
+    parent_pr: int,
+    *,
+    current_pr: int | None = None,
+    state_path: PathLike = STATE_FILE,
+) -> LoopState:
+    """Load the durable controller state, or initialize it for this PR."""
+    state = load_state(state_path)
+    if state is None:
+        return new_state(parent_pr, current_pr=current_pr)
+    if state.parent_pr != parent_pr:
+        raise ValueError(
+            f"state belongs to PR #{state.parent_pr}, not PR #{parent_pr}"
+        )
+    return state
+
+
+def persist_loop_snapshot(
+    *,
+    parent_pr: int,
+    head_sha: str,
+    review_verdict: str | None,
+    checks: Iterable[dict[str, object]],
+    now_epoch: float,
+    now_iso: str,
+    current_pr: int | None = None,
+    failure_signature: str = "",
+    state_path: PathLike = STATE_FILE,
+) -> LoopState:
+    """Persist one fresh GitHub snapshot and return its resumable phase.
+
+    This is the production seam used by the babysit-pr orchestration layer:
+    every fresh snapshot is observed and atomically saved before the next
+    action is chosen.
+    """
+    state = _load_or_create_loop_state(
+        parent_pr, current_pr=current_pr, state_path=state_path
+    )
+    state = observe(
+        state,
+        head_sha=head_sha,
+        review_verdict=review_verdict,
+        checks=checks,
+        now_epoch=now_epoch,
+        now_iso=now_iso,
+        failure_signature=failure_signature,
+    )
+    save_state(state, state_path)
+    return state
+
+
+def persist_loop_outcome(
+    *,
+    parent_pr: int,
+    outcome: str,
+    now_iso: str,
+    current_pr: int | None = None,
+    state_path: PathLike = STATE_FILE,
+) -> LoopState:
+    """Persist repair verification evidence and the next strategy."""
+    state = _load_or_create_loop_state(
+        parent_pr, current_pr=current_pr, state_path=state_path
+    )
+    state = record_outcome(state, outcome=outcome, now_iso=now_iso)
+    save_state(state, state_path)
+    return state
+
+
 def run_babysit_once(
     *,
     argv: Sequence[str],

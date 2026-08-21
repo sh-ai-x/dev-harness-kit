@@ -15,7 +15,7 @@ isolation; this recipe is the only place the slash-arguments-reach-the-helper
 contract lives.
 
 ```python
-import sys, os, json
+import sys, os, json, time, subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
@@ -74,6 +74,31 @@ pr_number = int(pr_snapshot["number"])
 if pr_snapshot.get("state") != "OPEN":
     print(f"PR #{pr_number} is {pr_snapshot.get('state')}; pass an open --pr N.", file=sys.stderr)
     sys.exit(1)
+
+# Durable control-plane wiring: snapshot before classification and persist
+# the phase before choosing wait/repair/approval actions. The repair path
+# calls bpc.persist_loop_outcome(...) after local verification; both helpers
+# load the prior state and atomically save the transition.
+checks = json.loads(subprocess.run(
+    ["gh", "pr", "checks", str(pr_number), "--json",
+     "name,state,conclusion,databaseId,startedAt,updatedAt"],
+    check=True, capture_output=True, text=True).stdout)
+loop_state = bpc.persist_loop_snapshot(
+    parent_pr=pr_number,
+    current_pr=pr_number,
+    head_sha=subprocess.run(
+        ["gh", "pr", "view", str(pr_number), "--json", "headRefOid",
+         "-q", ".headRefOid"], check=True, capture_output=True,
+        text=True).stdout.strip(),
+    review_verdict=subprocess.run(
+        ["gh", "pr", "view", str(pr_number), "--json", "reviewDecision",
+         "-q", ".reviewDecision"], check=True, capture_output=True,
+        text=True).stdout.strip() or None,
+    checks=checks,
+    now_epoch=time.time(),
+    now_iso=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+)
+print(f"babysit phase={loop_state.phase} strategy={loop_state.strategy}", flush=True)
 
 rc = bpc.run_babysit_once(
     argv=argv,
