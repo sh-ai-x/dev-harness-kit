@@ -195,9 +195,11 @@ class TestDimensionImmutability(unittest.TestCase):
                 f"{name}: dimension must be a frozen dataclass",
             )
         # Spot-check slots=True too so memory invariants are explicit.
+        # `__dataclass_params__.slots` only exists on Python 3.13+;
+        # on 3.12 we check `__slots__` on the class itself.
         for name, dim in dim_mod.REGISTRY.items():
             self.assertTrue(
-                dim.__dataclass_params__.slots,
+                hasattr(dim, "__slots__"),
                 f"{name}: dimension must declare slots=True",
             )
 
