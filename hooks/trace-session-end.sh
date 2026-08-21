@@ -21,16 +21,41 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-# Read the session_id from the stdin payload. Fall back gracefully
-# if the runtime does not provide it (Codex may use a different
-# field name).
+# Read the session_id + cwd from the stdin payload. Fall back gracefully
+# if the runtime does not provide them (Codex may use different field
+# names for sessionId, and some hooks run without a cwd field).
 SESSION_ID=$(printf '%s' "${INPUT:-}" | jq -r '.session_id // .sessionId // empty' 2>/dev/null || true)
 [ -z "$SESSION_ID" ] && exit 0
 
-# Resolve the worktree root. HOOK_CWD is set by hook-preamble.sh from
-# the payload's .cwd field; fall back to $PWD for non-Claude runtimes.
-EFFECTIVE_CWD="${HOOK_CWD:-$PWD}"
+# Resolve the worktree root. The payload's `cwd` is the source of truth
+# (matches the cwd that produced step.started in session-start-check.sh,
+# so the matching pair lands in the same trace file). Fall back to $PWD
+# for runtimes that don't supply a cwd field.
+PAYLOAD_CWD=$(printf '%s' "${INPUT:-}" | jq -r '.cwd // ""' 2>/dev/null || true)
+if [ -n "$PAYLOAD_CWD" ] && [ -d "$PAYLOAD_CWD" ]; then
+  EFFECTIVE_CWD="$PAYLOAD_CWD"
+else
+  EFFECTIVE_CWD="$PWD"
+fi
 [ -z "$EFFECTIVE_CWD" ] && exit 0
+
+# Idempotency guard: trace-session-end.sh is registered on BOTH Stop
+# (per-turn) AND SessionEnd (per-session) in hooks/hooks.json so the
+# script's hook signature stays in parity with Codex's
+# .codex-plugin/hooks/hooks.json (see tools/portability_check.py).
+# Without this guard, a multi-turn Claude session emits one
+# step.completed per turn, polluting the reducer's event_coverage
+# denominator. Skip the append when a terminal event already exists
+# for this session-scoped subject_id.
+EVENTS_FILE="${EFFECTIVE_CWD}/.dev-kit/trace/events.jsonl"
+SUBJECT_ID="session:${SESSION_ID}"
+if [ -f "$EVENTS_FILE" ] && command -v jq >/dev/null 2>&1; then
+  if jq -e --arg sid "$SUBJECT_ID" \
+    'select(.subject_id == $sid and (.event_type == "step.completed" or .event_type == "step.failed" or .event_type == "step.blocked"))' \
+    "$EVENTS_FILE" >/dev/null 2>&1; then
+    exit 0
+  fi
+fi
 
 # Emit the matching step.completed. subject_id is identical to the
 # step.started subject so the reducer's set-intersection finds the pair.

@@ -480,7 +480,7 @@ def _subject_observability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not started:
         findings.append(
             "no step.started events observed — producer is missing or "
-            "session-scoped hook (hooks/trace-session-start.sh) is not wired"
+            "session-scoped hook (hooks/session-start-check.sh) is not wired"
         )
     elif not terminal_subjects:
         findings.append(
