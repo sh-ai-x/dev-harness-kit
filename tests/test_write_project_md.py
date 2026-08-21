@@ -290,5 +290,51 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertIn("requests==2.31.0", out)
 
 
+class TestWriteProjectMdExceptionNarrowing(unittest.TestCase):
+    """Bare-except narrowing for the tree-extract and lockfile-read paths.
+
+    _safe_tree and _safe_deps previously caught bare Exception and
+    returned a fallback string. The realistic failure modes are: OSError
+    (permission denied, missing path, IO error) and ValueError (path
+    with null bytes) for the tree walker; OSError + UnicodeDecodeError
+    for the lockfile reader. Anything else must propagate so programmer
+    errors aren't silently hidden behind a "(read failed)" string.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_safe_deps_non_utf8_lockfile_returns_fallback_without_raising(self):
+        # Write a lockfile with non-UTF8 bytes (latin-1) — must not crash.
+        (self.root / "requirements.txt").write_bytes(b"requests==2.31.0\n# \xff\xfe bad-bytes\n")
+        out = write_project_md._safe_deps(self.root)
+        # The narrowed except (OSError, UnicodeDecodeError) catches the
+        # bad-byte read and returns the fallback string. The full valid
+        # prefix is NOT preserved on this path (json.loads sees the
+        # partial read); what matters is no exception escapes.
+        self.assertIsInstance(out, str)
+        self.assertEqual(out, "(read failed for requirements.txt)")
+
+    def test_safe_tree_null_byte_path_returns_fallback_without_raising(self):
+        # A path with an embedded null byte triggers ValueError on most
+        # filesystems; the narrow catches it and returns the fallback.
+        null_path = self.root / "bad\x00name"
+        out = write_project_md._safe_tree(null_path)
+        self.assertIsInstance(out, str)
+        self.assertEqual(out, "(tree extraction failed — STALE)")
+
+    def test_safe_tree_attribute_error_propagates(self):
+        """AttributeError (not in the narrow) must propagate — narrowing
+        is intentionally narrow so programmer errors aren't hidden."""
+        from unittest.mock import patch
+        with patch("write_project_md.os.walk", side_effect=AttributeError("not a walker")):
+            with self.assertRaises(AttributeError):
+                write_project_md._safe_tree(self.root)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

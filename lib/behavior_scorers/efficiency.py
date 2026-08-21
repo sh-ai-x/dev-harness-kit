@@ -76,7 +76,7 @@ def _save_baseline(path: Path, metrics: Dict[str, int]) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(metrics, f, indent=2, sort_keys=True)
-    except Exception:
+    except (OSError, ValueError, TypeError):
         # Best-effort cleanup on partial write
         try:
             os.unlink(path)

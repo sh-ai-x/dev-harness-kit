@@ -1125,5 +1125,66 @@ class TestMainDispatchEligibleStepsOnly(unittest.TestCase):
                       f"classifier must report eligible step count (2), not total (4); stderr was: {stderr!r}")
 
 
+class TestTransitionCompletedExceptionNarrowing(unittest.TestCase):
+    """Bare-except narrowing for _transition_completed.
+
+    Inner op: datetime.fromisoformat(started_at). The only realistic
+    failure modes are ValueError (malformed ISO string) and TypeError
+    (non-string input). Anything else (KeyError from a malformed dict,
+    AttributeError from a None field) is a programmer error and must
+    propagate — silently zeroing duration was the bug the cleancode
+    finding called out.
+    """
+
+    def test_malformed_started_at_leaves_duration_seconds_untouched(self):
+        step = {"started_at": "not-an-iso-date"}
+        before = step.get("duration_seconds", "<unset>")
+        execute._transition_completed(step, "2026-08-21T12:00:00+09:00")
+        # duration_seconds stays absent / not set when ISO parse fails.
+        self.assertEqual(step.get("duration_seconds", "<unset>"), before)
+
+    def test_valid_iso_sets_duration_seconds(self):
+        step = {"started_at": "2026-08-21T11:00:00+09:00"}
+        execute._transition_completed(step, "2026-08-21T12:00:00+09:00")
+        self.assertEqual(step["duration_seconds"], 3600.0)
+
+    def test_missing_started_at_is_noop(self):
+        step = {}
+        # No started_at — duration_seconds is unchanged (None path).
+        execute._transition_completed(step, "2026-08-21T12:00:00+09:00")
+        self.assertNotIn("duration_seconds", step)
+
+
+class TestSafeDurationSecondsExceptionNarrowing(unittest.TestCase):
+    """Bare-except narrowing for the duration-parse helper used inside
+    _step_post_collect.
+
+    Inner op: datetime.fromisoformat on `started_at_iso` + `now_iso()`.
+    Realistic failure modes: ValueError (malformed ISO), TypeError
+    (non-string input). KeyboardInterrupt / SystemExit must propagate.
+    """
+
+    def test_valid_iso_pair_returns_total_seconds(self):
+        result = execute._safe_duration_seconds(
+            "2026-08-21T11:00:00+09:00", "2026-08-21T12:00:00+09:00"
+        )
+        self.assertEqual(result, 3600.0)
+
+    def test_malformed_started_at_raises_valueerror(self):
+        """The helper raises the realistic exception; the inline-block caller
+        in `_step_post_collect` catches (ValueError, TypeError) and maps
+        to 0.0. The helper itself stays narrow — no silent zero."""
+        with self.assertRaises(ValueError):
+            execute._safe_duration_seconds("not-iso", "2026-08-21T12:00:00+09:00")
+
+    def test_malformed_end_iso_raises_valueerror(self):
+        with self.assertRaises(ValueError):
+            execute._safe_duration_seconds("2026-08-21T11:00:00+09:00", "garbage")
+
+    def test_non_string_input_raises_typeerror(self):
+        with self.assertRaises(TypeError):
+            execute._safe_duration_seconds(None, "2026-08-21T12:00:00+09:00")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -228,7 +228,7 @@ def _safe_tree(root: Path) -> str:
             for f in sorted(safe_filenames)[:FILES_PER_DIR_MAX]:
                 out.append(f"{indent}  {_redact(f)}")
         return "\n".join(out[:TREE_LINES_MAX]) or "(empty)"
-    except Exception:
+    except (OSError, ValueError):
         return "(tree extraction failed — STALE)"
 
 
@@ -248,7 +248,7 @@ def _safe_deps(root: Path) -> str:
                     _redact(line) for line in path.read_text(encoding="utf-8").splitlines()[:n]
                 ]
                 return "\n".join(lines) or f"({filename} empty)"
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 return f"(read failed for {filename})"
     return "- (no lockfile detected)"
 
