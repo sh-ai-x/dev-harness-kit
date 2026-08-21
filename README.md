@@ -688,8 +688,8 @@ diff first.
 
 When dev-kit ships new or fixed templates after your initial install, reach for
 [`/dev-kit:ci-update`](docs/skills/ci-update.md) instead of `--force` —
-it classifies each shipped file as `installed` / `new` / `updated` /
-`consumer_modified` / `diverged`, with backup-before-overwrite and no
+it classifies each shipped file as `new` / `updated` / `consumer_modified` /
+`diverged` (plus an `unchanged` no-op), with backup-before-overwrite and no
 destructive blind-apply. Full contract in
 [`docs/quality/ci-update.md`](docs/quality/ci-update.md).
 

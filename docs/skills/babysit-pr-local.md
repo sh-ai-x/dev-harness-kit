@@ -45,7 +45,7 @@ bin/babysit-pr-local.sh <PR> --auto-approve
 ## Related
 
 - [`/dev-kit:babysit-pr`](babysit-pr.md) — the GH-Actions-mode sibling; `--local-verify` flag adds a local pytest gate without leaving the GH-Actions wait loop.
-- [`bin/babysit-pr-local.sh`](../../bin/babysit-pr-local.sh) — single-call wrapper script (≈30 lines).
+- [`bin/babysit-pr-local.sh`](../../bin/babysit-pr-local.sh) — single-call wrapper script (≈70 lines).
 - [`bin/review-local.sh`](../../bin/review-local.sh) — local equivalent of the GH-Actions review workflow.
 - [`docs/local-ci.md`](../local-ci.md) — full local-CI playbook (when / when not / how).
 - [`skills/babysit-pr-local/SKILL.md`](../../skills/babysit-pr-local/SKILL.md) — full algorithm body.
