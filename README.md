@@ -442,8 +442,10 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | Command | What it does |
 |---|---|
 | [`/dev-kit:babysit-pr`](docs/skills/babysit-pr.md) | Watches your open PR, fixes failing checks, pushes, and repeats until CI is green and review approves. Add `--local-verify` to gate iterations on a local test pass before pushing (saves GH-Actions minutes). |
+| [`/dev-kit:babysit-pr-local`](docs/skills/babysit-pr-local.md) | Same algorithm, but the LLM-judge verdict loop runs locally via `bin/review-local.sh` instead of GH-Actions. Use when GH-Actions minutes are exhausted and you want a faster feedback loop. |
 | [`/dev-kit:pr-verify`](docs/skills/pr-verify.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI" / "LLM-judge still running" false positive before any "ready to merge" claim. |
 | [`/dev-kit:bump`](docs/skills/bump.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
+| [`/dev-kit:sync-version`](docs/skills/sync-version.md) | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically; useful when pre-push is not installed or CI reports a stale branch. |
 | [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow. Runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`, with the same verdict extraction + combined gate + L3-evidence check + optional auto-approve. See [`docs/local-ci.md`](docs/local-ci.md) for the full playbook. |
 
 ### Keeping the project healthy
@@ -684,6 +686,13 @@ install. Avoid `--force` on a clean re-run with no upstream changes, or if you'v
 hand-edited installed files — it overwrites local customizations, so review the
 diff first.
 
+When dev-kit ships new or fixed templates after your initial install, reach for
+[`/dev-kit:ci-update`](docs/skills/ci-update.md) instead of `--force` —
+it classifies each shipped file as `installed` / `new` / `updated` /
+`consumer_modified` / `diverged`, with backup-before-overwrite and no
+destructive blind-apply. Full contract in
+[`docs/quality/ci-update.md`](docs/quality/ci-update.md).
+
 ```bash
 bin/devkit-refresh.sh                                              # 1. refresh cache
 cd /path/to/consumer-repo
@@ -774,6 +783,7 @@ Each is read-only: it prints or writes a report; it never blocks a tool call.
 | [`/dev-kit:token-analyzer`](docs/skills/token-analyzer.md) | Post-hoc | `logs/{claude-code,codex}/*.jsonl` (from `/dev-kit:log`) | Self-contained HTML dashboard + per-worktree sidecar pages. 4-dim session scoring + 6 anti-pattern warnings (`CACHE_HIT_LOW`, `READ_HEAVY`, `MODEL_OVERSPEC`, `REPEATED_USER_MSG`, …) + USD savings estimate. | FinOps review of accumulated session spend; pre-release cost audit. |
 | [`/dev-kit:cost-gate`](docs/skills/cost-gate.md) | Live | `$CWD/.dev-kit/.cost-gate/state.json` (live session ledger) | Plain-text status (`scope`, `status`, `cost_usd`, threshold distance) **plus** a two-line `Cost-gate:` / `Cost-gate-Session:` commit-trailer block so the PR aggregator can aggregate. Read-only. | Right before a commit/PR — copy the trailer block into the commit message so the PR-level cost flag fires. |
 | [`/dev-kit:evaluate`](docs/skills/evaluate.md) | Post-hoc | Replayed transcripts + workflow evidence via `lib/eval_runner.RUBRIC_REGISTRY` | Per-rubric LLM-judge verdict, legacy D1–D7 Agent-Behavior report **and** five harness-effectiveness components (prevention / first-pass / recovery / learning / measurement-integrity); missing evidence is reported as `INSUFFICIENT_EVIDENCE`, never inferred. Converges when per-case axis mean ≥ 8.0. | After a harness change — programmatic gate on harness-quality and os-quality rubrics before merge. |
+| [`/dev-kit:harness-effectiveness`](docs/skills/harness-effectiveness.md) | Static | Same reducer as `evaluate`'s harness-effectiveness column (`lib.harness_effectiveness.build_report`) | The five-component scorecard (prevention / first-pass / recovery / learning / measurement-integrity) standalone, sub-second, zero API spend. | When you want the harness-effectiveness number without running the full `evaluate` judge pass. |
 | [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Static | `.github/`, `.dev-kit/ci-config.json`, provider file, secrets, `gh auth` status | One PASS / FAIL summary across five readiness checks. Read-only. | Pre-PR sanity check: "if I open a PR now, will CI even start?" |
 
 How they relate:

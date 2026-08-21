@@ -124,6 +124,7 @@ step inside their parent skill's flow; you never type them directly.
 | Skill | Category | Alpha | Invocable |
 |---|---|---|---|
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | human |
+| [`babysit-pr-local`](babysit-pr-local.md) | `ship` | `state` | human |
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
 | [`build`](build.md) | `build` | `state` | human |
 | [`build-debug`](build-debug.md) | `build` | `enforcement` | human |
@@ -134,6 +135,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`ci-doctor`](ci-doctor.md) | `audit` | `enforcement` | human |
 | [`ci-setup`](ci-setup.md) | `bootstrap` | `enforcement` | human |
 | [`ci-triage`](ci-triage.md) | `audit` | `enforcement` | human |
+| [`ci-update`](ci-update.md) | `bootstrap` | `enforcement` | human |
 | [`code-viz`](code-viz.md) | `audit` | `state` | human |
 | [`codex-cache-update`](codex-cache-update.md) | `shortcuts` | `analysis` | human |
 | [`config`](config.md) | `config` | `state` | human |
@@ -162,6 +164,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`ship`](ship.md) | `ship` | `state` | human |
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | human |
 | [`status`](status.md) | `status` | `state` | human |
+| [`sync-version`](sync-version.md) | `config` | `state` | human |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | human |
 | [`valuate`](valuate.md) | `design` | `enforcement` | model |
 
