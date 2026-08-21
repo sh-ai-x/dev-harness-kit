@@ -175,6 +175,7 @@ and do NOT inflate the verdict."
 # server is itself broken on workflow_dispatch (issue #635).
 # -----------------------------------------------------------------------------
 exec claude \
+  --plugin-dir "$PLUGIN_SRC" \
   --model "$ANTHROPIC_MODEL" \
   --permission-mode bypassPermissions \
   --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob" \
