@@ -135,6 +135,24 @@ class TestUnparseable:
         rc = cd.run(rules_dir, today=date(2026, 8, 19))
         assert rc == 1
 
+    def test_datetime_stale_after_normalizes_to_date(self, cd, tmp_path):
+        # PyYAML safe_load parses RFC 3339 timestamps into datetime.datetime
+        # (issue #685 followup). The gate must accept that and compare the
+        # calendar date, not the timestamp — otherwise a doc declared as
+        # `stale_after: 2026-11-30T00:00:00` would silently fail or get a
+        # timezone-offset comparison off by hours. Each scenario gets its
+        # own rules_dir so an expired fixture does not poison the fresh
+        # fixture on the same fixture instance.
+        expired_dir = tmp_path / "expired"
+        expired_dir.mkdir()
+        _write_doc(expired_dir / "ts_expired.md", "stale_after: 2025-01-01T00:00:00")
+        assert cd.run(expired_dir, today=date(2026, 8, 19)) == 1
+
+        fresh_dir = tmp_path / "fresh"
+        fresh_dir.mkdir()
+        _write_doc(fresh_dir / "ts_fresh.md", "stale_after: 2099-12-31T12:34:56")
+        assert cd.run(fresh_dir, today=date(2026, 8, 19)) == 0
+
 
 class TestMultiFile:
     """Mixed content: one expired file poisons the run, fresh files don't."""
@@ -155,13 +173,12 @@ class TestMultiFile:
 class TestRealRules:
     """Sanity check: every file in the actual rules/ directory must parse."""
 
-    def test_repo_rules_pass_or_have_judgment(self, cd):
+    def test_repo_rules_pass(self, cd):
         from datetime import date as _date
         rules_dir = ROOT / "rules"
         if not rules_dir.exists():
             pytest.skip("no rules/ directory")
-        rc = cd.run(rules_dir, today=_date(2026, 8, 19))
-        # After this PR adds stale_after to the 5 rule files with future
-        # dates, this should return 0. Until then, accept either rc if the
-        # maintainer runs the test on a non-marked branch.
-        assert rc in (0, 1)
+        # Every rules/*.md file carries a stale_after dated in the future,
+        # so the gate MUST return 0. A non-zero return is a real regression
+        # — see issue #685 followup which tightened this from `rc in (0, 1)`.
+        assert cd.run(rules_dir, today=_date(2026, 8, 19)) == 0

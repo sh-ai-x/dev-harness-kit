@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -69,9 +69,14 @@ def _check_one(path: Path, today: date) -> Optional[str]:
     stale_after = fm.get("stale_after")
     if stale_after is None:
         return None  # Fail-open: missing field ≠ expired (proposal §limitations 4)
-    # PyYAML safe_load auto-parses YYYY-MM-DD into datetime.date; other
-    # invalid inputs land here as str. Normalize both into date for the cmp.
-    if isinstance(stale_after, date):
+    # PyYAML safe_load auto-parses YYYY-MM-DD into datetime.date and
+    # RFC 3339 timestamps like 2026-11-30T00:00:00 into datetime.datetime.
+    # Both shapes are legal — only the calendar date matters for the
+    # expiry check — so normalize datetime down to date before comparing.
+    # Other invalid inputs land here as str or as unknown scalars.
+    if isinstance(stale_after, datetime):
+        expiry = stale_after.date()
+    elif isinstance(stale_after, date):
         expiry = stale_after
     elif isinstance(stale_after, str):
         try:
@@ -81,7 +86,9 @@ def _check_one(path: Path, today: date) -> Optional[str]:
     else:
         return f"{path}: stale_after must be a date (YYYY-MM-DD), got {type(stale_after).__name__}"
     if expiry < today:
-        return f"{path}: stale_after={stale_after} (< today={today.isoformat()})"
+        # Render with the normalized date so the message matches the cmp
+        # (a datetime would otherwise print `2025-01-01 00:00:00`).
+        return f"{path}: stale_after={expiry.isoformat()} (< today={today.isoformat()})"
     return None
 
 
