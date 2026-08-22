@@ -185,6 +185,26 @@
             "fail_closed": true
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/trace-session-end.sh",
+            "fail_closed": false
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/trace-session-end.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ]
   }

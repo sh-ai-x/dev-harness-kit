@@ -12,6 +12,14 @@
           }
         ],
         "_loghooks_managed": true
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -34,6 +42,14 @@
           }
         ],
         "_loghooks_managed": true
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
+          }
+        ]
       }
     ]
   },

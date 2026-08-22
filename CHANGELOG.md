@@ -3,6 +3,12 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **fix(reducer):** add `subject_observability` submetric + parent-score fallback
+  so `measurement_integrity.event_coverage` is observable in worktrees that
+  have not yet run a `lib/execute.py` build step. Closes #702. Schema version
+  bumps 2 -> 3. The session-scoped `step.started` / `step.completed` pair is
+  emitted by the hook stack at SessionStart and Stop/SessionEnd so the metric
+  has a baseline in every Claude Code session.
 
 ### Fixed — fork-PR review comments now post (dispatched-run workaround)
 
@@ -206,11 +212,4 @@ verdict (so silent skips aren't invisible to the PR author).
 - Iron Laws SSOT in `CLAUDE.md §1` (5 laws)
 - `.dev-kit/` state files (state.json, .active-hooks.json, hand-off/*.md)
 - Pre-impl gate (`docs/planning/PRE-IMPL-CHECK.md`) + 8-dimension cost analysis (`docs/quality/COST-ANALYSIS.md`)
-
-
-
-
-
-
-
 
