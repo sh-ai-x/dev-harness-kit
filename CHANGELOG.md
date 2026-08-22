@@ -214,3 +214,4 @@ verdict (so silent skips aren't invisible to the PR author).
 - Pre-impl gate (`docs/planning/PRE-IMPL-CHECK.md`) + 8-dimension cost analysis (`docs/quality/COST-ANALYSIS.md`)
 
 
+
