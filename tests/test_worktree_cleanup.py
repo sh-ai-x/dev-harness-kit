@@ -89,6 +89,17 @@ class TestResolveArchiveRoot:
         assert external is False
         assert root == tmp_path / "repo" / "logs" / ".archive"
 
+    def test_sanitizes_repo_label_to_match_save_log(self, wc, tmp_path, monkeypatch):
+        # Main review feedback (PR #707 finding #1): the archive repo
+        # label MUST go through _repository_label so a repo at
+        # `~/Code/My Project/` archives under `My-Project/`, the same
+        # label save_log writes under. Otherwise Stop-hook writes and
+        # archives diverge into two sibling trees under the same root.
+        monkeypatch.setenv("AGENT_LOG_ROOT", str(tmp_path / "external"))
+        repo = tmp_path / "My Project"
+        root, _ = wc._resolve_archive_root(str(repo))
+        assert root == tmp_path / "external" / "My-Project" / ".archive"
+
 
 class TestArchiveWorktreeLogs:
     def test_skips_when_no_logs_dir(self, wc, tmp_path):
@@ -113,8 +124,30 @@ class TestArchiveWorktreeLogs:
         # Default archive target = <main>/logs/.archive/<branch>/<ts>/
         target = Path(result["archive_target"])
         assert target.parent.parent == main / "logs" / ".archive"
+        # wt is a plain directory here (not a real git worktree), so
+        # detect_branch returns "no-git". The sanitized-branch layout
+        # is exercised in TestRealGitWorktree.test_real_worktree_archive.
         copied = sorted(p.name for p in target.rglob("*.jsonl"))
         assert copied == ["s1.jsonl", "s2.jsonl"]
+
+    def test_symlinks_are_counted_and_skipped(self, wc, tmp_path):
+        # Operator-controlled symlinks inside logs/ could point outside
+        # the worktree; we never follow them. The count is surfaced so
+        # rotated JSONL via symlink doesn't silently drop files.
+        main = tmp_path / "repo"
+        main.mkdir()
+        wt = main / "wt"
+        wt.mkdir()
+        log_dir = wt / "logs" / "claude-code" / "main"
+        log_dir.mkdir(parents=True)
+        (log_dir / "real.jsonl").write_text("x\n")
+        (log_dir / "link.jsonl").symlink_to("real.jsonl")
+
+        result = wc.archive_worktree_logs(str(wt), main_root=str(main))
+
+        assert result["status"] == "ok"
+        assert result["files_copied"] == 1
+        assert result["symlinks_skipped"] == 1
 
     def test_external_root_overrides_default(self, wc, tmp_path, monkeypatch):
         monkeypatch.setenv("AGENT_LOG_ROOT", str(tmp_path / "external"))
@@ -196,6 +229,48 @@ class TestRealGitWorktree:
             # Files preserved their relative path under logs/.
             assert (target / "claude-code" / "main" / "session-0.jsonl").exists()
             assert (target / "claude-code" / "main" / "session-1.jsonl").exists()
+        finally:
+            subprocess.run(
+                ["git", "-C", str(main), "worktree", "remove", "--force", str(wt)],
+                check=False, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(main), "branch", "-D", "feat-cleanup-test"],
+                check=False, capture_output=True,
+            )
+
+    def test_branch_with_slash_is_sanitized_to_single_segment(self, wc, tmp_path):
+        # Main review feedback (PR #707 finding #2): detect_branch must
+        # route through _sanitize_branch so a branch like `fix/issue-x`
+        # archives to `<main>/.archive/fix-issue-x/<ts>/` (flat), not
+        # `<main>/.archive/fix/issue-x/<ts>/` (nested). save_log writes
+        # under the flat label, so archives must converge there.
+        main = tmp_path / "repo"
+        main.mkdir()
+        subprocess.run(["git", "init", "-q", "--initial-branch=main", str(main)], check=True)
+        subprocess.run(
+            ["git", "-C", str(main), "config", "user.email", "test@test"],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(main), "config", "user.name", "test"],
+            check=True, capture_output=True,
+        )
+        (main / "README").write_text("hello\n")
+        subprocess.run(["git", "-C", str(main), "add", "README"], check=True)
+        subprocess.run(["git", "-C", str(main), "commit", "-q", "-m", "init"], check=True)
+
+        wt = _make_worktree(main, branch="fix/issue-685-content")
+        try:
+            _seed_logs(wt, files=1)
+            result = wc.archive_worktree_logs(str(wt), main_root=str(main))
+
+            assert result["status"] == "ok"
+            # Sanitized label — slash collapsed to hyphen, single segment.
+            assert result["branch"] == "fix-issue-685-content"
+            target = Path(result["archive_target"])
+            assert target.parent.name == "fix-issue-685-content"
+            assert target.parent.parent == main / "logs" / ".archive"
         finally:
             subprocess.run(
                 ["git", "-C", str(main), "worktree", "remove", "--force", str(wt)],

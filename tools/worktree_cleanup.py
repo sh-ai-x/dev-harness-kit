@@ -41,6 +41,24 @@ import time
 from pathlib import Path
 from typing import Optional
 
+# Make ``tools/`` importable so we can reuse save_log's repo label and
+# branch sanitization. tools/ is not a package by design (each script is
+# independently runnable from the CLI); see tests/test_save_log_branch.py
+# for the canonical sys.path.insert(0, tools/) pattern. Doing it here
+# keeps worktree_cleanup.py runnable via both `python3 tools/...` and
+# `from tools.worktree_cleanup import ...`.
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+
+# Reuse save_log's repo label + branch sanitization so a worktree removal
+# and the next session's Stop-hook write land in the same path. Without
+# this, an unsanitized label like `My Project` (raw main_root.name) would
+# diverge from `save_log`'s `My-Project` (`_sanitize_branch` output), and
+# a branch like `fix/issue-x` would archive to `.../.archive/fix/issue-x/...`
+# instead of `.../.archive/fix-issue-x/...`.
+from save_log import _repository_label, _sanitize_branch  # noqa: E402  (sys.path mutated above)
+
 
 # Mirror the AGENT_LOG_ROOT contract in tools/save_log.py so a worktree
 # removal and the next session's Stop-hook write land in the same place.
@@ -50,25 +68,32 @@ def _resolve_archive_root(main_root: str) -> tuple[Path, bool]:
     When AGENT_LOG_ROOT is set, archive_root is <AGENT_LOG_ROOT>/<repo>/.archive
     and external=True. Otherwise archive_root is <main_root>/logs/.archive and
     external=False. The .archive sibling keeps the analyzer (which only walks
-    `logs/<tool>/<branch>/`) from re-scanning archived telemetry.
+    `logs/<tool>/<branch>/`) from re-scanning archived telemetry. ``<repo>``
+    is the same sanitized label ``tools/save_log._repository_label`` returns
+    for the same main_root, so writes and archives converge on one path.
     """
     configured = os.environ.get("AGENT_LOG_ROOT", "").strip()
-    repo_label = Path(main_root).name
+    repo_label = _repository_label(main_root)
     if configured:
         return Path(configured).expanduser() / repo_label / ".archive", True
     return Path(main_root) / "logs" / ".archive", False
 
 
-def _safe_copy_tree(src: Path, dst: Path) -> int:
+def _safe_copy_tree(src: Path, dst: Path) -> tuple[int, int]:
     """Copy ``src`` into ``dst`` recursively without following symlinks.
 
-    Returns the number of files copied. Existing destination files are
-    overwritten (the second invocation is the idempotent replay case).
+    Returns ``(files_copied, symlinks_skipped)``. Existing destination
+    files are overwritten (the second invocation is the idempotent replay
+    case). Symlinks are deliberately not chased — operator-controlled
+    symlinks inside ``logs/`` could point outside the worktree and the
+    archival contract is "copy logs, not user data".
     """
-    count = 0
+    copied = 0
+    symlinks = 0
     for entry in src.rglob("*"):
         if entry.is_symlink():
-            continue  # never chase symlinks during archival
+            symlinks += 1
+            continue
         rel = entry.relative_to(src)
         target = dst / rel
         if entry.is_dir():
@@ -76,16 +101,18 @@ def _safe_copy_tree(src: Path, dst: Path) -> int:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(entry, target)
-        count += 1
-    return count
+        copied += 1
+    return copied, symlinks
 
 
 def detect_branch(cwd: str) -> str:
-    """Mirror save_log.detect_branch() so archive paths are stable across
-    the Stop-hook write and the worktree-remove path.
+    """Return the sanitized filesystem-safe branch label for ``cwd``.
 
-    Falls back to ``"no-git"`` if git is unavailable or the directory is not
-    a checkout; archival is best-effort, not a hard gate on removal.
+    Mirrors ``save_log.detect_branch()`` (raw git ref → ``_sanitize_branch``)
+    so the archive path uses the same flat single-segment label as the
+    Stop-hook write. Falls back to ``"no-git"`` if git is unavailable
+    or the directory is not a checkout; archival is best-effort, not a
+    hard gate on removal.
     """
     try:
         out = subprocess.run(
@@ -93,7 +120,7 @@ def detect_branch(cwd: str) -> str:
             capture_output=True, text=True, timeout=2, check=False,
         )
         if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
+            return _sanitize_branch(out.stdout.strip())
         out = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=2, check=False,
@@ -105,8 +132,8 @@ def detect_branch(cwd: str) -> str:
                     ["git", "-C", cwd, "rev-parse", "--short", "HEAD"],
                     capture_output=True, text=True, timeout=2, check=False,
                 ).stdout.strip()
-                return f"detached-{sha}" if sha else "detached"
-            return ref
+                return _sanitize_branch(f"detached-{sha}" if sha else "detached")
+            return _sanitize_branch(ref)
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
     return "no-git"
@@ -159,6 +186,7 @@ def archive_worktree_logs(
         "worktree_logs": str | None,        # absolute path or None if absent
         "archive_target": str | None,       # absolute path of destination root
         "files_copied": int,
+        "symlinks_skipped": int,            # never followed
         "external_root": bool,              # True when AGENT_LOG_ROOT is set
         "error": str | None,                # human-readable on error
       }
@@ -176,6 +204,7 @@ def archive_worktree_logs(
         "worktree_logs": None,
         "archive_target": None,
         "files_copied": 0,
+        "symlinks_skipped": 0,
         "external_root": False,
         "error": None,
     }
@@ -213,8 +242,9 @@ def archive_worktree_logs(
 
     try:
         target.mkdir(parents=True, exist_ok=True)
-        copied = _safe_copy_tree(src, target)
+        copied, symlinks = _safe_copy_tree(src, target)
         result["files_copied"] = copied
+        result["symlinks_skipped"] = symlinks
     except OSError as exc:
         result["status"] = "error"
         result["error"] = f"archive copy failed: {exc}"

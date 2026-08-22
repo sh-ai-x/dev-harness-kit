@@ -53,15 +53,18 @@ case "$WORKTREE_PATH" in
   *)  WT_ABS="$PWD/$WORKTREE_PATH" ;;
 esac
 
-# 1. Archive in-worktree logs/ before removal. Always emit JSON so
-# downstream tools can parse the result; surface the JSON on stdout
-# for the operator.
+# 1. Archive in-worktree logs/ before removal. Stream JSON to stdout
+# via a dedicated file-descriptor swap so any Python traceback or
+# warning stays on stderr (where it belongs) and the JSON parser
+# sees only the JSON document. Mixing them (the earlier `2>&1`
+# pattern) silently turned Python errors into "no error" when
+# JSONDecodeError fell back to sys.exit(0).
 ARCHIVE_ARGS=("$WT_ABS" "--main-root" "$REPO_ROOT" "--json")
 [[ "${DEV_KIT_WORKTREE_REMOVE_STRICT:-0}" == "1" ]] && ARCHIVE_ARGS+=("--strict")
 [[ "${DEV_KIT_WORKTREE_REMOVE_DRY_RUN:-0}" == "1" ]] && ARCHIVE_ARGS+=("--dry-run")
 
 ARCHIVE_JSON="$(python3 "$REPO_ROOT/tools/worktree_cleanup.py" \
-  "${ARCHIVE_ARGS[@]}" 2>&1)" || true
+  "${ARCHIVE_ARGS[@]}")" || ARCHIVE_JSON=""
 echo "$ARCHIVE_JSON"
 
 # Surface a one-line warning on error; never block unless strict.
@@ -81,5 +84,8 @@ if [[ "$ARCHIVE_STATUS" == "1" ]]; then
   echo "warning: archival reported an error; continuing with removal (set DEV_KIT_WORKTREE_REMOVE_STRICT=1 to block)" >&2
 fi
 
-# 2. Run the actual `git worktree remove`.
-git -C "$REPO_ROOT" worktree remove "$WT_ABS" "${GW_ARGS[@]}"
+# 2. Run the actual `git worktree remove`. The defensive `--`
+# protects against the rare case where WT_ABS starts with `--`
+# (git would otherwise interpret it as a flag); never causes harm
+# otherwise.
+git -C "$REPO_ROOT" worktree remove -- "$WT_ABS" "${GW_ARGS[@]}"
