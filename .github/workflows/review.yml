@@ -43,20 +43,12 @@ name: PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  # NOTE: `pull_request_target` was removed because the
-  # `anthropics/claude-code-action` v1 OIDC token exchange ("Auto-detected
-  # mode: tag → Requesting OIDC token → Exchanging OIDC token for app
-  # token") fails with `401 Unauthorized - Invalid OIDC token` on
-  # pull_request_target events, even for same-repo PRs from
-  # OWNER/MEMBER/COLLABORATOR authors. The same exchange SUCCEEDS on the
-  # `pull_request` event for same-repo branches (GITHUB_TOKEN stays
-  # read-only there, but the workflow uses `secrets.MINIMAX_API_KEY`
-  # directly via the env block, and `id-token: write` is honored for
-  # same-repo `pull_request` runs). Fork PRs are reviewed via
-  # `fork-pr-review.yml` (which dispatches this workflow via
-  # `workflow_dispatch` after maintainer approval) so the loss of
-  # `pull_request_target` does not block the maintainer-author fork-PR
-  # path — that path already bypasses the fork-restricted OIDC issue.
+  # Trusted maintainer-authored fork PRs run from the base branch context so
+  # review credentials are available immediately without the manual fork
+  # environment gate. The job conditions below restrict this event to
+  # OWNER/MEMBER/COLLABORATOR authors.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       review_provider:
