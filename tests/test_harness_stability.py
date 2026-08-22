@@ -391,3 +391,36 @@ def test_event_schema_version_unchanged() -> None:
     """The TraceLog event schema_version stays at 1; identity fields are
     additive and validated by the same contract."""
     assert EVENT_SCHEMA_VERSION == 1
+
+
+# --- Issue #702: schema_version bump + submetric nesting pin -----------
+
+def test_schema_version_is_three_after_subject_observability(tmp_path: Path) -> None:
+    """Issue #702: schema_version bumped 2 -> 3 to advertise the nested
+    subject_observability submetric. Top-level shape is unchanged."""
+    from lib.harness_effectiveness import build_report
+    report = build_report(tmp_path)
+    assert report["schema_version"] == 3
+    for key in ("components", "overall_score", "status", "event_count",
+                "contract_version"):
+        assert key in report
+
+
+def test_compact_weights_still_sum_to_one_after_subject_observability(tmp_path: Path) -> None:
+    """Issue #702: subject_observability is a nested submetric, not a
+    6th top-level component. Weights still sum to 1.0 and the key set
+    is unchanged (matches the issue #663 precedent)."""
+    from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
+    assert sum(COMPONENT_WEIGHTS.values()) == 1.0
+    assert set(COMPONENT_WEIGHTS.keys()) == {
+        "prevention_quality", "first_pass_quality",
+        "recovery_quality", "learning_quality", "measurement_integrity",
+    }
+    report = build_report(tmp_path)
+    assert "subject_observability" in (
+        report["components"]["measurement_integrity"]["submetrics"]
+    )
+    # Nested submetric has no weight, just like stability (issue #663).
+    sub = (report["components"]["measurement_integrity"]
+           ["submetrics"]["subject_observability"])
+    assert "weight" not in sub

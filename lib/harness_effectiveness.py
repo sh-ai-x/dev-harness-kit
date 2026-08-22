@@ -447,6 +447,77 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
 
 
+def _subject_observability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Issue #702 — subject_observability submetric.
+
+    Reports the fraction of distinct subjects in the corpus that carry
+    BOTH a ``step.started`` event and at least one terminal event
+    (``step.completed`` / ``step.failed`` / ``step.blocked``). The formula
+    is the symmetric ratio ``|started ∩ terminal| / |started ∪ terminal|``
+    so the metric reports a meaningful 0.0–1.0 in both producer-missing
+    and producer-broken scenarios:
+
+    - producer-missing (no ``step.started`` at all): 0/0 → ``None``,
+      status ``INSUFFICIENT_EVIDENCE``, finding names the missing
+      producer.
+    - producer-broken (started but no terminal): 1/1 = 100% coverage
+      with a non-zero finding "no terminal event observed" so the
+      operator can grep for the orphan session.
+
+    Uses the ``_submetric()`` shape (no ``weight`` field) so it cannot
+    influence the 5-component ``overall_score``.
+    """
+    started = {e["subject_id"] for e in events if e["event_type"] == "step.started"}
+    terminal_subjects = {
+        e["subject_id"] for e in events
+        if e["event_type"] in {"step.completed", "step.failed", "step.blocked"}
+    }
+    union = started | terminal_subjects
+    intersection = started & terminal_subjects
+    coverage_pct = _ratio(len(intersection), len(union)) if union else None
+    coverage = 0.0 if coverage_pct is None else coverage_pct / 100.0
+    findings: List[str] = []
+    if not started:
+        findings.append(
+            "no step.started events observed — producer is missing or "
+            "session-scoped hook (hooks/session-start-check.sh) is not wired"
+        )
+    elif not terminal_subjects:
+        findings.append(
+            "step.started events present but no terminal event observed — "
+            "Stop/SessionEnd hook may not have fired (SIGKILL/OOM/ExitWorktree)"
+        )
+    elif len(intersection) < len(started):
+        findings.append(
+            f"{len(started) - len(intersection)} of {len(started)} "
+            f"started subject(s) never reached a terminal event"
+        )
+    score = None if coverage_pct is None else coverage_pct
+    submetrics = {
+        "started_subjects": _metric(
+            len(started), len(union),
+            evidence=[e["event_id"] for e in events if e["event_type"] == "step.started"],
+            value=_ratio(len(started), len(union)) if union else None,
+        ),
+        "terminal_subjects": _metric(
+            len(terminal_subjects), len(union),
+            evidence=[e["event_id"] for e in events
+                      if e["event_type"] in {"step.completed", "step.failed", "step.blocked"}],
+            value=_ratio(len(terminal_subjects), len(union)) if union else None,
+        ),
+    }
+    return _submetric(
+        score,
+        submetrics=submetrics,
+        evidence=[e["event_id"] for e in events
+                  if e["event_type"] in {"step.started", "step.completed",
+                                          "step.failed", "step.blocked"}],
+        coverage=coverage,
+        findings=findings,
+        config_version="harness-subject-observability-v1",
+    )
+
+
 def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:
     path = root / ".dev-kit" / "trace" / "events.jsonl"
     raw_lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.is_file() else []
@@ -471,8 +542,23 @@ def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
     coverage_pct = _ratio(len(started_subjects & terminal_subjects), len(started_subjects)) if started_subjects else None
     coverage = None if coverage_pct is None else coverage_pct / 100.0
-    score = None if None in (schema, dedupe, attribution, coverage_pct) else (
-        schema * .3 + attribution * .25 + dedupe * .2 + coverage_pct * .25
+    # Issue #702 parent-score fallback: when the producer is missing
+    # (coverage_pct is None because |started_subjects| == 0, NOT because
+    # the producer is broken), fall back to the subject_observability
+    # symmetric ratio so the parent measurement_integrity.score stays
+    # meaningful. The original event_coverage formula is preserved so
+    # tests/test_harness_effectiveness.py:107, 119 still pin their
+    # asserted values; the fallback only fires when the original is None.
+    subject_obs_pct = _ratio(
+        len(started_subjects & terminal_subjects),
+        len(started_subjects | terminal_subjects),
+    ) if (started_subjects | terminal_subjects) else None
+    effective_coverage_pct = (
+        coverage_pct if coverage_pct is not None
+        else (subject_obs_pct if subject_obs_pct is not None else 0.0)
+    )
+    score = None if None in (schema, dedupe, attribution) else (
+        schema * .3 + attribution * .25 + dedupe * .2 + effective_coverage_pct * .25
     )
     metrics = {"schema_completeness": _metric(parsed_count, len(raw_lines), evidence=valid_ids, value=schema),
                "attribution_completeness": _metric(parents, len(events), evidence=valid_ids, value=attribution),
@@ -485,6 +571,11 @@ def _integrity(root: Path, events: List[Dict[str, Any]]) -> Dict[str, Any]:
     # a 6th top-level component (which would change COMPONENT_WEIGHTS
     # and break the 5-component overall_score contract).
     metrics["stability"] = _stability(events)
+    # Issue #702: subject_observability sibling submetric. Reports
+    # the symmetric |started ∩ terminal| / |started ∪ terminal| ratio
+    # so the metric survives the producer-missing case. See
+    # _subject_observability for the formula and finding strings.
+    metrics["subject_observability"] = _subject_observability(events)
     result = _component(
         "measurement_integrity", score, submetrics=metrics, evidence=valid_ids,
         coverage=0.0 if coverage is None else coverage, findings=findings,
@@ -533,10 +624,12 @@ def build_report(root: Path) -> Dict[str, Any]:
         overall = round(numerator / divisor, 1) if divisor else None
     return {
         # Bumped from 1 → 2 in issue #663 to advertise the nested
-        # stability submetric. The top-level shape is unchanged so
-        # 5-component consumers still work; new consumers can opt in
-        # to `components.measurement_integrity.submetrics.stability`.
-        "schema_version": 2,
+        # stability submetric; 2 → 3 in issue #702 to advertise the
+        # nested subject_observability submetric. The top-level shape
+        # is unchanged so 5-component consumers still work; new
+        # consumers can opt in to
+        # `components.measurement_integrity.submetrics.subject_observability`.
+        "schema_version": 3,
         "contract_version": "harness-effectiveness-v1",
         "components": components,
         "overall_score": overall,

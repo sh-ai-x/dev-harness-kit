@@ -108,3 +108,30 @@ passes after.
   separate security audit workstream).
 - Per-session reminder when .env has no CI_REVIEW_PROVIDER at all --
   noisy on first clone; deferred to a setup hint.
+
+## Closed by followup — lifecycle producer wiring (issue #702)
+
+`hooks/trace-session-end.sh` (added by `fix/event-coverage-observable`,
+issue #702) closes the producer-half of the measurement-integrity
+coverage gap: every Claude Code / Codex session now emits a matched
+`step.started` (in `hooks/session-start-check.sh:71-81`, BEFORE the
+`case "$WORKTREE_DETECT"` short-circuit so it fires on main + worktree
++ outside-repo) and a `step.completed` (in `hooks/trace-session-end.sh`,
+on `Stop` + `SessionEnd` with an idempotency guard so multi-turn
+re-fires do not duplicate the terminal event).
+
+Wired into all four manifests — `hooks/hooks.json` (plugin),
+`.claude/settings.json` (Claude runtime SessionEnd + Stop),
+`.codex/hooks.json` (Codex Stop), `.codex-plugin/hooks/hooks.json`
+(Codex plugin mirror). Sibling-hook additions, no existing hooks
+touched; portability parity with the Codex mirror is enforced by
+`tools/portability_check.py` (hard contract — `test_portability_loop.py`
+regression).
+
+The `_subject_observability` submetric in `lib/harness_effectiveness.py`
+symmetric-ratios `|started ∩ terminal| / |started ∪ terminal|` so
+empty worktrees report a meaningful `measurement_integrity.score` with
+an actionable finding string (missing producer / orphan started /
+partial coverage) instead of collapsing to `INSUFFICIENT_EVIDENCE`.
+`schema_version` bumps 2 → 3 (issue #663 precedent for the
+nested-submetric pattern).
