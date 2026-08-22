@@ -43,6 +43,12 @@ name: PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # Trusted maintainer-authored fork PRs run from the base branch context so
+  # review credentials are available immediately without the manual fork
+  # environment gate. The job conditions below restrict this event to
+  # OWNER/MEMBER/COLLABORATOR authors.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       review_provider:
@@ -139,7 +145,9 @@ jobs:
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
         (needs.scope.outputs.touches_prod == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+         (github.event.pull_request.head.repo.full_name == github.repository ||
+          (github.event_name == 'pull_request_target' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -197,7 +205,7 @@ jobs:
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:review via MiniMax
-        if: steps.provider.outputs.provider == 'minimax' && github.event_name == 'pull_request'
+        if: steps.provider.outputs.provider == 'minimax' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
         # MiniMax channel: env-only (no with.anthropic_api_key to avoid mixed auth).
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
@@ -210,7 +218,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -230,12 +238,12 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:review via Claude Code opt-in
-        if: steps.provider.outputs.provider == 'anthropic' && github.event_name == 'pull_request'
+        if: steps.provider.outputs.provider == 'anthropic' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -248,7 +256,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:review via DeepSeek
-        if: steps.provider.outputs.provider == 'deepseek' && github.event_name == 'pull_request'
+        if: steps.provider.outputs.provider == 'deepseek' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
         # DeepSeek channel: env-only, same pattern as MiniMax above.
         env:
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
@@ -261,7 +269,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:review --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -327,7 +335,7 @@ jobs:
           # page-1 comment instead of the LLM judge's latest verdict.
           comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
             --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | startswith("claude")) | select(.body | test("\\*\\*Verdict:\\*\\*"))] | sort_by(.updated_at) | .[-1].body // ""')"
+            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "review_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
@@ -350,7 +358,9 @@ jobs:
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
         (needs.scope.outputs.touches_prod == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+         (github.event.pull_request.head.repo.full_name == github.repository ||
+          (github.event_name == 'pull_request_target' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -407,7 +417,7 @@ jobs:
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:security via MiniMax
-        if: steps.provider.outputs.provider == 'minimax' && github.event_name == 'pull_request'
+        if: steps.provider.outputs.provider == 'minimax' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
         env:
           ANTHROPIC_BASE_URL: ${{ env.MINIMAX_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
@@ -419,7 +429,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -438,12 +448,12 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:security via Claude Code opt-in
-        if: steps.provider.outputs.provider == 'anthropic' && github.event_name == 'pull_request'
+        if: steps.provider.outputs.provider == 'anthropic' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -456,7 +466,7 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
       - name: Run /dev-kit:security via DeepSeek
-        if: steps.provider.outputs.provider == 'deepseek' && github.event_name == 'pull_request'
+        if: steps.provider.outputs.provider == 'deepseek' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
         env:
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
           ANTHROPIC_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -468,7 +478,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:security --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
 
@@ -525,7 +535,7 @@ jobs:
           # body prose).
           comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
             --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | startswith("claude")) | select(.body | test("\\*\\*Verdict:\\*\\*"))] | sort_by(.updated_at) | .[-1].body // ""')"
+            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "security_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
@@ -560,7 +570,10 @@ jobs:
     if: |
       always() &&
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
-      (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.head.repo.full_name == github.repository ||
+       (github.event_name == 'pull_request_target' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))
     # The auto-approve step casts `gh pr review --approve`, which
     # writes to the PR. The default GITHUB_TOKEN is read-only on most
     # operations; grant pull-requests: write so the auto-approve

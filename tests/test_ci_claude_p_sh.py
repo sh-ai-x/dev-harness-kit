@@ -120,20 +120,18 @@ class TestCiClaudePShStatic(unittest.TestCase):
         `anthropics/claude-code-action` on workflow_dispatch. If a
         future maintainer reintroduces it, the workaround is broken."""
         text = SCRIPT.read_text(encoding="utf-8")
-        # The header comment MAY mention claude-code-action (it does,
-        # by name + SHA). Strip the header (first contiguous comment
-        # block) before checking the body.
-        body_start = 0
-        for line in text.split("\n"):
-            if line.startswith("#!") or line.startswith("#"):
-                body_start += len(line) + 1
-                continue
-            break
-        body = text[body_start:]
-        self.assertNotIn("claude-code-action", body,
-                         "bin/ci-claude-p.sh body must NOT reference "
-                         "claude-code-action — the whole point is to "
-                         "bypass it on workflow_dispatch.")
+        # Strip ALL bash comments (lines starting with `#` or `#!`)
+        # so the test only inspects code that actually runs. The
+        # header block AND inline ` # ...` comments are both excluded.
+        code_lines = [
+            line for line in text.split("\n")
+            if not line.lstrip().startswith("#")
+        ]
+        code = "\n".join(code_lines)
+        self.assertNotIn("claude-code-action", code,
+                         "bin/ci-claude-p.sh code (comments stripped) must "
+                         "NOT reference claude-code-action — the whole "
+                         "point is to bypass it on workflow_dispatch.")
 
     def test_does_not_use_inline_comment_mcp_tool_in_allowed_tools(self):
         """The MCP server `mcp__github_inline_comment__create_inline_comment`

@@ -119,14 +119,55 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 # -----------------------------------------------------------------------------
-# Build the prompt. The slash command syntax is required because the
-# downstream skill (/dev-kit:review / /dev-kit:security / /dev-kit:maintenance)
-# is the actual reviewer; we just feed it the PR diff URL. The verdict
-# format requirement is what the workflow's verdict-extraction step
-# expects (it scans for `**Verdict:**` on the first line of any claude
-# PR comment).
+# Install the dev-kit plugin into the freshly-installed Claude Code's
+# plugin directory. The action normally installs the plugin via the
+# `claude-code-action` step; we're bypassing the action so we have to
+# do it ourselves. Without this, Claude Code prints "Unknown command:
+# /dev-kit:<skill>" and exits with num_turns=0.
+#
+# The plugin source is $GITHUB_WORKSPACE (the workflow's checkout of
+# the PR head). The plugin must contain a `.claude-plugin/plugin.json`
+# manifest. We symlink to ~/.claude/plugins/marketplaces/dev-kit/ so the
+# standard Claude Code marketplace plugin loader picks it up.
 # -----------------------------------------------------------------------------
-PROMPT="/dev-kit:${SKILL} --diff ${GITHUB_REPOSITORY}/pull/${PR_NUMBER}
+PLUGIN_SRC="${GITHUB_WORKSPACE:-}"
+if [ -z "$PLUGIN_SRC" ] || [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  echo "::error::GITHUB_WORKSPACE not set or missing .claude-plugin/plugin.json ($PLUGIN_SRC)" >&2
+  exit 1
+fi
+
+mkdir -p "$HOME/.claude/plugins/marketplaces"
+# -f (force) replaces any stale symlink; -n prevents creating a nested
+# link if the target already exists as a directory.
+ln -sfn "$PLUGIN_SRC" "$HOME/.claude/plugins/marketplaces/dev-kit"
+# Verify the symlink resolves to a valid plugin (manifest present).
+if [ ! -f "$HOME/.claude/plugins/marketplaces/dev-kit/.claude-plugin/plugin.json" ]; then
+  echo "::error::dev-kit plugin symlinked but .claude-plugin/plugin.json missing" >&2
+  exit 1
+fi
+# Note: we deliberately do NOT verify skills/$SKILL/ exists. Some
+# workflow prompts (e.g. maintenance) reference /dev-kit:<skill>
+# slash commands that historically don't have a corresponding
+# skills/<skill>/ directory — the rubric instructions in the prompt
+# body are sufficient for the judge to complete the task even when
+# the slash command itself doesn't resolve. The upstream claude-code-action
+# silently tolerates this same case; we mirror that behavior here.
+
+# -----------------------------------------------------------------------------
+# Build the prompt. We deliberately omit the `/dev-kit:${SKILL}` slash
+# command prefix that the workflow uses — some skill names (notably
+# `maintenance`) have no corresponding `skills/<skill>/SKILL.md` in the
+# dev-kit plugin, so the slash command resolves to "Unknown command"
+# and aborts the run. The skill's rubric instructions are passed
+# inline below; Claude Code treats that as a plain-text task. For
+# review/security the slash command also works, so the inline form
+# is a strict superset.
+#
+# The verdict format requirement is what the workflow's verdict-
+# extraction step expects (it scans for `**Verdict:**` on the first
+# line of any claude/github-actions PR comment).
+# -----------------------------------------------------------------------------
+PROMPT="Apply the /dev-kit:${SKILL} skill to PR ${GITHUB_REPOSITORY}/pull/${PR_NUMBER}.
 
 The first line of your final PR comment MUST be exactly one of:
 
@@ -147,6 +188,7 @@ and do NOT inflate the verdict."
 # server is itself broken on workflow_dispatch (issue #635).
 # -----------------------------------------------------------------------------
 exec claude \
+  --plugin-dir "$PLUGIN_SRC" \
   --model "$ANTHROPIC_MODEL" \
   --permission-mode bypassPermissions \
   --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob" \
