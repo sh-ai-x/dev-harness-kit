@@ -122,6 +122,34 @@ When `AGENT_LOG_ROOT` is set, `/dev-kit:token-analyzer` automatically discovers
 the repository's external log bucket and uses the sidecar's `worktree` field for
 Cost by Worktree attribution, including after the source worktree is removed.
 
+### Cleanup-safe worktree removal
+
+The `bin/worktree-remove-safe.sh` wrapper complements `AGENT_LOG_ROOT` by
+archiving a worktree's `logs/` tree into the durable store **before** `git
+worktree remove` deletes the directory. Default archive target mirrors the
+Stop-hook write path:
+
+| `AGENT_LOG_ROOT` | Archive target |
+|---|---|
+| unset | `<main>/logs/.archive/<branch>/<ts>/` |
+| set | `<AGENT_LOG_ROOT>/<repo>/.archive/<branch>/<ts>/` |
+
+```bash
+# Default: warn on archival error, do not block removal
+bin/worktree-remove-safe.sh /path/to/repo.worktrees/feat-x
+
+# Forward args to git worktree remove after --
+bin/worktree-remove-safe.sh /path/to/repo.worktrees/feat-x -- --force
+
+# Strict mode: block removal if archival fails (CI / automation)
+DEV_KIT_WORKTREE_REMOVE_STRICT=1 bin/worktree-remove-safe.sh /path/to/repo.worktrees/feat-x
+```
+
+The wrapper is idempotent (copy, not move) and fail-safe (returns a JSON
+status dict, never raises). See `tools/worktree_cleanup.py` for the
+programmatic contract and `tests/test_worktree_cleanup.py` for the
+contract test. The wrapper closes the second half of issue #689.
+
 ## Output
 
 No file artifact of its own beyond the scaffolded `logs/{claude-code,codex}/`
