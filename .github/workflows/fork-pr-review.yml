@@ -35,8 +35,8 @@ name: Fork PR Review Gate
 # Pin tests: tests/test_dispatched_run_uses_claude_p.py +
 # tests/test_ci_claude_p_sh.py.
 #
-# This workflow is the maintainer-approval gate that unblocks review for
-# a fork PR without weakening that restriction: it runs on
+# This workflow is the fallback maintainer-approval gate for untrusted fork
+# PRs without weakening that restriction: it runs on
 # `pull_request_target` (workflow file is read from the trusted `main`
 # branch, not the fork, so it is safe to grant it write permissions) and
 # sits behind the `fork-pr-review` GitHub Environment, which requires an
@@ -46,9 +46,11 @@ name: Fork PR Review Gate
 # `workflow_dispatch` (a manual-trigger context, not a fork-origin
 # `pull_request` event, so THAT run gets full normal permissions).
 #
-# Same-repo PRs (including the repo owner's own) are untouched by this
-# workflow entirely — review.yml / maintenance.yml keep running fully
-# automatically on `pull_request` for those, exactly as before.
+# Trusted maintainer-authored fork PRs (OWNER/MEMBER/COLLABORATOR) bypass this
+# fallback gate and run immediately through `pull_request_target` in
+# review.yml / maintenance.yml. Unknown fork authors still require the
+# explicit environment approval below. Same-repo PRs remain on the normal
+# `pull_request` path.
 #
 # Why this workflow also writes commit status (not just dispatching):
 # review.yml and maintenance.yml run on `pull_request`, which auto-attaches
@@ -70,6 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event.pull_request.head.repo.full_name != github.repository &&
+      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) &&
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     environment: fork-pr-review
     permissions:
