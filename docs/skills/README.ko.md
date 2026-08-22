@@ -122,6 +122,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | 스킬 | 카테고리 | Alpha | 호출 방식 |
 |---|---|---|---|
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | 사용자 |
+| [`babysit-pr-local`](babysit-pr-local.md) | `ship` | `state` | 사용자 |
 | [`bootstrap`](bootstrap.ko.md) | `bootstrap` | `state` | 사용자 |
 | [`build`](build.ko.md) | `build` | `state` | 사용자 |
 | [`build-debug`](build-debug.md) | `build` | `enforcement` | 사용자 |
@@ -132,6 +133,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`ci-doctor`](ci-doctor.md) | `audit` | `enforcement` | 사용자 |
 | [`ci-setup`](ci-setup.ko.md) | `bootstrap` | `enforcement` | 사용자 |
 | [`ci-triage`](ci-triage.md) | `audit` | `enforcement` | 사용자 |
+| [`ci-update`](ci-update.md) | `bootstrap` | `enforcement` | 사용자 |
 | [`code-viz`](code-viz.md) | `audit` | `state` | 사용자 |
 | [`codex-cache-update`](codex-cache-update.md) | `shortcuts` | `analysis` | 사용자 |
 | [`config`](config.md) | `config` | `state` | 사용자 |
@@ -139,6 +141,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | 사용자 |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | 사용자 |
 | [`evidence-plan`](evidence-plan.md) | `design` | `state` | 사용자 |
+| [`harness-effectiveness`](harness-effectiveness.md) | `eval` | `enforcement` | 사용자 |
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | 모델 |
 | [`inspect`](inspect.md) | `audit` | `analysis` | 사용자 |
 | [`interview`](interview.md) | `design` | `enforcement` | 사용자 |
@@ -155,9 +158,11 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`research`](research.md) | `design` | `enforcement` | 사용자 |
 | [`review`](review.md) | `review` | `analysis` | 사용자 |
 | [`security`](security.md) | `security` | `enforcement` | 사용자 |
+| [`security-metrics`](security-metrics.md) | `security` | `enforcement` | 사용자 |
 | [`ship`](ship.md) | `ship` | `state` | 사용자 |
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | 사용자 |
 | [`status`](status.md) | `status` | `state` | 사용자 |
+| [`sync-version`](sync-version.md) | `config` | `state` | 사용자 |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | 사용자 |
 | [`valuate`](valuate.md) | `design` | `enforcement` | 모델 |
 
