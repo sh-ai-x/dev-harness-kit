@@ -42,6 +42,16 @@ bin/babysit-pr-local.sh <PR> --auto-approve
 - The branch's PR requires a reviewer bot or org-level MCP that's only available via `anthropics/claude-code-action`. Local `claude -p` does not have access to the same MCP servers.
 - The PR requires `gh pr merge` — merging is always a human action.
 
+## CI infrastructure failures
+
+Local mode runs the LLM-judge verdict loop locally, but the GitHub-side check rollup still depends on the same workflows as `babysit-pr` (`.github/workflows/maintenance.yml`, `review.yml`). When a check fails for an *infrastructure* reason — e.g. `anthropics/claude-code-action` OIDC token exchange returning `401 Unauthorized` on `pull_request_target` — local pytest + local `bin/review-local.sh` both pass, yet the GH-Actions check stays red. In that case:
+
+1. Confirm the failing run's log is a token/auth error, not a code review issue (run `gh run view <run-id> --log-failed`).
+2. Re-dispatch via `gh workflow run maintenance.yml --ref <branch> -f pr_number=<N>` — `workflow_dispatch` hits the `bin/ci-claude-p.sh` workaround path that bypasses OIDC, so the rerun typically succeeds where the original PRT run could not.
+3. The dispatch run posts the verdict + audit comment; the next push (or another re-run) refreshes the rollup.
+
+This keeps the loop moving without modifying the workflow to silence an OIDC failure (which would violate the no-workaround iron law).
+
 ## Related
 
 - [`/dev-kit:babysit-pr`](babysit-pr.md) — the GH-Actions-mode sibling; `--local-verify` flag adds a local pytest gate without leaving the GH-Actions wait loop.
