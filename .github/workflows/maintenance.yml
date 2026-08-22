@@ -141,6 +141,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
+          anthropic_oidc_audience: anthropic
           track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:maintenance --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
@@ -166,6 +167,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
+          anthropic_oidc_audience: anthropic
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
@@ -190,6 +192,7 @@ jobs:
         uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           allowed_bots: '*'
+          anthropic_oidc_audience: anthropic
           track_progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
           prompt: |
             /dev-kit:maintenance --diff ${{ github.repository }}/pull/${{ steps.provider.outputs.pr_number }}
