@@ -43,16 +43,12 @@ name: PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  # NOTE: pull_request_target was removed (2026-08) to resolve the
-  # anthropic_oidc_audience="" OIDC token failure on `pull_request_target`
-  # runs (the action's app-token exchange was 401'ing because GitHub issued
-  # the OIDC token with an empty audience, and the default audience on the
-  # action is "" too). Same-repo PRs (the common case) continue to run
-  # via `pull_request` above, which gets an audience-bound OIDC token.
-  # Maintainer fork PRs fall back to `fork-pr-review.yml` (which dispatches
-  # THIS workflow via `workflow_dispatch` after manual environment approval),
-  # so no PR is left without an AI-judge path — the only loss is the
-  # auto-trigger on fork PRs from OWNER/MEMBER/COLLABORATOR.
+  # Trusted maintainer-authored fork PRs run from the base branch context so
+  # review credentials are available immediately without the manual fork
+  # environment gate. The job conditions below restrict this event to
+  # OWNER/MEMBER/COLLABORATOR authors.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       review_provider:

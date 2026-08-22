@@ -32,10 +32,8 @@ name: PR Maintenance Gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  # NOTE: pull_request_target was removed (2026-08) to resolve the
-  # anthropic_oidc_audience="" OIDC token failure on `pull_request_target`
-  # runs. Same-repo PRs continue to run via `pull_request` above.
-  # Maintainer fork PRs fall back to `fork-pr-review.yml` → workflow_dispatch.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       review_provider:
