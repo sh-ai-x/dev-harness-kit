@@ -32,16 +32,8 @@ name: PR Maintenance Gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  # INTENTIONALLY no `pull_request_target:` trigger. The previous OIDC-fix
-  # iterations (Aug 2026) attempted both, but the anthropics/claude-code-action
-  # v1's federated App-token exchange returns 401 Invalid OIDC token on
-  # `pull_request_target` runs in this repo (the action's federation
-  # endpoint requires an OIDC `aud` claim the platform-level token
-  # configuration does not include). `pull_request` triggers issue a token
-  # the action accepts. The template
-  # (`templates/ci/.github/workflows/review.yml`) has always used
-  # `pull_request` for this reason. Same-repo + dispatched-from-fork-pr-review
-  # paths are the supported entry points.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       review_provider:
@@ -75,16 +67,12 @@ jobs:
     # job would just fail on the OIDC fetch step. `fork-pr-review.yml`
     # dispatches this workflow via `workflow_dispatch` after maintainer
     # approval instead, which is not fork-restricted.
-    # The `pull_request_target:` branch (for maintainer-authored fork PRs)
-    # was REMOVED in the Aug-2026 OIDC fix because the
-    # anthropics/claude-code-action v1's federation endpoint rejects the
-    # OIDC token on `pull_request_target` with 401 Invalid OIDC token.
-    # Maintainer-authored fork PRs now route through `fork-pr-review.yml`
-    # just like untrusted forks.
     if: |
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository ||
+       (github.event_name == 'pull_request_target' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -281,13 +269,13 @@ jobs:
     # (intentionally-skipped) judge verdict to Approve. `fork-pr-review.yml`
     # dispatches a `workflow_dispatch` run after maintainer approval, which
     # reaches this same `gate` job with a real verdict.
-    # `pull_request_target:` branch removed (Aug 2026 OIDC fix); see the
-    # `if:` block in `maintenance_judge` above.
     if: |
       always() &&
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository ||
+       (github.event_name == 'pull_request_target' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))
     permissions:
       contents: read
       pull-requests: read

@@ -43,19 +43,12 @@ name: PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  # INTENTIONALLY no `pull_request_target:` trigger. The previous OIDC-fix
-  # iterations (Aug 2026) attempted both, but the anthropics/claude-code-action
-  # v1's federated App-token exchange returns 401 Invalid OIDC token on
-  # `pull_request_target` runs in this repo (the action's federation
-  # endpoint requires an OIDC `aud` claim the platform-level token
-  # configuration does not include). `pull_request` triggers issue a token
-  # the action accepts. The template
-  # (`templates/ci/.github/workflows/review.yml`) has always used
-  # `pull_request` for this reason. The fork-PR path
-  # (`.github/workflows/fork-pr-review.yml`) already gates on maintainer
-  # approval and dispatches THIS workflow via `workflow_dispatch`, which is
-  # not a fork-origin `pull_request` event and therefore reaches this job
-  # with full normal permissions.
+  # Trusted maintainer-authored fork PRs run from the base branch context so
+  # review credentials are available immediately without the manual fork
+  # environment gate. The job conditions below restrict this event to
+  # OWNER/MEMBER/COLLABORATOR authors.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       review_provider:
@@ -152,7 +145,9 @@ jobs:
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
         (needs.scope.outputs.touches_prod == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+         (github.event.pull_request.head.repo.full_name == github.repository ||
+          (github.event_name == 'pull_request_target' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -363,7 +358,9 @@ jobs:
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
         (needs.scope.outputs.touches_prod == 'true' &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+         (github.event.pull_request.head.repo.full_name == github.repository ||
+          (github.event_name == 'pull_request_target' &&
+           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
     permissions:
@@ -574,7 +571,9 @@ jobs:
       always() &&
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository ||
+       (github.event_name == 'pull_request_target' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))
     # The auto-approve step casts `gh pr review --approve`, which
     # writes to the PR. The default GITHUB_TOKEN is read-only on most
     # operations; grant pull-requests: write so the auto-approve
