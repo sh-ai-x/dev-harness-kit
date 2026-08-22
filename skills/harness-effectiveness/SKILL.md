@@ -1,7 +1,7 @@
 ---
 name: harness-effectiveness
 category: eval
-description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested submetric (issue #663) covering agent / model / provider swap behaviour.
+description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested stability submetric (issue #663) covering agent / model / provider swap behaviour, and a nested subject_observability submetric (issue #702) reporting producer coverage so event_coverage is observable in worktrees that have not yet run a build step.
 when_to_use:
   - User types /dev-kit:harness-effectiveness
   - Operator wants the 5-component metric without running the full 12-case `/dev-kit:evaluate` judge pass
@@ -93,7 +93,7 @@ The full reducer JSON is printed to stdout (one line per field, pretty-printed).
 ```
 $ /dev-kit:harness-effectiveness
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "contract_version": "harness-effectiveness-v1",
   "event_count": 81,
   "overall_score": null,
@@ -137,9 +137,14 @@ The slash command (canonical `commands/harness-effectiveness.md`) is a thin wrap
 - `lib/harness_effectiveness.build_report` is unchanged for the 5-component
   contract: `COMPONENT_WEIGHTS` still sums to 1.0, the `overall_score` formula
   is the same, and `components` / `overall_score` / `status` / `event_count`
-  / `contract_version` still exist. `schema_version` bumps from 1 → 2 to
-  advertise the nested `stability` submetric; consumers that ignore unknown
-  versions continue to work unchanged. Callers that import it directly still work.
+  / `contract_version` still exist. `schema_version` bumps from 1 → 2 in
+  issue #663 to advertise the nested `stability` submetric, and 2 → 3 in
+  issue #702 to advertise the nested `subject_observability` submetric.
+  Consumers that ignore unknown versions continue to work unchanged.
+  Callers that import it directly still work. The parent
+  `measurement_integrity.score` now falls back to the `subject_observability`
+  symmetric ratio when `event_coverage` is `None` (producer-missing case),
+  so an empty worktree reports a non-null score tied to a specific finding.
 - `/dev-kit:evaluate` keeps emitting the same embedded table — this skill is an additive shortcut, not a replacement.
 - Existing `tests/test_harness_effectiveness.py` continues to cover the reducer; no test renames.
 

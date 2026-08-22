@@ -40,6 +40,14 @@
           }
         ],
         "_loghooks_managed": true
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$PWD/hooks/trace-session-end.sh\""
+          }
+        ]
       }
     ]
   }
