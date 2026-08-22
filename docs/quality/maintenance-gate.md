@@ -211,7 +211,12 @@ still posted on the PR by each dispatched run as before.
   drift).
 - `.github/workflows/review.yml` — the sibling security/correctness
   gate. Both gates share the verdict-extraction pattern so PR
-  comments look identical to operators.
+  comments look identical to operators. The jq filter accepts both
+  `claude*` (the upstream `claude-code-action` reviewer) and
+  `github-actions[bot]` (the dispatched-run workaround from
+  `bin/ci-claude-p.sh` that posts via `gh pr comment`); it excludes
+  audit comments carrying the `<!-- dev-kit-verdict-audit -->`
+  marker so the audit post never self-matches.
 - `.github/workflows/fork-pr-review.yml` — maintainer-approval gate
   that dispatches this workflow (+ `review.yml`) for fork PRs. See
   "Fork PRs" above.

@@ -335,7 +335,7 @@ jobs:
           # page-1 comment instead of the LLM judge's latest verdict.
           comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
             --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | startswith("claude")) | select(.body | test("\\*\\*Verdict:\\*\\*"))] | sort_by(.updated_at) | .[-1].body // ""')"
+            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "review_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
@@ -535,7 +535,7 @@ jobs:
           # body prose).
           comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
             --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | startswith("claude")) | select(.body | test("\\*\\*Verdict:\\*\\*"))] | sort_by(.updated_at) | .[-1].body // ""')"
+            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "security_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
