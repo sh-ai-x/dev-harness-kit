@@ -32,8 +32,12 @@ name: PR Maintenance Gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+  # NOTE: `pull_request_target` removed — see review.yml for rationale.
+  # The `anthropics/claude-code-action` v1 OIDC exchange fails with
+  # `401 Unauthorized - Invalid OIDC token` on `pull_request_target`,
+  # but succeeds on `pull_request` for same-repo branches. Fork PRs
+  # are reviewed via `fork-pr-review.yml` → `workflow_dispatch`, which
+  # is not fork-restricted and reaches this workflow normally.
   workflow_dispatch:
     inputs:
       review_provider:
