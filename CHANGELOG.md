@@ -207,3 +207,4 @@ verdict (so silent skips aren't invisible to the PR author).
 - `.dev-kit/` state files (state.json, .active-hooks.json, hand-off/*.md)
 - Pre-impl gate (`docs/planning/PRE-IMPL-CHECK.md`) + 8-dimension cost analysis (`docs/quality/COST-ANALYSIS.md`)
 
+
