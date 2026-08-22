@@ -145,8 +145,9 @@ jobs:
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
         (needs.scope.outputs.touches_prod == 'true' &&
-         (github.event.pull_request.head.repo.full_name == github.repository ||
+         ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
           (github.event_name == 'pull_request_target' &&
+           github.event.pull_request.head.repo.full_name != github.repository &&
            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
@@ -361,8 +362,9 @@ jobs:
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
         (needs.scope.outputs.touches_prod == 'true' &&
-         (github.event.pull_request.head.repo.full_name == github.repository ||
+         ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
           (github.event_name == 'pull_request_target' &&
+           github.event.pull_request.head.repo.full_name != github.repository &&
            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
@@ -577,8 +579,9 @@ jobs:
       always() &&
       !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v') &&
       (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository ||
+       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
        (github.event_name == 'pull_request_target' &&
+        github.event.pull_request.head.repo.full_name != github.repository &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))
     # The auto-approve step casts `gh pr review --approve`, which
     # writes to the PR. The default GITHUB_TOKEN is read-only on most
