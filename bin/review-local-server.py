@@ -74,9 +74,11 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -126,12 +128,79 @@ def _decrement_active_streams() -> None:
         _active_streams = max(0, _active_streams - 1)
 
 
+# Track active subprocess.Popen handles so SIGINT / SIGTERM can clean
+# them up before the server exits. Without this, the spawned
+# `bin/review-local.sh` and its transitive `claude -p` survive the
+# server process — they keep consuming API quota and the only way to
+# kill them is `ps -ef | grep claude` (review finding M1 on PR #731).
+_active_procs: list[subprocess.Popen] = []
+_active_procs_lock = threading.Lock()
+
+# Monotonic clock at the moment the current stream's subprocess
+# was spawned. Used by the 10-minute wall-clock cap in the
+# `_stream_review_local` finally block. Initialized to 0; the first
+# stream call sets it to time.monotonic() before Popen.
+_stream_start_monotonic: float = 0.0
+
+# Wall-clock cap on a single verdict pipeline run. Mirrors the
+# 10-minute per-job timeout in `.github/workflows/review.yml:127` so
+# the local mode fails fast on a hung `claude -p` instead of holding
+# a stream slot forever (review finding m1 on PR #731).
+PROC_TIMEOUT_SECONDS = 600
+
+
+def _register_proc(proc: subprocess.Popen) -> None:
+    with _active_procs_lock:
+        _active_procs.append(proc)
+
+
+def _unregister_proc(proc: subprocess.Popen) -> None:
+    with _active_procs_lock:
+        try:
+            _active_procs.remove(proc)
+        except ValueError:
+            pass
+
+
+def _terminate_all_procs() -> None:
+    """Terminate every active subprocess on server shutdown.
+
+    Called from the SIGINT/SIGTERM handler in `main()`. Each proc is
+    given 2 s to exit cleanly; stragglers are SIGKILLed. Idempotent —
+    safe to call from multiple signal paths.
+    """
+    with _active_procs_lock:
+        procs = list(_active_procs)
+    for p in procs:
+        try:
+            p.terminate()
+        except (ProcessLookupError, OSError):
+            continue
+    for p in procs:
+        try:
+            p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                p.kill()
+                p.wait(timeout=1)
+            except (ProcessLookupError, OSError):
+                pass
+
+
 def _resolve_default_pr() -> int | None:
     """Best-effort: return the PR number for the current branch via `gh`.
 
     Returns None if `gh` is missing, unauthenticated, or the branch has no PR.
     The server's `/` handler then renders an empty form instead of a redirect.
+
+    The result is memoized in `_cached_default_pr` so a slow /
+    unauthenticated `gh` doesn't stall every `GET /` request
+    (review finding m3 on PR #731). Restart the server to refresh
+    the cache after switching branches.
     """
+    global _cached_default_pr_resolved, _cached_default_pr
+    if _cached_default_pr_resolved:
+        return _cached_default_pr
     try:
         out = subprocess.run(
             ["gh", "pr", "view", "--json", "number", "-q", ".number"],
@@ -141,23 +210,43 @@ def _resolve_default_pr() -> int | None:
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if out.returncode != 0 or not out.stdout.strip():
-        return None
-    try:
-        return int(out.stdout.strip())
-    except ValueError:
-        return None
+        _cached_default_pr = None
+    else:
+        try:
+            _cached_default_pr = int(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
+        except ValueError:
+            _cached_default_pr = None
+    _cached_default_pr_resolved = True
+    return _cached_default_pr
+
+
+# Memoization state for `_resolve_default_pr`. `_cached_default_pr`
+# is None until the first call; `_cached_default_pr_resolved` flips
+# True after, so subsequent calls skip the `gh pr view` round-trip
+# entirely (avoid stalling every `GET /` on a slow / unauthenticated
+# gh CLI -- review finding m3 on PR #731).
+_cached_default_pr: int | None = None
+_cached_default_pr_resolved: bool = False
 
 
 class _Handler(BaseHTTPRequestHandler):
     """Single handler for the four routes (/, /pr/<N>, /pr/<N>/stream, /healthz)."""
 
-    # Quieter logs (default writes one line per request to stderr; we
-    # only want stream lifecycle events).
+    # Quieter logs. Default BaseHTTPRequestHandler logs every request
+    # to stderr; we only want lifecycle events (healthz, the 302 from
+    # /, 404s). Stream connections are intentionally silent — the
+    # SSE pipe is the operator's UI, stderr would be noise.
+    #
+    # Previously used `if "/stream" not in format` (denylist), but
+    # review finding m2 noted that any future debug path that happens
+    # to contain "/stream" would be silently dropped. Allowlist is
+    # safer: only log the routes that genuinely need observability.
+    _LOG_ALLOWLIST_PREFIXES = ("/healthz", "GET / ", "GET /pr/ (not numeric)")
+
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - BaseHTTPRequestHandler API
-        if "/stream" not in format:
-            sys.stderr.write("[review-local-server] %s - %s\n" % (self.address_string(), format % args))
+        msg = format % args
+        if any(msg.startswith(p) for p in self._LOG_ALLOWLIST_PREFIXES):
+            sys.stderr.write("[review-local-server] %s - %s\n" % (self.address_string(), msg))
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urllib.parse.urlsplit(self.path).path
@@ -240,6 +329,12 @@ class _Handler(BaseHTTPRequestHandler):
                 title = ""
             self._write_sse({"event": "meta", "pr": pr_number, "title": title})
 
+            # Capture the stream-start monotonic clock so the
+            # 10-minute wall-clock cap in `finally:` is measured from
+            # the actual subprocess spawn (review finding m1).
+            global _stream_start_monotonic
+            _stream_start_monotonic = time.monotonic()
+
             # Spawn the verdict pipeline. Capture stdout line-by-line so
             # the SSE client gets each line as soon as the subprocess
             # flushes it (bufsize=1, text mode).
@@ -260,14 +355,47 @@ class _Handler(BaseHTTPRequestHandler):
                 self._write_sse({"event": "done", "exit_code": -1})
                 return
 
+            _register_proc(proc)
             assert proc.stdout is not None
-            for line in proc.stdout:
+            import selectors
+            sel = selectors.DefaultSelector()
+            sel.register(proc.stdout, selectors.EVENT_READ)
+            timed_out = False
+            # Wall-clock cap (review finding m1 on PR #731). Without
+            # this, a hung subprocess holds the stream slot forever.
+            # select() lets us multiplex the stdout read with a
+            # deadline timer -- readline() alone blocks indefinitely
+            # if the subprocess keeps stdout open while hung.
+            while True:
+                elapsed = time.monotonic() - _stream_start_monotonic
+                if elapsed > PROC_TIMEOUT_SECONDS:
+                    timed_out = True
+                    break
+                remaining = max(0.1, PROC_TIMEOUT_SECONDS - elapsed)
+                events = sel.select(timeout=remaining)
+                if not events:
+                    # select timed out without any data; loop top
+                    # rechecks elapsed and breaks.
+                    continue
+                line = proc.stdout.readline()
+                if not line:
+                    # EOF -- subprocess closed its stdout.
+                    break
                 # Strip trailing newline; SSE will re-add framing.
                 payload = {"event": "stdout", "line": line.rstrip("\n")}
                 self._write_sse(payload)
 
-            exit_code = proc.wait()
-            self._write_sse({"event": "done", "exit_code": exit_code})
+            if timed_out:
+                # Kill the hung subprocess; emit the timeout marker.
+                proc.kill()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+                self._write_sse({"event": "done", "exit_code": -9, "reason": "timeout"})
+            else:
+                exit_code = proc.wait()
+                self._write_sse({"event": "done", "exit_code": exit_code})
         except (BrokenPipeError, ConnectionResetError):
             # Operator closed the tab mid-stream; kill the subprocess so
             # we don't leak orphans.
@@ -276,6 +404,15 @@ class _Handler(BaseHTTPRequestHandler):
             except (NameError, ProcessLookupError, OSError):
                 pass
         finally:
+            # Unregister from the active-procs list so a shutdown
+            # signal that fires after we return doesn't see a stale
+            # handle. The 10-minute cap is enforced inline in the
+            # stdout loop; this finally is just cleanup.
+            try:
+                proc  # type: ignore[possibly-undefined]
+                _unregister_proc(proc)
+            except NameError:
+                pass
             _decrement_active_streams()
 
     # ------------------------------------------------------------------
@@ -335,9 +472,34 @@ def main() -> int:
         f"(project_root={PROJECT_ROOT})",
         flush=True,
     )
+
+    # Signal handlers: SIGINT (Ctrl+C) and SIGTERM (kill / systemd)
+    # must terminate every active subprocess before the main thread
+    # exits, or the verdict pipelines + their transitive `claude -p`
+    # invocations survive as orphans (review finding M1 on PR #731).
+    # Idempotent -- _terminate_all_procs is safe to call multiple
+    # times. signal handlers run on the main thread; we set them up
+    # BEFORE serve_forever so a SIGTERM during shutdown still routes
+    # through the handler.
+    def _on_signal(signum: int, frame: object) -> None:  # noqa: ARG001
+        try:
+            name = signal.Signals(signum).name
+        except ValueError:
+            name = str(signum)
+        print(f"\n[review-local-server] caught {name}; terminating {len(_active_procs)} active subprocess(es)", flush=True)
+        _terminate_all_procs()
+        server.shutdown()
+
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        # Belt-and-suspenders: the SIGINT handler above should fire
+        # first, but if it doesn't (different Python / no handler
+        # race), make sure subprocesses still get terminated.
+        _terminate_all_procs()
         print("\n[review-local-server] shutting down", flush=True)
         server.shutdown()
     return 0
