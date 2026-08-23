@@ -343,9 +343,16 @@ class SetProviderContract(unittest.TestCase):
         # The "TO ADD A NEW PROVIDER" recipe block must be reachable
         # from --help (issue #714 acceptance).
         self.assertIn("TO ADD A NEW PROVIDER", result.stdout)
+        # Recipe must mention the case block, the arm pattern operators
+        # need to add, and each of the four files to touch. The post-
+        # v0.3.320 recipe phrases step 2 as "add a `openai)` arm to the
+        # `case` block", so we match `case` AND `arm` separately rather
+        # than the contiguous `case arm` substring (which was only in
+        # the pre-#722 wording).
         for needle in (
             "ALLOWLIST",
-            "case arm",
+            "case",
+            "arm",
             ".github/workflows/review.yml",
             ".env.example",
         ):
