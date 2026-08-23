@@ -39,6 +39,7 @@ from pathlib import Path
 try:
     from .ci_setup import (  # type: ignore  # noqa: E402
         PROVIDER_SECRETS,
+        check_provider_consistency,
         detect_owner_repo,
         gh_secret_set_command,
         read_env_key,
@@ -48,6 +49,7 @@ try:
 except ImportError:
     from ci_setup import (  # type: ignore  # noqa: E402
         PROVIDER_SECRETS,
+        check_provider_consistency,
         detect_owner_repo,
         gh_secret_set_command,
         read_env_key,
@@ -698,6 +700,34 @@ def _check_provider_declared(target: Path) -> list[Check]:
     return [Check("provider declared", "PASS", f"{resolved} (via {source})")]
 
 
+def _check_provider_consistency(target: Path) -> Check:
+    """Issue #712: surface `.env` vs `vars.CI_REVIEW_PROVIDER` drift.
+
+    Wraps `lib.ci_setup.check_provider_consistency` and translates its
+    `(status, message)` tuple into the Check state set used by the
+    audit surface (`{PASS, FAIL, SKIP, INFO, WARN}`):
+
+      - engine `OK`   → `PASS` (both unset, or both set equal)
+      - engine `WARN` → `WARN` (drift is advisory, never flips verdict)
+      - engine `SKIP` → `SKIP` (`gh` absent / unauth — honest can't-verify)
+      - engine `FAIL` → `FAIL` (reserved; not currently emitted)
+
+    The check never raises — subprocess errors in the underlying gh
+    calls are surfaced via `SKIP` rows by `check_provider_consistency`
+    itself.
+    """
+    try:
+        status, message = check_provider_consistency(target)
+    except Exception as e:  # pragma: no cover — defensive net
+        return Check(
+            "CI_REVIEW_PROVIDER consistency", "SKIP",
+            f"check_provider_consistency errored: {type(e).__name__}",
+        )
+    state_map = {"OK": "PASS", "WARN": "WARN", "SKIP": "SKIP", "FAIL": "FAIL"}
+    state = state_map.get(status, "SKIP")
+    return Check("CI_REVIEW_PROVIDER consistency", state, message)
+
+
 def _check_secrets(target: Path, provider: str | None,
                    source_repo: bool = False) -> list[Check]:
     repo = _detect_owner_repo(target)
@@ -1120,6 +1150,7 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
     report.checks.extend(_check_marker_payload(target, source_repo))
     report.checks.extend(_check_templates_current(target, source_repo))
     report.checks.extend(_check_provider_declared(target))
+    report.checks.append(_check_provider_consistency(target))
     report.checks.append(_check_gh_auth())
     report.checks.extend(_check_secrets(target, provider, source_repo))
     report.checks.extend(_check_workflow_diagnostics(target, source_repo))

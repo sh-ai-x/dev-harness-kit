@@ -386,6 +386,48 @@ def read_env_key(path: Path, key: str) -> str:
 _read_env_key = read_env_key
 
 
+# Provider values are free-form strings that operators put into `.env` and
+# `vars.CI_REVIEW_PROVIDER`. They appear in the printed remediation message
+# verbatim — operators may copy-paste it into a shell. Reject shell
+# metacharacters so a typo or hostile value can't invite an `$(rm -rf ~)`
+# copy-paste. Mirrors the spirit of `bin/set-provider.sh:234`'s allow-list
+# (only writes a fixed set of values), without pulling the full script.
+_SHELL_METACHARS_RE = re.compile(r"""[\s;&|`$()<>'"\\]""")
+
+
+def _is_safe_provider_value(value: str) -> bool:
+    """True iff `value` has no shell metacharacters and is non-empty.
+
+    Allowlist: alnum + `._-` only. Empty values are treated as "unset"
+    by the caller, not as a safety violation, so this returns True
+    for the empty string — the caller decides whether to use it.
+    """
+    if not value:
+        return True
+    return not _SHELL_METACHARS_RE.search(value)
+
+
+def _remediation_msg(local_val: str, ci_val: str) -> str:
+    """Render the `gh variable set …` remediation tail for a drift WARN.
+
+    Single source of truth so the three drift branches (local-only,
+    ci-only, both-set-differ) don't drift from each other. The
+    remediation always echoes the LOCAL value (the side the operator
+    can change without `gh` admin rights) and references `bin/set-provider.sh`
+    for the inverse direction.
+    """
+    if local_val and not ci_val:
+        return (
+            f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`"
+        )
+    if ci_val and not local_val:
+        return (
+            f"`gh variable set CI_REVIEW_PROVIDER --body {ci_val}` "
+            f"(or `bin/set-provider.sh {ci_val}` to update local)"
+        )
+    return f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`"
+
+
 def _read_ci_provider_via_gh() -> tuple[str, str]:
     """Read `gh variable get CI_REVIEW_PROVIDER`. Returns `(value, degraded_msg)`.
 
@@ -401,7 +443,8 @@ def _read_ci_provider_via_gh() -> tuple[str, str]:
     false PASS/WARN when the tool to verify is unavailable).
 
     Never raises; subprocess.SubprocessError / OSError / TimeoutExpired
-    are caught and surfaced as degraded messages.
+    are caught and surfaced as degraded messages using the exception
+    *type* name only (the full repr can include fragments of argv).
     """
     gh = shutil.which("gh")
     if not gh:
@@ -409,10 +452,10 @@ def _read_ci_provider_via_gh() -> tuple[str, str]:
     try:
         auth_cp = subprocess.run(
             [gh, "auth", "status"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=10,
         )
     except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return "", f"gh auth error: {e}"
+        return "", f"gh auth error: {type(e).__name__}"
     if auth_cp.returncode != 0:
         return "", "gh not authenticated"
     try:
@@ -421,13 +464,13 @@ def _read_ci_provider_via_gh() -> tuple[str, str]:
             capture_output=True, text=True, timeout=10,
         )
     except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return "", f"gh variable get error: {e}"
+        return "", f"gh variable get error: {type(e).__name__}"
     if cp.returncode != 0:
         err = (cp.stderr or "").strip().lower()
-        # "Variable not found" / "no variable" / "none" means the repo
-        # has no CI_REVIEW_PROVIDER set — that's a valid (empty) value,
-        # not a degraded read. Anything else is a real failure.
-        if "not found" in err or "no variable" in err or "none" in err:
+        # "Variable not found" / "no variable" means the repo has no
+        # CI_REVIEW_PROVIDER set — that's a valid (empty) value, not a
+        # degraded read. Anything else is a real failure.
+        if "not found" in err or "no variable" in err:
             return "", ""
         return "", (
             f"gh variable get failed: "
@@ -454,13 +497,15 @@ def check_provider_consistency(target_dir: Path) -> tuple[str, str]:
                    includes the diff AND the `gh variable set` remediation
                    command (the same one `bin/set-provider.sh:234` prints
                    as a "next steps" hint).
-          - SKIP : gh absent, unauthenticated, or `gh variable get`
-                   errored for a reason other than "not found".
+          - SKIP : gh absent, unauthenticated, `gh variable get` errored
+                   for a reason other than "not found", OR either side
+                   carries shell metacharacters (defensive — operator
+                   must fix the value manually before ci-doctor can
+                   safely echo a remediation).
           - FAIL : reserved for future use (currently not emitted by this
                    check). The `Check` dataclass in `lib/ci_doctor.py`
-                   accepts FAIL too, so a future FAIL row (e.g. `.env`
-                   unreadable for permission reasons) would not require a
-                   contract change.
+                   accepts FAIL too, so a future FAIL row would not
+                   require a contract change.
 
     The check is advisory only — it never flips ci-doctor's verdict. A
     WARN row appears in `warnings: N` and on screen; SKIP rows are
@@ -472,30 +517,37 @@ def check_provider_consistency(target_dir: Path) -> tuple[str, str]:
     ci_val, degraded = _read_ci_provider_via_gh()
     if degraded:
         return "SKIP", degraded
+    if not _is_safe_provider_value(local_val):
+        return "SKIP", (
+            "local .env:CI_REVIEW_PROVIDER contains shell metacharacters; "
+            "fix manually before ci-doctor can render a remediation"
+        )
+    if not _is_safe_provider_value(ci_val):
+        return "SKIP", (
+            "vars.CI_REVIEW_PROVIDER contains shell metacharacters; "
+            "fix manually before ci-doctor can render a remediation"
+        )
     if not local_val and not ci_val:
         return "OK", "both .env:CI_REVIEW_PROVIDER and vars.CI_REVIEW_PROVIDER are unset"
+    if local_val == ci_val:
+        return "OK", f"both {local_val}"
+    remediation = _remediation_msg(local_val, ci_val)
     if local_val and not ci_val:
         return (
             "WARN",
             f"local .env=CI_REVIEW_PROVIDER={local_val} but "
-            f"vars.CI_REVIEW_PROVIDER is unset; sync with "
-            f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`",
+            f"vars.CI_REVIEW_PROVIDER is unset; sync with {remediation}",
         )
     if ci_val and not local_val:
         return (
             "WARN",
             f"local .env:CI_REVIEW_PROVIDER is unset but "
-            f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with "
-            f"`gh variable set CI_REVIEW_PROVIDER --body {ci_val}` "
-            f"(or `bin/set-provider.sh {ci_val}` to update local)",
+            f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with {remediation}",
         )
-    if local_val == ci_val:
-        return "OK", f"both {local_val}"
     return (
         "WARN",
         f"local .env=CI_REVIEW_PROVIDER={local_val} but "
-        f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with "
-        f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`",
+        f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with {remediation}",
     )
 
 

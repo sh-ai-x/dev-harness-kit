@@ -113,14 +113,7 @@ class TestCheckProviderConsistency(unittest.TestCase):
     # --- WARN paths (issue #712 Iron Law L2 — repro of the drift bug) --
 
     def test_local_and_ci_differ_returns_warn(self):
-        """Issue #712 repro: `.env=anthropic` but CI=`minimax` → WARN with
-        both values visible AND the `gh variable set` remediation command.
-
-        This is the L2 regression: the literal scenario from the issue body
-        ("Operator runs `bin/set-provider.sh anthropic` locally; forgets
-        `gh variable set CI_REVIEW_PROVIDER --body anthropic`") MUST
-        produce a WARN row with both values named verbatim.
-        """
+        """Issue #712 repro (L2 regression)."""
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             (target / ".env").write_text("CI_REVIEW_PROVIDER=anthropic\n", encoding="utf-8")
@@ -224,28 +217,73 @@ class TestCheckProviderConsistency(unittest.TestCase):
     def test_status_in_allowed_set(self):
         """Every status the function returns must be in the documented
         contract set {OK, WARN, SKIP, FAIL}. INFO is reserved for ci-doctor
-        rows that this helper does NOT emit — it never raises INFO."""
+        rows that this helper does NOT emit — it never raises INFO.
+
+        Exercises the SKIP branch by feeding `degraded_msg="x"` on one row
+        (the contract test name implies full coverage, so missing the
+        SKIP row would be a silent regression).
+        """
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             allowed = {"OK", "WARN", "SKIP", "FAIL"}
-            for local, ci in [
-                ("", ""),
-                ("minimax", "minimax"),
-                ("anthropic", "minimax"),
-                ("minimax", ""),
-                ("", "deepseek"),
-            ]:
+            rows = [
+                ("", "", ""),
+                ("minimax", "minimax", ""),
+                ("anthropic", "minimax", ""),
+                ("minimax", "", ""),
+                ("", "deepseek", ""),
+                ("minimax", "", "x"),  # SKIP — degraded_msg is non-empty
+            ]
+            for local, ci, degraded in rows:
                 if local:
                     (target / ".env").write_text(
                         f"CI_REVIEW_PROVIDER={local}\n", encoding="utf-8",
                     )
                 else:
                     (target / ".env").unlink(missing_ok=True)
-                status, _ = self._check_with_gh(target, ci_value=ci, degraded_msg="")
+                status, _ = self._check_with_gh(
+                    target, ci_value=ci, degraded_msg=degraded,
+                )
                 self.assertIn(
                     status, allowed,
-                    f"local={local!r} ci={ci!r} → status={status!r} not in {allowed}",
+                    f"local={local!r} ci={ci!r} degraded={degraded!r} → "
+                    f"status={status!r} not in {allowed}",
                 )
+
+    def test_local_value_with_shell_metachars_returns_skip(self):
+        """`.env` value containing shell metacharacters → SKIP, not WARN.
+
+        Defensive: ci-doctor prints the value verbatim in the WARN
+        remediation message, so a value with `$()` or backticks would
+        invite a copy-paste accident. SKIP tells the operator to fix
+        the value manually before ci-doctor can echo it safely.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".env").write_text(
+                "CI_REVIEW_PROVIDER=$(rm -rf ~)\n", encoding="utf-8",
+            )
+            status, msg = self._check_with_gh(target, ci_value="", degraded_msg="")
+            self.assertEqual(status, "SKIP")
+            self.assertIn("metacharacters", msg)
+            # The dangerous value itself must NOT appear in the message.
+            self.assertNotIn("$(rm", msg)
+
+    def test_ci_value_with_shell_metachars_returns_skip(self):
+        """`vars.CI_REVIEW_PROVIDER` containing shell metacharacters → SKIP.
+
+        Same defensive posture as the local-side check. The CI value
+        reaches the audit via `gh variable get`; if the repo variable
+        was ever set with a hostile / typo value, ci-doctor refuses to
+        render a remediation rather than echo it.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".env").write_text("CI_REVIEW_PROVIDER=minimax\n", encoding="utf-8")
+            status, msg = self._check_with_gh(target, ci_value="`evil`", degraded_msg="")
+            self.assertEqual(status, "SKIP")
+            self.assertIn("metacharacters", msg)
+            self.assertNotIn("`evil`", msg)
 
 
 if __name__ == "__main__":
