@@ -127,6 +127,9 @@ read_json_or_empty() {
 # Merge source loghooks into a target settings.json (Claude or Codex).
 # Idempotent: replaces existing entries with the same .hooks[0].command,
 # adds new ones, marks every inserted entry with _loghooks_managed=true.
+# Byte-stable: a re-run with no semantic change leaves the target file
+# unchanged on disk (issue #708), so SessionStart auto-installation does
+# not dirty the working tree on every session.
 # Preserves all other top-level keys (e.g. permissions, $schema).
 #
 # A08 mitigation: every merged entry's command MUST match the documented

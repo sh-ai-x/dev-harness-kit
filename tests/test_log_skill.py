@@ -15,6 +15,7 @@ tempfile.mkdtemp() and exercise the real scripts via subprocess. No mocks.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -244,6 +245,14 @@ class TestOnOffRoundTrip(unittest.TestCase):
             out.append(tuple(cmds))
         return out
 
+    @staticmethod
+    def _file_hash(p: Path) -> str:
+        """SHA256 of on-disk bytes; the regression test wants byte-level
+        stability, not semantic equality. Used by the byte-idempotence
+        tests (issue #708) to assert the file is unchanged across reruns
+        even when the existing content is in a non-canonical form."""
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+
     def test_on_merges_and_tags_managed_entries(self):
         r = _run("log-on.sh", "--target", str(self.tgt),
                  env_extra={"LOGHOOKS_DIR": str(self.src)})
@@ -318,15 +327,15 @@ class TestOnOffRoundTrip(unittest.TestCase):
     def test_on_byte_level_idempotent_on_rerun(self):
         """Issue #708: log-on must be byte-stable on re-runs.
 
-        Without the canonical-form skip-when-equal check, every
-        SessionStart re-rewrites the file (possibly with a different
-        entry order), dirtying the working tree and blocking pulls.
+        Re-seeds the file in a non-canonical form (indent=4,
+        sort_keys=False, reversed entry order) between two log-on
+        invocations. WITHOUT the canonical-form skip-when-equal
+        check, the second run would rewrite the file in jq's
+        canonical form, changing the bytes. WITH the new check,
+        the canonical comparison passes (semantic content is
+        unchanged), the write is skipped, and the bytes survive
+        intact.
         """
-        import hashlib
-
-        def file_hash(p: Path) -> str:
-            return hashlib.sha256(p.read_bytes()).hexdigest()
-
         # First run installs managed entries.
         r = _run("log-on.sh", "--target", str(self.tgt),
                  env_extra={"LOGHOOKS_DIR": str(self.src)})
@@ -334,65 +343,94 @@ class TestOnOffRoundTrip(unittest.TestCase):
 
         claude = self.tgt / ".claude" / "settings.json"
         codex = self.tgt / ".codex" / "hooks.json"
-        h_claude_1 = file_hash(claude)
-        h_codex_1 = file_hash(codex)
 
-        # Second run must be a no-op at the byte level.
+        # Re-seed both files in a NON-canonical byte form (indent=4,
+        # sort_keys=False). The semantic content is identical to what
+        # jq produces, but the byte-level form differs (extra
+        # whitespace, key insertion order). A rewrite by jq would
+        # change the bytes back to canonical form (no indent, sorted
+        # keys). Note: we deliberately do NOT reverse the entries
+        # within an event — the merge's source order is a different
+        # logical state from the seeded order, so a reversal would
+        # not be semantically equivalent and the canonical-form
+        # comparison would correctly (in the sense of the new check)
+        # decide a rewrite is needed.
+        for path in (claude, codex):
+            data = json.loads(path.read_text())
+            path.write_text(json.dumps(data, indent=4, sort_keys=False))
+
+        h_claude_seeded = self._file_hash(claude)
+        h_codex_seeded = self._file_hash(codex)
+
+        # Second run: without the new check, the file would be
+        # rewritten in jq's canonical form (sorted keys, no indent),
+        # changing the bytes. With the new check, the write is
+        # skipped and the bytes survive intact.
         r = _run("log-on.sh", "--target", str(self.tgt),
                  env_extra={"LOGHOOKS_DIR": str(self.src)})
         self.assertEqual(r.returncode, 0, f"second on failed: {r.stderr}")
-        self.assertEqual(file_hash(claude), h_claude_1,
-                         "log-on re-run rewrote .claude/settings.json (issue #708)")
-        self.assertEqual(file_hash(codex), h_codex_1,
-                         "log-on re-run rewrote .codex/hooks.json (issue #708)")
-
-        # Third run for good measure.
-        r = _run("log-on.sh", "--target", str(self.tgt),
-                 env_extra={"LOGHOOKS_DIR": str(self.src)})
-        self.assertEqual(r.returncode, 0, f"third on failed: {r.stderr}")
-        self.assertEqual(file_hash(claude), h_claude_1,
-                         "log-on 3rd run rewrote .claude/settings.json")
-        self.assertEqual(file_hash(codex), h_codex_1,
-                         "log-on 3rd run rewrote .codex/hooks.json")
+        self.assertEqual(self._file_hash(claude), h_claude_seeded,
+                         "log-on re-run rewrote .claude/settings.json "
+                         "in canonical form (issue #708: missing byte-"
+                         "level idempotence check)")
+        self.assertEqual(self._file_hash(codex), h_codex_seeded,
+                         "log-on re-run rewrote .codex/hooks.json in "
+                         "canonical form (issue #708)")
 
     def test_on_recovers_when_user_removes_managed_entry(self):
         """If a user (or another tool) strips a managed entry, the next
-        log-on must re-add it; after that, subsequent runs are no-ops."""
-        import hashlib
+        log-on must re-add it; after that, subsequent runs are no-ops.
 
-        def file_hash(p: Path) -> str:
-            return hashlib.sha256(p.read_bytes()).hexdigest()
-
+        Iterates events to find the FIRST one that actually contains
+        a `_loghooks_managed` entry (not just the first event in
+        insertion order, which is usually the user-authored
+        UserPromptSubmit), strips it, and asserts the recovery
+        sequence: 2 managed -> 1 managed (after strip) -> 2 managed
+        (after recovery log-on) -> 2 managed (stable on subsequent
+        run)."""
         # Install managed entries.
         r = _run("log-on.sh", "--target", str(self.tgt),
                  env_extra={"LOGHOOKS_DIR": str(self.src)})
         self.assertEqual(r.returncode, 0, f"first on failed: {r.stderr}")
 
         claude = self.tgt / ".claude" / "settings.json"
-        # Sanity: 2 managed entries installed.
-        self.assertGreaterEqual(self._managed_count(claude), 2)
+        n_before = self._managed_count(claude)
+        self.assertGreaterEqual(n_before, 2,
+                                f"expected >=2 managed entries, got {n_before}")
 
-        # Simulate user/tampering: strip the first managed entry.
+        # Find the first event with a managed entry, strip ONE of them.
         data = json.loads(claude.read_text())
-        for ev, entries in list((data.get("hooks") or {}).items()):
-            keep = [e for e in entries if not e.get(SENTINEL)]
-            data["hooks"][ev] = keep
-            break
+        stripped = False
+        for ev in list((data.get("hooks") or {}).keys()):
+            entries = data["hooks"][ev]
+            for i, e in enumerate(entries):
+                if e.get(SENTINEL):
+                    del data["hooks"][ev][i]
+                    stripped = True
+                    break
+            if stripped:
+                break
+        self.assertTrue(stripped,
+                        "could not find a managed entry to strip; "
+                        "fixture loghooks source should ship >=1 managed entry per event")
         claude.write_text(json.dumps(data))
+        n_after_strip = self._managed_count(claude)
+        self.assertEqual(n_after_strip, n_before - 1,
+                         "managed count did not decrease after strip")
 
-        # Next run must re-add the missing entry AND stabilize afterwards.
+        # Recovery run: must re-add the missing entry.
         r = _run("log-on.sh", "--target", str(self.tgt),
                  env_extra={"LOGHOOKS_DIR": str(self.src)})
         self.assertEqual(r.returncode, 0, f"recovery on failed: {r.stderr}")
-        self.assertGreaterEqual(self._managed_count(claude), 2,
-                                "managed entry was not re-added on recovery run")
-        h_recovered = file_hash(claude)
+        self.assertEqual(self._managed_count(claude), n_before,
+                         "managed count did not recover after log-on")
 
-        # Subsequent run is a byte-stable no-op.
+        # Subsequent run is byte-stable.
+        h_recovered = self._file_hash(claude)
         r = _run("log-on.sh", "--target", str(self.tgt),
                  env_extra={"LOGHOOKS_DIR": str(self.src)})
         self.assertEqual(r.returncode, 0, f"stability run failed: {r.stderr}")
-        self.assertEqual(file_hash(claude), h_recovered,
+        self.assertEqual(self._file_hash(claude), h_recovered,
                          "log-on re-run after recovery did not stabilize (issue #708)")
 
     def test_on_preserves_user_added_hook_across_reruns(self):
@@ -400,11 +438,6 @@ class TestOnOffRoundTrip(unittest.TestCase):
         log-on re-runs. The first run may normalize the file (which
         is fine — it's a one-time upgrade), but the second and later
         runs must be byte-stable."""
-        import hashlib
-
-        def file_hash(p: Path) -> str:
-            return hashlib.sha256(p.read_bytes()).hexdigest()
-
         # First run installs managed entries alongside the baseline
         # UserPromptSubmit user-authored hook.
         r = _run("log-on.sh", "--target", str(self.tgt),
@@ -417,14 +450,14 @@ class TestOnOffRoundTrip(unittest.TestCase):
         self.assertIn(('echo user-authored',), ups,
                       "user-authored UserPromptSubmit hook was lost on first on")
 
-        h_after_first = file_hash(claude)
+        h_after_first = self._file_hash(claude)
 
         # Subsequent runs are no-ops.
         for i in range(2):
             r = _run("log-on.sh", "--target", str(self.tgt),
                      env_extra={"LOGHOOKS_DIR": str(self.src)})
             self.assertEqual(r.returncode, 0, f"rerun {i} failed: {r.stderr}")
-            self.assertEqual(file_hash(claude), h_after_first,
+            self.assertEqual(self._file_hash(claude), h_after_first,
                              f"rerun {i+1} rewrote .claude/settings.json (issue #708)")
             ups = self._user_event_signatures(claude, "UserPromptSubmit")
             self.assertIn(('echo user-authored',), ups,
