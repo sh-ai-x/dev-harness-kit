@@ -17,6 +17,7 @@
 #   bin/set-provider.sh anthropic --dry-run      # show what would change
 #   bin/set-provider.sh --show                   # alias for no-arg form
 #   bin/set-provider.sh --help
+#   bin/set-provider.sh --check-extensibility    # audit ALLOWLIST vs case arms
 #
 # Allowlist: minimax, anthropic, deepseek (must match the choice list
 # declared in .github/workflows/review.yml -> workflow_dispatch.inputs).
@@ -29,6 +30,22 @@
 # And the matching CI_REVIEW_PROVIDER repo variable so the workflow
 # knows which secret to read:
 #   gh variable set CI_REVIEW_PROVIDER --body "<provider>"
+#
+# TO ADD A NEW PROVIDER (idempotent recipe — issue #714):
+#   1. bin/set-provider.sh:38        — append the provider name to ALLOWLIST
+#   2. bin/set-provider.sh:235-239   — add a `case` arm mapping it to its
+#                                      *_API_KEY secret name (e.g.
+#                                      `openai) gh secret set OPENAI_API_KEY ...`)
+#   3. .github/workflows/review.yml  — add the new provider to
+#                                      on.workflow_dispatch.inputs
+#                                      .review_provider.options so manual
+#                                      `workflow_dispatch` runs accept it
+#   4. .env.example                  — add `CI_REVIEW_PROVIDER=<name>` so
+#                                      the next operator's template lists it
+#   After editing, run `bin/set-provider.sh --check-extensibility` to
+#   assert the ALLOWLIST and case arms still match. The script also
+#   prints the same recipe so the checklist is reachable without
+#   re-reading the source.
 
 set -euo pipefail
 
@@ -138,6 +155,51 @@ upsert_env_file() {
   fi
 }
 
+# Audit ALLOWLIST vs the `case "$NEW" in` arms at line 235 (issue #714).
+# Prints the add-provider recipe and any drift between the two lists.
+# Always exits 0 — this is an advisory check, not a gate. Operators
+# run it after editing either side to confirm they stayed in sync.
+check_extensibility() {
+  local allowlist case_arms
+  # Parse `ALLOWLIST=(a b c)` from line 38. `tr ' ' '\n' | grep -v '^$'`
+  # collapses whitespace-separated names into one-per-line; the grep
+  # drops empty entries from a stray leading/trailing space.
+  allowlist=$(grep -E '^ALLOWLIST=\(' "$0" \
+              | sed -E 's/^ALLOWLIST=\((.*)\).*/\1/' \
+              | tr ' ' '\n' | grep -v '^$' | sort)
+  # Parse `name)` arms from the `case "$NEW" in` ... `esac` block.
+  # The regex matches an indented word followed by `)`, capturing the
+  # name. Each provider line has the shape `  <name>)  echo ... ;;`
+  # so the trailing `)` and whatever follows is dropped.
+  case_arms=$(sed -nE "/^case \"\\\$NEW\" in\$/,/^esac\$/p" "$0" \
+              | sed -nE 's/^[[:space:]]+([a-zA-Z0-9_-]+)\).*/\1/p' \
+              | sort)
+
+  cat <<EOF
+=== Files to touch when adding a new provider ===
+  1. bin/set-provider.sh:38        (ALLOWLIST)
+  2. bin/set-provider.sh:235-239   (case arm -> *_API_KEY secret)
+  3. .github/workflows/review.yml  (workflow_dispatch.inputs.<provider>.choices)
+  4. .env.example                  (CI_REVIEW_PROVIDER=<name> entry)
+
+=== ALLOWLIST (bin/set-provider.sh:38) ===
+EOF
+  if [ -n "$allowlist" ]; then printf '%s\n' $allowlist; fi
+  cat <<EOF
+
+=== case arms (bin/set-provider.sh:235-239) ===
+EOF
+  if [ -n "$case_arms" ]; then printf '%s\n' $case_arms; fi
+  echo
+
+  if [ "$allowlist" = "$case_arms" ]; then
+    echo "OK: ALLOWLIST and case arms are in sync."
+  else
+    echo "DRIFT: ALLOWLIST and case arms disagree:"
+    diff <(printf '%s\n' $allowlist) <(printf '%s\n' $case_arms) || true
+  fi
+}
+
 # Parse args. Support provider as first positional, then flags.
 PROVIDER_ARG=""
 DRY_RUN=0
@@ -149,6 +211,7 @@ else
   case "$1" in
     -h|--help) show_help; exit 0 ;;
     --show)    SHOW_ONLY=1 ;;
+    --check-extensibility) check_extensibility; exit 0 ;;
     --dry-run) DRY_RUN=1; PROVIDER_ARG="${2:-}"; [ -n "$PROVIDER_ARG" ] || die "--dry-run requires a provider name" ;;
     -*)        die "unknown flag: $1 (try --help)" ;;
     *)         PROVIDER_ARG="$1"

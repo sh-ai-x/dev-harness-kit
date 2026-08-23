@@ -292,6 +292,45 @@ class SetProviderContract(unittest.TestCase):
         self.assertIn("current: anthropic", result.stdout,
                       f"expected stripped value, got: {result.stdout!r}")
 
+    # T15 (issue #714): --check-extensibility exits 0 and lists the
+    # four files an operator must touch when adding a new provider.
+    # The current ALLOWLIST and case arms are identical (the script
+    # is in a known-good state), so the drift check prints "OK: in sync".
+    def test_check_extensibility_lists_recipe_and_reports_sync(self) -> None:
+        result = _run_in_worktree(self.wt, "--check-extensibility")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # All 4 recipe files appear in the output.
+        self.assertIn("bin/set-provider.sh:38", result.stdout)
+        self.assertIn("bin/set-provider.sh:235-239", result.stdout)
+        self.assertIn(".github/workflows/review.yml", result.stdout)
+        self.assertIn(".env.example", result.stdout)
+        # Both the parsed ALLOWLIST and the case arms are rendered, in
+        # sorted order (the script sorts both before comparing).
+        self.assertIn("ALLOWLIST (bin/set-provider.sh:38)", result.stdout)
+        self.assertIn("case arms (bin/set-provider.sh:235-239)", result.stdout)
+        for name in ALLOWLIST:
+            self.assertIn(name, result.stdout)
+        # No drift on the shipped state.
+        self.assertIn("OK: ALLOWLIST and case arms are in sync", result.stdout)
+        self.assertNotIn("DRIFT:", result.stdout)
+
+    # T16 (issue #714): --check-extensibility is documented in --help.
+    def test_help_documents_check_extensibility(self) -> None:
+        result = _run_in_worktree(self.wt, "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--check-extensibility", result.stdout)
+        # The "TO ADD A NEW PROVIDER" recipe block must be reachable
+        # from --help (issue #714 acceptance).
+        self.assertIn("TO ADD A NEW PROVIDER", result.stdout)
+        for needle in (
+            "ALLOWLIST",
+            "case arm",
+            ".github/workflows/review.yml",
+            ".env.example",
+        ):
+            self.assertIn(needle, result.stdout,
+                          f"recipe missing {needle!r}")
+
 
 if __name__ == "__main__":
     unittest.main()
