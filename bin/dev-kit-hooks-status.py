@@ -35,6 +35,43 @@ def codex_hooks_path(root: Path, manifest: Path) -> Path:
     return root / hooks_ref if isinstance(hooks_ref, str) and hooks_ref else root / ".codex-plugin" / "hooks" / "hooks.json"
 
 
+def _pr_gate_line(root: Path, timeout_s: float = 2.0) -> str:
+    """Run the read-only `bin/babysit-pr-local-status.py` SSOT and
+    return its single-line stdout. Empty string on any failure.
+
+    The script is fail-soft by contract (exits 0 unconditionally, emits
+    `?` glyphs when `gh` is unavailable), so we only need to bound its
+    runtime so the statusLine doesn't hang on a wedged `gh`.
+    """
+    script = root / "bin" / "babysit-pr-local-status.py"
+    if not script.is_file():
+        return ""
+    try:
+        proc = subprocess.run(
+            ["python3", str(script), str(root)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+            env={**__import__("os").environ, "BABYSIT_STATUS_NO_COLOR": "1"},
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return ""
+    # The script is single-line by contract; take the first non-empty
+    # line and strip ANSI in case the env var did not take.
+    out = proc.stdout or ""
+    for line in out.splitlines():
+        line = line.strip()
+        if line:
+            # Strip ANSI SGR escapes for environments that render the
+            # statusLine without color (e.g. some terminals, log files).
+            import re
+
+            return re.sub(r"\x1b\[[0-9;]*m", "", line)
+    return ""
+
+
 def status(root: Path) -> dict[str, object]:
     hooks_json = root / "hooks" / "hooks.json"
     claude_manifest = root / ".claude-plugin" / "plugin.json"
@@ -84,6 +121,7 @@ def status(root: Path) -> dict[str, object]:
             "pre_commit_active": pre_commit_active,
         },
         "active_hooks_matrix": (root / ".dev-kit" / ".active-hooks.json").is_file(),
+        "pr_gate": _pr_gate_line(root),
     }
 
 
