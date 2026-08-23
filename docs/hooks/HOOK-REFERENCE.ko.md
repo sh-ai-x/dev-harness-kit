@@ -95,7 +95,7 @@
 ## 타임아웃 정책
 
 UserPromptSubmit 훅(특히 `tdd-scope-judge.sh`와 `worktree-auto-cut.sh`)은
-`hooks.json`에 명시적 `timeout: 120`을 가진다. 30초 기본값은 이 훅들에
+`hooks.json`에 명시적 `timeout: 60`을 가진다. 30초 기본값은 이 훅들에
 불충분하다:
 
 - `worktree-auto-cut.sh`는 `git fetch origin main` + `git worktree add`를
