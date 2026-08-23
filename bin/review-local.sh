@@ -105,7 +105,14 @@ fi
 # shellcheck source=lib/review_local_lib.sh
 . "$REPO_ROOT/lib/review_local_lib.sh"
 
-die() { echo "error: $*" >&2; exit 1; }
+die() {
+  # Echo to stderr (gets merged into the SSE pipe's captured
+  # stdout via `claude -p 2>&1` in run_skill, OR directly into the
+  # script's stdout otherwise). Exit code 1 so the python
+  # maintenance_gate flags it as a parse failure.
+  echo "error: $*" >&2
+  exit 1
+}
 log() { echo "  $*"; }
 
 # format_audit <verdict> [<extra_key=val> ...]
@@ -446,7 +453,15 @@ run_skill() {
   # claude_env_args empty on purpose -- see §2/§3 above).
   local out
   out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p --plugin-dir "$PLUGIN_SRC" "$prompt" 2>&1)" \
-    || die "$skill: claude -p exited non-zero (review the output above)"
+    || {
+      # Echo the captured stdout/stderr BEFORE die() so the SSE
+      # viewer sees what `claude -p` actually said before the
+      # exit-status summary. Without this, every failure looks
+      # identical ("claude -p exited non-zero (review the output
+      # above)") and the operator has no signal to diagnose.
+      printf '%s\n' "$out"
+      die "$skill: claude -p exited non-zero"
+    }
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"
 }

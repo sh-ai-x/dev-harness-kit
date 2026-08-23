@@ -281,36 +281,57 @@
     currentSource.onerror = function () {
       // EventSource fires `error` on transient drops AND on the
       // terminal close after `done`. Only flag if we're still active.
+      //
       // The browser EventSource API does NOT surface HTTP errors
       // (e.g., 503 from the server's concurrency cap) -- it just
-      // silently retries. Detect the dead-lock by polling readyState.
-      if (currentSource && currentSource.readyState !== EventSource.CLOSED) {
-        appendOutput("[stream] reconnecting…", "muted");
-        var stuckSince = Date.now();
-        var stuckCheck = setInterval(function () {
-          if (!currentSource || currentSource.readyState === EventSource.CLOSED) {
-            clearInterval(stuckCheck);
-            return;
-          }
-          if (currentSource.readyState === EventSource.OPEN) {
-            clearInterval(stuckCheck);
-            return;
-          }
-          if (Date.now() - stuckSince > 5000) {
-            clearInterval(stuckCheck);
-            appendOutput(
-              "[error] stream stuck in CONNECTING > 5s. The server's 4-stream " +
-              "concurrency cap is likely full. Close other tabs or restart the server.",
-              "stderr"
-            );
-            setStatus("server rejected", "done-err");
-            try { currentSource.close(); } catch (_e) { /* ignore */ }
-            currentSource = null;
-            stopBtn.disabled = true;
-            startBtn.disabled = false;
-          }
-        }, 500);
+      // silently retries. Worse: after a server-side failure
+      // (claude -p exits non-zero, then the script emits a final
+      // line and exits), the browser auto-reconnects -> new stream
+      // -> same failure -> 4-stream cap deadlock.
+      //
+      // Fix: CLOSE the EventSource on the first error after we've
+      // received at least one stdout frame. The operator must
+      // click Start to retry. We do NOT close on transient errors
+      // that arrive BEFORE any stdout (genuine network drops at
+      // connect time -- those should retry).
+      if (!currentSource || currentSource.readyState === EventSource.CLOSED) return;
+      var sawAnyOutput = output && output.textContent && output.textContent.trim().length > 0;
+      if (sawAnyOutput) {
+        appendOutput("[stream] server closed the stream after a non-zero exit. Click Start to retry.", "stderr");
+        setStatus("failed", "done-err");
+        try { currentSource.close(); } catch (_e) { /* ignore */ }
+        currentSource = null;
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+        return;
       }
+      // No stdout yet -- might be stuck connecting. Detect a 5s+
+      // hang so we surface a clear error.
+      appendOutput("[stream] reconnecting…", "muted");
+      var stuckSince = Date.now();
+      var stuckCheck = setInterval(function () {
+        if (!currentSource || currentSource.readyState === EventSource.CLOSED) {
+          clearInterval(stuckCheck);
+          return;
+        }
+        if (currentSource.readyState === EventSource.OPEN) {
+          clearInterval(stuckCheck);
+          return;
+        }
+        if (Date.now() - stuckSince > 5000) {
+          clearInterval(stuckCheck);
+          appendOutput(
+            "[error] stream stuck in CONNECTING > 5s. The server's 4-stream " +
+            "concurrency cap is likely full. Close other tabs or restart the server.",
+            "stderr"
+          );
+          setStatus("server rejected", "done-err");
+          try { currentSource.close(); } catch (_e) { /* ignore */ }
+          currentSource = null;
+          stopBtn.disabled = true;
+          startBtn.disabled = false;
+        }
+      }, 500);
     };
 
     stopBtn.disabled = false;
