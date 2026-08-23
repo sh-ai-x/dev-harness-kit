@@ -709,6 +709,31 @@ in `lib/babysit_pr_reliability.py`. Pin tests live in
 
 A claim of "fixed" without the `local:` line violates MUST-L3 (evidence-before-done).
 
+## Visual status surface
+
+`bin/babysit-pr-local-status.py` (a sibling of this skill) prints one
+ANSI line summarizing the current branch's PR gate state from a single
+source. Wire it into three render points so the operator sees gate
+progress in real time, not only by tail-watching this skill's stdout:
+
+| Render point | How to enable |
+|---|---|
+| **Claude Code status bar** | Extend `bin/dev-kit-hooks-status.py`'s `status()` dict with a `pr_gate` key that shells out to the sibling script. The existing user-level `~/.claude/statusline-command.sh` (already wired at `~/.claude/settings.json`) can then pick up the third line via `jq -r '.pr_gate'`. |
+| **Codex TUI footer** | Paste into `~/.codex/config.toml`:<br>`[tui.status_line]`<br>`type = "command"`<br>`command = "/Users/sanghee/dev/dev-harness-kit/bin/babysit-pr-local-status.py"` |
+| **Babysitter tail** | Append one line of `python3 bin/babysit-pr-local-status.py` after the per-iteration `LOG` block above. The same line that the statusLine surfaces. |
+
+Example output:
+
+```
+PR#605 feat/foo │ review=✓ sec=✓ maint=✗ │ CI 3✓ 1✗ │ babysit iter=4
+```
+
+Glyphs: `✓` green (pass), `✗` red/yellow (fail/blocked/changes-requested),
+`·` yellow (pending), `?` dim (gh unavailable / parse error). The script
+exits 0 unconditionally — a broken status line is worse than no status
+line. See `skills/babysit-pr-local/SKILL.md` "Visual status surface"
+section for the full algorithm + audit-comment parser details.
+
 ---
 
 ## Hook alignment

@@ -20,9 +20,9 @@ Example (regenerate the screenshot shown in README.md)::
     python3 tools/token_efficiency_analyzer.py \
         --repo "dev-harness-kit" --days 30 \
         --logs-dir fixtures/logs \
-        --out token-dashboard-dev-harness-kit-30d.html
+        --out docs/observability/dashboard-dev-harness-kit-30d.html
     python3 tools/render_dashboard.py \
-        token-dashboard-dev-harness-kit-30d.html \
+        docs/observability/dashboard-dev-harness-kit-30d.html \
         docs/screenshots/token-dashboard-dev-harness-kit-30d.png
 """
 from __future__ import annotations

@@ -6,6 +6,10 @@
 #   2. test.sh     — pytest suite (skips if no tests/)
 #   3. act -l      — list discovered workflows (optional, WARN if missing)
 #
+# Also runs the CC ↔ Codex hook-manifest parity check (issue #715)
+# as a dedicated step so consumer repos catch drift on `hooks/hooks.json`
+# vs `.codex-plugin/hooks/hooks.json` before the full test suite.
+#
 # Exit non-zero on any failure. Idempotent.
 
 set -eo pipefail
@@ -31,6 +35,17 @@ echo "=== validate ==="
 if ! python3 scripts/validate.py; then
   echo "ci-local.sh: validate FAILED" >&2
   exit 1
+fi
+echo ""
+
+echo "=== hooks-json-parity (issue #715) ==="
+if [ -f tests/test_hooks_json_parity.py ]; then
+  if ! python3 -m pytest tests/test_hooks_json_parity.py -v --tb=short; then
+    echo "ci-local.sh: hooks-json-parity FAILED — CC vs Codex hook manifests drifted (issue #715)" >&2
+    exit 1
+  fi
+else
+  echo "ci-local.sh: tests/test_hooks_json_parity.py not present; skipping parity check."
 fi
 echo ""
 
