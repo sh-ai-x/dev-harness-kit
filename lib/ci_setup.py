@@ -386,6 +386,119 @@ def read_env_key(path: Path, key: str) -> str:
 _read_env_key = read_env_key
 
 
+def _read_ci_provider_via_gh() -> tuple[str, str]:
+    """Read `gh variable get CI_REVIEW_PROVIDER`. Returns `(value, degraded_msg)`.
+
+    `value` is the lowercased variable body, or `""` when the variable is
+    unset on the repo (gh exits non-zero with a "not found" stderr — that
+    is a valid "no CI value" state, not a degraded call).
+
+    `degraded_msg` is non-empty when the call is SKIP-worthy: gh absent
+    from PATH, gh not authenticated, subprocess errored, or the variable
+    query failed for any reason OTHER than "not found". The caller emits
+    SKIP in that case (consistent with `_check_gh_auth` / `_list_repo_secrets`
+    in `lib/ci_doctor.py` — ci-doctor prefers "honest can't verify" over a
+    false PASS/WARN when the tool to verify is unavailable).
+
+    Never raises; subprocess.SubprocessError / OSError / TimeoutExpired
+    are caught and surfaced as degraded messages.
+    """
+    gh = shutil.which("gh")
+    if not gh:
+        return "", "gh not on PATH"
+    try:
+        auth_cp = subprocess.run(
+            [gh, "auth", "status"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return "", f"gh auth error: {e}"
+    if auth_cp.returncode != 0:
+        return "", "gh not authenticated"
+    try:
+        cp = subprocess.run(
+            [gh, "variable", "get", "CI_REVIEW_PROVIDER"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return "", f"gh variable get error: {e}"
+    if cp.returncode != 0:
+        err = (cp.stderr or "").strip().lower()
+        # "Variable not found" / "no variable" / "none" means the repo
+        # has no CI_REVIEW_PROVIDER set — that's a valid (empty) value,
+        # not a degraded read. Anything else is a real failure.
+        if "not found" in err or "no variable" in err or "none" in err:
+            return "", ""
+        return "", (
+            f"gh variable get failed: "
+            f"{(cp.stderr or '').strip() or cp.returncode}"
+        )
+    return (cp.stdout or "").strip().lower(), ""
+
+
+def check_provider_consistency(target_dir: Path) -> tuple[str, str]:
+    """Compare local `.env:CI_REVIEW_PROVIDER` with `vars.CI_REVIEW_PROVIDER`.
+
+    The local value is read from `<target_dir>/.env` via `read_env_key()`
+    (same dotenv reader as `read_provider()`). The CI value is read via
+    `gh variable get CI_REVIEW_PROVIDER`; when `gh` is absent or not
+    authenticated, the check degrades to SKIP — same contract as the
+    existing ci-doctor checks (`_check_gh_auth`, `_list_repo_secrets`,
+    `_fetch_open_pr_state`): the audit prefers "honest can't verify" over
+    a false PASS/WARN.
+
+    Returns:
+        `(status, message)` tuple where `status ∈ {OK, WARN, SKIP, FAIL}`:
+          - OK   : both unset, or both set to the same value
+          - WARN : exactly one is set, or both set but differ. Message
+                   includes the diff AND the `gh variable set` remediation
+                   command (the same one `bin/set-provider.sh:234` prints
+                   as a "next steps" hint).
+          - SKIP : gh absent, unauthenticated, or `gh variable get`
+                   errored for a reason other than "not found".
+          - FAIL : reserved for future use (currently not emitted by this
+                   check). The `Check` dataclass in `lib/ci_doctor.py`
+                   accepts FAIL too, so a future FAIL row (e.g. `.env`
+                   unreadable for permission reasons) would not require a
+                   contract change.
+
+    The check is advisory only — it never flips ci-doctor's verdict. A
+    WARN row appears in `warnings: N` and on screen; SKIP rows are
+    counted in `skipped: N`. See issue #212-D1 for the verdict-neutral
+    contract.
+    """
+    target = Path(target_dir).resolve()
+    local_val = read_env_key(target / ".env", "CI_REVIEW_PROVIDER").strip().lower()
+    ci_val, degraded = _read_ci_provider_via_gh()
+    if degraded:
+        return "SKIP", degraded
+    if not local_val and not ci_val:
+        return "OK", "both .env:CI_REVIEW_PROVIDER and vars.CI_REVIEW_PROVIDER are unset"
+    if local_val and not ci_val:
+        return (
+            "WARN",
+            f"local .env=CI_REVIEW_PROVIDER={local_val} but "
+            f"vars.CI_REVIEW_PROVIDER is unset; sync with "
+            f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`",
+        )
+    if ci_val and not local_val:
+        return (
+            "WARN",
+            f"local .env:CI_REVIEW_PROVIDER is unset but "
+            f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with "
+            f"`gh variable set CI_REVIEW_PROVIDER --body {ci_val}` "
+            f"(or `bin/set-provider.sh {ci_val}` to update local)",
+        )
+    if local_val == ci_val:
+        return "OK", f"both {local_val}"
+    return (
+        "WARN",
+        f"local .env=CI_REVIEW_PROVIDER={local_val} but "
+        f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with "
+        f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`",
+    )
+
+
 def read_provider(target_dir: Path | None = None) -> str:
     """Resolve the CI review provider for `target_dir`.
 
