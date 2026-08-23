@@ -817,14 +817,6 @@ jobs:
           # provider switch instead of the misleading workflow-merge
           # message.
           #
-          # Backward-compat: when R_SOURCE / S_SOURCE is empty (older
-          # extract-verdict versions that did not emit a source label, or
-          # future call sites that forget to set it), default to the
-          # bootstrap arm so existing tests / workflows still behave
-          # like before this split. The new "no execution file" arm
-          # fires only when the source is explicitly set to a non-
-          # bootstrap value (default-approve-no-file, parse-failed-no-
-          # verdict, etc.).
           # Issue #726 fix: the gate used to hard-fail whenever EITHER job
           # reported agent_ran=false, even on the documented bootstrap-PR
           # case where the action's anti-recursion guard skipped the agent
@@ -861,9 +853,11 @@ jobs:
                 echo "  is not 'needs-fallback-bootstrap-pr' on both sides). Most"
                 echo "  often this is the issue #212-C1 install-broken signature:"
                 echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
-                echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY missing"
+                echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
                 echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
                 echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+                echo "    - provider=minimax occasionally drops the assistant stream"
+                echo "      (issue #625); consider setting CI_REVIEW_PROVIDER=anthropic"
                 echo
                 echo "  The gate does NOT default to Approve here -- that would mask"
                 echo "  install bugs. Fix the upstream failure and re-push."
