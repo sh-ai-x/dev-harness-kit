@@ -70,11 +70,14 @@ check_extensibility() {
   allowlist_line="$(grep -n '^ALLOWLIST=' "$script_path" | head -1 | cut -d: -f1)"
   case_start="$(grep -n '^case "\$NEW" in' "$script_path" | head -1 | cut -d: -f1)"
   case_end="$(grep -n '^esac' "$script_path" | tail -1 | cut -d: -f1)"
-  choices_line="$(grep -n 'workflow_dispatch.inputs.review_provider' "$review_yml" \
-                   || grep -n 'review_provider' "$review_yml" | head -1 \
-                   || true)"
-  choices_line="$(echo "$choices_line" | cut -d: -f1)"
-  env_key_line="$(grep -n 'CI_REVIEW_PROVIDER' "$env_example" | head -1 | cut -d: -f1)"
+  # Anchor on the editable `options:` block (line 59 in review.yml). The
+  # previous two-step grep fell back to a prose comment when the literal
+  # `'workflow_dispatch.inputs.review_provider'` had no match, leaving an
+  # operator stranded on `review.yml:28`. Anchor on the line shape itself.
+  choices_line="$(grep -n '^[[:space:]]*options:' "$review_yml" | head -1 | cut -d: -f1)"
+  # Anchor on the assignment line (`CI_REVIEW_PROVIDER=minimax`), not the
+  # prose comment at `.env.example:25`. Same rationale as choices_line.
+  env_key_line="$(grep -n '^CI_REVIEW_PROVIDER=' "$env_example" | head -1 | cut -d: -f1)"
 
   echo "Extensibility checklist for adding a new provider"
   echo "================================================="

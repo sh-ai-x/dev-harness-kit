@@ -97,6 +97,56 @@ class ExtensibilityContract(unittest.TestCase):
                 self.assertIn(needle, result.stdout,
                               f"--check-extensibility missing {needle!r}")
 
+    # T3b: the line numbers printed by --check-extensibility must point at
+    # the editable anchor in each file, not a comment that mentions the
+    # same keyword. Regression net for the choices_line / env_key_line
+    # grep fall-back that landed operators on prose.
+    def test_check_extensibility_line_numbers_hit_editable_anchors(self) -> None:
+        result = _run("--check-extensibility")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        def _line(path: str, step_marker: str) -> int:
+            # Checklist rows look like:
+            #   "  3. .github/workflows/review.yml:59      # workflow_dispatch.inputs.review_provider.options  — extend the choice list."
+            # Match by step marker (" 3. " / " 4. ") to avoid comment
+            # text matching the same path/keyword.
+            for ln in result.stdout.splitlines():
+                if not ln.lstrip().startswith(step_marker):
+                    continue
+                if path not in ln:
+                    continue
+                after = ln.split(f"{path}:", 1)[1]
+                digits = ""
+                for ch in after:
+                    if ch.isdigit():
+                        digits += ch
+                    else:
+                        break
+                self.assertTrue(
+                    digits, f"could not parse line number from {ln!r}",
+                )
+                return int(digits)
+            self.fail(
+                f"checklist step {step_marker!r} for {path!r} not found in stdout"
+            )
+
+        review_line = _line(".github/workflows/review.yml", "3.")
+        env_line = _line(".env.example", "4.")
+
+        review_text = (REPO_ROOT / ".github" / "workflows" / "review.yml").read_text()
+        env_text = ENV_EXAMPLE.read_text()
+        review_row = review_text.splitlines()[review_line - 1]
+        env_row = env_text.splitlines()[env_line - 1]
+
+        self.assertRegex(
+            review_row, r"^\s*options:",
+            f"review.yml:{review_line} must be the options: block, got: {review_row!r}",
+        )
+        self.assertRegex(
+            env_row, r"^CI_REVIEW_PROVIDER=",
+            f".env.example:{env_line} must be the CI_REVIEW_PROVIDER= assignment, got: {env_row!r}",
+        )
+
     # T4: the checklist reflects the live allowlist, not stale text.
     def test_check_extensibility_refs_live_allowlist(self) -> None:
         result = _run("--check-extensibility")
