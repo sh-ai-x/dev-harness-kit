@@ -239,38 +239,79 @@
       setStatus("incompatible", "done-err");
       return;
     }
-    currentSource.addEventListener("ready", function (e) {
-      setStatus("running", "running");
-    });
-    currentSource.addEventListener("meta", function (e) {
+    // Single onmessage dispatcher. The server emits only `data:` lines
+    // (no `event:` field), so named `addEventListener("ready", ...)`
+    // never fires -- every SSE frame arrives on the generic
+    // `onmessage` channel. Dispatch on the JSON payload's `event`
+    // field instead.
+    currentSource.onmessage = function (e) {
       var data;
       try { data = JSON.parse(e.data); } catch (_err) { return; }
-      metaEl.textContent = "PR #" + data.pr + " · " + (data.title || "(no title)");
-    });
-    currentSource.addEventListener("stdout", function (e) {
-      var data;
-      try { data = JSON.parse(e.data); } catch (_err) { return; }
-      var cls = applyLineEvents(data.line);
-      appendOutput(data.line, cls);
-    });
-    currentSource.addEventListener("error", function (e) {
+      if (!data || typeof data !== "object") return;
+      switch (data.event) {
+        case "ready":
+          setStatus("running", "running");
+          break;
+        case "meta":
+          metaEl.textContent = "PR #" + data.pr + " · " + (data.title || "(no title)");
+          break;
+        case "stdout": {
+          var cls = applyLineEvents(data.line);
+          appendOutput(data.line, cls);
+          break;
+        }
+        case "done": {
+          appendOutput("[stream] subprocess exited rc=" + data.exit_code + (data.reason ? " (" + data.reason + ")" : ""), "muted");
+          var label = data.exit_code === 0 ? "Approve (rc=0)" : ("rc=" + data.exit_code);
+          setStatus(label, data.exit_code === 0 ? "done-ok" : "done-err");
+          stopBtn.disabled = true;
+          startBtn.disabled = false;
+          try { currentSource.close(); } catch (_e) { /* ignore */ }
+          currentSource = null;
+          break;
+        }
+        case "error":
+          appendOutput("[error] " + (data.message || "unknown"), "stderr");
+          break;
+        default:
+          // Unknown event type -- ignore.
+          break;
+      }
+    };
+    currentSource.onerror = function () {
       // EventSource fires `error` on transient drops AND on the
       // terminal close after `done`. Only flag if we're still active.
+      // The browser EventSource API does NOT surface HTTP errors
+      // (e.g., 503 from the server's concurrency cap) -- it just
+      // silently retries. Detect the dead-lock by polling readyState.
       if (currentSource && currentSource.readyState !== EventSource.CLOSED) {
         appendOutput("[stream] reconnecting…", "muted");
+        var stuckSince = Date.now();
+        var stuckCheck = setInterval(function () {
+          if (!currentSource || currentSource.readyState === EventSource.CLOSED) {
+            clearInterval(stuckCheck);
+            return;
+          }
+          if (currentSource.readyState === EventSource.OPEN) {
+            clearInterval(stuckCheck);
+            return;
+          }
+          if (Date.now() - stuckSince > 5000) {
+            clearInterval(stuckCheck);
+            appendOutput(
+              "[error] stream stuck in CONNECTING > 5s. The server's 4-stream " +
+              "concurrency cap is likely full. Close other tabs or restart the server.",
+              "stderr"
+            );
+            setStatus("server rejected", "done-err");
+            try { currentSource.close(); } catch (_e) { /* ignore */ }
+            currentSource = null;
+            stopBtn.disabled = true;
+            startBtn.disabled = false;
+          }
+        }, 500);
       }
-    });
-    currentSource.addEventListener("done", function (e) {
-      var data;
-      try { data = JSON.parse(e.data); } catch (_err) { return; }
-      appendOutput("[stream] subprocess exited rc=" + data.exit_code, "muted");
-      setStatus(data.exit_code === 0 ? "Approve (rc=0)" : "rc=" + data.exit_code,
-                data.exit_code === 0 ? "done-ok" : "done-err");
-      stopBtn.disabled = true;
-      startBtn.disabled = false;
-      try { currentSource.close(); } catch (_e) { /* ignore */ }
-      currentSource = null;
-    });
+    };
 
     stopBtn.disabled = false;
     startBtn.disabled = true;
