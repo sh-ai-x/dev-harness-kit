@@ -360,7 +360,26 @@ class _Handler(BaseHTTPRequestHandler):
             import selectors
             sel = selectors.DefaultSelector()
             sel.register(proc.stdout, selectors.EVENT_READ)
+            # Also watch the CLIENT socket so a tab-close / browser
+            # navigation unblocks the loop. Without this, an idle
+            # subprocess (claude -p blocked, no stdout) holds the
+            # stream slot until the 10-minute cap -- the operator
+            # closes the tab and the slot stays reserved, eventually
+            # dead-locking the 4-stream cap with phantom connections.
+            try:
+                # `self.connection` is the raw client socket (set by
+                # BaseHTTPRequestHandler.setup() before do_GET runs).
+                # Wrapping in a fileno + EVENT_READ lets select()
+                # wake on hangup (Linux returns EVENT_READ + empty
+                # read; macOS returns EVENT_READ on EOF too).
+                sel.register(self.connection, selectors.EVENT_READ)
+            except (OSError, ValueError, AttributeError):
+                # Some test harnesses don't set self.connection
+                # (e.g., BaseHTTPRequestHandler invoked directly).
+                # Fall back to timeout-only behavior.
+                pass
             timed_out = False
+            client_gone = False
             # Wall-clock cap (review finding m1 on PR #731). Without
             # this, a hung subprocess holds the stream slot forever.
             # select() lets us multiplex the stdout read with a
@@ -377,13 +396,42 @@ class _Handler(BaseHTTPRequestHandler):
                     # select timed out without any data; loop top
                     # rechecks elapsed and breaks.
                     continue
-                line = proc.stdout.readline()
-                if not line:
-                    # EOF -- subprocess closed its stdout.
+                for key, _mask in events:
+                    if key.fileobj is proc.stdout:
+                        line = proc.stdout.readline()
+                        if not line:
+                            # EOF -- subprocess closed its stdout.
+                            timed_out = False
+                            client_gone = False
+                            sel.unregister(proc.stdout)
+                            break
+                        # Strip trailing newline; SSE will re-add framing.
+                        try:
+                            self._write_sse({"event": "stdout", "line": line.rstrip("\n")})
+                        except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+                            # Client socket died mid-write -- stop
+                            # reading from the subprocess so we can
+                            # clean up.
+                            client_gone = True
+                            break
+                    elif key.fileobj is self.connection:
+                        # Client socket readable = either new data or
+                        # hangup. We don't expect inbound data, so any
+                        # readable event here means the socket is
+                        # closing. Verify with a non-blocking recv.
+                        try:
+                            data = self.connection.recv(1)
+                        except (BlockingIOError, OSError):
+                            continue
+                        if not data:
+                            # EOF -- operator closed the tab.
+                            client_gone = True
+                            break
+                if client_gone or timed_out:
                     break
-                # Strip trailing newline; SSE will re-add framing.
-                payload = {"event": "stdout", "line": line.rstrip("\n")}
-                self._write_sse(payload)
+                # If we consumed the proc.stdout EOF above, exit cleanly.
+                if not sel.get_key(proc.stdout):
+                    break
 
             if timed_out:
                 # Kill the hung subprocess; emit the timeout marker.
@@ -392,10 +440,25 @@ class _Handler(BaseHTTPRequestHandler):
                     proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     pass
-                self._write_sse({"event": "done", "exit_code": -9, "reason": "timeout"})
+                try:
+                    self._write_sse({"event": "done", "exit_code": -9, "reason": "timeout"})
+                except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+                    pass
+            elif client_gone:
+                # Operator closed the tab / browser navigated away.
+                # Kill the subprocess so we don't leak orphans
+                # (review finding M1).
+                proc.kill()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
             else:
                 exit_code = proc.wait()
-                self._write_sse({"event": "done", "exit_code": exit_code})
+                try:
+                    self._write_sse({"event": "done", "exit_code": exit_code})
+                except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+                    pass
         except (BrokenPipeError, ConnectionResetError):
             # Operator closed the tab mid-stream; kill the subprocess so
             # we don't leak orphans.
