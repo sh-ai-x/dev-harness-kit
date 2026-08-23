@@ -154,7 +154,7 @@ every transition.
 ## Timeout policy
 
 UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
-`worktree-auto-cut.sh`) carry an explicit `timeout: 120` in
+`worktree-auto-cut.sh`) carry an explicit `timeout: 60` in
 `hooks.json`. The 30s default is insufficient for these because:
 
 - `worktree-auto-cut.sh` runs `git fetch origin main` + `git worktree add`,
@@ -172,7 +172,7 @@ UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
 Both hooks are advisory (exit 0 on failure per the script-level
 contract), so a timeout silently discards the nudge rather than
 breaking correctness — but the user loses the suggestion.
-120s is well above the typical case (<10s) and well below the
+60s is well above the typical case (<10s) and well below the
 600s default hook ceiling. Other hook groups (PreToolUse,
 SessionStart, PostToolUse, Stop) inherit the 30s default; none
 currently run heavy paths so defaults are fine.
