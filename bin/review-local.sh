@@ -191,6 +191,33 @@ if [ -n "$PROVIDER_FLAG" ]; then
 elif [ -n "${CI_REVIEW_PROVIDER:-}" ]; then
   PROVIDER="$CI_REVIEW_PROVIDER"
   PROVIDER_EXPLICIT=1
+elif [ -n "${MINIMAX_API_KEY:-}" ]; then
+  # Infer from the operator's shell env: a process-level
+  # MINIMAX_API_KEY export means the operator is already using
+  # the minimax provider (typically set by `bin/set-provider.sh
+  # minimax` in their interactive shell). Treat it as an explicit
+  # ask so the ANTHROPIC_BASE_URL / MODEL injection runs.
+  PROVIDER=minimax
+  PROVIDER_EXPLICIT=1
+elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  PROVIDER=deepseek
+  PROVIDER_EXPLICIT=1
+elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+  # Third-party providers (minimax, deepseek, etc.) configure via
+  # ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN rather than
+  # <PROVIDER>_API_KEY. Detect the provider from the host part of
+  # the base URL. The mapping matches the case arms in §3 below.
+  case "${ANTHROPIC_BASE_URL}" in
+    *minimax*)  PROVIDER=minimax  ;;
+    *deepseek*) PROVIDER=deepseek ;;
+    *) PROVIDER=anthropic ;;  # base URL with no third-party host
+  esac
+  PROVIDER_EXPLICIT=1
+elif [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "${ANTHROPIC_API_KEY#sk-ant-}" != "$ANTHROPIC_API_KEY" ]; then
+  # sk-ant- prefix = direct anthropic API key, not a third-party
+  # auth token. Operator has direct anthropic creds.
+  PROVIDER=anthropic
+  PROVIDER_EXPLICIT=1
 else
   PROVIDER="$(python3 -c "
 import sys
@@ -222,16 +249,28 @@ esac
 # (DEV_KIT_GITHUB_TOKEN, <PROVIDER>_API_KEY); we want the second one.
 read_provider_api_key() {
   python3 -c "
-import sys
+import sys, os
 from pathlib import Path
 sys.path.insert(0, 'lib')
 from ci_setup import read_env_key, required_secrets_for_provider
 provider = '${PROVIDER}'
 target = Path('${REPO_ROOT}')
-for name in required_secrets_for_provider(provider):
+# Operator shells often export ANTHROPIC_AUTH_TOKEN (the Anthropic-
+# SDK-shaped name) instead of the per-provider MINIMAX_API_KEY
+# (the .env-template shape). Accept either so the local viewer
+# works without re-running bin/set-provider.sh in the operator's
+# interactive shell. The ANTHROPIC_AUTH_TOKEN form is what
+# bin/set-provider.sh minimax exports for interactive Claude Code
+# sessions (mirrors the upstream Anthropic SDK env-var names).
+extra_fallbacks = {
+    'minimax':   ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'],
+    'deepseek':  ['ANTHROPIC_AUTH_TOKEN'],
+    'anthropic': [],
+}.get(provider, [])
+for name in list(required_secrets_for_provider(provider)) + extra_fallbacks:
     if name == 'DEV_KIT_GITHUB_TOKEN':
         continue
-    v = read_env_key(target / '.env', name)
+    v = read_env_key(target / '.env', name) or os.environ.get(name) or ''
     if v:
         print(v)
         sys.exit(0)
