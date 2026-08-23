@@ -57,25 +57,14 @@ is_allowed() {
 
 # Read CI_REVIEW_PROVIDER from .env (last occurrence wins; comments and
 # blanks ignored). Echoes the value, or empty string when unset.
-# Strips surrounding single/double quotes from the value to match
-# `lib/ci_setup._read_env_key()` so the two sides agree on quoted inputs.
+# Delegates to `lib/read_env_key.read_env_key` (issue #711) so the bash
+# and Python sides cannot drift on quoting / `export` prefix / CRLF
+# edge cases. The helper's full rules are pinned by
+# tests/test_read_env_key.py; the previous in-bash parser was deleted.
 read_provider_from_env_file() {
-  local f="$1" line key val last=""
+  local f="$1"
   [ -f "$f" ] || return 0
-  while IFS= read -r line; do
-    case "$line" in
-      "#"*|"") continue ;;
-    esac
-    key="${line%%=*}"
-    val="${line#*=}"
-    if [ "$key" = "$PROVIDER_KEY" ]; then
-      last="${val%\"}"
-      last="${last#\"}"
-      last="${last%\'}"
-      last="${last#\'}"
-    fi
-  done < "$f"
-  printf '%s' "$last"
+  python3 -c "from lib.read_env_key import read_env_key; from pathlib import Path; import sys; print(read_env_key(Path(sys.argv[1]), sys.argv[2]), end='')" "$f" "$PROVIDER_KEY"
 }
 
 # Echo the current effective provider: process env → .env → .env.example

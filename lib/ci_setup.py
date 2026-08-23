@@ -50,6 +50,14 @@ try:
 except ImportError:
     from atomic import atomic_write_json, read_json_or_default  # type: ignore
 
+# Single-source-of-truth dotenv parser (issue #711). Dual-import mirrors
+# the `atomic` shim above so the consumer-side install (no
+# `lib/__init__.py` shipped) keeps working.
+try:
+    from .read_env_key import read_env_key as _read_env_key_helper  # type: ignore
+except ImportError:
+    from read_env_key import read_env_key as _read_env_key_helper  # type: ignore
+
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _TEMPLATES_ROOT = _PLUGIN_ROOT / "templates" / "ci"
@@ -358,24 +366,18 @@ def gh_secret_set_command(repo: str, secret_name: str) -> str:
 def read_env_key(path: Path, key: str) -> str:
     """Return the last `KEY=...` value from a dotenv-style file.
 
-    Skips blank lines and `#` comments. Does NOT handle multi-line values
-    or `export KEY=` prefixes — neither is produced by `bin/set-provider.sh`.
-    Surrounding single or double quotes are stripped. OSError (missing /
-    unreadable) returns empty.
+    Thin wrapper around `lib.read_env_key.read_env_key` so the bash
+    (`bin/set-provider.sh`) and Python (`lib/ci_setup.read_provider`)
+    sides share a single parser (issue #711) and cannot drift on
+    quoting / `export` prefix / CRLF edge cases. Behavior matches the
+    pre-refactor in-line implementation for every previously-pinned
+    test case (see `tests/test_read_env_key.py`); the helper itself
+    additionally handles `export KEY=...` and CRLF line endings that
+    the previous parser silently dropped.
+
+    See `lib/read_env_key.py` for the full rules.
     """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    out = ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        if k.strip() == key:
-            out = v.strip().strip('"').strip("'")
-    return out
+    return _read_env_key_helper(path, key)
 
 
 # Private back-compat alias — same function object. New callers should
