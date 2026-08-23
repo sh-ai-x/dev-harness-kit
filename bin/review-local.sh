@@ -91,6 +91,17 @@ fi
 [ -n "$REPO_ROOT" ] || { echo "error: not in a git repo" >&2; exit 1; }
 cd "$REPO_ROOT"
 
+# Resolve the dev-kit plugin root once at startup. The spawned
+# `claude -p` must load the plugin via `--plugin-dir` so that
+# /dev-kit:* slash commands resolve; without the flag the spawned
+# CLI exits immediately with "Unknown command" and the verdict
+# pipeline synthesizes a lenient-default Approve (false positive).
+# Mirror of bin/ci-claude-p.sh:142-148.
+PLUGIN_SRC="$REPO_ROOT"
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json"
+fi
+
 # shellcheck source=lib/review_local_lib.sh
 . "$REPO_ROOT/lib/review_local_lib.sh"
 
@@ -380,7 +391,7 @@ run_skill() {
   local prompt="$2"
   log "running /$skill via provider=$PROVIDER (dry_run=$DRY_RUN)"
   if [ "$DRY_RUN" = "1" ]; then
-    log "would run: env <$PROVIDER env+key> claude -p \"$prompt\""
+    log "would run: env <$PROVIDER env+key> claude -p --plugin-dir \"$PLUGIN_SRC\" \"<prompt>\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -395,7 +406,7 @@ run_skill() {
   # exactly the local-auth-fallback case (USE_LOCAL_AUTH=1 leaves
   # claude_env_args empty on purpose -- see §2/§3 above).
   local out
-  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p "$prompt" 2>&1)" \
+  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p --plugin-dir "$PLUGIN_SRC" "$prompt" 2>&1)" \
     || die "$skill: claude -p exited non-zero (review the output above)"
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"

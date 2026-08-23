@@ -133,6 +133,31 @@ class TestReviewLocalShell(unittest.TestCase):
         self.assertNotIn("gh ", r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_plugin_dir_passed_to_spawned_claude(self) -> None:
+        """Regression: bin/review-local.sh must pass --plugin-dir to
+        every spawned `claude -p` so /dev-kit:* slash commands resolve.
+        Without it, every judge exits in <1s with "Unknown command"
+        and the wrapper silently defaults verdicts to Approve.
+
+        This was originally issue #727 (closed PR #728), then
+        re-surfaced as the "HTML viewer shows nothing useful" bug
+        during PR #731's 2026-08-23 babysit -- the SSE pipe was
+        alive but every line was `Unknown command: /dev-kit:*`.
+        """
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'claude -p --plugin-dir "$PLUGIN_SRC" "$prompt"',
+            src,
+            "review-local.sh must call `claude -p --plugin-dir \"$PLUGIN_SRC\" \"$prompt\"`",
+        )
+        self.assertNotIn(
+            'claude -p "$prompt" 2>&1',
+            src,
+            "review-local.sh still contains a bare `claude -p \"$prompt\" 2>&1` site",
+        )
+        self.assertIn('PLUGIN_SRC="$REPO_ROOT"', src)
+        self.assertIn(".claude-plugin/plugin.json", src)
+
 
 # ---------------------------------------------------------------------------
 # Stub-binary behavioural coverage.
