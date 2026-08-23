@@ -315,6 +315,121 @@ class TestOnOffRoundTrip(unittest.TestCase):
             self.assertEqual(len(cmds), len(set(cmds)),
                              f"duplicate hook commands in event {event}: {cmds}")
 
+    def test_on_byte_level_idempotent_on_rerun(self):
+        """Issue #708: log-on must be byte-stable on re-runs.
+
+        Without the canonical-form skip-when-equal check, every
+        SessionStart re-rewrites the file (possibly with a different
+        entry order), dirtying the working tree and blocking pulls.
+        """
+        import hashlib
+
+        def file_hash(p: Path) -> str:
+            return hashlib.sha256(p.read_bytes()).hexdigest()
+
+        # First run installs managed entries.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"first on failed: {r.stderr}")
+
+        claude = self.tgt / ".claude" / "settings.json"
+        codex = self.tgt / ".codex" / "hooks.json"
+        h_claude_1 = file_hash(claude)
+        h_codex_1 = file_hash(codex)
+
+        # Second run must be a no-op at the byte level.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"second on failed: {r.stderr}")
+        self.assertEqual(file_hash(claude), h_claude_1,
+                         "log-on re-run rewrote .claude/settings.json (issue #708)")
+        self.assertEqual(file_hash(codex), h_codex_1,
+                         "log-on re-run rewrote .codex/hooks.json (issue #708)")
+
+        # Third run for good measure.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"third on failed: {r.stderr}")
+        self.assertEqual(file_hash(claude), h_claude_1,
+                         "log-on 3rd run rewrote .claude/settings.json")
+        self.assertEqual(file_hash(codex), h_codex_1,
+                         "log-on 3rd run rewrote .codex/hooks.json")
+
+    def test_on_recovers_when_user_removes_managed_entry(self):
+        """If a user (or another tool) strips a managed entry, the next
+        log-on must re-add it; after that, subsequent runs are no-ops."""
+        import hashlib
+
+        def file_hash(p: Path) -> str:
+            return hashlib.sha256(p.read_bytes()).hexdigest()
+
+        # Install managed entries.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"first on failed: {r.stderr}")
+
+        claude = self.tgt / ".claude" / "settings.json"
+        # Sanity: 2 managed entries installed.
+        self.assertGreaterEqual(self._managed_count(claude), 2)
+
+        # Simulate user/tampering: strip the first managed entry.
+        data = json.loads(claude.read_text())
+        for ev, entries in list((data.get("hooks") or {}).items()):
+            keep = [e for e in entries if not e.get(SENTINEL)]
+            data["hooks"][ev] = keep
+            break
+        claude.write_text(json.dumps(data))
+
+        # Next run must re-add the missing entry AND stabilize afterwards.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"recovery on failed: {r.stderr}")
+        self.assertGreaterEqual(self._managed_count(claude), 2,
+                                "managed entry was not re-added on recovery run")
+        h_recovered = file_hash(claude)
+
+        # Subsequent run is a byte-stable no-op.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"stability run failed: {r.stderr}")
+        self.assertEqual(file_hash(claude), h_recovered,
+                         "log-on re-run after recovery did not stabilize (issue #708)")
+
+    def test_on_preserves_user_added_hook_across_reruns(self):
+        """A user-added hook (no _loghooks_managed tag) must survive
+        log-on re-runs. The first run may normalize the file (which
+        is fine — it's a one-time upgrade), but the second and later
+        runs must be byte-stable."""
+        import hashlib
+
+        def file_hash(p: Path) -> str:
+            return hashlib.sha256(p.read_bytes()).hexdigest()
+
+        # First run installs managed entries alongside the baseline
+        # UserPromptSubmit user-authored hook.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"first on failed: {r.stderr}")
+
+        claude = self.tgt / ".claude" / "settings.json"
+        # User-authored hook must still be present.
+        ups = self._user_event_signatures(claude, "UserPromptSubmit")
+        self.assertIn(('echo user-authored',), ups,
+                      "user-authored UserPromptSubmit hook was lost on first on")
+
+        h_after_first = file_hash(claude)
+
+        # Subsequent runs are no-ops.
+        for i in range(2):
+            r = _run("log-on.sh", "--target", str(self.tgt),
+                     env_extra={"LOGHOOKS_DIR": str(self.src)})
+            self.assertEqual(r.returncode, 0, f"rerun {i} failed: {r.stderr}")
+            self.assertEqual(file_hash(claude), h_after_first,
+                             f"rerun {i+1} rewrote .claude/settings.json (issue #708)")
+            ups = self._user_event_signatures(claude, "UserPromptSubmit")
+            self.assertIn(('echo user-authored',), ups,
+                          f"user-authored UserPromptSubmit hook lost on rerun {i+1}")
+
     def test_on_refuses_when_setup_missing(self):
         # fresh target, no setup
         fresh_tmp = Path(tempfile.mkdtemp(prefix="log-test-fresh-"))

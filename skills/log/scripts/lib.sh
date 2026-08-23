@@ -164,7 +164,11 @@ merge_loghooks_into() {
         return 6
     fi
 
-    printf '%s' "$current" | jq \
+    # Build the merge result but do NOT write yet — the byte-level
+    # idempotence check below compares canonical forms and skips the
+    # write when the file already matches (issue #708).
+    local merged
+    merged="$(printf '%s' "$current" | jq \
         --slurpfile src "$src" \
         --arg sentinel "$LOGHOOKS_SENTINEL" '
         .hooks = (.hooks // {})
@@ -189,7 +193,25 @@ merge_loghooks_into() {
                 )
             )
           )
-        ' | write_json_atomic "$target"
+        ')"
+
+    # Byte-level idempotence: if the canonical form of the merge result
+    # equals the canonical form of the existing file, skip the write.
+    # Without this, every SessionStart re-rewrites the file with a
+    # (possibly) different entry order, dirtying the working tree and
+    # blocking `git pull`. Canonical (`jq -S .`) comparison is robust
+    # to key-order drift in either the existing file or the merge
+    # output — only semantically meaningful changes trigger a write.
+    if [[ -f "$target" ]]; then
+        local existing_canonical merged_canonical
+        existing_canonical="$(jq -S . "$target" 2>/dev/null || true)"
+        merged_canonical="$(printf '%s' "$merged" | jq -S . 2>/dev/null || true)"
+        if [[ "$existing_canonical" == "$merged_canonical" ]]; then
+            return 0
+        fi
+    fi
+
+    printf '%s' "$merged" | write_json_atomic "$target"
 }
 
 # Remove all hook entries marked _loghooks_managed from a settings.json.
