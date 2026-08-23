@@ -133,6 +133,42 @@ class TestReviewLocalShell(unittest.TestCase):
         self.assertNotIn("gh ", r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_plugin_dir_passed_to_spawned_claude(self) -> None:
+        """Regression for issue #727: bin/review-local.sh must pass
+        --plugin-dir to the spawned `claude -p` so /dev-kit:* slash
+        commands resolve. Without it, every judge exits in <1s with
+        "Unknown command" and the wrapper silently defaults verdicts
+        to Approve (a false positive).
+
+        We can't shell out to a real `claude` here (CI is hermetic),
+        so this is a source-text contract test: grep the script for
+        the exact arglist pattern that must accompany every
+        `claude -p` invocation. The pattern allows arbitrary
+        whitespace + env-var expansion prefix but requires
+        `--plugin-dir "$PLUGIN_SRC"` before the prompt argument.
+        """
+        src = SCRIPT.read_text(encoding="utf-8")
+        # The exact call site must use --plugin-dir. Substring match
+        # is sufficient — bash source-text greppability beats regex
+        # for hermetic source contracts.
+        self.assertIn(
+            'claude -p --plugin-dir "$PLUGIN_SRC" "$prompt"',
+            src,
+            "review-local.sh must call `claude -p --plugin-dir \"$PLUGIN_SRC\" \"$prompt\"` "
+            "so /dev-kit:* slash commands resolve (issue #727).",
+        )
+        # The negative site must NOT still exist (a stale copy from
+        # before the fix would re-introduce the bug).
+        self.assertNotIn(
+            'claude -p "$prompt" 2>&1',
+            src,
+            "review-local.sh still contains a bare `claude -p \"$prompt\" 2>&1` site "
+            "(no --plugin-dir). This is the bug fixed by issue #727.",
+        )
+        # PLUGIN_SRC must be derived from REPO_ROOT and validated.
+        self.assertIn('PLUGIN_SRC="$REPO_ROOT"', src)
+        self.assertIn(".claude-plugin/plugin.json", src)
+
 
 # ---------------------------------------------------------------------------
 # Stub-binary behavioural coverage.

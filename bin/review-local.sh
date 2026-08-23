@@ -97,6 +97,22 @@ cd "$REPO_ROOT"
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "  $*"; }
 
+# Resolve the dev-kit plugin root once at startup. The spawned `claude -p`
+# must load the plugin via `--plugin-dir` so that `/dev-kit:review`,
+# `/dev-kit:security`, `/dev-kit:maintenance` slash commands resolve.
+# Without this flag the spawned process exits immediately with
+# "Unknown command: /dev-kit:*" (the slash command is registered by
+# the plugin's `.claude-plugin/plugin.json`, not by the bare CLI).
+# Mirror of bin/ci-claude-p.sh:142-148 (the GH-Actions sibling, which
+# symlinks the plugin into ~/.claude/plugins/marketplaces/dev-kit
+# before the claude-code-action runs -- local mode just points the
+# spawned CLI at the plugin source directly).
+PLUGIN_SRC="$REPO_ROOT"
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json"
+fi
+log "plugin-dir resolved: $PLUGIN_SRC"
+
 # format_audit <verdict> [<extra_key=val> ...]
 # Build the human-friendly + machine-parseable audit comment body via
 # lib.maintenance_gate --format-audit. Mirrors the emitter in
@@ -380,7 +396,7 @@ run_skill() {
   local prompt="$2"
   log "running /$skill via provider=$PROVIDER (dry_run=$DRY_RUN)"
   if [ "$DRY_RUN" = "1" ]; then
-    log "would run: env <$PROVIDER env+key> claude -p \"$prompt\""
+    log "would run: env <$PROVIDER env+key> claude -p --plugin-dir \"$PLUGIN_SRC\" \"<prompt>\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -395,7 +411,7 @@ run_skill() {
   # exactly the local-auth-fallback case (USE_LOCAL_AUTH=1 leaves
   # claude_env_args empty on purpose -- see §2/§3 above).
   local out
-  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p "$prompt" 2>&1)" \
+  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p --plugin-dir "$PLUGIN_SRC" "$prompt" 2>&1)" \
     || die "$skill: claude -p exited non-zero (review the output above)"
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"
