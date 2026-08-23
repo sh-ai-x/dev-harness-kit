@@ -463,6 +463,89 @@ class TestOnOffRoundTrip(unittest.TestCase):
             self.assertIn(('echo user-authored',), ups,
                           f"user-authored UserPromptSubmit hook lost on rerun {i+1}")
 
+    def test_on_preserves_existing_entry_order_within_event(self):
+        """Regression (issue #708 follow-up): when an existing event array
+        already contains a managed entry in a non-canonical POSITION
+        (i.e. not where the source would append it), log-on must NOT
+        move it. Without this guarantee, every SessionStart that runs
+        against a project whose committed .claude/settings.json has the
+        loghooks entry at index 0 (the older committed order) would
+        rewrite the file at index 1 (the merge output order), dirtying
+        the working tree and blocking `git pull`.
+
+        Compared to test_on_byte_level_idempotent_on_rerun — which
+        explicitly avoids reversing entry order — this test reverses
+        the order and asserts the merge is byte-stable.
+        """
+        # Install managed entries (produces canonical merge order).
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"first on failed: {r.stderr}")
+
+        claude = self.tgt / ".claude" / "settings.json"
+        codex = self.tgt / ".codex" / "hooks.json"
+
+        # Reverse the entry order within SessionEnd + Stop for BOTH
+        # files: put the user-authored entry at the end (loghooks
+        # entry at the front, like the older .claude/settings.json
+        # committed in origin/main). The reversal is the byte form
+        # we are committing to in this test.
+        for path in (claude, codex):
+            data = json.loads(path.read_text())
+            for event, entries in (data.get("hooks") or {}).items():
+                if event not in ("SessionEnd", "Stop"):
+                    continue
+                managed_idx = next(
+                    (i for i, e in enumerate(entries) if e.get(SENTINEL)),
+                    None,
+                )
+                if managed_idx is None or managed_idx == 0:
+                    continue
+                # Swap so the managed entry moves to index 0.
+                entries[0], entries[managed_idx] = entries[managed_idx], entries[0]
+            path.write_text(json.dumps(data, indent=2, sort_keys=True))
+
+        h_claude_reversed = self._file_hash(claude)
+        h_codex_reversed = self._file_hash(codex)
+
+        # Now run log-on again. With the in-place-replace merge logic,
+        # the existing managed entry at index 0 must be replaced in
+        # place (sentinel carried forward, position preserved), and
+        # no other entry should move. The merge result must be
+        # byte-equal to what we just wrote.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"second on failed: {r.stderr}")
+        self.assertEqual(self._file_hash(claude), h_claude_reversed,
+                         "log-on moved the managed entry within the event "
+                         "array (issue #708 follow-up: missing order "
+                         "preservation in merge_loghooks_into)")
+        self.assertEqual(self._file_hash(codex), h_codex_reversed,
+                         "log-on moved the managed entry in codex hooks "
+                         "(issue #708 follow-up: missing order "
+                         "preservation in merge_loghooks_into)")
+
+        # And a third run stays byte-stable too.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"third on failed: {r.stderr}")
+        self.assertEqual(self._file_hash(claude), h_claude_reversed,
+                         "third log-on re-run drifted bytes after order "
+                         "preservation fix")
+        self.assertEqual(self._file_hash(codex), h_codex_reversed,
+                         "third codex log-on re-run drifted bytes after "
+                         "order preservation fix")
+
+        # Sanity: the user-authored entry is still present, AND the
+        # managed entry still carries the sentinel.
+        ups = self._user_event_signatures(claude, "UserPromptSubmit")
+        self.assertIn(('echo user-authored',), ups,
+                      "user-authored UserPromptSubmit hook was lost across "
+                      "order-preserving merge reruns")
+        self.assertGreaterEqual(self._managed_count(claude), 2,
+                                "managed entries missing after order-"
+                                "preserving merge reruns")
+
     def test_on_refuses_when_setup_missing(self):
         # fresh target, no setup
         fresh_tmp = Path(tempfile.mkdtemp(prefix="log-test-fresh-"))
