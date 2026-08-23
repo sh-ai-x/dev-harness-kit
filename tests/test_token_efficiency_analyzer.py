@@ -1434,7 +1434,7 @@ class TestWorktreeAwareness(unittest.TestCase):
                     "--logs-dir", str(td_path / "logs"),
                 ])
             self.assertEqual(rc, 0)
-            html_path = Path("token-dashboard-dev-harness-kit-3650d.html")
+            html_path = Path("docs/observability/dashboard-dev-harness-kit-3650d.html")
             try:
                 src = html_path.read_text()
                 self.assertIn("Cost by Worktree", src)
