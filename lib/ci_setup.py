@@ -1043,6 +1043,33 @@ _KNOWN_STALE_PATTERNS: tuple[tuple[str, str, str], ...] = (
         "`--force` to refresh the template; the patched gate defaults missing verdicts to "
         "Approve with a ::warning:: in both event modes.",
     ),
+    (
+        ".github/workflows/review.yml",
+        # Issue #726: pre-fix gate hard-failed whenever
+        # verdict_source=needs-fallback-bootstrap-pr, contradicting its own
+        # documented fallback contract (the extract-verdict step had already
+        # posted a synthetic 'Verdict: Approve' tagged with that source).
+        # The post-fix gate tolerates the bootstrap case on BOTH sides
+        # (AND on R_SOURCE and S_SOURCE) and falls through to the rank/case
+        # logic; install-broken signatures (default-approve-no-file,
+        # parse-failed-no-verdict, missing source, mixed bootstrap+ran)
+        # still hard-fail (issue #212-C1). The remediation text below
+        # ('Merge this PR's workflow changes to main first.') only appears
+        # in the OLD broken bootstrap-path; the post-fix non-bootstrap
+        # branch uses a different remediation block.
+        "Merge this PR's workflow changes to main first.",
+        "stale bootstrap-PR hard-fail gate in review.yml (issue #726) -- the gate "
+        "used to exit 1 with 'Merge this PR's workflow changes to main first' "
+        "whenever the anthropics/claude-code-action@v1 anti-recursion guard "
+        "skipped both review and security on a PR that modifies "
+        ".github/workflows/*. The fallback contract posts a synthesized "
+        "'Verdict: Approve' tagged verdict_source=needs-fallback-bootstrap-pr; "
+        "the pre-fix gate contradicted this by hard-failing on agent_ran=false. "
+        "Re-run with `--force` to refresh the template; the patched gate tolerates "
+        "the BOTH-bootstrap case via an AND on R_SOURCE+S_SOURCE and falls "
+        "through to the rank/case logic. Mixed or non-bootstrap signatures still "
+        "hard-fail (issue #212-C1 install-broken protection preserved).",
+    ),
 )
 
 
