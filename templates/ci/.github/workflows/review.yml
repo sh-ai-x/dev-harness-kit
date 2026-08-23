@@ -857,7 +857,12 @@ jobs:
                 echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
                 echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
                 echo "    - provider=minimax occasionally drops the assistant stream"
-                echo "      (issue #625); consider setting CI_REVIEW_PROVIDER=anthropic"
+                echo "      when the conversation stream goes silent (issue #625):"
+                echo "      no execution file is emitted and the agent_ran=false"
+                echo "      signal looks identical to a bootstrap-PR skip. Set"
+                echo "      CI_REVIEW_PROVIDER=anthropic for the failing repo via"
+                echo "      'gh variable set CI_REVIEW_PROVIDER=anthropic --repo <r>'"
+                echo "      to switch the provider and unblock the gate."
                 echo
                 echo "  The gate does NOT default to Approve here -- that would mask"
                 echo "  install bugs. Fix the upstream failure and re-push."

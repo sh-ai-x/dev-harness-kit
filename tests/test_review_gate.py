@@ -461,12 +461,17 @@ class TestSeverityGateTolerance(unittest.TestCase):
         self.assertNotIn("Merge this PR's workflow changes to main", combined)
 
     def test_both_agents_skipped_no_source_still_hard_fails(self):
-        """Issue #726 backward-compat: when sources are empty (older
-        extract-verdict versions / future call sites that forget to set
-        the source), the gate keeps the install-broken hard-fail. The new
-        logic relies on the source being explicitly set to
-        needs-fallback-bootstrap-pr for the tolerance; empty sources fall
-        through to the non-bootstrap arm.
+        """Issue #726 strict mode: empty R_SOURCE / S_SOURCE no longer
+        default to the bootstrap arm. Main's pre-#726 logic treated empty
+        sources as a "backward-compat" bootstrap case (defaulted to the
+        bootstrap arm so older extract-verdict versions that did not
+        emit a source label still passed). The post-#726 logic is stricter:
+        the bootstrap-PR tolerance ONLY fires when the source is
+        explicitly set to needs-fallback-bootstrap-pr on both sides.
+        Empty sources fall through to the install-broken / non-bootstrap
+        arm, which is the safer failure mode (issue #212-C1 install-
+        broken protection). See review.yml issue-#726 comment block for
+        the full rationale.
         """
         cp = _run_gate(
             r="",
@@ -512,10 +517,19 @@ class TestSeverityGateTolerance(unittest.TestCase):
         """Both review + security jobs MUST declare `verdict_source` in their
         job-level `outputs:` block. Without this declaration,
         `needs.<job>.outputs.verdict_source` is always empty in production,
-        the gate's `[ -z "$R_SOURCE$S_SOURCE" ]` backward-compat branch is
-        always-true, and the no-execution-file remediation arm (issue #625)
-        becomes unreachable. The PR's stated purpose — split the agent_ran=false
-        gate message by verdict_source — is functionally defeated.
+        the post-#726 bootstrap-vs-non-bootstrap classifier never matches
+        `needs-fallback-bootstrap-pr`, and the source-aware tolerance arm
+        never fires — every agent_ran=false case falls through to the
+        install-broken hard-fail. The PR's stated purpose — split the
+        agent_ran=false gate by verdict_source — is functionally defeated
+        if the job-level output declaration is dropped.
+
+        Note: main's pre-#626 design used an explicit `[ -z
+        "$R_SOURCE$S_SOURCE" ]` empty-source check as a backward-compat
+        branch. Issue #726 removed that branch (empty sources now hard-
+        fail by design — issue #212-C1 install-broken protection). This
+        test enforces the new contract: `verdict_source` must be set
+        explicitly, not defaulted via empty-source tolerance.
 
         This test parses the workflow YAML structurally so a future editor
         who removes or renames the key (e.g. renames to `source`) breaks the
