@@ -228,3 +228,40 @@ class TestCliModes:
         assert len(rows) == 1
         assert rows[0]["branch"] == "feat/json"
         assert set(rows[0].keys()) == {"path", "branch", "epoch", "sha"}
+
+    def test_table_head_mode_renders_first_n_rows(self, wp, tmp_path):
+        # Regression for review finding #1 (PR #721): the shell script
+        # uses --table --head N to render the "Will remove" preview so
+        # it shares the audit-table format instead of duplicating the
+        # Python heredoc. Without --head the table prints all rows;
+        # with --head N, only the first N.
+        repo = _make_git_repo(tmp_path)
+        _add_worktree(repo, "feat/a", age_seconds=86_400 * 10)  # oldest
+        _add_worktree(repo, "feat/b", age_seconds=86_400 * 5)
+        _add_worktree(repo, "feat/c", age_seconds=86_400)        # newest
+
+        result = self._run(repo, "--table", "--head", "1")
+        assert result.returncode == 0
+        body = result.stdout
+        # Header is preserved (still the same audit-table format).
+        assert "Worktrees registered: 3" in body
+        assert "AGE(d)" in body
+        assert "BRANCH" in body
+        # Only the oldest row is in the body.
+        assert "feat/a" in body
+        assert "feat/b" not in body
+        assert "feat/c" not in body
+
+    def test_render_head_table_helper_matches_full_table_prefix(self, wp):
+        # Pure-Python check that render_head_table(n=...) is exactly
+        # the first n rows of render_table(all).
+        rows = [
+            wp.Row(path="/wt/a", branch="feat/a", epoch=1_000_000, sha="aaa"),
+            wp.Row(path="/wt/b", branch="feat/b", epoch=1_500_000, sha="bbb"),
+            wp.Row(path="/wt/c", branch="feat/c", epoch=1_699_000_000, sha="ccc"),
+        ]
+        now = 1_700_000_000
+        full = wp.render_table(rows, now).split("\n")
+        head = wp.render_head_table(rows, now, 2).split("\n")
+        # head_table includes header + separator + N data rows = first N+2 lines.
+        assert head == full[:4]

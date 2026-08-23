@@ -178,13 +178,25 @@ def render_table(rows: list[Row], now_epoch: int) -> str:
     return "\n".join(lines)
 
 
+def render_head_table(rows: list[Row], now_epoch: int, head: int) -> str:
+    """Same format as ``render_table`` but only the first ``head`` rows.
+
+    Used by the shell script's "Will remove" preview so the selected
+    slice reuses the audit-table format instead of re-implementing it
+    in a second Python heredoc.
+    """
+    return render_table(rows[:head], now_epoch)
+
+
 def main() -> None:
     """CLI mode — used by bin/worktree-prune.sh.
 
     Three modes, mutually exclusive (default is JSON):
     * ``--table`` — human-readable fixed-width table prefixed by a
       ``Worktrees registered: N`` summary line that the shell script
-      greps for the total count. No ANSI, grep/cut-friendly.
+      greps for the total count. No ANSI, grep/cut-friendly. Accepts
+      ``--head N`` to render only the first N rows (the "Will remove"
+      preview reuses the same format).
     * ``--count`` — just the integer N. Cheap, used for the shell
       short-circuit when the user passes 0.
     * (default) — JSON list of Row dicts for downstream tooling.
@@ -198,6 +210,8 @@ def main() -> None:
                    help="Print the human-readable table with a summary header")
     p.add_argument("--count", action="store_true",
                    help="Print only the integer count of candidates")
+    p.add_argument("--head", type=int, default=None,
+                   help="In --table mode, render only the first N rows")
     args = p.parse_args()
 
     rows = collect(args.repo)
@@ -208,6 +222,11 @@ def main() -> None:
         now = int(_time.time())
         print(f"Worktrees registered: {len(rows)} (excluding main checkout)")
         print()
+        # --head trims the table contents (preview) without changing the
+        # summary line — the operator still sees the full candidate
+        # count, just the rendered preview is sliced.
+        if args.head is not None:
+            rows = rows[: args.head]
         print(render_table(rows, now))
         return
     print(json.dumps([asdict(r) for r in rows]))

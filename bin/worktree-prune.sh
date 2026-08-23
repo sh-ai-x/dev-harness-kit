@@ -13,21 +13,26 @@
 # This script is the shell half.
 #
 # What it does, in order:
-#   1. `python3 -m lib.worktree_prune --repo <root> --table` — emits the
-#      age-sorted candidate list (excludes main checkout + detached)
-#      with a `Worktrees registered: N` summary line.
-#   2. `python3 -m lib.worktree_prune --repo <root> --count` — the same
-#      N as a standalone int. Used for the interactive ask.
+#   1. `python3 -m lib.worktree_prune --repo <root>` — emits the JSON
+#      candidate list (excludes main checkout + detached).
+#   2. `python3 -m lib.worktree_prune --repo <root> --table` — renders
+#      the audit table (one porcelain + one for-each-ref under the hood;
+#      this script only pays the git-call cost once via step 1's JSON).
 #   3. Read N from stdin (interactive) or accept it positionally.
-#   4. Print the would-be-removed rows + final y/N gate.
-#   5. For each selected row, call `bin/worktree-remove-safe.sh <path>`
-#      so the per-worktree log archive (issue #689 Phase 2) runs first.
+#   4. `python3 -m lib.worktree_prune --repo <root> --table --head N`
+#      renders the would-be-removed slice in the same format as step 2
+#      (review finding #1: previous two Python heredocs duplicated the
+#      f-string layout; now both views call the module's renderer).
+#   5. Final y/N gate, then per-row
+#      `bin/worktree-remove-safe.sh <path>` so the per-worktree log
+#      archive (issue #689 Phase 2) runs first.
 #
 # Flags:
 #   -y, --yes       Skip the final y/N gate (CI / batch mode).
 #   -n, --dry-run   Print what would be removed; never mutate.
-#   -k, --keep N    Keep at least N newest worktrees (selects from the
-#                   oldest side). Mutually exclusive with positional N.
+#   -k, --keep N    Keep exactly N newest worktrees (selects the
+#                   TOTAL-N oldest for removal). Mutually exclusive with
+#                   positional N.
 #   -h, --help      Show usage and exit 0.
 #
 # Exit codes:
@@ -106,21 +111,10 @@ if [[ -z "$TOTAL" || "$TOTAL" -eq 0 ]]; then
   exit 0
 fi
 
-# Render the table from the same JSON so the "all candidates" view and
-# the "selected" preview use identical formatting.
-TABLE_OUT="$(printf '%s' "$JSON_OUT" | python3 -c "
-import json, sys, time
-rows = json.load(sys.stdin)
-now = int(time.time())
-def trunc(s, m): return s if len(s) <= m else s[:m-3] + '...'
-print(f'Worktrees registered: {len(rows)} (excluding main checkout)')
-print()
-print(f\"{'#':>4}  {'AGE(d)':>6}  {'BRANCH':<30}  PATH\")
-print(f\"{'----':>4}  {'------':>6}  {'-' * 30}  {'-' * 4}\")
-for i, r in enumerate(rows, 1):
-    age = max(0, (now - r['epoch']) // 86400) if r['epoch'] else 0
-    print(f\"{i:>4}  {age:>6}  {trunc(r['branch'], 30):<30}  {r['path']}\")
-")"
+# Use the module's --table mode so the audit table shares the exact
+# rendering path with the "Will remove" preview below (review finding
+# #1 in PR #721: was previously two near-identical Python heredocs).
+TABLE_OUT="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" --table)"
 
 # Print the table.
 printf '%s\n' "$TABLE_OUT"
@@ -160,22 +154,10 @@ fi
 
 # --- selected list + confirm --------------------------------------------
 
-# Render the first N rows in the same fixed-width format as the table so
-# the "Will remove" preview matches the audit table the user just saw.
-SELECTED_TABLE="$(printf '%s' "$JSON_OUT" | python3 -c "
-import json, sys, time
-rows = json.load(sys.stdin)
-n = ${SELECT_COUNT}
-now = int(time.time())
-def trunc(s, m): return s if len(s) <= m else s[:m-3] + '...'
-print(f\"{'#':>4}  {'AGE(d)':>6}  {'BRANCH':<30}  PATH\")
-print(f\"{'----':>4}  {'------':>6}  {'-' * 30}  {'-' * 4}\")
-for i, r in enumerate(rows[:n], 1):
-    age = max(0, (now - r['epoch']) // 86400) if r['epoch'] else 0
-    print(f\"{i:>4}  {age:>6}  {trunc(r['branch'], 30):<30}  {r['path']}\")
-")"
-
-NOW="$(date +%s)"
+# --table --head N reuses render_table() so the "Will remove" preview
+# format matches the audit table verbatim (review finding #1 in PR
+# #721: was a duplicate Python heredoc).
+SELECTED_TABLE="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" --table --head "$SELECT_COUNT")"
 
 echo
 echo "Will remove the following $SELECT_COUNT oldest worktree(s):"
@@ -198,15 +180,12 @@ if [[ "$YES" -eq 0 && -t 0 ]]; then
   esac
 fi
 
-# Materialize the slice into arrays so the removal loop runs in the
-# current shell (avoids the subshell-boundary that would swallow the
-# fail counter). Pull paths out of the cached JSON.
-mapfile -t SELECTED < <(printf '%s' "$JSON_OUT" | python3 -c "
-import json, sys
-rows = json.load(sys.stdin)
-for r in rows[:${SELECT_COUNT}]:
-    print(r['path'])
-")
+# Pull paths straight from the cached JSON with jq (review finding
+# #5: the third inline heredoc was dead-from-the-caller's-perspective
+# code — lib.worktree_prune exposes CLI modes but jq is lighter here).
+# mapfile in the current shell keeps the fail counter alive across
+# iterations (subshell boundaries would swallow it).
+mapfile -t SELECTED < <(printf '%s' "$JSON_OUT" | jq -r --argjson n "$SELECT_COUNT" '.[:$n] | .[].path')
 
 fail_count=0
 for path in "${SELECTED[@]}"; do
