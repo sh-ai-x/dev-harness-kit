@@ -50,7 +50,7 @@
 
 ```
 [ok] sessions=14  files_scanned=14  total_cost=$1.23  estimated_savings=$0.01  stale_cost=$0.00  transcripts=14
-Open: ./token-dashboard-dev-harness-kit-30d.html
+Open: ./docs/observability/dashboard-dev-harness-kit-30d.html
 ```
 
 ### 미리보기
@@ -69,7 +69,7 @@ Open: ./token-dashboard-dev-harness-kit-30d.html
 | `--days <n>` | `30` | 룩백 윈도우 |
 | `--logs-dir <path>` | `./logs` | `claude-code/` + `codex/` 서브디렉터리의 루트 (재귀 워크) |
 | `--branch <name>` | _(모두)_ | 단일 브랜치로 필터(`gitBranch`에 대한 대소문자 무시 서브스트링); 빈 값 = 필터 없음 |
-| `--out <path>` | `token-dashboard-<repo>-<days>d.html` | 출력 HTML 경로(사이드카는 `<out-stem>.assets/`에 떨어짐) |
+| `--out <path>` | `docs/observability/dashboard-<repo>-<days>d.html` | 출력 HTML 경로(사이드카는 `<out-stem>.assets/`에 떨어짐) |
 | `--transcripts` / `--no-transcripts` | `--transcripts` (켜짐) | 세션별 풀-트랜스크립트 사이드카 페이지를 작성하고 Transcript Index에서 연결; `--no-transcripts` = 인덱스 전용, 비활성 Open 셀 |
 | `--cost-gate-tokens <int>` | `200000` | 세션별 `input + cache_read` 게이트; 이 값을 초과하는 세션은 stderr WARN 트리거 |
 | `--cost-gate-usd <float>` | `5.00` | 세션별 USD 게이트; 이 값을 초과하는 세션은 stderr WARN 트리거 |

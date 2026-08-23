@@ -51,7 +51,7 @@ Example emitted lines:
 
 ```
 [ok] sessions=14  files_scanned=14  total_cost=$1.23  estimated_savings=$0.01  stale_cost=$0.00  transcripts=14
-Open: ./token-dashboard-dev-harness-kit-30d.html
+Open: ./docs/observability/dashboard-dev-harness-kit-30d.html
 ```
 
 ### Preview
@@ -70,7 +70,7 @@ any `tools/token_efficiency_analyzer.py` change.*
 | `--days <n>` | `30` | Look-back window |
 | `--logs-dir <path>` | `./logs` | Root for `claude-code/` + `codex/` subdirs (recursively walked) |
 | `--branch <name>` | _(all)_ | Filter to a single branch (case-insensitive substring on `gitBranch`); empty = no filter |
-| `--out <path>` | `token-dashboard-<repo>-<days>d.html` | Output HTML path (sidecars land in `<out-stem>.assets/`) |
+| `--out <path>` | `docs/observability/dashboard-<repo>-<days>d.html` | Output HTML path (sidecars land in `<out-stem>.assets/`) |
 | `--transcripts` / `--no-transcripts` | `--transcripts` (on) | Write per-session full-transcript sidecar pages and link them from the Transcript Index; `--no-transcripts` = index-only, inert Open cells |
 | `--cost-gate-tokens <int>` | `200000` | Per-session `input + cache_read` gate; sessions over this trigger a stderr WARN |
 | `--cost-gate-usd <float>` | `5.00` | Per-session USD gate; sessions over this trigger a stderr WARN |
