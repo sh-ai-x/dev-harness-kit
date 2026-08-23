@@ -37,6 +37,7 @@ Runs `lib/ci_doctor.py:audit()` against the current working directory (or `--tar
 | `secret set: <provider-API-key>` | Provider-matching secret (B2). Default `minimax` ⇒ `MINIMAX_API_KEY` |
 | `workflow triggers` / `fork-PR secret gap` / `concurrency:` / `branch policy` | Root-cause diagnostics for *why* `ci github action review` might not run — always WARN or INFO, never FAIL, never flip the verdict (flexible review process) |
 | `open PR mergeable` / `open PR draft` / `open PR title` / `open PR state` | Issue #249: surfaces when the open PR's state would silently skip CI (CONFLICTING → FAIL; UNKNOWN → WARN; isDraft / bump-title → INFO; gh absent or no PR open → SKIP) |
+| `CI_REVIEW_PROVIDER consistency` | Issue #712: drift probe between local `.env:CI_REVIEW_PROVIDER` (gitignored, per-user) and the GitHub repo variable `vars.CI_REVIEW_PROVIDER` (per-repo, set via `gh variable set`). Same value on both sides → OK; exactly one set OR both set but differ → WARN with the diff and the `gh variable set CI_REVIEW_PROVIDER --body <value>` remediation; `gh` absent or not authenticated → SKIP (honest "can't verify"). Read-only, advisory, never flips the verdict. Engine: `lib/ci_setup.check_provider_consistency()`; pinned by `tests/test_check_provider_consistency.py`. |
 
 Every FAIL row prints the exact remediation (`run: gh secret set NAME --repo OWNER/REPO`, etc.) so the discover path is `audit → paste commands → re-audit` rather than the current `push PR → CI red → read log → grep for the secret name`.
 
