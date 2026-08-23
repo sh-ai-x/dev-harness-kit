@@ -383,7 +383,7 @@ class TestSeverityGateTolerance(unittest.TestCase):
         self.assertNotIn("refuses any PR whose head differs", combined)
         self.assertNotIn("Merge this PR's workflow changes to main", combined)
 
-    def test_review_bootstrap_pr_still_emits_bootstrap_remediation(self):
+    def test_review_bootstrap_security_ran_mixed_hard_fails(self):
         """Issue #726 update: review bootstrap + security ran (mixed case)
         must hard-fail via the non-bootstrap arm.
 
