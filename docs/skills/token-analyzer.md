@@ -24,7 +24,7 @@ The skill itself is read-only (`disallowed-tools: Write Edit`); the Python CLI w
 
 ```
 [ok] sessions=14  files_scanned=14  total_cost=$1.23  estimated_savings=$0.01  stale_cost=$0.00  transcripts=14
-Open: ./token-dashboard-dev-harness-kit-30d.html
+Open: ./docs/observability/dashboard-dev-harness-kit-30d.html
 ```
 
 The `transcripts=N` field counts per-session sidecar pages written under `<out-stem>.assets/<worktree>/`, linked from the dashboard's **Transcript Index** via relative `<a href>` — navigation is plain links with no JS or server, so a worktree's transcripts load lazily only when clicked. Pass `--no-transcripts` for an index-only run. Do not read the output HTML back into the conversation — it is a binary-ish artifact best opened in a browser.
@@ -44,7 +44,7 @@ The `transcripts=N` field counts per-session sidecar pages written under `<out-s
 | `--days <n>` | `30` | Look-back window |
 | `--logs-dir <path>` | `./logs` | Root for `claude-code/` + `codex/` subdirs (recursively walked) |
 | `--branch <name>` | _(all)_ | Filter to a single branch (case-insensitive substring on `gitBranch`); empty = no filter |
-| `--out <path>` | `token-dashboard-<repo>-<days>d.html` | Output HTML path (sidecars land in `<out-stem>.assets/`) |
+| `--out <path>` | `docs/observability/dashboard-<repo>-<days>d.html` | Output HTML path (sidecars land in `<out-stem>.assets/`) |
 | `--transcripts` / `--no-transcripts` | `--transcripts` (on) | Write per-session full-transcript sidecar pages and link them from the Transcript Index; `--no-transcripts` = index-only, inert Open cells |
 | `--cost-gate-tokens <int>` | `200000` | Per-session `input + cache_read` gate; sessions over this trigger a stderr WARN |
 | `--cost-gate-usd <float>` | `5.00` | Per-session USD gate; sessions over this trigger a stderr WARN |
@@ -53,7 +53,7 @@ The `transcripts=N` field counts per-session sidecar pages written under `<out-s
 
 ## Output
 
-One self-contained HTML file (default `token-dashboard-<repo>-30d.html`): inline `<style>` only, no `<script>`, no external assets, dark-mode aware. Both `claude-code` and `codex` transcripts are first-class sources; the Cost Gate evaluates sessions from either. Sections, rendered by `tools/token_efficiency_analyzer.py:render_dashboard`:
+One self-contained HTML file (default `docs/observability/dashboard-<repo>-30d.html`): inline `<style>` only, no `<script>`, no external assets, dark-mode aware. Both `claude-code` and `codex` transcripts are first-class sources; the Cost Gate evaluates sessions from either. Sections, rendered by `tools/token_efficiency_analyzer.py:render_dashboard`:
 
 - **Cost Gate banner** — green `ok` / amber `warn` / red `bad`, with offending session IDs and reasons, driven by `--cost-gate-tokens` and `--cost-gate-usd`.
 - **Overview** — 4 metric tiles: active sessions, total cost, avg score (with letter-grade badge), avg cache hit ratio.

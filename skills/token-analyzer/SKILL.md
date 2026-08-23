@@ -96,7 +96,7 @@ before running.
 
 ## Output
 
-One HTML file (default name `token-dashboard-<repo>-30d.html`).
+One HTML file (default name `docs/observability/dashboard-<repo>-30d.html`).
 Self-contained: inline `<style>`, no `<script>`, no external assets.
 Dark-mode aware. Safe to email, archive, or open from `file://`.
 Both `claude-code` and `codex` CLI transcripts are first-class sources;
@@ -255,4 +255,4 @@ PR pipeline can block on it.
 - `/dev-kit:log` -- captures the input this skill consumes
 
 Next: open the output HTML in a browser, or share the relative file path
-(e.g. `./token-dashboard-<repo>-30d.html`, never absolute) with the user.
+(e.g. `./docs/observability/dashboard-<repo>-30d.html`, never absolute) with the user.
