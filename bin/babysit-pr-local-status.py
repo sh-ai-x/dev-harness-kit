@@ -20,7 +20,7 @@ Glyph mapping (per gate):
     ·  yellow pending (live, not yet ghost)
     ?  dim    unknown / gh call failed / parse error
 
-The script reads no `gh` calls with a timeout > 1s. Reads no env from
+The script reads no `gh` calls with a timeout > 3.5s. Reads no env from
 the parent shell except NO_COLOR (per no-color.org). The .dev-kit
 state files are read but never written.
 """
@@ -30,8 +30,8 @@ import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
+
 
 # ANSI escape codes. Respect NO_COLOR (https://no-color.org/) and a
 # non-tty stdout (CI logs, file redirect) -- always emit plain text
@@ -75,7 +75,7 @@ def bold(t: str) -> str:
 # --- subprocess wrappers -----------------------------------------------------
 
 
-def _run(cmd: list[str], cwd: Path, timeout_s: float = 1.0) -> tuple[int, str, str]:
+def _run(cmd: list[str], cwd: Path, timeout_s: float = 3.5) -> tuple[int, str, str]:
     """Run `cmd` with a hard timeout. Return (rc, stdout, stderr). Never raises."""
     try:
         proc = subprocess.run(
@@ -91,8 +91,14 @@ def _run(cmd: list[str], cwd: Path, timeout_s: float = 1.0) -> tuple[int, str, s
     return (proc.returncode, proc.stdout, proc.stderr)
 
 
-def _gh(args: list[str], cwd: Path, timeout_s: float = 1.0) -> str:
-    """Run `gh <args>` with a 1s timeout. Return stdout, or "" on any failure."""
+def _gh(args: list[str], cwd: Path, timeout_s: float = 3.5) -> str:
+    """Run `gh <args>` with a 3.5s timeout. Return stdout, or "" on any failure.
+
+    3.5s is the budget observed for `gh pr view --comments --json comments`
+    on cold caches (~1.5s typical, occasionally 2-3s). The script's
+    fail-soft contract still holds: a slow `gh` degrades to `?` glyphs,
+    never a blank line.
+    """
     rc, out, _ = _run(["gh", *args], cwd=cwd, timeout_s=timeout_s)
     return out if rc == 0 else ""
 
@@ -197,15 +203,21 @@ def _parse_audit_quartet(body: str) -> dict[str, str]:
 
 
 def _gh_checks(pr_number: str, cwd: Path) -> list[dict]:
-    """Run `gh pr checks --json name,state,conclusion`; return list of dicts.
+    """Run `gh pr checks --json name,state,bucket`; return list of dicts.
 
-    Empty list on any failure. The 1s timeout keeps the status surface
+    Empty list on any failure. The 2s timeout keeps the status surface
     snappy: if `gh` is slow, we degrade to `?` glyphs, not a blank line.
+
+    Note: we use `bucket` rather than `conclusion` because the installed
+    `gh` CLI emits `bucket` (categorized as pass/fail/pending/skipping)
+    rather than the raw `conclusion` string. The bucket field already
+    encapsulates the same categorization `lib/pr_verify.py` uses for
+    the deterministic PR verifier (PASS_BUCKETS = {pass, skipping}).
     """
     out = _gh(
         [
             "pr", "checks", pr_number,
-            "--json", "name,state,conclusion",
+            "--json", "name,state,bucket",
             "-q", ".[]",
         ],
         cwd=cwd,
@@ -229,37 +241,35 @@ def _gh_checks(pr_number: str, cwd: Path) -> list[dict]:
 def _bucket_checks(checks: list[dict]) -> dict[str, int]:
     """Reduce a `gh pr checks` listing to {pass, fail, pending, ghost} counts.
 
-    Mirrors `lib/babysit_pr_reliability.classify_check` semantics but
-    keeps the status script hermetic -- no import from `lib/`, so the
-    script never breaks because of a lib refactor. The vocab is the
-    same: APPROVED_CONCLUSIONS={success,skipped,neutral},
-    FAILING_CONCLUSIONS={failure,failures,cancelled,timed_out,stale,error},
-    everything else pending unless the entry has no databaseId (ghost).
+    The installed `gh` CLI provides a `bucket` field that is already
+    the categorized version of the raw `state` (values: pass, fail,
+    pending, skipping, cancel). We use it directly so the script
+    doesn't have to mirror `lib/babysit_pr_reliability.classify_check`'s
+    APPROVED/FAILING conclusion vocab.
+
+    `skipping` counts as `pass` (matches `lib/pr_verify.PASS_BUCKETS`).
+    `cancel` / anything unmapped counts as `fail` (matches the
+    verifier's fail-closed policy outside its allow-list).
     """
-    APPROVED = {"success", "skipped", "neutral"}
-    FAILING = {"failure", "failures", "cancelled", "timed_out", "stale", "error"}
+    PASS_BUCKETS = {"pass", "skipping"}
+    FAIL_BUCKETS = {"fail", "cancel"}
     out = {"pass": 0, "fail": 0, "pending": 0, "ghost": 0}
     for c in checks:
         if not isinstance(c, dict):
             continue
-        conclusion = c.get("conclusion")
-        if isinstance(conclusion, str):
-            c_lower = conclusion.lower()
-            if c_lower in APPROVED:
-                out["pass"] += 1
-                continue
-            if c_lower in FAILING:
-                out["fail"] += 1
-                continue
+        bucket = (c.get("bucket") or "").lower()
+        if bucket in PASS_BUCKETS:
+            out["pass"] += 1
+        elif bucket in FAIL_BUCKETS:
+            out["fail"] += 1
+        elif bucket == "pending":
             out["pending"] += 1
-            continue
-        # No conclusion: distinguish live-pending from ghost.
-        # A check with no databaseId is "pruned from the checks table"
-        # per GitHub's contract -- ghost regardless of state.
-        if c.get("databaseId") in (None, "", 0):
-            out["ghost"] += 1
         else:
-            out["pending"] += 1
+            # Unknown bucket (should not happen with current `gh`):
+            # fail-closed to `fail` so the operator sees a red marker
+            # and investigates. Matches the verifier's policy of
+            # refusing to approve anything outside its allow-list.
+            out["fail"] += 1
     return out
 
 
@@ -325,7 +335,6 @@ def _ci_summary(buckets: dict[str, int]) -> str:
 
 def render(cwd: Path) -> str:
     """Build the one-line summary for `cwd` (a git checkout). Never raises."""
-    now = time.time()
     branch = _current_branch(cwd)
     pr = _pr_number(branch, cwd)
 

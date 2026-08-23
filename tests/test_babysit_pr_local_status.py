@@ -145,8 +145,8 @@ class TestBinBabysitPrLocalStatus(unittest.TestCase):
                  "provider": "minimax",
              }), \
              mock.patch.object(status_mod, "_gh_checks", return_value=[
-                 {"name": "branch-policy", "state": "completed", "conclusion": "success"},
-                 {"name": "secret-scan",   "state": "completed", "conclusion": "success"},
+                 {"name": "branch-policy", "state": "SUCCESS", "bucket": "pass"},
+                 {"name": "secret-scan",   "state": "SUCCESS", "bucket": "pass"},
              ]), \
              mock.patch.object(status_mod, "_lock_body", return_value=""), \
              mock.patch.object(status_mod, "_iter_from_log", return_value=""):
@@ -171,7 +171,7 @@ class TestBinBabysitPrLocalStatus(unittest.TestCase):
                  "maintenance": "Approve",
              }), \
              mock.patch.object(status_mod, "_gh_checks", return_value=[
-                 {"name": "branch-policy", "state": "completed", "conclusion": "success"},
+                 {"name": "branch-policy", "state": "SUCCESS", "bucket": "pass"},
                  {"name": "secret-scan",   "state": "completed", "conclusion": "failure"},
              ]), \
              mock.patch.object(status_mod, "_lock_body", return_value=""), \
@@ -193,7 +193,7 @@ class TestBinBabysitPrLocalStatus(unittest.TestCase):
                  "maintenance": "Changes Requested",
              }), \
              mock.patch.object(status_mod, "_gh_checks", return_value=[
-                 {"name": "branch-policy", "state": "completed", "conclusion": "success"},
+                 {"name": "branch-policy", "state": "SUCCESS", "bucket": "pass"},
              ]), \
              mock.patch.object(status_mod, "_lock_body", return_value=""), \
              mock.patch.object(status_mod, "_iter_from_log", return_value=""):
@@ -215,7 +215,7 @@ class TestBinBabysitPrLocalStatus(unittest.TestCase):
                  "maintenance": "Approve",
              }), \
              mock.patch.object(status_mod, "_gh_checks", return_value=[
-                 {"name": "branch-policy", "state": "completed", "conclusion": "success"},
+                 {"name": "branch-policy", "state": "SUCCESS", "bucket": "pass"},
              ]), \
              mock.patch.object(status_mod, "_lock_body",
                               return_value="2026-08-23T10:00:00+00:00 pid=99999 branch=feat/x"), \
@@ -244,7 +244,7 @@ class TestBinBabysitPrLocalStatus(unittest.TestCase):
                  "maintenance": "Approve",
              }), \
              mock.patch.object(status_mod, "_gh_checks", return_value=[
-                 {"name": "branch-policy", "state": "completed", "conclusion": "success"},
+                 {"name": "branch-policy", "state": "SUCCESS", "bucket": "pass"},
              ]), \
              mock.patch.object(status_mod, "_lock_body", return_value=""), \
              mock.patch.object(status_mod, "_iter_from_log", return_value=""):
@@ -275,24 +275,32 @@ class TestBinBabysitPrLocalStatus(unittest.TestCase):
         self.assertEqual(parsed.get("provider"), "minimax")
 
     def test_bucket_checks_vocab(self) -> None:
-        """Pin the per-check classification vocab to the canonical set."""
+        """Pin the per-check bucket vocab to the canonical set.
+
+        The installed `gh` CLI emits a `bucket` field with values
+        {pass, fail, pending, skipping, cancel} -- already the
+        categorized version of the raw `state`. The script maps:
+            pass    -> pass
+            skipping -> pass  (lib/pr_verify.PASS_BUCKETS contract)
+            fail    -> fail
+            cancel  -> fail  (verifier fail-closed)
+            pending -> pending
+            unknown -> fail  (verifier fail-closed default)
+        """
         checks = [
-            {"name": "a", "state": "completed", "conclusion": "success"},
-            {"name": "b", "state": "completed", "conclusion": "skipped"},
-            {"name": "c", "state": "completed", "conclusion": "neutral"},
-            {"name": "d", "state": "completed", "conclusion": "failure"},
-            {"name": "e", "state": "completed", "conclusion": "cancelled"},
-            {"name": "f", "state": "completed", "conclusion": "timed_out"},
-            {"name": "g", "state": "in_progress", "conclusion": None,
-             "databaseId": 1, "startedAt": "2026-08-23T10:00:00Z"},
-            {"name": "h", "state": "completed", "conclusion": None,
-             "databaseId": None},  # ghost
+            {"name": "a", "state": "SUCCESS",   "bucket": "pass"},
+            {"name": "b", "state": "SKIPPED",   "bucket": "skipping"},
+            {"name": "c", "state": "FAILURE",   "bucket": "fail"},
+            {"name": "d", "state": "CANCELLED", "bucket": "cancel"},
+            {"name": "e", "state": "IN_PROGRESS", "bucket": "pending"},
+            {"name": "f", "state": "PENDING",   "bucket": "pending"},
+            {"name": "g", "state": "UNKNOWN",   "bucket": ""},
         ]
         buckets = status_mod._bucket_checks(checks)
-        self.assertEqual(buckets["pass"], 3)    # success, skipped, neutral
-        self.assertEqual(buckets["fail"], 3)    # failure, cancelled, timed_out
-        self.assertEqual(buckets["pending"], 1)  # g (live pending with databaseId)
-        self.assertEqual(buckets["ghost"], 1)   # h (no databaseId)
+        self.assertEqual(buckets["pass"], 2)     # pass + skipping
+        self.assertEqual(buckets["fail"], 3)     # fail + cancel + unknown
+        self.assertEqual(buckets["pending"], 2)  # e + f
+        self.assertEqual(buckets["ghost"], 0)
 
     def test_gate_glyph_mapping(self) -> None:
         """Pin every verdict string -> glyph/color we expect the script to render."""
