@@ -181,6 +181,18 @@ class TestHooksStatus(unittest.TestCase):
             self.assertTrue(git_status["pre_push_active"])
             self.assertIn("configured_pre_push", git_status)
 
+    def test_reports_pr_gate_key(self):
+        """`bin/dev-kit-hooks-status.py --json` must always emit a
+        `pr_gate` key. The value is the SSOT script's one-line output
+        (or empty when no PR exists / the SSOT times out).
+        """
+        result = self.run_status(ROOT)
+        self.assertIn("pr_gate", result)
+        # pr_gate is always a string (possibly empty); never an error
+        # dict or None -- the user-level statusline script pipes it
+        # directly through jq.
+        self.assertIsInstance(result["pr_gate"], str)
+
 
 if __name__ == "__main__":
     unittest.main()

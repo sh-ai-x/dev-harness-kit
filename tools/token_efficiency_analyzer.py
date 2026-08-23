@@ -2632,7 +2632,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Auto-discover logs from .worktrees/*/logs/ and legacy worktree roots (default: True). "
                              "Pass --no-include-worktree-logs to disable. Implicitly disabled when --logs-dir "
                              "is set explicitly.")
-    parser.add_argument("--out", default=None, help="Output HTML path (default: token-dashboard-<repo>-<days>d.html).")
+    parser.add_argument("--out", default=None, help="Output HTML path (default: docs/observability/dashboard-<repo>-<days>d.html).")
     parser.add_argument("--cost-gate-tokens", type=int, default=DEFAULT_COST_GATE_TOKENS,
                         help=f"Per-session input+cache_read gate (default {DEFAULT_COST_GATE_TOKENS:,}).")
     parser.add_argument("--cost-gate-usd", type=float, default=DEFAULT_COST_GATE_USD,
@@ -2693,7 +2693,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit_json(snap)
 
     out_path = Path(args.out) if args.out else Path(
-        f"token-dashboard-{snap.request.repo}-{snap.request.days}d.html"
+        f"docs/observability/dashboard-{snap.request.repo}-{snap.request.days}d.html"
     )
     transcripts_written = _render_html(snap, out_path, transcripts_enabled=args.transcripts)
 

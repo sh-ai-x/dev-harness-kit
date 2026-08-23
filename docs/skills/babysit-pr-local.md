@@ -57,5 +57,6 @@ This keeps the loop moving without modifying the workflow to silence an OIDC fai
 - [`/dev-kit:babysit-pr`](babysit-pr.md) — the GH-Actions-mode sibling; `--local-verify` flag adds a local pytest gate without leaving the GH-Actions wait loop.
 - [`bin/babysit-pr-local.sh`](../../bin/babysit-pr-local.sh) — single-call wrapper script (≈70 lines).
 - [`bin/review-local.sh`](../../bin/review-local.sh) — local equivalent of the GH-Actions review workflow.
+- [`bin/babysit-pr-local-status.py`](../../bin/babysit-pr-local-status.py) — read-only one-line ANSI summary of the active PR's gate state; consumed by Claude Code's statusLine, Codex's `[tui.status_line]`, and this skill's per-iteration tail.
 - [`docs/local-ci.md`](../local-ci.md) — full local-CI playbook (when / when not / how).
 - [`skills/babysit-pr-local/SKILL.md`](../../skills/babysit-pr-local/SKILL.md) — full algorithm body.
