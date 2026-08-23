@@ -32,8 +32,14 @@
 #   gh variable set CI_REVIEW_PROVIDER --body "<provider>"
 #
 # TO ADD A NEW PROVIDER (idempotent recipe — issue #714):
-#   1. bin/set-provider.sh:38        — append the provider name to ALLOWLIST
-#   2. bin/set-provider.sh:235-239   — add a `case` arm mapping it to its
+#   1. bin/set-provider.sh           — append the provider name to the
+#                                      `ALLOWLIST=(...)` assignment
+#                                      (line is reported by
+#                                      `--check-extensibility` so it
+#                                      stays correct after reorders)
+#   2. bin/set-provider.sh           — add a `case` arm in the
+#                                      `case "$NEW" in ... esac` block
+#                                      mapping the provider to its
 #                                      *_API_KEY secret name (e.g.
 #                                      `openai) gh secret set OPENAI_API_KEY ...`)
 #   3. .github/workflows/review.yml  — add the new provider to
@@ -155,18 +161,32 @@ upsert_env_file() {
   fi
 }
 
-# Audit ALLOWLIST vs the `case "$NEW" in` arms at line 235 (issue #714).
+# Audit ALLOWLIST vs the `case "$NEW" in` arms (issue #714).
 # Prints the add-provider recipe and any drift between the two lists.
 # Always exits 0 — this is an advisory check, not a gate. Operators
 # run it after editing either side to confirm they stayed in sync.
+#
+# The recipe's line numbers are derived at runtime via `grep -n` so
+# the printed references stay correct when the file is reordered
+# (previously the numbers were hard-coded, drifted when the recipe
+# block and check_extensibility function themselves were inserted,
+# and the corresponding tests pinned the wrong values — T15/T16
+# now derive the expected numbers the same way).
 check_extensibility() {
-  local allowlist case_arms
-  # Parse `ALLOWLIST=(a b c)` from line 38. `tr ' ' '\n' | grep -v '^$'`
+  local allowlist case_arms allowlist_line case_line
+  # Find the `ALLOWLIST=(...)` line at runtime so the printed
+  # reference tracks any reorder. `grep -n` returns "<line>:<match>";
+  # `cut -d: -f1` keeps the line number.
+  allowlist_line=$(grep -nE '^ALLOWLIST=\(' "$0" | head -n 1 | cut -d: -f1)
+  # Parse `ALLOWLIST=(a b c)` body. `tr ' ' '\n' | grep -v '^$'`
   # collapses whitespace-separated names into one-per-line; the grep
   # drops empty entries from a stray leading/trailing space.
   allowlist=$(grep -E '^ALLOWLIST=\(' "$0" \
               | sed -E 's/^ALLOWLIST=\((.*)\).*/\1/' \
               | tr ' ' '\n' | grep -v '^$' | sort)
+  # Find the `case "$NEW" in` line at runtime so the printed
+  # reference tracks any reorder.
+  case_line=$(grep -n '^case "\$NEW" in$' "$0" | head -n 1 | cut -d: -f1)
   # Parse `name)` arms from the `case "$NEW" in` ... `esac` block.
   # The regex matches an indented word followed by `)`, capturing the
   # name. Each provider line has the shape `  <name>)  echo ... ;;`
@@ -177,17 +197,17 @@ check_extensibility() {
 
   cat <<EOF
 === Files to touch when adding a new provider ===
-  1. bin/set-provider.sh:38        (ALLOWLIST)
-  2. bin/set-provider.sh:235-239   (case arm -> *_API_KEY secret)
+  1. bin/set-provider.sh:${allowlist_line}        (ALLOWLIST)
+  2. bin/set-provider.sh:${case_line}            (case arm -> *_API_KEY secret)
   3. .github/workflows/review.yml  (workflow_dispatch.inputs.<provider>.choices)
   4. .env.example                  (CI_REVIEW_PROVIDER=<name> entry)
 
-=== ALLOWLIST (bin/set-provider.sh:38) ===
+=== ALLOWLIST (bin/set-provider.sh:${allowlist_line}) ===
 EOF
   if [ -n "$allowlist" ]; then printf '%s\n' $allowlist; fi
   cat <<EOF
 
-=== case arms (bin/set-provider.sh:235-239) ===
+=== case arms (bin/set-provider.sh:${case_line}) ===
 EOF
   if [ -n "$case_arms" ]; then printf '%s\n' $case_arms; fi
   echo
