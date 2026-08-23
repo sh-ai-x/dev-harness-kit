@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>dev-kit: review-local live viewer</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #30363d;
+    --fg: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --running: #d2a8ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 14px; line-height: 1.45; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  header .status { margin-left: auto; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+  header .status.idle { background: #21262d; color: var(--muted); }
+  header .status.running { background: #1f6feb33; color: var(--running); border: 1px solid var(--running); }
+  header .status.done-ok { background: #1f6feb33; color: var(--ok); border: 1px solid var(--ok); }
+  header .status.done-err { background: #f8514922; color: var(--err); border: 1px solid var(--err); }
+  main { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  nav { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; height: fit-content; }
+  nav h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  nav label { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  nav input[type=number] { width: 100%; padding: 6px 8px; margin-top: 4px; background: #0d1117; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  nav button { margin-top: 10px; width: 100%; padding: 8px; background: #238636; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+  nav button:hover { background: #2ea043; }
+  nav button.stop { background: #6e2329; }
+  nav button.stop:hover { background: #8b2c33; }
+  nav .gate-list { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  nav .gate { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  nav .gate .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  nav .gate .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-left: 8px; flex-shrink: 0; margin-top: 4px; }
+  nav .gate.running .dot { background: var(--running); box-shadow: 0 0 0 0 var(--running); animation: pulse 1.6s infinite; }
+  nav .gate.approved .dot { background: var(--ok); }
+  nav .gate.changes .dot { background: var(--warn); }
+  nav .gate.blocked .dot { background: var(--err); }
+  nav .gate.failed .dot { background: var(--err); }
+  nav .gate .verdict { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  nav .gate.running .verdict { color: var(--running); }
+  nav .gate.approved .verdict { color: var(--ok); }
+  nav .gate.changes .verdict { color: var(--warn); }
+  nav .gate.blocked .verdict { color: var(--err); }
+  nav .gate.failed .verdict { color: var(--err); }
+  nav .info { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); line-height: 1.55; }
+  nav .info code { background: #0d1117; padding: 1px 5px; border-radius: 3px; color: var(--accent); }
+  section.output { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  section.output header { background: transparent; border-bottom: 1px solid var(--border); padding: 10px 14px; font-size: 13px; color: var(--muted); }
+  section.output header code { color: var(--accent); }
+  section.output pre { margin: 0; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; word-break: break-word; max-height: 70vh; overflow-y: auto; background: #0a0e14; }
+  section.output pre .gate-marker { color: var(--running); font-weight: 600; }
+  section.output pre .verdict-approve { color: var(--ok); font-weight: 600; }
+  section.output pre .verdict-changes { color: var(--warn); font-weight: 600; }
+  section.output pre .verdict-blocked { color: var(--err); font-weight: 600; }
+  section.output pre .muted { color: var(--muted); }
+  section.output pre .stderr { color: var(--err); }
+  .empty { color: var(--muted); font-style: italic; padding: 14px; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(210, 168, 255, 0.55); }
+    70% { box-shadow: 0 0 0 6px rgba(210, 168, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(210, 168, 255, 0); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>dev-kit review-local viewer</h1>
+  <span class="meta" id="meta">PR &middot; title</span>
+  <span class="status idle" id="status">idle</span>
+</header>
+<main>
+  <nav>
+    <h2>Controls</h2>
+    <label for="pr-input">PR number</label>
+    <input id="pr-input" type="number" min="1" step="1" placeholder="e.g. 725" />
+    <button id="start-btn">Start</button>
+    <button id="stop-btn" class="stop" disabled>Stop</button>
+    <div class="gate-list">
+      <h2>Gates</h2>
+      <div class="gate" data-gate="review"><span class="name">/dev-kit:review</span><span class="verdict" data-verdict>&mdash;</span><span class="dot"></span></div>
+      <div class="gate" data-gate="security"><span class="name">/dev-kit:security</span><span class="verdict" data-verdict>&mdash;</span><span class="dot"></span></div>
+      <div class="gate" data-gate="maintenance"><span class="name">/dev-kit:maintenance</span><span class="verdict" data-verdict>&mdash;</span><span class="dot"></span></div>
+    </div>
+    <div class="info">
+      Endpoint: <code id="endpoint-display">/pr/&lt;N&gt;/stream</code><br />
+      SSE reconnects automatically. Tab close kills the subprocess on the server.
+    </div>
+  </nav>
+  <section class="output">
+    <header>
+      Live output of <code>bin/review-local.sh --pr &lt;N&gt;</code>
+      <span class="muted" style="float:right;" id="line-counter">&mdash; lines</span>
+    </header>
+    <pre id="output" aria-live="polite"><span class="empty">Waiting for the first gate to start. Pick a PR number and press Start.</span></pre>
+  </section>
+</main>
+<script>
+"use strict";
+
+(function () {
+  var outputEl = document.getElementById("output");
+  var statusEl = document.getElementById("status");
+  var metaEl = document.getElementById("meta");
+  var counterEl = document.getElementById("line-counter");
+  var endpointEl = document.getElementById("endpoint-display");
+  var startBtn = document.getElementById("start-btn");
+  var stopBtn = document.getElementById("stop-btn");
+  var prInput = document.getElementById("pr-input");
+
+  var currentSource = null;
+  var lineCount = 0;
+
+  // Per-gate state. A gate is "running" from the moment the
+  // `running /dev-kit:<gate>` marker line appears until a
+  // `**Verdict:**` line is captured (or the run ends).
+  var gates = ["review", "security", "maintenance"];
+  gates.forEach(function (g) {
+    var row = document.querySelector('[data-gate="' + g + '"]');
+    row.verdict = row.querySelector("[data-verdict]");
+  });
+
+  function setStatus(label, cls) {
+    statusEl.textContent = label;
+    statusEl.className = "status " + cls;
+  }
+
+  function setGateState(gate, state, verdictLabel) {
+    var row = document.querySelector('[data-gate="' + gate + '"]');
+    if (!row) return;
+    row.className = "gate " + state;
+    if (verdictLabel !== undefined) row.verdict.textContent = verdictLabel;
+  }
+
+  function resetGates() {
+    gates.forEach(function (g) { setGateState(g, "", "—"); });
+  }
+
+  function clearOutput() {
+    while (outputEl.firstChild) outputEl.removeChild(outputEl.firstChild);
+    lineCount = 0;
+    counterEl.textContent = "— lines";
+  }
+
+  function appendOutput(line, cls) {
+    // First real line replaces the empty-state placeholder.
+    if (lineCount === 0 && outputEl.firstChild && outputEl.firstChild.classList && outputEl.firstChild.classList.contains("empty")) {
+      outputEl.removeChild(outputEl.firstChild);
+    }
+    var span = document.createElement("span");
+    span.textContent = line + "\n";
+    if (cls) span.className = cls;
+    outputEl.appendChild(span);
+    lineCount += 1;
+    counterEl.textContent = lineCount + " lines";
+    // Auto-scroll only if user hasn't scrolled up.
+    var nearBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 80;
+    if (nearBottom) outputEl.scrollTop = outputEl.scrollHeight;
+  }
+
+  // Match `running /dev-kit:<gate> via provider=...` to flip the
+  // gate indicator into "running".
+  var runningRe = /^  running \/dev-kit:(review|security|maintenance) via provider=(\S+) \(dry_run=(\d+)\)/;
+
+  // Match `verdicts: review='...' security='...' maintenance='...'` to
+  // bulk-set gate verdicts in one frame.
+  var verdictsRe = /^  verdicts: review='([^']*)' security='([^']*)' maintenance='([^']*)'/;
+
+  // Match `combined verdict: <X>` for the header status badge.
+  var combinedRe = /^  combined verdict: (\S+)/;
+
+  // Match `**Verdict:** <X>` for per-gate verdicts (the judge
+  // embeds these in its own output lines).
+  var judgeVerdictRe = /\*\*Verdict:\*\*\s*(Approve|Changes Requested|Blocked)/i;
+
+  function applyLineEvents(line) {
+    var m = runningRe.exec(line);
+    if (m) {
+      setGateState(m[1], "running", "running");
+      return "gate-marker";
+    }
+    m = verdictsRe.exec(line);
+    if (m) {
+      var v = { review: m[1], security: m[2], maintenance: m[3] };
+      Object.keys(v).forEach(function (g) {
+        var raw = v[g] || "";
+        if (raw === "Approve") setGateState(g, "approved", "Approve");
+        else if (raw === "Changes Requested") setGateState(g, "changes", "Changes Requested");
+        else if (raw === "Blocked") setGateState(g, "blocked", "Blocked");
+        else if (raw === "PARSE_FAILED") setGateState(g, "failed", "parse-failed");
+        else if (raw === "") setGateState(g, "failed", "missing");
+      });
+      return null;
+    }
+    m = combinedRe.exec(line);
+    if (m) {
+      var label = m[1];
+      if (label === "Approve") setStatus("Approve", "done-ok");
+      else if (label === "Changes Requested") setStatus("Changes Requested", "done-err");
+      else if (label === "Blocked") setStatus("Blocked", "done-err");
+      else setStatus(label, "done-err");
+      return null;
+    }
+    m = judgeVerdictRe.exec(line);
+    if (m) {
+      var v = m[1].toLowerCase();
+      if (v === "approve") return "verdict-approve";
+      if (v === "changes requested") return "verdict-changes";
+      if (v === "blocked") return "verdict-blocked";
+    }
+    return null;
+  }
+
+  function startStream(prNumber) {
+    if (currentSource) {
+      try { currentSource.close(); } catch (_e) { /* ignore */ }
+      currentSource = null;
+    }
+    clearOutput();
+    resetGates();
+    setStatus("connecting…", "running");
+    metaEl.textContent = "PR #" + prNumber + " · connecting…";
+    endpointEl.textContent = "/pr/" + prNumber + "/stream";
+
+    var url = "/pr/" + prNumber + "/stream";
+    if (typeof EventSource !== "undefined") {
+      currentSource = new EventSource(url);
+    } else {
+      appendOutput("[error] Browser does not support EventSource (SSE).", "stderr");
+      setStatus("incompatible", "done-err");
+      return;
+    }
+    currentSource.addEventListener("ready", function (e) {
+      setStatus("running", "running");
+    });
+    currentSource.addEventListener("meta", function (e) {
+      var data;
+      try { data = JSON.parse(e.data); } catch (_err) { return; }
+      metaEl.textContent = "PR #" + data.pr + " · " + (data.title || "(no title)");
+    });
+    currentSource.addEventListener("stdout", function (e) {
+      var data;
+      try { data = JSON.parse(e.data); } catch (_err) { return; }
+      var cls = applyLineEvents(data.line);
+      appendOutput(data.line, cls);
+    });
+    currentSource.addEventListener("error", function (e) {
+      // EventSource fires `error` on transient drops AND on the
+      // terminal close after `done`. Only flag if we're still active.
+      if (currentSource && currentSource.readyState !== EventSource.CLOSED) {
+        appendOutput("[stream] reconnecting…", "muted");
+      }
+    });
+    currentSource.addEventListener("done", function (e) {
+      var data;
+      try { data = JSON.parse(e.data); } catch (_err) { return; }
+      appendOutput("[stream] subprocess exited rc=" + data.exit_code, "muted");
+      setStatus(data.exit_code === 0 ? "Approve (rc=0)" : "rc=" + data.exit_code,
+                data.exit_code === 0 ? "done-ok" : "done-err");
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+      try { currentSource.close(); } catch (_e) { /* ignore */ }
+      currentSource = null;
+    });
+
+    stopBtn.disabled = false;
+    startBtn.disabled = true;
+  }
+
+  function stopStream() {
+    if (currentSource) {
+      try { currentSource.close(); } catch (_e) { /* ignore */ }
+      currentSource = null;
+    }
+    setStatus("stopped", "idle");
+    stopBtn.disabled = true;
+    startBtn.disabled = false;
+  }
+
+  startBtn.addEventListener("click", function () {
+    var v = parseInt(prInput.value, 10);
+    if (!v || v < 1) {
+      prInput.focus();
+      return;
+    }
+    startStream(v);
+  });
+  stopBtn.addEventListener("click", stopStream);
+  prInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") startBtn.click();
+  });
+
+  // Auto-start if the page was opened with a PR number injected by
+  // the server (window.__PR_NUMBER__ from /pr/<N>).
+  if (typeof window.__PR_NUMBER__ === "number" && window.__PR_NUMBER__ > 0) {
+    prInput.value = String(window.__PR_NUMBER__);
+    startStream(window.__PR_NUMBER__);
+  }
+})();
+</script>
+</body>
+</html>
