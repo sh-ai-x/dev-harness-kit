@@ -90,6 +90,7 @@ def _minimal_env() -> dict:
         "ANTHROPIC_API_KEY": "test-key",
         "GITHUB_REPOSITORY": "owner/repo",
         "GH_TOKEN": "x",
+        "GITHUB_WORKSPACE": "/tmp/fake-workspace",
         "PATH": os.pathsep.join(safe_dirs) if safe_dirs else "/usr/bin:/bin",
         "HOME": "/tmp",
     }
@@ -219,6 +220,13 @@ class TestCiClaudePShRequiredEnv(unittest.TestCase):
         r = _run("review", "42", env=env)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("GH_TOKEN", r.stderr)
+
+    def test_missing_github_workspace_exits_nonzero(self):
+        env = _minimal_env()
+        env.pop("GITHUB_WORKSPACE")
+        r = _run("review", "42", env=env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("GITHUB_WORKSPACE", r.stderr)
 
 
 if __name__ == "__main__":
