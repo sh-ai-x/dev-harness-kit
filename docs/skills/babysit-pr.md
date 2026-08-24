@@ -116,6 +116,7 @@ All stdout/stderr output is English only.
 
 ## Related
 
+- [babysit-pr architecture](../architecture/2026-08-24/babysit-pr-architecture.md) — Archidraw MCP export and explanation of the bounded repair loop.
 - [ship](ship.md) — recommended next step once the loop terminates with an approved PR.
 - `hooks/lib/worktree-detect.sh` — the shared worktree discriminator this skill sources rather than reimplementing.
 - `lib/babysit_pr_cli.py` — the pure helper backing the single-operator bypass.
