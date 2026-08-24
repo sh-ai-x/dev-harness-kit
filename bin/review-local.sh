@@ -179,7 +179,16 @@ PLUGIN_MANIFEST_PARSE="$(python3 -c '
 import json, sys
 try:
     with open(sys.argv[1], encoding="utf-8") as f:
-        name = json.load(f).get("name", "")
+        data = json.load(f)
+    # A manifest that parses to a non-dict JSON value (list, string,
+    # number, null, bool) has no "name" field to speak of. Treat it
+    # the same as "name field absent" (empty string) rather than
+    # letting .get() raise AttributeError on a non-dict -- that
+    # exception previously fell outside the catch tuple below and
+    # produced an opaque "(failed to parse ())" die() message instead
+    # of the informative empty-name-mismatch message this branch is
+    # meant to give (review finding F2, PR #741).
+    name = data.get("name", "") if isinstance(data, dict) else ""
     print("OK:" + str(name))
 except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
     print("ERR:" + type(e).__name__ + ": " + str(e))
@@ -481,7 +490,7 @@ run_skill() {
     # The dry-run log MUST mirror the real argv shape (including
     # --plugin-dir) so reviewers can audit the contract from the log
     # alone -- mirrors what issue #727 regression test asserts.
-    log "would run: env <$PROVIDER env+key> claude --plugin-dir \"$PLUGIN_SRC\" -p \"$prompt\""
+    log "would run: env <$PROVIDER env+key> claude --plugin-dir \"$PLUGIN_SRC_DISPLAY\" -p \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
