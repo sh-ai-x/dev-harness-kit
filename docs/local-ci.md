@@ -7,7 +7,10 @@ without consuming GH-Actions minutes. Two deliverables, both additive
 
 1. `bin/review-local.sh` — local equivalent of the
    review + maintenance workflow orchestration.
-2. `/dev-kit:babysit-pr --local-verify [--local-test-cmd "..."]` —
+2. `bin/review-local-server.py` — localhost HTML live-streaming viewer
+   that renders the verdict pipeline in real time (additive to the
+   terminal path; passive — opening the page does not start a run).
+3. `/dev-kit:babysit-pr --local-verify [--local-test-cmd "..."]` —
    optional local-test gate inside the babysit iteration loop.
 
 ## When to use
@@ -152,6 +155,81 @@ not the "just use my session" case.
 - **No provider fallback**: `--provider` is strict; an unknown
   provider exits 1. The script does not auto-switch to `minimax`.
   This matches `bin/set-provider.sh` behavior.
+
+---
+
+## Local viewer: `bin/review-local-server.py`
+
+A stdlib `http.server` (no Flask, no extra deps) that wraps the
+`bin/review-local.sh --pr N` invocation in a localhost HTML page so
+operators can watch the three judges (`/dev-kit:review`,
+`/dev-kit:security`, `/dev-kit:maintenance`) flip from
+**gray → running → approved / changes / blocked** in the browser
+instead of staring at a quiet terminal.
+
+The page is a **passive viewer**: opening `/pr/<N>` pre-fills the PR
+number input but does **NOT** spawn a review pipeline. Streaming only
+starts when the operator clicks **Start** (or when an external
+trigger like `bin/babysit-pr-local.sh` opens the page after launching
+`bin/review-local.sh --pr N` separately). This avoids the
+"GET-surprise-spawns-bash+claude" footgun and the stale-tab API quota
+leak that an auto-start would invite.
+
+### Quick start
+
+```bash
+# Terminal 1 — start the server on 127.0.0.1:8765
+bin/review-local-server.py --port 8765
+
+# Browser — open the page. The Start button is the on-page trigger.
+open http://127.0.0.1:8765/pr/731
+```
+
+### Routes
+
+| Method | Path | Behavior |
+|--------|------|----------|
+| `GET`  | `/` | 302 → `/pr/<current-branch-PR>` (resolved via `gh`) |
+| `GET`  | `/pr/<N>` | Serves the static HTML page (`tools/review-local-preview.html`) |
+| `GET`  | `/pr/<N>/stream` | Server-Sent Events: stdout of `bin/review-local.sh --pr N` line-by-line as JSON `data:` frames. EventSource auto-reconnects on transient drops. Closing the tab kills the subprocess. |
+| `GET`  | `/healthz` | `{status: ok, active_streams: N}` for liveness probes |
+| any    | anything else | 404 |
+
+### Safety properties (review findings M1, m9, etc.)
+
+- **LAN-routable by default.** The default `--bind 0.0.0.0` exposes the
+  server on every interface, so operators on the same network can open
+  `http://<host>:8765/pr/<N>` without an SSH tunnel. There is no CORS,
+  no session handling, and no auth — the network boundary is the LAN.
+- **PR number `int()`-validated server-side** before argv splice.
+  `/pr/123;rm -rf /` becomes `123` and `/pr/-1` is rejected.
+- **4-stream concurrency cap** (`MAX_CONCURRENT_STREAMS = 4`). A 5th
+  concurrent `/stream` returns 503.
+- **Subprocess lifetime = SSE connection lifetime.** The Popen uses
+  `start_new_session=True` so each `bash review-local.sh` gets its
+  own pgid. All kill sites (`_terminate_all_procs`, the 600 s timeout
+  branch, the tab-close / `BrokenPipe` handler) call
+  `os.killpg(pgid, signal.SIGTERM/SIGKILL)` so the three
+  `claude -p` children bash spawns are killed together — no orphan
+  `claude -p` sessions keep streaming against the operator's API key
+  after server shutdown or tab-close. (Review finding **M1-followup**.)
+- **600 s wall-clock cap** (`PROC_TIMEOUT_SECONDS = 600`) on every
+  stream via `selectors.DefaultSelector` + `sel.select(timeout=)`.
+  Hung `bin/review-local.sh` no longer holds a slot forever.
+
+### Caveats
+
+- **No auto-start.** Opening the page does not trigger a review. The
+  Start button is the only on-page trigger; external triggers
+  (`bin/babysit-pr-local.sh`) must invoke `bin/review-local.sh`
+  separately.
+- **Single-operator localhost only.** The `--bind 127.0.0.1` default
+  is a safety property, not a UX choice. For LAN/remote access use an
+  SSH tunnel (`ssh -L 8765:127.0.0.1:8765 …`), not a reverse proxy.
+- **`gh pr merge` is still a human action.** The viewer can post an
+  audit comment (`<!-- dev-kit-verdict-audit -->`) via
+  `bin/review-local.sh --auto-approve`, but the operator runs
+  `gh pr merge` manually.
 
 ---
 
@@ -335,6 +413,9 @@ tell which skill held the lock. The stale-lock TTL is the same
 ## Related
 
 - `bin/review-local.sh` — local equivalent of the GH-Actions review workflow.
+- `bin/review-local-server.py` — localhost HTML live-streaming viewer (passive; bound to `127.0.0.1`).
+- `tools/review-local-preview.html` — single static HTML page served by `bin/review-local-server.py`.
+- `docs/tools/review-local-html-viewer.md` — operator-facing quick-start + safety properties for the viewer.
 - `bin/babysit-pr-local.sh` — local-mode babysit wrapper (executable; refuses `--auto-appearing`).
 - `commands/review-local.md` — slash command wrapper (one-shot local review).
 - `commands/babysit-pr-local.md` — slash command wrapper (local-mode babysit).
@@ -349,6 +430,7 @@ tell which skill held the lock. The stale-lock TTL is the same
 - `.github/workflows/maintenance.yml` — GH-Actions equivalent (unchanged).
 - `scripts/ci-local.sh` — pre-existing local validator runner (no LLM review).
 - `tests/test_review_local_sh.py` — shell-level tests for `bin/review-local.sh`.
+- `tests/test_review_local_server.py` — hermetic tests for `bin/review-local-server.py` (SSE frames, concurrency cap, killpg lifecycle).
 - `tests/test_review_local_lib.py` — unit tests for `lib/review_local_lib.sh`.
 - `tests/test_babysit_pr_cli.py` — parser + orchestrator tests for babysit-pr.
 - `tests/test_babysit_pr_local_cli.py` — parser + `is_local_mode` tests for babysit-pr-local.
