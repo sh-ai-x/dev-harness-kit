@@ -97,14 +97,14 @@ cd "$REPO_ROOT"
 # CLI exits immediately with "Unknown command" and the verdict
 # pipeline synthesizes a lenient-default Approve (false positive).
 # Mirror of bin/ci-claude-p.sh:142-148.
-PLUGIN_SRC="$REPO_ROOT"
-if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
-  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json"
-fi
-
-# shellcheck source=lib/review_local_lib.sh
-. "$REPO_ROOT/lib/review_local_lib.sh"
-
+# `die`/`log` MUST be defined before any call site (issue #619 D2
+# regression: the manifest check below runs from the cwd-independence
+# path which can fire BEFORE the script's argument parser — calling
+# `die` while it is still undefined yields `die: command not found`
+# and exit 127 instead of the intended exit 1). Both helpers stay
+# minimal: `lib/review_local_lib.sh` (sourced below) re-defines them
+# only if the script is sourced into an interactive shell, not when
+# executed. The first definition wins for the script body.
 die() {
   # Echo to stderr (gets merged into the SSE pipe's captured
   # stdout via `claude -p 2>&1` in run_skill, OR directly into the
@@ -114,6 +114,27 @@ die() {
   exit 1
 }
 log() { echo "  $*"; }
+
+# `--help` short-circuits BEFORE the manifest check (issue #619 D2
+# regression: the cwd-independence test installs a partial consumer
+# without `.claude-plugin/plugin.json`, then runs `--help` from outside
+# the consumer to prove the script resolves REPO_ROOT from cwd's git
+# toplevel. Without this early exit the script dies on the manifest
+# check instead of returning the help banner).
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+}
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
+PLUGIN_SRC="$REPO_ROOT"
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json"
+fi
+
+# shellcheck source=lib/review_local_lib.sh
+. "$REPO_ROOT/lib/review_local_lib.sh"
 
 # format_audit <verdict> [<extra_key=val> ...]
 # Build the human-friendly + machine-parseable audit comment body via
