@@ -97,6 +97,21 @@ cd "$REPO_ROOT"
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "  $*"; }
 
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+}
+
+# `--help` MUST short-circuit before the manifest check below. The
+# cwd-independence smoke test (TestCwdIndependence) installs a minimal
+# consumer (bin/ + lib/ only, no .claude-plugin/) and runs the script
+# with --help from a directory outside that consumer, to prove
+# REPO_ROOT resolves from cwd's git toplevel rather than BASH_SOURCE.
+# That path has no manifest by construction, so --help must exit 0
+# before the hard-fail check fires.
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
 # PLUGIN_SRC: dev-kit plugin root. The local mirror of the GH-Actions
 # `claude -p` invocation MUST pass `--plugin-dir` so the spawned claude
 # process loads the slash commands (/dev-kit:review, /dev-kit:security,
@@ -105,15 +120,21 @@ log() { echo "  $*"; }
 # GH-Actions sibling `bin/ci-claude-p.sh` already does this -- see
 # `bin/ci-claude-p.sh:200` for the canonical reference implementation.
 #
-# Warn instead of die if the manifest is missing -- the cwd-independence
-# test (TestCwdIndependence) installs a minimal consumer (bin/ + lib/
-# only, no .claude-plugin/) and runs the script with --help from a
-# directory outside that consumer. Real consumer installs DO ship the
-# plugin directory; the warning surfaces drift to operators without
-# breaking the smoke-test path.
+# HARD FAIL (not warn) when the manifest is missing. A prior version
+# of this check only warned and let execution continue into
+# `claude -p --plugin-dir <incomplete source>`, which reproduces the
+# exact #727 regression this script exists to fix: the slash commands
+# resolve to "Unknown command", no `**Verdict:**` line appears, and
+# the lenient-default logic (see extract_verdict below) silently maps
+# the empty verdict to Approve. A fix that only works when the
+# operator's plugin source happens to be intact is not a fix -- it
+# narrows the trigger condition. Real consumer installs DO ship the
+# plugin directory; a missing manifest here means a broken/partial
+# install, and the operator needs a loud failure, not a silent
+# Approve. (Local judge finding F1, PR #741.)
 PLUGIN_SRC="$REPO_ROOT"
 if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
-  log "warning: $PLUGIN_SRC/.claude-plugin/plugin.json missing; claude -p --plugin-dir will point at an incomplete plugin source"
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json -- refusing to run the LLM judge against an incomplete plugin source (this would silently reproduce issue #727)"
 fi
 
 # format_audit <verdict> [<extra_key=val> ...]
@@ -131,10 +152,6 @@ format_audit() {
                --verdict "$verdict" --source bin_review_local )
   for kv in "$@"; do args+=( --extra "$kv" ); done
   python3 -m lib.maintenance_gate --format-audit "${args[@]}"
-}
-
-usage() {
-  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
 }
 
 # ---------------------------------------------------------------------------
@@ -618,6 +635,59 @@ if [ "$DRY_RUN" = "1" ]; then
 else
   gh pr comment "$PR_NUMBER" --body "$AUDIT_BODY" >/dev/null \
     || log "warning: gh pr comment failed (audit skipped)"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.5. Local archive (operator-only run history for the SSE viewer).
+# ---------------------------------------------------------------------------
+# Writes the per-run artifacts under `<REPO_ROOT>/.review-local-archive/<PR>/<TS>/`
+# so `bin/review-local-server.py`'s `/archive/<pr>` routes can serve them
+# back to the browser after the live stream ends. The directory is in
+# .gitignore (per-machine data, never committed). Skipped in dry-run so
+# the operator's archive doesn't fill up with empty stubs from CI-budget
+# planning.
+if [ "$DRY_RUN" != "1" ]; then
+  ARCHIVE_DIR="${REPO_ROOT}/.review-local-archive/${PR_NUMBER}/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  mkdir -p "$ARCHIVE_DIR"
+  # meta.json — run-level facts the UI renders without re-reading the log.
+  # Built via a single python3 call (not bash heredoc string interpolation)
+  # so every value goes through json.dumps exactly once. A prior version
+  # wrapped an already-quoted json.dumps() result in ANOTHER pair of
+  # heredoc quotes, producing invalid double-quoted JSON like
+  # `"worst_verdict": ""Approve"",` that broke every consumer
+  # (bin/review-local-server.py's /archive routes, `python3 -m json.tool`).
+  ARCHIVE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+  ARCHIVE_HEAD_OID="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+  ARCHIVE_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  python3 -c '
+import json, sys
+pr_number, started_at, provider, branch, head_oid, worst, review_v, security_v, maintenance_v, l3_ok, audit_body, out_path = sys.argv[1:]
+meta = {
+    "pr_number": int(pr_number),
+    "started_at": started_at,
+    "provider": provider,
+    "branch": branch,
+    "head_oid": head_oid,
+    "worst_verdict": worst,
+    "review_verdict": review_v,
+    "security_verdict": security_v,
+    "maintenance_verdict": maintenance_v,
+    "l3_ok": l3_ok == "1",
+    "audit_body": audit_body,
+}
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2)
+    f.write("\n")
+' "$PR_NUMBER" "$ARCHIVE_STARTED_AT" "$PROVIDER" "$ARCHIVE_BRANCH" "$ARCHIVE_HEAD_OID" \
+    "$WORST" "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V" "$L3_OK" "$AUDIT_BODY" \
+    "$ARCHIVE_DIR/meta.json"
+  # Per-gate raw stdout (un-prefixed; the SSE pipe prefixes are
+  # stripped here because the saved artifact is for human review,
+  # not for re-streaming).
+  printf '%s' "${REVIEW_OUTPUT:-}"      > "$ARCHIVE_DIR/review.json"
+  printf '%s' "${SECURITY_OUTPUT:-}"    > "$ARCHIVE_DIR/security.json"
+  printf '%s' "${MAINTENANCE_OUTPUT:-}" > "$ARCHIVE_DIR/maintenance.json"
+  log "archived run to $ARCHIVE_DIR"
 fi
 
 # ---------------------------------------------------------------------------
