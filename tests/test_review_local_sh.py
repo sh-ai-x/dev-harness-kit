@@ -791,13 +791,18 @@ class TestCwdIndependence(unittest.TestCase):
 # resolved to "Unknown command" and the gate silently defaulted all
 # three verdicts to Approve (a false positive).
 #
-# Two tests lock the fix:
-#   1. test_plugin_dir_in_claude_argv: behavioral -- spawns the script
-#      with stub `gh` + `claude`, runs --dry-run, asserts the captured
-#      claude argv contains `--plugin-dir`.
+# Tests lock the fix:
+#   1. test_dry_run_argv_contains_plugin_dir: behavioral -- spawns the
+#      script with stub `gh` + `claude`, runs --dry-run, asserts the
+#      captured claude argv contains `--plugin-dir`.
 #   2. test_plugin_src_script_source: static check on the script source
 #      for the PLUGIN_SRC derivation + the manifest guard. Cheap;
 #      catches accidental removal even if the stub infra regresses.
+#   3. test_missing_manifest_dies / test_wrong_manifest_name_dies:
+#      behavioral negative-path coverage for the two `die()` branches
+#      that ARE the fix (review finding #1, PR #741) -- without these,
+#      a `die` -> `log` warning swap re-introduces issue #727 silently,
+#      since neither of the two tests above exercises the failure path.
 # ---------------------------------------------------------------------------
 class TestReviewLocalPluginDir(unittest.TestCase):
     def setUp(self) -> None:
@@ -853,15 +858,6 @@ exit 0
             },
         )
 
-    def _claude_argv_lines(self) -> list[str]:
-        if not self.call_log.exists():
-            return []
-        return [
-            line[len("CLAUDE_CALLED: "):]
-            for line in self.call_log.read_text(encoding="utf-8").splitlines()
-            if line.startswith("CLAUDE_CALLED: ")
-        ]
-
     def test_dry_run_argv_contains_plugin_dir(self) -> None:
         """Issue #727: every `claude -p` invocation MUST carry
         `--plugin-dir "$PLUGIN_SRC"` so the spawned process loads
@@ -879,15 +875,19 @@ exit 0
         self._stub_gh_open_pr()
         self._stub_claude()
         r = self._run_with_stubs("--pr", "1", "--dry-run")
-        # Each gate emits a `would run: env ... claude -p ...` line.
-        # Count them; 3 gates -> >=3 dry-run prints.
+        # Each gate emits a `would run: env ... claude --plugin-dir ... -p
+        # ...` line (review finding #5, PR #741: --plugin-dir precedes
+        # -p to match bin/ci-claude-p.sh:198-203's canonical argv
+        # order). Count them; 3 gates -> >=3 dry-run prints. Match on
+        # "claude " (not "claude -p") so the assertion stays valid
+        # regardless of exact flag ordering.
         would_run_lines = [
             line for line in r.stdout.splitlines()
-            if line.strip().startswith("would run:") and "claude -p" in line
+            if line.strip().startswith("would run:") and "claude " in line
         ]
         self.assertGreaterEqual(
             len(would_run_lines), 3,
-            f"expected >=3 'would run: claude -p' lines (one per gate); "
+            f"expected >=3 'would run: claude ...' lines (one per gate); "
             f"got {len(would_run_lines)}. stdout={r.stdout!r} "
             f"stderr={r.stderr!r}",
         )
@@ -896,6 +896,10 @@ exit 0
                 "--plugin-dir", line,
                 f"dry-run print #{i} missing --plugin-dir (issue #727): "
                 f"{line!r}",
+            )
+            self.assertIn(
+                " -p ", line,
+                f"dry-run print #{i} missing -p flag: {line!r}",
             )
 
     def test_plugin_src_script_source(self) -> None:
@@ -909,6 +913,67 @@ exit 0
             "PLUGIN_SRC guard (manifest check) missing")
         self.assertIn('--plugin-dir "$PLUGIN_SRC"', text,
             "claude -p call missing --plugin-dir -- issue #727 not fixed")
+
+    def _install_manifestless_consumer(self, tmp_path: Path) -> Path:
+        """Mirror TestCwdIndependence's install pattern: bin/ + lib/
+        only, no .claude-plugin/. Returns the consumer directory.
+        """
+        consumer = tmp_path / "consumer"
+        consumer.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=consumer, check=True)
+        for filetype, rels in (
+            ("bin", ("review-local.sh",)),
+            ("lib", ("review_local_lib.sh", "maintenance_gate.py", "atomic.py", "__init__.py")),
+        ):
+            (consumer / filetype).mkdir()
+            for name in rels:
+                src = PROJECT_ROOT / filetype / name
+                dst = consumer / filetype / name
+                dst.write_bytes(src.read_bytes())
+                dst.chmod(dst.stat().st_mode | 0o111)
+        return consumer
+
+    def test_missing_manifest_dies(self) -> None:
+        """Review finding #1 (MAJOR, PR #741): the die() branch at the
+        manifest-existence check is the fix for issue #727's silent-
+        Approve regression. A swap of `die` back to a `log` warning
+        would reproduce #727 undetected without this test.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            consumer = self._install_manifestless_consumer(Path(tmp))
+            r = subprocess.run(
+                ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit; stdout={r.stdout!r} stderr={r.stderr!r}")
+            self.assertIn("plugin manifest not found", r.stderr,
+                f"expected manifest-not-found die message; stderr={r.stderr!r}")
+
+    def test_wrong_manifest_name_dies(self) -> None:
+        """Review finding #1 (MAJOR, PR #741): the die() branch that
+        rejects a manifest whose `name` != "dev-kit" is the F1-followup
+        fix (local judge finding A08). Without this test, removing the
+        name check re-opens the substituted-plugin-source gap silently.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            consumer = self._install_manifestless_consumer(Path(tmp))
+            (consumer / ".claude-plugin").mkdir()
+            (consumer / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "not-dev-kit"}), encoding="utf-8",
+            )
+            r = subprocess.run(
+                ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit; stdout={r.stdout!r} stderr={r.stderr!r}")
+            self.assertIn('does not declare name="dev-kit"', r.stderr,
+                f"expected name-mismatch die message; stderr={r.stderr!r}")
 
 
 if __name__ == "__main__":

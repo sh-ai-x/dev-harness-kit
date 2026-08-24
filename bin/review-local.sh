@@ -133,28 +133,71 @@ esac
 # install, and the operator needs a loud failure, not a silent
 # Approve. (Local judge finding F1, PR #741.)
 PLUGIN_SRC="$REPO_ROOT"
+# Security finding F5 (PR #741): the raw absolute $PLUGIN_SRC leaks the
+# operator's OS username (e.g. /Users/alice/...) into the dry-run argv
+# log and any die() message below -- both land in
+# .review-local-current/<PR>.log, an operator-scoped but on-disk file.
+# Redact the $HOME prefix for every operator-facing rendering of the
+# path; PLUGIN_SRC itself stays unredacted for the actual filesystem
+# calls (open(), -f test) that need the real path.
+PLUGIN_SRC_DISPLAY="${PLUGIN_SRC/#$HOME/\~}"
+
+# Security finding F6 (PR #741): the two manifest-guard die() calls
+# below previously used a bare `echo >&2`, bypassing the script's own
+# `log` helper and carrying no timestamp -- unlike every other
+# operator-facing line in this script (`log "verdicts: ..."` etc).
+# manifest_guard_log emits a UTC-timestamped line through the same
+# `log` helper before the eventual `die`, so a postmortem grep of
+# .review-local-current/<PR>.log can correlate a guard trip against
+# the surrounding gate timeline.
+manifest_guard_log() {
+  log "$(date -u +%Y-%m-%dT%H:%M:%SZ) manifest-guard: $*"
+}
+
 if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
-  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json -- refusing to run the LLM judge against an incomplete plugin source (this would silently reproduce issue #727)"
+  manifest_guard_log "missing manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json"
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json -- refusing to run the LLM judge against an incomplete plugin source (this would silently reproduce issue #727)"
 fi
 # Local judge finding A08 (security review, PR #741): the existence
 # check above only proves *a* manifest is present, not that it's
 # dev-kit's. A repo with a substituted `.claude-plugin/plugin.json`
-# (typosquat, downgrade, attacker-authored) would pass L136 and get
-# loaded into the judge subprocess via `--plugin-dir`. Validate the
-# `name` field matches "dev-kit" -- cheap, deterministic, and closes
-# the gap the finding describes without adding a new dependency
-# (python3 -m json.tool is already a script-wide dependency).
-PLUGIN_MANIFEST_NAME="$(python3 -c '
+# (typosquat, downgrade, attacker-authored) would pass the check above
+# and get loaded into the judge subprocess via `--plugin-dir`.
+# Validate the `name` field matches "dev-kit" -- cheap, deterministic,
+# and closes the gap the finding describes without adding a new
+# dependency (python3 is already a script-wide dependency).
+#
+# Security finding F3 (PR #741): the original version of this parse
+# collapsed every failure mode (missing name key, JSON syntax error,
+# non-UTF-8 bytes) to the same empty string, so the die() message
+# below couldn't distinguish "manifest has no name field" from
+# "manifest is corrupted" -- both looked like `(got "")`. The
+# `OK:<name>` / `ERR:<ExceptionType>: <message>` prefix lets the bash
+# side branch on parse-success vs parse-failure and surface the real
+# exception type + message on failure, without a second python3 call.
+PLUGIN_MANIFEST_PARSE="$(python3 -c '
 import json, sys
 try:
     with open(sys.argv[1], encoding="utf-8") as f:
-        print(json.load(f).get("name", ""))
-except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-    print("")
+        name = json.load(f).get("name", "")
+    print("OK:" + str(name))
+except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+    print("ERR:" + type(e).__name__ + ": " + str(e))
 ' "$PLUGIN_SRC/.claude-plugin/plugin.json")"
-if [ "$PLUGIN_MANIFEST_NAME" != "dev-kit" ]; then
-  die "dev-kit plugin manifest at $PLUGIN_SRC/.claude-plugin/plugin.json does not declare name=\"dev-kit\" (got \"$PLUGIN_MANIFEST_NAME\") -- refusing to load a substituted or malformed plugin source into the judge subprocess"
-fi
+
+case "$PLUGIN_MANIFEST_PARSE" in
+  OK:dev-kit)
+    : # valid manifest; proceed
+    ;;
+  OK:*)
+    manifest_guard_log "name mismatch at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json (got \"${PLUGIN_MANIFEST_PARSE#OK:}\")"
+    die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json does not declare name=\"dev-kit\" (got \"${PLUGIN_MANIFEST_PARSE#OK:}\") -- refusing to load a substituted or malformed plugin source into the judge subprocess"
+    ;;
+  *)
+    manifest_guard_log "parse failure at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json (${PLUGIN_MANIFEST_PARSE#ERR:})"
+    die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json failed to parse (${PLUGIN_MANIFEST_PARSE#ERR:}) -- refusing to load a malformed plugin source into the judge subprocess"
+    ;;
+esac
 
 # format_audit <verdict> [<extra_key=val> ...]
 # Build the human-friendly + machine-parseable audit comment body via
@@ -438,7 +481,7 @@ run_skill() {
     # The dry-run log MUST mirror the real argv shape (including
     # --plugin-dir) so reviewers can audit the contract from the log
     # alone -- mirrors what issue #727 regression test asserts.
-    log "would run: env <$PROVIDER env+key> claude -p --plugin-dir \"$PLUGIN_SRC\" \"$prompt\""
+    log "would run: env <$PROVIDER env+key> claude --plugin-dir \"$PLUGIN_SRC\" -p \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -453,7 +496,7 @@ run_skill() {
   # exactly the local-auth-fallback case (USE_LOCAL_AUTH=1 leaves
   # claude_env_args empty on purpose -- see §2/§3 above).
   local out
-  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p --plugin-dir "$PLUGIN_SRC" "$prompt" 2>&1)" \
+  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" \
     || die "$skill: claude -p exited non-zero (review the output above)"
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"
