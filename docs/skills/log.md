@@ -60,6 +60,19 @@ session — without this check, every session start would rewrite
 (which may differ from the existing file's order), preventing `git pull`
 on the main checkout.
 
+### Order-preserving merge (issue #708 follow-up)
+
+The byte-level check above is necessary but not sufficient: `jq -S .`
+sorts dict keys but preserves **array order**, so the merge itself can
+reorder an event's entries and still produce a different byte sequence
+even though no semantic content changed. The merge therefore operates
+**in place** — for each source entry, replace the first matching existing
+entry (carrying the sentinel forward), or append if no match exists.
+This means a project whose `.claude/settings.json` ships managed entries
+at index 0 (the order some commits landed with) is left untouched when
+the source would have appended them at the end; `git pull` no longer
+re-creates a stale diff every session.
+
 ## Usage
 
 ```bash

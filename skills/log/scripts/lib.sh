@@ -170,6 +170,19 @@ merge_loghooks_into() {
     # Build the merge result but do NOT write yet — the byte-level
     # idempotence check below compares canonical forms and skips the
     # write when the file already matches (issue #708).
+    #
+    # Order-preserving merge: for each source entry, REPLACE the first
+    # matching existing entry in place (carrying the sentinel forward),
+    # or APPEND if no match exists. This preserves the existing array
+    # order of user-authored hooks AND of loghooks entries that were
+    # committed in a different position than the source ships today
+    # (a regression of issue #708: the previous filter+append logic
+    # moved matching entries to the end of the array, dirtying the
+    # working tree on every SessionStart that touched a file where
+    # origin/main's committed order differed from the merge's output
+    # order — e.g. the [loghooks, trace] order shipped in some
+    # .claude/settings.json vs the [trace, loghooks] order this merge
+    # produced).
     local merged
     merged="$(printf '%s' "$current" | jq \
         --slurpfile src "$src" \
@@ -178,21 +191,15 @@ merge_loghooks_into() {
         | reduce ([$src[0].hooks // {} | keys[]] | unique[]) as $event (
             .;
             .hooks[$event] = (
-                (
-                    (.hooks[$event] // [])
-                    | map(
-                        select(
-                            (.hooks[0].command // "") as $cmd
-                            | ($src[0].hooks[$event] // [])
-                              | map(.hooks[0].command // "")
-                              | index($cmd)
-                            | not
-                        )
-                    )
-                )
-                + (
-                    ($src[0].hooks[$event] // [])
-                    | map(. + {($sentinel): true})
+                reduce ($src[0].hooks[$event] // [])[] as $s (
+                    (.hooks[$event] // []);
+                    . as $cur
+                    | (($cur | map(.hooks[0].command // "")) | index($s.hooks[0].command // "")) as $idx
+                    | if $idx != null then
+                        $cur | .[$idx] = ($s + {($sentinel): true})
+                      else
+                        $cur + [$s + {($sentinel): true}]
+                      end
                 )
             )
           )

@@ -53,6 +53,12 @@ gh secret   list --repo <owner>/<repo> | grep -E '(MINIMAX|ANTHROPIC|DEEPSEEK)_A
 
 The matching local selector is `.env:CI_REVIEW_PROVIDER` (managed via `bin/set-provider.sh <provider>`); the local half is gitignored and per-user, while the GitHub variable is per-repo. The `provider-divergence-check.sh` SessionStart hook nudges when the two disagree.
 
+### Adding a new provider
+
+`bin/set-provider.sh --help` carries an idempotent "TO ADD A NEW PROVIDER" recipe (issue #714) covering the four files every new provider must touch: the script's `ALLOWLIST=(...)` assignment + matching `case` arm in the `case "$NEW" in … esac` block, `.github/workflows/review.yml` `workflow_dispatch.inputs.<provider>.options`, and `.env.example`. After editing either side of the script, run `bin/set-provider.sh --check-extensibility` to audit `ALLOWLIST` against the `case` arms and reprint the same recipe — drift between the two lists is reported but does not fail the script (advisory check, see `tests/test_set_provider.py::T15` / `T16`). The same recipe is also surfaced in `bin/set-provider.sh --help`, so the checklist is reachable without re-reading the source.
+
+The recipe's line numbers inside `bin/set-provider.sh` are derived at runtime via `grep -n` so the printed references stay correct when the file is reordered; the corresponding tests in `tests/test_set_provider.py::T15` derive the expected needles the same way.
+
 > The `--setup-secrets` flag of `/dev-kit:ci-setup` reads `CI_REVIEW_PROVIDER`, enumerates the required secret via `required_secrets_for_provider()`, and prompts for each before calling `gh secret set`. Install still succeeds on secret-set failure (warning, not error).
 
 ## When to use it

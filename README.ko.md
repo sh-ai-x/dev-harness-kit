@@ -252,7 +252,7 @@ python3 tools/loop_engine.py verify --feature-list feature_list.json
 | L0 아키텍처 | 계층 토폴로지 — 사용자 → 스킬/명령 → 훅 → lib/tools/bin → 외부(GH Actions / MCP / CLI). |
 | [`/dev-kit:plan` 워크플로](docs/skills/plan.md) | 5게이트 파이프라인(frame → validate → non-goals → decompose → emit)과 emit에서 frame으로 돌아가는 모호성 루프 백엣지. |
 | [`/dev-kit:security` 워크플로](docs/skills/security.md) | OWASP Top-10(A01–A10) 병렬 팬아웃 — 코드 리뷰의 심층 보안 렌즈. |
-| [`/dev-kit:babysit-pr` 워크플로](docs/skills/babysit-pr.md) | 15단계 수정 상태 머신. `INCREMENT`에서 `OPT-OUT CHECK`로 가는 점선 백엣지가 CI 판정이 초록으로 뒤집힐 때까지 재폴링하는 제한된 반복 루프다. |
+| [`/dev-kit:babysit-pr` 워크플로](docs/skills/babysit-pr.md) | 사전 opt-out 검사와 outcome 체크포인트를 포함한 14단계 수정 상태 머신. `INCREMENT`에서 `OPT-OUT CHECK`로 가는 점선 백엣지가 CI 판정이 초록으로 뒤집힐 때까지 재폴링하는 제한된 반복 루프다. |
 
 #### `/dev-kit:plan` — 모호성 루프를 가진 5게이트
 
@@ -289,7 +289,7 @@ flowchart TD
   A10["A10 · 예외 상황 처리 오류<br/>bare except, fail-open 기본값, 패닉 기반 에러"]
 ```
 
-#### `/dev-kit:babysit-pr` — 재시도 백엣지를 가진 15단계 수정 루프
+#### `/dev-kit:babysit-pr` — 재시도 백엣지를 가진 제한된 수정 루프
 
 ```mermaid
 flowchart TD
@@ -302,7 +302,8 @@ flowchart TD
   s5["step 5 · FETCH LOGS<br/>변경된 실패 체크마다 gh run view --log-failed"] --> s6
   s6["step 6 · DIAGNOSE<br/>실패 체크마다 단일 근본 원인 식별"] --> s7
   s7["step 7 · APPLY FIX<br/>코드 수정, 반복당 하나의 논리적 변경"] --> s8
-  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, 같은 실패 명령을 로컬에서 재실행"] --> s9
+  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, 같은 실패 명령을 로컬에서 재실행"] --> s8o
+  s8o["step 8.5 · OUTCOME<br/>진행 상태와 복구 상태 저장"] --> s9
   s9["step 9 · COMMIT<br/>git add 특정 경로 + 컨벤셔널 커밋"] --> s10
   s10["step 10 · PUSH<br/>git push origin HEAD"] --> s11
   s11["step 11 · LOG<br/>.dev-kit/babysit.log에 한 줄 추가"] --> s12
