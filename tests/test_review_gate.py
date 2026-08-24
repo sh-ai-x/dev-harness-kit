@@ -274,6 +274,26 @@ class TestSeverityGateTolerance(unittest.TestCase):
         self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
         self.assertIn("AI agent was skipped", cp.stdout + cp.stderr)
 
+    def test_agent_skip_message_action_ref_survives_sha_pin(self):
+        """Issue #732: agent-skip remediation must survive action SHA pinning.
+
+        The remediation text references `anthropics/claude-code-action@...`
+        to tell the operator which action skipped. As of v0.3.296 the
+        canonical workflow SHA-pins the action to `@<sha> # v1`. Future
+        SHA bumps must not break the test. The contract locks the regex
+        to match BOTH the unpinned `@v1` form and the SHA-pinned
+        `@<sha> # v1` form -- the semantic content (action name + remediation
+        context) is what matters, not the exact pin form.
+        """
+        cp = _run_gate(r="", s="Approve", event="pull_request", r_agent="false")
+        self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
+        combined = cp.stdout + cp.stderr
+        self.assertIn("AI agent was skipped", combined)
+        self.assertRegex(
+            combined,
+            r"anthropics/claude-code-action@(?:[0-9a-f]{6,}\s+#\s+v1|v1)\b",
+        )
+
     # === Issue #397: PARSE_FAILED sentinel hard-fail ===
 
     def test_review_PARSE_FAILED_hard_fails(self):
