@@ -782,5 +782,134 @@ class TestCwdIndependence(unittest.TestCase):
         self.assertNotIn("not in a git repo", r.stderr)
 
 
+# ---------------------------------------------------------------------------
+# Issue #727: regression for `claude -p` missing `--plugin-dir`. The
+# GH-Actions sibling `bin/ci-claude-p.sh` correctly passes
+# `--plugin-dir "$PLUGIN_SRC"` so /dev-kit:review, /dev-kit:security,
+# /dev-kit:maintenance slash commands resolve. The local mirror
+# previously called bare `claude -p "$prompt"`, so the slash commands
+# resolved to "Unknown command" and the gate silently defaulted all
+# three verdicts to Approve (a false positive).
+#
+# Two tests lock the fix:
+#   1. test_plugin_dir_in_claude_argv: behavioral -- spawns the script
+#      with stub `gh` + `claude`, runs --dry-run, asserts the captured
+#      claude argv contains `--plugin-dir`.
+#   2. test_plugin_src_script_source: static check on the script source
+#      for the PLUGIN_SRC derivation + the manifest guard. Cheap;
+#      catches accidental removal even if the stub infra regresses.
+# ---------------------------------------------------------------------------
+class TestReviewLocalPluginDir(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.stub_bin = Path(self._tmp.name) / "bin"
+        self.stub_bin.mkdir()
+        self.call_log = Path(self._tmp.name) / "calls.log"
+        real_path = os.environ.get("PATH", "/usr/bin:/bin")
+        self.new_path = f"{self.stub_bin}:{real_path}"
+
+    def _write_stub(self, name: str, body: str) -> None:
+        p = self.stub_bin / name
+        p.write_text(body, encoding="utf-8")
+        p.chmod(p.stat().st_mode | 0o111)
+
+    def _stub_gh_open_pr(self) -> None:
+        pr_json = json.dumps({
+            "state": "OPEN",
+            "title": "feat: anything",
+            "body": "",
+            "reviewDecision": "",
+            "files": ["lib/x.py"],
+        })
+        self._write_stub("gh", f"""#!/usr/bin/env bash
+echo "GH_CALLED: $*" >> '{self.call_log}'
+case "$1" in
+  pr)
+    case "$2" in
+      view) printf '%s\\n' '{pr_json}'; exit 0 ;;
+      comment) exit 0 ;;
+      review) exit 0 ;;
+    esac ;;
+  repo) echo 'owner/repo'; exit 0 ;;
+  api) echo '[]'; exit 0 ;;
+esac
+exit 0
+""")
+
+    def _stub_claude(self) -> None:
+        self._write_stub("claude", f"""#!/usr/bin/env bash
+echo "CLAUDE_CALLED: $*" >> '{self.call_log}'
+exit 0
+""")
+
+    def _run_with_stubs(self, *args: str) -> subprocess.CompletedProcess:
+        return _run(
+            *args,
+            path=self.new_path,
+            env={
+                "CI_REVIEW_PROVIDER": "anthropic",
+                "ANTHROPIC_API_KEY": "sk-ant-fake-for-test",
+            },
+        )
+
+    def _claude_argv_lines(self) -> list[str]:
+        if not self.call_log.exists():
+            return []
+        return [
+            line[len("CLAUDE_CALLED: "):]
+            for line in self.call_log.read_text(encoding="utf-8").splitlines()
+            if line.startswith("CLAUDE_CALLED: ")
+        ]
+
+    def test_dry_run_argv_contains_plugin_dir(self) -> None:
+        """Issue #727: every `claude -p` invocation MUST carry
+        `--plugin-dir "$PLUGIN_SRC"` so the spawned process loads
+        /dev-kit:* slash commands. Regression: bare `claude -p "$prompt"`
+        made /dev-kit:review / /dev-kit:security / /dev-kit:maintenance
+        resolve to "Unknown command" and the gate silently defaulted
+        all three verdicts to Approve.
+
+        We assert on the dry-run log (which mirrors the real argv shape
+        per the script's contract) instead of capturing real `claude`
+        argv, because the stub-binary path is fully hermetic and the
+        dry-run print is the audit-visible record of what the gate
+        *would* have done.
+        """
+        self._stub_gh_open_pr()
+        self._stub_claude()
+        r = self._run_with_stubs("--pr", "1", "--dry-run")
+        # Each gate emits a `would run: env ... claude -p ...` line.
+        # Count them; 3 gates -> >=3 dry-run prints.
+        would_run_lines = [
+            line for line in r.stdout.splitlines()
+            if line.strip().startswith("would run:") and "claude -p" in line
+        ]
+        self.assertGreaterEqual(
+            len(would_run_lines), 3,
+            f"expected >=3 'would run: claude -p' lines (one per gate); "
+            f"got {len(would_run_lines)}. stdout={r.stdout!r} "
+            f"stderr={r.stderr!r}",
+        )
+        for i, line in enumerate(would_run_lines):
+            self.assertIn(
+                "--plugin-dir", line,
+                f"dry-run print #{i} missing --plugin-dir (issue #727): "
+                f"{line!r}",
+            )
+
+    def test_plugin_src_script_source(self) -> None:
+        """Static check on the script source. Catches accidental removal
+        of PLUGIN_SRC even if the integration stub infra regresses.
+        """
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('PLUGIN_SRC="$REPO_ROOT"', text,
+            "PLUGIN_SRC derivation missing -- issue #727 not fixed")
+        self.assertIn(".claude-plugin/plugin.json", text,
+            "PLUGIN_SRC guard (manifest check) missing")
+        self.assertIn('--plugin-dir "$PLUGIN_SRC"', text,
+            "claude -p call missing --plugin-dir -- issue #727 not fixed")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

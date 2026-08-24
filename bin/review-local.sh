@@ -97,6 +97,25 @@ cd "$REPO_ROOT"
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "  $*"; }
 
+# PLUGIN_SRC: dev-kit plugin root. The local mirror of the GH-Actions
+# `claude -p` invocation MUST pass `--plugin-dir` so the spawned claude
+# process loads the slash commands (/dev-kit:review, /dev-kit:security,
+# /dev-kit:maintenance). Without it the slash commands resolve to
+# "Unknown command" and the gate silently defaults to Approve. The
+# GH-Actions sibling `bin/ci-claude-p.sh` already does this -- see
+# `bin/ci-claude-p.sh:200` for the canonical reference implementation.
+#
+# Warn instead of die if the manifest is missing -- the cwd-independence
+# test (TestCwdIndependence) installs a minimal consumer (bin/ + lib/
+# only, no .claude-plugin/) and runs the script with --help from a
+# directory outside that consumer. Real consumer installs DO ship the
+# plugin directory; the warning surfaces drift to operators without
+# breaking the smoke-test path.
+PLUGIN_SRC="$REPO_ROOT"
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  log "warning: $PLUGIN_SRC/.claude-plugin/plugin.json missing; claude -p --plugin-dir will point at an incomplete plugin source"
+fi
+
 # format_audit <verdict> [<extra_key=val> ...]
 # Build the human-friendly + machine-parseable audit comment body via
 # lib.maintenance_gate --format-audit. Mirrors the emitter in
@@ -380,7 +399,10 @@ run_skill() {
   local prompt="$2"
   log "running /$skill via provider=$PROVIDER (dry_run=$DRY_RUN)"
   if [ "$DRY_RUN" = "1" ]; then
-    log "would run: env <$PROVIDER env+key> claude -p \"$prompt\""
+    # The dry-run log MUST mirror the real argv shape (including
+    # --plugin-dir) so reviewers can audit the contract from the log
+    # alone -- mirrors what issue #727 regression test asserts.
+    log "would run: env <$PROVIDER env+key> claude -p --plugin-dir \"$PLUGIN_SRC\" \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -395,7 +417,7 @@ run_skill() {
   # exactly the local-auth-fallback case (USE_LOCAL_AUTH=1 leaves
   # claude_env_args empty on purpose -- see §2/§3 above).
   local out
-  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p "$prompt" 2>&1)" \
+  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p --plugin-dir "$PLUGIN_SRC" "$prompt" 2>&1)" \
     || die "$skill: claude -p exited non-zero (review the output above)"
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"
