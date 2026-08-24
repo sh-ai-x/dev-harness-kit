@@ -361,11 +361,18 @@
     if (e.key === "Enter") startBtn.click();
   });
 
-  // Auto-start if the page was opened with a PR number injected by
-  // the server (window.__PR_NUMBER__ from /pr/<N>).
+  // Pre-fill the input from the server-injected window.__PR_NUMBER__
+  // (set on /pr/<N> pages) so the operator sees which PR they were
+  // looking at, but DO NOT auto-start the stream. The HTML is a
+  // passive viewer — streaming only kicks off when the operator
+  // clicks Start (or when an external trigger like
+  // bin/babysit-pr-local.sh opens the page after launching
+  // `bin/review-local.sh --pr N` separately). Auto-start on a plain
+  // GET would be surprising (a static page that suddenly spawns a
+  // bash + three `claude -p` subprocesses) and unsafe (a stale tab
+  // left open could leak API quota).
   if (typeof window.__PR_NUMBER__ === "number" && window.__PR_NUMBER__ > 0) {
     prInput.value = String(window.__PR_NUMBER__);
-    startStream(window.__PR_NUMBER__);
   }
 })();
 </script>

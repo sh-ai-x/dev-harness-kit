@@ -39,6 +39,16 @@ open http://127.0.0.1:8765           # → 302 → /pr/<your-branch-PR>
 open http://127.0.0.1:8765/pr/725
 ```
 
+The page is **passive** — opening it does NOT auto-start the stream.
+The PR number input is pre-filled from `window.__PR_NUMBER__` (server
+injects on `/pr/<N>`) so the operator sees which PR they're looking
+at, but the actual review/security/maintenance judges only run when
+the operator clicks **Start** (or when an external trigger like
+`bin/babysit-pr-local.sh` opens the page after launching
+`bin/review-local.sh --pr N` separately). This avoids the
+"GET-surprise-spawns-bash+claude" footgun and the stale-tab quota
+leak that an auto-start would invite.
+
 The page is single static HTML (`tools/review-local-preview.html`),
 no JS framework, no build step. Opening it on a phone (same network)
 also works — the server binds only to `127.0.0.1`, so you would
