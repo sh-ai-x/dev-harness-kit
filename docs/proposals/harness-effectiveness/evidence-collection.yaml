@@ -1,6 +1,6 @@
 title: "Evidence Collection — why 4 of 5 effectiveness components can never score"
 status: design-discussion
-date: 2026-08-13
+date: 2026-08-23
 tags: [harness-effectiveness, trace-log, hooks, evidence, telemetry, measurement-integrity]
 
 before:
@@ -98,18 +98,17 @@ after:
         is produced deterministically and is separable from ambient traffic.
     - path: lib/harness_effectiveness.py
       change: |
-        Split `_integrity` findings into blocking (schema/dedupe below
-        threshold) and advisory (historical duplicate present). Advisory
-        findings stay visible in `findings` but no longer force
-        `INSUFFICIENT_EVIDENCE`. No component may be filled with `0.0`.
-        Rebalance `COMPONENT_WEIGHTS` so `learning_quality` is `0.00`
-        (Phase-4 shadow mode deferred). Redistribute the freed 0.20
-        proportionally across the four shippable components so the
-        weights still sum to 1.00: `prevention_quality` 0.25,
-        `first_pass_quality` 0.25, `recovery_quality` 0.31,
-        `measurement_integrity` 0.19. `overall_score` is a plain
-        weighted average; zero-weight components drop out of the
-        numerator.
+        DONE (issue #653, commit `f0c9ed2`): `COMPONENT_WEIGHTS` rebalanced
+        so `learning_quality` is `0.00` with the freed weight redistributed
+        to `prevention_quality` 0.25, `first_pass_quality` 0.25,
+        `recovery_quality` 0.31, `measurement_integrity` 0.19
+        (`lib/harness_effectiveness.py:34-38`); `build_report` renormalizes
+        `overall_score` over the scored set (`:607-624`).
+        STILL TO DO: split `_integrity` findings into blocking
+        (schema/dedupe below threshold) and advisory (historical duplicate
+        present). Advisory findings stay visible in `findings` but no longer
+        force `INSUFFICIENT_EVIDENCE` (`_integrity` still does this at
+        `:567`). No component may be filled with `0.0`.
     - path: tests/conftest.py
       change: |
         Autouse fixture pointing `DEV_KIT_TRACE_ROOT` at `tmp_path` for the
@@ -136,13 +135,110 @@ cons:
   - 'Phase 4 (learning cohorts) requires a shadow mode where a guard logs but does not block — a real safety surface that must be config-gated and off by default.'
 
 limitations:
-  - 'This proposal does not make `learning_quality` scoreable. Without a control cohort it stays `INSUFFICIENT_EVIDENCE`, and `overall_score` therefore stays `null` until Phase 4 ships or the component weight is renegotiated.'
+  - 'This proposal does not make `learning_quality` scoreable. Without a control cohort it stays `INSUFFICIENT_EVIDENCE`. It no longer forces `overall_score` to `null`, though: issue #653 (`lib/harness_effectiveness.py:607-624`) renormalizes the overall over the scored set, so a partially-instrumented harness reports a meaningful weighted average (today `74.2`) and `learning_quality` at weight `0.00` contributes to neither numerator nor divisor. See the "Status update (2026-08-23)" section for why that divergence from the original null-propagate wording is kept.'
   - 'The 81 events currently on disk are test artifacts and will be purged, not migrated. There is no historical baseline to compare against after the fix.'
   - 'The 16-hex event_id block proves a second runtime copy of `lib/trace_log.py` wrote to this stream; the idempotency guard prevents replay damage but does not identify or remove that writer.'
   - 'Hook-emitted `verify.*` observes the exit code of a command, not whether the command actually tested the thing that was written. `first_pass_quality` will measure "the suite passed after the write", not semantic correctness.'
   - 'Sharding is fixed for git worktrees via `--git-common-dir`; a consumer project that vendors dev-kit outside git gets no aggregation and falls back to a per-cwd stream.'
 
 sections:
+  - title: "Status update (2026-08-23)"
+    body: |
+      This proposal was written 2026-08-13. Two partial shipments have
+      landed since, both confirmed by direct file reads in the main
+      checkout on 2026-08-23. Everything else remains open.
+
+      **#653 — weight rebalance + overall_score normalization (SHIPPED,
+      commit `f0c9ed2`).**
+
+      - `COMPONENT_WEIGHTS` is now exactly the proposed split:
+        `prevention_quality 0.25`, `first_pass_quality 0.25`,
+        `recovery_quality 0.31`, `learning_quality 0.00`,
+        `measurement_integrity 0.19`
+        (`lib/harness_effectiveness.py:34-38`). The Phase-3 "rebalance
+        `COMPONENT_WEIGHTS`" file-change is DONE.
+      - **Divergence to reconcile.** The original proposal's wording said
+        `overall_score` stays `null` until Phase 4 (old `limitations`
+        bullet, now corrected). The shipped `build_report`
+        (`lib/harness_effectiveness.py:607-624`) instead renormalizes:
+        null-scored AND zero-weight components drop out of BOTH numerator
+        and divisor, so the overall is the weighted average of only the
+        scored set. Live today: `overall_score: 74.2`,
+        `status: DRIFT_WARNING`, with 4 of 5 components still `null`.
+      - **Judgment: keep the renormalization.** It is the correct
+        generalization of the Phase-4 "Decision (locked)" rule (a
+        zero-weight `learning_quality` contributes to neither numerator
+        nor divisor), extended to every null-scored component. Collapsing
+        the whole scorecard to `null` the moment one component lacks
+        evidence hides the signal the instrumented components already
+        carry; the per-component `status` (`INSUFFICIENT_EVIDENCE`) plus
+        `event_count` still tell the reader the corpus is partial, so a
+        rendered `74.2` misleads no one. The stale `limitations` bullet is
+        corrected in this refresh; Phase 4's "Decision (locked)" and the
+        `lib/harness_effectiveness.py` file-change are marked DONE.
+
+      **#702 — subject_observability + session-lifecycle producer
+      (SHIPPED, commit `c1ad328`). NOT part of the original Phase 1-4
+      plan.**
+
+      - New `hooks/trace-session-end.sh` fires on Stop and SessionEnd
+        (`hooks/hooks.json:182-211`, `fail_closed:false`, best-effort
+        `|| true`), emitting `step.completed` for a session-scoped
+        `subject_id` (`hooks/trace-session-end.sh:62`). Its pair,
+        `step.started`, is emitted from
+        `hooks/session-start-check.sh:74-75` (`--type step.started`,
+        best-effort).
+      - New `_subject_observability` submetric
+        (`lib/harness_effectiveness.py:450-518`): the symmetric
+        `|started ∩ terminal| / |started ∪ terminal|` ratio, nested under
+        `measurement_integrity`. `_integrity` uses it as a fallback into
+        the parent score only when the original `event_coverage` formula
+        is `None` (`:552-559`). Live: `event_coverage numerator=1,
+        denominator=99`.
+      - This is a **session-lifecycle-only** lane. It produces no
+        per-write or per-verify events, so it does NOT touch
+        `first_pass_quality` or `recovery_quality`, and does NOT overlap
+        with the still-missing Phase 2 hooks. Phase 2 builds ALONGSIDE it,
+        not on top: the `step.started`/`step.completed` session lane is
+        DONE; Phase 2 owns only the per-subject `write.observed` /
+        `verify.passed` / `verify.failed` / `heal.attempted` events.
+
+      **Root causes still open (fresh citations, 2026-08-23):**
+
+      - **RC-1** (no interactive write/verify producer): `hooks/trace-write.sh`
+        and `hooks/trace-verify.sh` do not exist; PostToolUse
+        `Write|Edit|MultiEdit` registers only `secret-scan` /
+        `slop-detector` / `l4-todo-scan`, and PostToolUse `Bash` only
+        `worktree-log-auto-install` / `loop-detect` /
+        `linear-worktree-create` (`hooks/hooks.json:130-180`). OPEN.
+      - **RC-2** (emitter dies outside repo): `hooks/lib/payload-parse.sh:108`
+        still calls `python3 -m lib.trace_log append-event` with no
+        `PYTHONPATH`/`CLAUDE_PLUGIN_ROOT` prefix. OPEN.
+      - **RC-3** (guards emit only on deny): the single allow-path emission
+        is still `hooks/worktree-guard.sh:93`
+        (`emit_guard_event "WORKTREE GUARD" "allowed" allowed`);
+        `git-guard.sh` and `bash-guard.sh` call `emit_guard_event` nowhere
+        on their exit-0 path. OPEN.
+      - **RC-4** (`ground_truth` from an env var nobody sets):
+        `hooks/lib/payload-parse.sh:105` still reads
+        `env.DEV_KIT_GROUND_TRUTH // null`; no `eval/guard-corpus/`
+        directory and no `bin/guard-calibrate.sh`. OPEN.
+      - **RC-5** (per-worktree sharding): `hooks/lib/payload-parse.sh:100`
+        still uses `git rev-parse --show-toplevel`; no `resolve_trace_root`,
+        `DEV_KIT_TRACE_ROOT`, or `--git-common-dir` anywhere in
+        `lib/trace_log.py`. OPEN.
+      - **RC-6** (integrity findings-gate): `lib/harness_effectiveness.py:567`
+        still forces `status = INSUFFICIENT_EVIDENCE if findings else ...`,
+        so one historical "duplicate event_id" pins the component off even
+        though `score` computes (live: `measurement_integrity.score 74.2`,
+        `status INSUFFICIENT_EVIDENCE`). Not split into blocking/advisory.
+        OPEN. (The `event_coverage` half of the original RC-6 is now partly
+        addressed by #702's fallback; the findings-gate half is untouched.)
+      - **RC-7** (test-suite pollution of the real trace file):
+        `tests/conftest.py` does not exist — there is no autouse fixture
+        pinning `DEV_KIT_TRACE_ROOT` to `tmp_path`, so the Phase 1
+        isolation is still entirely net-new. OPEN.
+
   - title: "Root-cause table"
     body: |
       | # | Root cause | Evidence | Blocks |
@@ -152,7 +248,7 @@ sections:
       | RC-3 | Guards emit only on deny | `emit_guard_event` called from `deny()`; one allow site (`worktree-guard.sh:93`) | prevention (recall) |
       | RC-4 | `ground_truth` read from an env var nobody sets | `payload-parse.sh:105`; zero writers | prevention (precision) |
       | RC-5 | Evidence sharded per worktree | `--root $(git rev-parse --show-toplevel)`; ~1000 worktrees | all |
-      | RC-6 | Integrity pinned off by findings-gate + empty `step.started` | `harness_effectiveness.py:225-227`, `:209-220` | measurement_integrity |
+      | RC-6 | Integrity pinned off by findings-gate (findings-gate still open; `step.started` denominator now partly fed by #702) | `harness_effectiveness.py:567` (findings-gate); `event_coverage` at `:543-566` | measurement_integrity |
       | RC-7 | Only events on disk came from the test suite | reason strings match test fixtures; `test_git_workflow.py:361` uses `cwd=REPO_ROOT` | data trust |
 
   - title: "Phase 1 — make the existing emitter survive (RC-2, RC-5, RC-7)"
@@ -182,6 +278,15 @@ sections:
     body: |
       Two new PostToolUse producers plus an allow-path emission on the
       existing guards.
+
+      **Scope boundary (updated 2026-08-23):** the session-lifecycle lane
+      is already DONE — issue #702 shipped `step.started`
+      (`hooks/session-start-check.sh:74-75`) and `step.completed`
+      (`hooks/trace-session-end.sh:62`) for a session-scoped `subject_id`.
+      Phase 2 must NOT re-implement session-level `step.*`. Phase 2 owns
+      only the per-subject events below (`write.observed`, `verify.*`,
+      `heal.attempted`) keyed on a repo-relative file path, and builds
+      alongside the #702 producer, not on top of it.
 
       - `hooks/trace-write.sh` (Write|Edit|MultiEdit) → `write.observed`,
         `subject_id` = repo-relative path.
@@ -217,9 +322,16 @@ sections:
       - `_integrity` splits findings: blocking (schema or dedupe below
         threshold) vs advisory (a historical duplicate exists). Advisory
         findings stay in `findings` for the reader but stop forcing
-        `INSUFFICIENT_EVIDENCE` at 100% schema completeness.
-      - `event_coverage` gets a real denominator once Phase 2's producers
-        emit lifecycle starts and terminals.
+        `INSUFFICIENT_EVIDENCE` at 100% schema completeness. This is the
+        ONLY remaining `lib/harness_effectiveness.py` change — the
+        `COMPONENT_WEIGHTS` rebalance and `overall_score` renormalization
+        already shipped in #653 (`:34-38`, `:607-624`); the findings-gate
+        bug is still live at `:567`.
+      - `event_coverage` now has a partial denominator: issue #702 added a
+        session-scoped `step.started`/`step.completed` pair and a
+        `subject_observability` fallback (`:552-559`), so today
+        `event_coverage numerator=1, denominator=99`. Phase 2's per-subject
+        producers still fill the write/verify side of the coverage picture.
 
       Exit criterion: `prevention_quality` and `measurement_integrity`
       both report a number after one calibration run.
@@ -231,12 +343,17 @@ sections:
       shadow mode where the guard evaluates and logs but does not block —
       which is a genuine safety surface, not a telemetry detail.
 
-      **Decision (locked):** ship `learning_quality` with weight `0.00`
-      and normalize `overall_score` by the actual weight sum so it cannot
-      depress the overall until Phase 4 lands. The component is still
-      rendered in the table (visibility), but it contributes neither to
-      the numerator nor the divisor. Re-enabling is a one-line weight
-      change when the control cohort ships.
+      **Decision (locked) — SHIPPED in #653 (2026-08-16..08-23):**
+      `learning_quality` ships at weight `0.00` and `overall_score` is
+      renormalized over the scored set, so learning cannot depress the
+      overall until Phase 4 lands (`lib/harness_effectiveness.py:34-38`,
+      `:607-624`). The component is still rendered in the table
+      (visibility) but contributes to neither numerator nor divisor.
+      Re-enabling is a one-line weight change when the control cohort
+      ships. Note the shipped code generalizes this rule to EVERY
+      null-scored component, not just the zero-weight one — see the
+      "Status update (2026-08-23)" section for that divergence and why it
+      is kept.
 
       Proposed shape of Phase 4 itself, explicitly deferred until Phases
       1–3 land and are trusted: `DEV_KIT_GUARD_SHADOW=1` puts named guards

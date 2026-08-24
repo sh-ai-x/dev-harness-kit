@@ -96,6 +96,32 @@ check_extensibility() {
   echo "  gh variable set CI_REVIEW_PROVIDER --body '<name>'  # so the workflow picks the right secret"
   echo
   echo "Recipe reference: bin/set-provider.sh --help  (TO ADD A NEW PROVIDER section)"
+
+  # Drift audit (PR #725, issue #714 follow-up): parse ALLOWLIST and the
+  # `case "$NEW" in` arms at runtime and report whether the two lists
+  # agree. Same grep -n / sort pipeline that the original recipe used;
+  # never hard-codes line numbers, so reordering the file never makes
+  # this verdict stale. Pinned by tests/test_set_provider.py::T15.
+  local allowlist_parsed case_arms_parsed
+  allowlist_parsed=$(grep -E '^ALLOWLIST=\(' "$script_path" \
+                     | sed -E 's/^ALLOWLIST=\((.*)\).*/\1/' \
+                     | tr ' ' '\n' | grep -v '^$' | sort)
+  case_arms_parsed=$(sed -nE '/^case "\$NEW" in$/,/^esac$/p' "$script_path" \
+                     | sed -nE 's/^[[:space:]]+([a-zA-Z0-9_-]+)\).*/\1/p' \
+                     | sort)
+  echo
+  echo "=== ALLOWLIST (${script_path}:${allowlist_line}) ==="
+  if [ -n "$allowlist_parsed" ]; then printf '%s\n' $allowlist_parsed; fi
+  echo
+  echo "=== case arms (${script_path}:${case_start}) ==="
+  if [ -n "$case_arms_parsed" ]; then printf '%s\n' $case_arms_parsed; fi
+  echo
+  if [ "$allowlist_parsed" = "$case_arms_parsed" ]; then
+    echo "OK: ALLOWLIST and case arms are in sync."
+  else
+    echo "DRIFT: ALLOWLIST and case arms disagree:"
+    diff <(printf '%s\n' $allowlist_parsed) <(printf '%s\n' $case_arms_parsed) || true
+  fi
 }
 
 show_help() {
@@ -116,25 +142,14 @@ is_allowed() {
 
 # Read CI_REVIEW_PROVIDER from .env (last occurrence wins; comments and
 # blanks ignored). Echoes the value, or empty string when unset.
-# Strips surrounding single/double quotes from the value to match
-# `lib/ci_setup._read_env_key()` so the two sides agree on quoted inputs.
+# Delegates to `lib/read_env_key.read_env_key` (issue #711) so the bash
+# and Python sides cannot drift on quoting / `export` prefix / CRLF
+# edge cases. The helper's full rules are pinned by
+# tests/test_read_env_key.py; the previous in-bash parser was deleted.
 read_provider_from_env_file() {
-  local f="$1" line key val last=""
+  local f="$1"
   [ -f "$f" ] || return 0
-  while IFS= read -r line; do
-    case "$line" in
-      "#"*|"") continue ;;
-    esac
-    key="${line%%=*}"
-    val="${line#*=}"
-    if [ "$key" = "$PROVIDER_KEY" ]; then
-      last="${val%\"}"
-      last="${last#\"}"
-      last="${last%\'}"
-      last="${last#\'}"
-    fi
-  done < "$f"
-  printf '%s' "$last"
+  python3 -c "from lib.read_env_key import read_env_key; from pathlib import Path; import sys; print(read_env_key(Path(sys.argv[1]), sys.argv[2]), end='')" "$f" "$PROVIDER_KEY"
 }
 
 # Echo the current effective provider: process env → .env → .env.example

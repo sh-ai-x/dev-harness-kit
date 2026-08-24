@@ -4,6 +4,11 @@ This document is the source-level Code-Viz record for the repair workflow.
 `/dev-kit:babysit-pr` is the only user-facing repair entrypoint. GitHub Actions
 only emits events into the same coordinator contract.
 
+The dedicated Archidraw MCP rendering is documented in the
+[babysit-pr architecture](../architecture/2026-08-24/babysit-pr-architecture.md)
+reference. It describes the repair loop and its human merge boundary; it does
+not represent a fixed commit count.
+
 ## Architecture
 
 ```mermaid
