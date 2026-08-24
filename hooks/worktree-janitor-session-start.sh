@@ -69,6 +69,13 @@ esac
 # --dry-run` is the audit step, this hook is just the "you should run
 # that" signal.
 ORPHAN_COUNT=0
+RECORDS_SEEN=0
+# Hard cap on records processed: a 1500-worktree inventory would fork
+# `git merge-base` + `git log` 3000+ times per SessionStart. Stop after
+# MAX_PROBE records and report the truncated count as "≥MAX_PROBE";
+# the operator still sees the nudge surface, just with a floor on
+# the displayed number rather than a precise count of every record.
+MAX_PROBE="${DEV_KIT_JANITOR_MAX_PROBE:-500}"
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
   STALE_DAYS=7
   # Iterate porcelain worktree records; each record is a multi-line
@@ -101,6 +108,15 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
         fi
       fi
       RECORD=""
+      RECORDS_SEEN=$((RECORDS_SEEN + 1))
+      # Short-circuit once we've seen enough records to bound the cost.
+      # The nudge surfaces "≥MAX_PROBE" so operators still see the
+      # signal that pruning is needed without forcing the hook to walk
+      # the entire inventory.
+      if [ "${RECORDS_SEEN:-0}" -ge "${MAX_PROBE}" ]; then
+        ORPHAN_COUNT="${MAX_PROBE}"
+        break
+      fi
       continue
     fi
     RECORD="${RECORD}${line}"$'\n'
@@ -110,7 +126,14 @@ fi
 # Always exit 0 with optional additionalContext. SessionStart is a
 # gentle nudge surface; a non-zero exit would block session startup.
 if [ "${ORPHAN_COUNT:-0}" -gt 0 ] 2>/dev/null; then
-  jq -nc --arg n "$ORPHAN_COUNT" --arg cmd "bin/worktree-prune.sh --dry-run" \
+  # When the cap fired, ORPHAN_COUNT is set to MAX_PROBE — render the
+  # count as a floor so operators know it's a truncated read.
+  if [ "${ORPHAN_COUNT}" = "${MAX_PROBE}" ] && [ "${RECORDS_SEEN:-0}" -ge "${MAX_PROBE}" ]; then
+    DISPLAY="≥${ORPHAN_COUNT}"
+  else
+    DISPLAY="${ORPHAN_COUNT}"
+  fi
+  jq -nc --arg n "$DISPLAY" --arg cmd "bin/worktree-prune.sh --dry-run" \
     '{
       hookSpecificOutput: {
         hookEventName: "SessionStart",

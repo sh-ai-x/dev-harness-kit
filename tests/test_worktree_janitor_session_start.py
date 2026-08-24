@@ -20,21 +20,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 HOOK = PROJECT_ROOT / "hooks" / "worktree-janitor-session-start.sh"
 
 
-def _run_hook(*, cwd_label: str = "worktree", payload: dict | None = None,
-              stdin_payload: dict | None = None,
-              env_extra: dict | None = None,
-              cwd: Path | None = None,
-              jq_on_path: bool = True) -> subprocess.CompletedProcess:
-    """Spawn the hook with a fake git binary that returns a controlled
-    porcelain block + (optionally) a fake jq binary.
-
-    `cwd_label` chooses the worktree-detect result:
-      - 'worktree' => hook fires its probe + emits JSON
-      - 'main'     => hook is a silent no-op (early-exit at the case)
-    """
-    raise RuntimeError("use _HookRunner instead")
-
-
 class _HookRunner:
     """Encapsulates the fake-binary scaffolding so each test gets hermetic
     git/jq/cwd output without re-implementing the setup.
@@ -230,6 +215,29 @@ class TestWorktreeJanitorHook(unittest.TestCase):
         self.skipTest("covered by other tests; PROJECT_ROOT porcelain "
                       "makes the no-cwd probe impractical to test "
                       "in-process")
+
+
+    def test_probe_caps_records_at_max_probe(self) -> None:
+        """Issue #717 VM-3: the probe must short-circuit after MAX_PROBE
+        records so a 1500-worktree inventory doesn't fork git 3000+
+        times per SessionStart. With MAX_PROBE=3 + 600 porcelain records,
+        the hook should report ≥3 (the cap) and stop iterating.
+        """
+        wt = self.runner.make_main_or_worktree("worktree")
+        # 600 records (3 blocks per record * 200 records, but each
+        # record is 3 lines + 1 blank, so 200 records works). All
+        # merged so the counter would otherwise run to 200.
+        records = (
+            "worktree /tmp/wt\nHEAD abc\nbranch refs/heads/feat-merged\n\n"
+        ) * 200
+        self.runner.write_fake_porcelain(records)
+        # Drop MAX_PROBE to 3 so the test runs fast.
+        r = self.runner.run_hook(wt, env_extra={"DEV_KIT_JANITOR_MAX_PROBE": "3"})
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        out = json.loads(r.stdout)
+        ctx = out["hookSpecificOutput"].get("additionalContext", "")
+        self.assertIn("≥3 orphan", ctx,
+            f"cap should render as floor ≥3; got: {ctx!r}")
 
 
 if __name__ == "__main__":
