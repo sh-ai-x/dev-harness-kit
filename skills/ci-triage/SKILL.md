@@ -24,6 +24,8 @@ user-invocable: true
 
 ## What it does
 
+> **One-shot convenience:** `python3 lib/ci_triage.py summary [--count N | --commits SHA... | --no-scan]` runs a fresh scan (bumping already-known signatures only) and prints the rendered report in a single call. Use this for the "just tell me what's in the store now" flow. No judging step happens here — judgment is still a separate `record --from-json` call (the script never invents judgment content).
+
 1. **Ask scope** (does not default to a fixed count). Use `AskUserQuestion` or read explicit CLI-style args if the user already gave them: either "how many recent commits on the current branch" (a count) or an explicit list of commits/SHAs. Never hardcode a number — the right scope depends on what the user is chasing (a fresh regression vs. a historical sweep).
 2. **Scan**: `python3 lib/ci_triage.py scan --count N` (or `--commits <sha...>`). This resolves each commit to its full 40-char SHA (`gh run list --commit` silently returns nothing on a short SHA — see `runs_for_commit` in `lib/ci_triage.py`), finds its linked workflow runs, and for every non-passing run fetches failure detail: the failing job/step's log via `gh run view --log-failed`, or — when GitHub scheduled zero jobs at all (e.g. a stale trigger registration) — the one-line `gh run view` diagnostic instead.
 3. Each failure is hashed to a signature and checked against the store. The scan output separates:
