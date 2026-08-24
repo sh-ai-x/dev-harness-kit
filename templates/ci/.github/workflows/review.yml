@@ -794,8 +794,8 @@ jobs:
           R_RESULT="${{ needs.review.result }}"
           S_RESULT="${{ needs.security.result }}"
           EVENT="$EVENT_NAME"
-          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT)"
-          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT)"
+          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT, source=$R_SOURCE)"
+          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT, source=$S_SOURCE)"
 
           # Issue #212-C1-fix: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 exits 0 with
           # a "workflow validation skip" warning when the PR's head differs
@@ -817,63 +817,58 @@ jobs:
           # provider switch instead of the misleading workflow-merge
           # message.
           #
-          # Backward-compat: when R_SOURCE / S_SOURCE is empty (older
-          # extract-verdict versions that did not emit a source label, or
-          # future call sites that forget to set it), default to the
-          # bootstrap arm so existing tests / workflows still behave
-          # like before this split. The new "no execution file" arm
-          # fires only when the source is explicitly set to a non-
-          # bootstrap value (default-approve-no-file, parse-failed-no-
-          # verdict, etc.).
+          # Issue #726 fix: the gate used to hard-fail whenever EITHER job
+          # reported agent_ran=false, even on the documented bootstrap-PR
+          # case where the action's anti-recursion guard skipped the agent
+          # because the PR modifies .github/workflows/*. That contradicted
+          # the gate's own fallback contract: the extract-verdict step
+          # already posted a synthetic 'Verdict: Approve' comment tagged
+          # verdict_source=needs-fallback-bootstrap-pr, and the human gate
+          # (REVIEW_REQUIRED / CHANGES_REQUESTED) is what actually blocks
+          # merge. The new logic below is source-aware:
+          #
+          #   - Both R and S are bootstrap (agent_ran=false + source =
+          #     needs-fallback-bootstrap-pr): tolerate the skip, fall
+          #     through to the rank/case logic on the synthesized Approve.
+          #   - Any other agent_ran=false signature (default-approve-no-file,
+          #     parse-failed-no-verdict, mixed bootstrap+ran, missing source):
+          #     still hard-fail (issue #212-C1 install-broken protection).
+          #     The gate does NOT default to Approve here -- that would mask
+          #     real install bugs.
           if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
-            if [ "$R_SOURCE" = "needs-fallback-bootstrap-pr" ] || [ "$S_SOURCE" = "needs-fallback-bootstrap-pr" ] || [ -z "$R_SOURCE$S_SOURCE" ]; then
+            if { [ "$R_AGENT" = "false" ] && [ "$R_SOURCE" = "needs-fallback-bootstrap-pr" ]; } \
+               && { [ "$S_AGENT" = "false" ] && [ "$S_SOURCE" = "needs-fallback-bootstrap-pr" ]; }; then
+              # Bootstrap-PR exception (BOTH sides must be bootstrap). The
+              # synthesized Approve from each fallback path will pass cleanly
+              # through the rank/case logic below.
+              echo "::notice::bootstrap-PR fallback: both review+security agents skipped due to anthropics/claude-code-action@v1's workflow-validation guard (PR modifies .github/workflows/*). Accepting synthesized Approve; human gate decides merge."
+            else
               {
-                echo "::error::review+security gate: AI agent was skipped"
+                echo "::error::review+security gate: AI agent was skipped (non-bootstrap)"
                 echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
                 echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
                 echo
-                echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run on this PR."
-                echo "  The action refuses any PR whose head differs from the"
-                echo "  default branch under .github/workflows/*. Result is"
-                echo "  success (exit-0), but no claude[bot] comment was posted"
-                echo "  -- the 'Approve' verdict in the gate was the empty-verdict"
-                echo "  tolerance, NOT an actual AI review."
+                echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run, but the"
+                echo "  skip is NOT the documented bootstrap-PR case (verdict_source"
+                echo "  is not 'needs-fallback-bootstrap-pr' on both sides). Most"
+                echo "  often this is the issue #212-C1 install-broken signature:"
+                echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
+                echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
+                echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
+                echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+                echo "    - provider=minimax occasionally drops the assistant stream"
+                echo "      when the conversation stream goes silent (issue #625):"
+                echo "      no execution file is emitted and the agent_ran=false"
+                echo "      signal looks identical to a bootstrap-PR skip. Set"
+                echo "      CI_REVIEW_PROVIDER=anthropic for the failing repo via"
+                echo "      'gh variable set CI_REVIEW_PROVIDER=anthropic --repo <r>'"
+                echo "      to switch the provider and unblock the gate."
                 echo
-                echo "  Fix:"
-                echo "    1. Merge this PR's workflow changes to main first."
-                echo "    2. Re-open or sync from the updated default branch."
-                echo "    3. Future PRs (without workflow modifications) will run"
-                echo "       the agent normally and post real verdicts + inline"
-                echo "       comments."
+                echo "  The gate does NOT default to Approve here -- that would mask"
+                echo "  install bugs. Fix the upstream failure and re-push."
               } >&2
               exit 1
             fi
-            {
-              echo "::error::review+security gate: AI agent produced no execution file"
-              echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
-              echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
-              echo
-              echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 exited 0 but did not produce"
-              echo "  a claude-execution-output.json at the expected path."
-              echo "  This is NOT the workflow-validation skip (the PR does"
-              echo "  not touch .github/workflows/*); the action ran but"
-              echo "  its output envelope was empty or unreadable."
-              echo
-              echo "  Common causes:"
-              echo "    - provider=minimax occasionally returns no execution"
-              echo "      file when the conversation stream is missing (see"
-              echo "      issue #625). Consider switching CI_REVIEW_PROVIDER"
-              echo "      to 'anthropic' for this PR."
-              echo "    - action rate-limit masked by exit-0"
-              echo "    - transient filesystem / network error"
-              echo
-              echo "  Fix:"
-              echo "    - Inspect the 'Run anthropics/claude-code-action' step"
-              echo "      logs in the GH Actions run for the actual reason."
-              echo "    - If the failure mode is recurring for provider=minimax,"
-              echo "      set CI_REVIEW_PROVIDER=anthropic via 'gh variable set'."
-            } >&2
-            exit 1
           fi
 
           # Hard-fail gate if EITHER upstream job actually failed (not

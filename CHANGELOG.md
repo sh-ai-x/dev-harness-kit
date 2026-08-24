@@ -3,6 +3,22 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **fix(review):** severity gate tolerates the bootstrap-PR fallback contract
+  on BOTH review + security jobs. When `anthropics/claude-code-action@v1`'s
+  anti-recursion guard skips both agents because the PR modifies
+  `.github/workflows/*`, the gate now falls through to the rank/case logic
+  on the synthesized `Verdict: Approve` (tagged
+  `verdict_source=needs-fallback-bootstrap-pr`) instead of hard-failing with
+  the misleading "Merge this PR's workflow changes to main first" message.
+  Mixed signatures (one bootstrap + one ran), install-broken
+  (`default-approve-no-file`, `parse-failed-no-verdict`, missing source), and
+  PARSE_FAILED still hard-fail -- issue #212-C1 protection preserved.
+  Closes #726.
+- **`lib/ci_setup.py:lint_installed_workflows`** gains a sibling
+  `_KNOWN_STALE_PATTERNS` entry that flags installs still carrying the
+  pre-fix `'Merge this PR's workflow changes to main first.'` remediation
+  text. Consumers can detect staleness via `ci-setup` itself; re-run with
+  `--force` to refresh. (Companion to the existing pre-0.1.3 lint entry.)
 - **fix(reducer):** add `subject_observability` submetric + parent-score fallback
   so `measurement_integrity.event_coverage` is observable in worktrees that
   have not yet run a `lib/execute.py` build step. Closes #702. Schema version

@@ -199,7 +199,7 @@ flowchart TD
   PROGRESS -->|no, repair PR 1| R2[repair PR 2]
   R2 --> OBSERVE
   PROGRESS -->|no, repair PR 2| EX[exception evidence bundle]
-  VERIFY -->|all required gates pass| MERGE[eligible for automatic merge]
+  VERIFY -->|all required gates pass| MERGE[human merge hand-off]
 ```
 
 GitHub's `auto-fix-pr` is only an event adapter into the same repair state; it
@@ -260,6 +260,15 @@ The portable Archidraw scene data is stored alongside the image at
 The date-based directory makes future exports auditable and keeps the source
 scene separate from the rendered PNG.
 
+#### Dedicated babysit-pr architecture
+
+The separate Archidraw MCP export below shows the complete bounded repair loop
+for `babysit-pr`, including its human merge hand-off. It is a repair state
+machine, not a fixed number of commits. The detailed explanation is in the
+[babysit-pr architecture reference](docs/architecture/2026-08-24/babysit-pr-architecture.md).
+
+<img src="docs/screenshots/architecture/babysit-pr-architecture.png" alt="babysit-pr bounded repair loop architecture created with Archidraw MCP" width="1200" />
+
 The top flow is the operational spine: user intent enters through foundation
 configuration, moves through research and planning, is implemented and
 verified by the build skills, passes review and security gates, and reaches
@@ -280,7 +289,7 @@ it is shown here only as one member of the ship-and-repair skill family.
 | L0 Architecture | Layered topology — user → skills/commands → hooks → lib/tools/bin → external (GH Actions / MCP / CLI). |
 | [`/dev-kit:plan` workflow](docs/skills/plan.md) | The 5-gate pipeline (frame → validate → non-goals → decompose → emit) with the ambiguity-loop back-edge from emit to frame. |
 | [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
-| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
+| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 14-step repair state machine plus a pre-loop opt-out check and an outcome checkpoint; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
 
 #### `/dev-kit:plan` — 5 gates with ambiguity loop
 
@@ -317,7 +326,7 @@ flowchart TD
   A10["A10 · Mishandling Exceptional Conditions<br/>bare except, fail-open defaults, panic-driven errors"]
 ```
 
-#### `/dev-kit:babysit-pr` — 15-step repair loop with retry back-edge
+#### `/dev-kit:babysit-pr` — bounded repair loop with retry back-edge
 
 ```mermaid
 flowchart TD
@@ -330,7 +339,8 @@ flowchart TD
   s5["step 5 · FETCH LOGS<br/>gh run view --log-failed for each failing check in changed"] --> s6
   s6["step 6 · DIAGNOSE<br/>identify ONE root cause per failing check"] --> s7
   s7["step 7 · APPLY FIX<br/>modify code; one logical change per iteration"] --> s8
-  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s9
+  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s8o
+  s8o["step 8.5 · OUTCOME<br/>persist progress and recovery state"] --> s9
   s9["step 9 · COMMIT<br/>git add specific paths + conventional commit"] --> s10
   s10["step 10 · PUSH<br/>git push origin HEAD"] --> s11
   s11["step 11 · LOG<br/>append one line to .dev-kit/babysit.log"] --> s12
@@ -398,7 +408,7 @@ two items:
 2. **`[N/M] LABEL → desc`** — used by `plan`'s 5-step framing.
 3. **`## Gate N/M — label` / `## Phase N — label`** — numbered gates.
 4. **Numbered list under `## Algorithm`** — used by `babysit-pr`'s 14-step
-   repair loop.
+   repair loop, plus its explicit pre-loop and outcome checkpoint.
 5. **`## <SectionName>` headers** as implicit phases.
 
 Skills without an extractable workflow are listed as text chips in a "no

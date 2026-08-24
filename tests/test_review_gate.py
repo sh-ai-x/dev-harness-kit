@@ -349,17 +349,20 @@ class TestSeverityGateTolerance(unittest.TestCase):
 
     def test_review_default_approve_no_file_does_not_emit_bootstrap_remediation(self):
         """agent_ran=false with verdict_source=default-approve-no-file must NOT
-        print the bootstrap-PR remediation text.
+        print the bootstrap-PR remediation text (install-broken signature).
 
         Pre-#625 the gate hard-failed any agent_ran=false case with the
         "PR-refuses-any-workflow-modification" message, even on PRs that
         did NOT touch .github/workflows/* (the action ran but produced no
         execution file -- e.g. provider=minimax wrapper-format output).
         The misleading remediation pointed users at workflow-merge steps
-        that did not apply. The fix splits the gate arm: only the
-        bootstrap-PR source emits the workflow-merge message; default-
-        approve-no-file emits a generic "no execution file" message
-        pointing at the action logs / provider switch.
+        that did not apply. Issue #726 collapsed the agent_ran=false arm
+        to a single 'AI agent was skipped (non-bootstrap)' message that
+        covers default-approve-no-file, parse-failed-no-verdict, mixed
+        bootstrap+ran, and missing source -- all of which are install-
+        broken signatures that must hard-fail. The OLD bootstrap-PR
+        remediation text ('Merge this PR's workflow changes to main first.')
+        MUST NOT appear here.
         """
         cp = _run_gate(
             r="",
@@ -373,17 +376,27 @@ class TestSeverityGateTolerance(unittest.TestCase):
             f"agent_ran=false MUST hard-fail.\nstdout={cp.stdout}\nstderr={cp.stderr}",
         )
         combined = cp.stdout + cp.stderr
-        # The new no-file message must fire.
-        self.assertIn("::error::review+security gate: AI agent produced no execution file", combined)
-        self.assertIn("provider=minimax", combined)
-        # The bootstrap-PR text must NOT fire on the default-approve-no-file source.
+        # Issue #726: single non-bootstrap hard-fail arm covers install-broken.
+        self.assertIn("AI agent was skipped (non-bootstrap)", combined)
+        # The OLD bootstrap-PR remediation text MUST NOT fire on the
+        # default-approve-no-file source.
         self.assertNotIn("refuses any PR whose head differs", combined)
         self.assertNotIn("Merge this PR's workflow changes to main", combined)
 
-    def test_review_bootstrap_pr_still_emits_bootstrap_remediation(self):
-        """Sanity: explicit verdict_source=needs-fallback-bootstrap-pr keeps
-        the existing bootstrap-PR remediation text (issue #212-C1-fix
-        behavior is preserved when the source is set correctly)."""
+    def test_review_bootstrap_security_ran_mixed_hard_fails(self):
+        """Issue #726 update: review bootstrap + security ran (mixed case)
+        must hard-fail via the non-bootstrap arm.
+
+        The pre-fix gate hard-failed on agent_ran=false regardless of source.
+        The post-fix gate (issue #726) tolerates the bootstrap case ONLY when
+        BOTH R_SOURCE and S_SOURCE are needs-fallback-bootstrap-pr (AND on
+        both sides); the mixed case (review=bootstrap + security=ran) keeps
+        the install-broken hard-fail with the post-fix 'non-bootstrap'
+        message. The OLD bootstrap-PR remediation text
+        ('Merge this PR's workflow changes to main first.') does NOT fire
+        here -- the consumer's lint pass detects its accidental
+        re-introduction.
+        """
         cp = _run_gate(
             r="",
             s="Approve",
@@ -393,14 +406,89 @@ class TestSeverityGateTolerance(unittest.TestCase):
         )
         self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
         combined = cp.stdout + cp.stderr
-        self.assertIn("::error::review+security gate: AI agent was skipped", combined)
-        self.assertIn("refuses any PR whose head differs", combined)
-        self.assertIn("Merge this PR's workflow changes to main", combined)
+        # Post-fix mixed case: hard-fail with the non-bootstrap message.
+        self.assertIn("AI agent was skipped (non-bootstrap)", combined)
+        # The OLD bootstrap-PR remediation text MUST NOT appear on this
+        # mixed signature (lint detects accidental reintroduction).
+        self.assertNotIn("Merge this PR's workflow changes to main", combined)
+        self.assertNotIn("refuses any PR whose head differs", combined)
+
+    def test_both_agents_bootstrap_falls_through(self):
+        """Issue #726 BOTH-bootstrap case: gate tolerates the skip and falls
+        through to the rank/case logic on the synthesized Approve.
+
+        When BOTH review and security report agent_ran=false AND
+        verdict_source=needs-fallback-bootstrap-pr, the gate must NOT
+        hard-fail. The synthesized 'Verdict: Approve' from each fallback
+        path passes through the rank/case logic and the worst-of is
+        Approve, so the gate exits 0. The pre-fix gate contradicted this
+        by hard-failing on agent_ran=false even on the documented
+        bootstrap-PR case.
+        """
+        cp = _run_gate(
+            r="Approve",
+            s="Approve",
+            event="pull_request",
+            r_agent="false",
+            s_agent="false",
+            r_source="needs-fallback-bootstrap-pr",
+            s_source="needs-fallback-bootstrap-pr",
+        )
+        self.assertEqual(
+            cp.returncode, 0,
+            f"BOTH bootstrap must fall through (was hard-fail).\nstdout={cp.stdout}\nstderr={cp.stderr}",
+        )
+        combined = cp.stdout + cp.stderr
+        # The ::notice:: line announces the bootstrap tolerance.
+        self.assertIn("::notice::bootstrap-PR fallback", combined)
+        # Must NOT emit the install-broken hard-fail error.
+        self.assertNotIn("AI agent was skipped (non-bootstrap)", combined)
+        self.assertNotIn("::error::", combined)
+
+    def test_security_bootstrap_alone_still_hard_fails(self):
+        """Issue #726 symmetric: security bootstrap + review ran (mixed)
+        hard-fails via the non-bootstrap arm (mirror of review case)."""
+        cp = _run_gate(
+            r="Approve",
+            s="",
+            event="pull_request",
+            s_agent="false",
+            s_source="needs-fallback-bootstrap-pr",
+        )
+        self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
+        combined = cp.stdout + cp.stderr
+        self.assertIn("AI agent was skipped (non-bootstrap)", combined)
+        self.assertNotIn("Merge this PR's workflow changes to main", combined)
+
+    def test_both_agents_skipped_no_source_still_hard_fails(self):
+        """Issue #726 strict mode: empty R_SOURCE / S_SOURCE no longer
+        default to the bootstrap arm. Main's pre-#726 logic treated empty
+        sources as a "backward-compat" bootstrap case (defaulted to the
+        bootstrap arm so older extract-verdict versions that did not
+        emit a source label still passed). The post-#726 logic is stricter:
+        the bootstrap-PR tolerance ONLY fires when the source is
+        explicitly set to needs-fallback-bootstrap-pr on both sides.
+        Empty sources fall through to the install-broken / non-bootstrap
+        arm, which is the safer failure mode (issue #212-C1 install-
+        broken protection). See review.yml issue-#726 comment block for
+        the full rationale.
+        """
+        cp = _run_gate(
+            r="",
+            s="",
+            event="pull_request",
+            r_agent="false",
+            s_agent="false",
+        )
+        self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
+        combined = cp.stdout + cp.stderr
+        self.assertIn("AI agent was skipped (non-bootstrap)", combined)
 
     def test_review_security_default_approve_no_file_does_not_emit_bootstrap_remediation(self):
-        """Symmetric to the review case: security-side agent_ran=false
-        with verdict_source=default-approve-no-file must fire the new
-        no-file message, not the bootstrap-PR text."""
+        """Symmetric to the review case (issue #726): security-side
+        agent_ran=false with verdict_source=default-approve-no-file must
+        fire the post-fix 'non-bootstrap' hard-fail, not the OLD bootstrap-
+        PR remediation text."""
         cp = _run_gate(
             r="Approve",
             s="",
@@ -410,7 +498,7 @@ class TestSeverityGateTolerance(unittest.TestCase):
         )
         self.assertEqual(cp.returncode, 1, cp.stdout + cp.stderr)
         combined = cp.stdout + cp.stderr
-        self.assertIn("::error::review+security gate: AI agent produced no execution file", combined)
+        self.assertIn("AI agent was skipped (non-bootstrap)", combined)
         self.assertNotIn("refuses any PR whose head differs", combined)
 
     def test_extracted_bash_is_nonempty(self):
@@ -429,10 +517,19 @@ class TestSeverityGateTolerance(unittest.TestCase):
         """Both review + security jobs MUST declare `verdict_source` in their
         job-level `outputs:` block. Without this declaration,
         `needs.<job>.outputs.verdict_source` is always empty in production,
-        the gate's `[ -z "$R_SOURCE$S_SOURCE" ]` backward-compat branch is
-        always-true, and the no-execution-file remediation arm (issue #625)
-        becomes unreachable. The PR's stated purpose — split the agent_ran=false
-        gate message by verdict_source — is functionally defeated.
+        the post-#726 bootstrap-vs-non-bootstrap classifier never matches
+        `needs-fallback-bootstrap-pr`, and the source-aware tolerance arm
+        never fires — every agent_ran=false case falls through to the
+        install-broken hard-fail. The PR's stated purpose — split the
+        agent_ran=false gate by verdict_source — is functionally defeated
+        if the job-level output declaration is dropped.
+
+        Note: main's pre-#626 design used an explicit `[ -z
+        "$R_SOURCE$S_SOURCE" ]` empty-source check as a backward-compat
+        branch. Issue #726 removed that branch (empty sources now hard-
+        fail by design — issue #212-C1 install-broken protection). This
+        test enforces the new contract: `verdict_source` must be set
+        explicitly, not defaulted via empty-source tolerance.
 
         This test parses the workflow YAML structurally so a future editor
         who removes or renames the key (e.g. renames to `source`) breaks the
