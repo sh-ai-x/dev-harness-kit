@@ -140,7 +140,7 @@ PLUGIN_SRC="$REPO_ROOT"
 # Redact the $HOME prefix for every operator-facing rendering of the
 # path; PLUGIN_SRC itself stays unredacted for the actual filesystem
 # calls (open(), -f test) that need the real path.
-PLUGIN_SRC_DISPLAY="${PLUGIN_SRC/#$HOME/\~}"
+PLUGIN_SRC_DISPLAY="${PLUGIN_SRC/#$HOME/~}"
 
 # Security finding F6 (PR #741): the two manifest-guard die() calls
 # below previously used a bare `echo >&2`, bypassing the script's own
