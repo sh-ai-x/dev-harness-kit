@@ -486,7 +486,6 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:bump`](docs/skills/bump.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
 | [`/dev-kit:sync-version`](docs/skills/sync-version.md) | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically; useful when pre-push is not installed or CI reports a stale branch. |
 | [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow. Runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`, with the same verdict extraction + combined gate + L3-evidence check + optional auto-approve. See [`docs/local-ci.md`](docs/local-ci.md) for the full playbook. |
-| `bin/review-local-server.py` | Localhost HTML live-streaming viewer for the same pipeline. Bound to `127.0.0.1` only; pass `--port 8765` and open `http://127.0.0.1:8765/pr/<N>`. The page is **passive** — opening it does NOT spawn a run. Click Start (or invoke `bin/review-local.sh --pr N` separately) to begin streaming. See [`docs/tools/review-local-html-viewer.md`](docs/tools/review-local-html-viewer.md) for the operator guide. |
 
 ### Keeping the project healthy
 
