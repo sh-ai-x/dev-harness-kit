@@ -125,6 +125,15 @@
             "fail_closed": false
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-janitor-session-start.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "PostToolUse": [
