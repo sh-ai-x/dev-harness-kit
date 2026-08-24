@@ -199,7 +199,7 @@ flowchart TD
   PROGRESS -->|no, repair PR 1| R2[repair PR 2]
   R2 --> OBSERVE
   PROGRESS -->|no, repair PR 2| EX[exception evidence bundle]
-  VERIFY -->|all required gates pass| MERGE[eligible for automatic merge]
+  VERIFY -->|all required gates pass| MERGE[human merge hand-off]
 ```
 
 GitHub's `auto-fix-pr` is only an event adapter into the same repair state; it
@@ -239,19 +239,57 @@ long-running process with discrete phases.
 
 ### Plugin at a glance
 
-`/dev-kit:code-viz` walks the plugin and emits one self-contained HTML with
-multi-level views (architecture → code → skill → hook → tools → external)
-plus a per-skill workflow extraction. The same `mermaid` syntax the
-visualizer emits is reproduced inline below; the visualizer's HTML output
-is the multi-level view that folds them all into one page (see the
-screenshot at the end of this section for an example).
+The table and Mermaid diagrams below are the compact, source-backed examples
+from `/dev-kit:code-viz`. Its generated HTML remains the canonical interactive
+view for the full architecture → code → skill → hook → tools → external
+levels and per-skill workflow extraction.
+
+#### Overall skill relationship map
+
+The following architecture map was created in the Archidraw canvas through
+the Archidraw MCP workflow. It inventories all **44 skills** shipped by this
+repository and groups them by the role they play in the development harness:
+foundation and integration, research and planning, build and refactor, review
+and security, ship and repair, quality and documentation, and evaluation and
+operations.
+
+<img src="docs/screenshots/architecture/overall-skill-architecture.png" alt="Overall dev-harness-kit skill relationship map created with Archidraw MCP" width="1200" />
+
+The portable Archidraw scene data is stored alongside the image at
+[`docs/architecture/2026-08-23/overall-skill-architecture.json`](docs/architecture/2026-08-23/overall-skill-architecture.json).
+The date-based directory makes future exports auditable and keeps the source
+scene separate from the rendered PNG.
+
+#### Dedicated babysit-pr architecture
+
+The separate Archidraw MCP export below shows the complete bounded repair loop
+for `babysit-pr`, including its human merge hand-off. It is a repair state
+machine, not a fixed number of commits. The detailed explanation is in the
+[babysit-pr architecture reference](docs/architecture/2026-08-24/babysit-pr-architecture.md).
+
+<img src="docs/screenshots/architecture/babysit-pr-architecture.png" alt="babysit-pr bounded repair loop architecture created with Archidraw MCP" width="1200" />
+
+The top flow is the operational spine: user intent enters through foundation
+configuration, moves through research and planning, is implemented and
+verified by the build skills, passes review and security gates, and reaches
+ship or repair before a human merge. The category columns below that spine are
+the complete skill inventory rather than separate execution steps. The arrows
+from each category header show ownership of the listed skills, while the
+artifacts and GitHub nodes show the two durable integration surfaces: local
+state/TraceLog outputs and pull-request checks.
+
+The shapes carry meaning: ellipses represent lifecycle endpoints or external
+surfaces, rectangles represent reusable skill groups and operations, diamonds
+represent decisions or gates, and arrows represent the direction of the main
+workflow. The dedicated `babysit-pr` workflow remains documented separately;
+it is shown here only as one member of the ship-and-repair skill family.
 
 | Diagram | What it shows |
 |---|---|
 | L0 Architecture | Layered topology — user → skills/commands → hooks → lib/tools/bin → external (GH Actions / MCP / CLI). |
 | [`/dev-kit:plan` workflow](docs/skills/plan.md) | The 5-gate pipeline (frame → validate → non-goals → decompose → emit) with the ambiguity-loop back-edge from emit to frame. |
 | [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
-| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
+| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 14-step repair state machine plus a pre-loop opt-out check and an outcome checkpoint; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
 
 #### `/dev-kit:plan` — 5 gates with ambiguity loop
 
@@ -288,7 +326,7 @@ flowchart TD
   A10["A10 · Mishandling Exceptional Conditions<br/>bare except, fail-open defaults, panic-driven errors"]
 ```
 
-#### `/dev-kit:babysit-pr` — 15-step repair loop with retry back-edge
+#### `/dev-kit:babysit-pr` — bounded repair loop with retry back-edge
 
 ```mermaid
 flowchart TD
@@ -301,7 +339,8 @@ flowchart TD
   s5["step 5 · FETCH LOGS<br/>gh run view --log-failed for each failing check in changed"] --> s6
   s6["step 6 · DIAGNOSE<br/>identify ONE root cause per failing check"] --> s7
   s7["step 7 · APPLY FIX<br/>modify code; one logical change per iteration"] --> s8
-  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s9
+  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s8o
+  s8o["step 8.5 · OUTCOME<br/>persist progress and recovery state"] --> s9
   s9["step 9 · COMMIT<br/>git add specific paths + conventional commit"] --> s10
   s10["step 10 · PUSH<br/>git push origin HEAD"] --> s11
   s11["step 11 · LOG<br/>append one line to .dev-kit/babysit.log"] --> s12
@@ -322,7 +361,7 @@ like in a browser:
 
 <img src="docs/screenshots/code-viz/diagram-00.png" alt="L0 Architecture overview rendered by /dev-kit:code-viz — user → skills/commands → hooks → lib/tools/bin → external" width="360" />
 
-> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots. The README only embeds the L0 PNG above; the per-skill workflows render inline as `mermaid` blocks and need no PNG export.
+> Regenerate the code-viz image by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The code-viz L0 image and the separately authored Archidraw Overall Skill Map are both committed exports; update each from its own source when the corresponding architecture changes. The per-skill workflows render inline as `mermaid` blocks and need no PNG export.
 
 ### GH Actions gate workflow
 
@@ -369,7 +408,7 @@ two items:
 2. **`[N/M] LABEL → desc`** — used by `plan`'s 5-step framing.
 3. **`## Gate N/M — label` / `## Phase N — label`** — numbered gates.
 4. **Numbered list under `## Algorithm`** — used by `babysit-pr`'s 14-step
-   repair loop.
+   repair loop, plus its explicit pre-loop and outcome checkpoint.
 5. **`## <SectionName>` headers** as implicit phases.
 
 Skills without an extractable workflow are listed as text chips in a "no
