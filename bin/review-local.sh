@@ -136,6 +136,25 @@ PLUGIN_SRC="$REPO_ROOT"
 if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
   die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json -- refusing to run the LLM judge against an incomplete plugin source (this would silently reproduce issue #727)"
 fi
+# Local judge finding A08 (security review, PR #741): the existence
+# check above only proves *a* manifest is present, not that it's
+# dev-kit's. A repo with a substituted `.claude-plugin/plugin.json`
+# (typosquat, downgrade, attacker-authored) would pass L136 and get
+# loaded into the judge subprocess via `--plugin-dir`. Validate the
+# `name` field matches "dev-kit" -- cheap, deterministic, and closes
+# the gap the finding describes without adding a new dependency
+# (python3 -m json.tool is already a script-wide dependency).
+PLUGIN_MANIFEST_NAME="$(python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        print(json.load(f).get("name", ""))
+except (OSError, json.JSONDecodeError):
+    print("")
+' "$PLUGIN_SRC/.claude-plugin/plugin.json")"
+if [ "$PLUGIN_MANIFEST_NAME" != "dev-kit" ]; then
+  die "dev-kit plugin manifest at $PLUGIN_SRC/.claude-plugin/plugin.json does not declare name=\"dev-kit\" (got \"$PLUGIN_MANIFEST_NAME\") -- refusing to load a substituted or malformed plugin source into the judge subprocess"
+fi
 
 # format_audit <verdict> [<extra_key=val> ...]
 # Build the human-friendly + machine-parseable audit comment body via
