@@ -638,59 +638,6 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 10.5. Local archive (operator-only run history for the SSE viewer).
-# ---------------------------------------------------------------------------
-# Writes the per-run artifacts under `<REPO_ROOT>/.review-local-archive/<PR>/<TS>/`
-# so `bin/review-local-server.py`'s `/archive/<pr>` routes can serve them
-# back to the browser after the live stream ends. The directory is in
-# .gitignore (per-machine data, never committed). Skipped in dry-run so
-# the operator's archive doesn't fill up with empty stubs from CI-budget
-# planning.
-if [ "$DRY_RUN" != "1" ]; then
-  ARCHIVE_DIR="${REPO_ROOT}/.review-local-archive/${PR_NUMBER}/$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  mkdir -p "$ARCHIVE_DIR"
-  # meta.json — run-level facts the UI renders without re-reading the log.
-  # Built via a single python3 call (not bash heredoc string interpolation)
-  # so every value goes through json.dumps exactly once. A prior version
-  # wrapped an already-quoted json.dumps() result in ANOTHER pair of
-  # heredoc quotes, producing invalid double-quoted JSON like
-  # `"worst_verdict": ""Approve"",` that broke every consumer
-  # (bin/review-local-server.py's /archive routes, `python3 -m json.tool`).
-  ARCHIVE_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-  ARCHIVE_HEAD_OID="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
-  ARCHIVE_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  python3 -c '
-import json, sys
-pr_number, started_at, provider, branch, head_oid, worst, review_v, security_v, maintenance_v, l3_ok, audit_body, out_path = sys.argv[1:]
-meta = {
-    "pr_number": int(pr_number),
-    "started_at": started_at,
-    "provider": provider,
-    "branch": branch,
-    "head_oid": head_oid,
-    "worst_verdict": worst,
-    "review_verdict": review_v,
-    "security_verdict": security_v,
-    "maintenance_verdict": maintenance_v,
-    "l3_ok": l3_ok == "1",
-    "audit_body": audit_body,
-}
-with open(out_path, "w", encoding="utf-8") as f:
-    json.dump(meta, f, indent=2)
-    f.write("\n")
-' "$PR_NUMBER" "$ARCHIVE_STARTED_AT" "$PROVIDER" "$ARCHIVE_BRANCH" "$ARCHIVE_HEAD_OID" \
-    "$WORST" "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V" "$L3_OK" "$AUDIT_BODY" \
-    "$ARCHIVE_DIR/meta.json"
-  # Per-gate raw stdout (un-prefixed; the SSE pipe prefixes are
-  # stripped here because the saved artifact is for human review,
-  # not for re-streaming).
-  printf '%s' "${REVIEW_OUTPUT:-}"      > "$ARCHIVE_DIR/review.json"
-  printf '%s' "${SECURITY_OUTPUT:-}"    > "$ARCHIVE_DIR/security.json"
-  printf '%s' "${MAINTENANCE_OUTPUT:-}" > "$ARCHIVE_DIR/maintenance.json"
-  log "archived run to $ARCHIVE_DIR"
-fi
-
-# ---------------------------------------------------------------------------
 # 11. Final exit (mirrors review.yml:557-561).
 # ---------------------------------------------------------------------------
 case "$WORST" in
