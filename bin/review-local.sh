@@ -149,7 +149,7 @@ import json, sys
 try:
     with open(sys.argv[1], encoding="utf-8") as f:
         print(json.load(f).get("name", ""))
-except (OSError, json.JSONDecodeError):
+except (OSError, UnicodeDecodeError, json.JSONDecodeError):
     print("")
 ' "$PLUGIN_SRC/.claude-plugin/plugin.json")"
 if [ "$PLUGIN_MANIFEST_NAME" != "dev-kit" ]; then
