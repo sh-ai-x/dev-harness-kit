@@ -756,6 +756,31 @@ def _cli() -> int:
 
     sub.add_parser("report")
 
+    # `summary` = scan + render_report in one shot. Use this when you
+    # want the current store state after a fresh scan without
+    # re-judging anything (already-known signatures get bumped only).
+    # `--no-scan` prints the report from the existing store as-is
+    # (offline mode for CI logs that are slow to fetch).
+    psum = sub.add_parser(
+        "summary",
+        help="scan (--count/--commits) then render the full report in "
+             "one call; no judging step. Use this for the 'just tell me "
+             "what's in the store now' flow. Pass --no-scan to skip "
+             "the scan and just render the existing store.",
+    )
+    # --commits / --count drive the scan; --no-scan disables the scan
+    # entirely. They're not mutually exclusive on purpose: --no-scan
+    # overrides whatever scan scope was given. Validation is enforced
+    # at runtime below (one of {--commits, --count} must be set unless
+    # --no-scan is passed).
+    psum.add_argument("--commits", nargs="+", default=None,
+                      help="scan these SHAs then report")
+    psum.add_argument("--count", type=int, default=None,
+                      help="scan the N most recent commits on HEAD then report")
+    psum.add_argument("--no-scan", action="store_true",
+                      help="skip the scan; render the report from the "
+                           "existing store as-is (offline mode)")
+
     pp = sub.add_parser("process", help="auto-resolve open cases: "
                         "apply known-pattern fixes, verify via a fresh scan, "
                         "transition open -> processed with a full resolution "
@@ -802,6 +827,17 @@ def _cli() -> int:
         return 0
 
     if args.cmd == "report":
+        store = load_store(store_path)
+        print(render_report(store))
+        return 0
+
+    if args.cmd == "summary":
+        # --no-scan renders the store as-is. Otherwise we need exactly
+        # one of {--commits, --count} — same as the `scan` subcommand.
+        if not args.no_scan:
+            if (args.commits is None) == (args.count is None):
+                p.error("summary: pass either --commits SHA... or --count N (or use --no-scan)")
+            scan(commits=args.commits, count=args.count, store_path=store_path)
         store = load_store(store_path)
         print(render_report(store))
         return 0
