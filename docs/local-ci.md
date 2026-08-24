@@ -37,6 +37,17 @@ A direct shell port of the orchestration half of
 skills (`/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance`)
 are reused verbatim via the local `claude -p` invocation.
 
+Every `claude -p` call is spawned with `--plugin-dir "$PLUGIN_SRC"`
+(`PLUGIN_SRC` = the repo root the script resolved via `git rev-parse
+--show-toplevel`). Without this flag the spawned process has no
+dev-kit slash commands loaded — `/dev-kit:review` etc. resolve to
+`Unknown command`, the process exits in under a second with
+`num_turns=0`, and the verdict extractor sees empty stdout, which the
+wrapper's lenient-default logic silently maps to `Approve` (a false
+positive that hides real judge failures). This mirrors
+`bin/ci-claude-p.sh:200`, the GH-Actions sibling that already passed
+`--plugin-dir` correctly (issue #727).
+
 ### Usage
 
 ```bash
