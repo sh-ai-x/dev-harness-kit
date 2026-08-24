@@ -204,17 +204,39 @@ class TestReviewLocalServer(unittest.TestCase):
             events = [f.get("event") for f in frames]
             stdout_events = [e for e in events if e == "stdout"]
             stdout_lines = [f.get("line", "") for f in frames if f.get("event") == "stdout"]
-            # Required contract: ready frame, meta frame, and at least
-            # 6 stdout frames with the combined-verdict line.
-            # We do NOT assert `done` is in the sequence because the
-            # server's client-gone detection kills proc + skips the
-            # terminal `done` write when the test client closes its
-            # socket early (which happens here -- urlopen returns
-            # after _read_sse_frames returns, closing the socket
-            # while the server is mid-write). The `done` write is
-            # best-effort and not contract-critical.
+            # Required contract: ready, meta, >= 6 stdout, and a
+            # terminal `done` frame with exit_code=0. The stub is
+            # fast (<1s) and `_read_sse_frames` stops as soon as it
+            # sees `done`, so this should arrive well within the 12s
+            # window -- no client-gone race here (unlike the
+            # concurrency-cap test, which deliberately holds
+            # connections open).
+            #
+            # This assertion regressed silently once before: a bug
+            # in the server's EOF-handling (selectors.get_key() raises
+            # KeyError for an unregistered fileobj instead of
+            # returning None) caused an uncaught exception the moment
+            # proc.stdout hit EOF, which terminated the connection
+            # BEFORE the `done` frame was written. The symptom looked
+            # identical to "client closed early" from the test's
+            # point of view, so this assertion was relaxed to ignore
+            # `done` entirely -- which hid the bug instead of
+            # catching it. Discovered live against PR #731 (MiniMax
+            # "Invalid API key" case: the browser saw the error line
+            # but never saw `done`, so the UI never signaled the run
+            # had ended). Fixed by replacing the get_key() post-check
+            # with an explicit `stdout_eof` flag.
             self.assertEqual(events[0], "ready", f"first frame should be ready, got {frames[:2]!r}")
             self.assertIn("meta", events, f"expected meta frame, got {events!r}")
+            self.assertEqual(
+                events[-1], "done",
+                f"last frame must be done (server must always signal run completion); got {events!r}",
+            )
+            done_frame = frames[-1]
+            self.assertEqual(
+                done_frame.get("exit_code"), 0,
+                f"expected exit_code=0 for the stub's clean exit; got {done_frame!r}",
+            )
             self.assertGreaterEqual(
                 len(stdout_events), 6,
                 f"expected at least 6 stdout frames, got {len(stdout_events)} (events={events!r})",

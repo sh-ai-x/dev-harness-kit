@@ -171,9 +171,15 @@ def _terminate_all_procs() -> None:
     """
     with _active_procs_lock:
         procs = list(_active_procs)
+    # SIGTERM the whole process group (review finding M1-followup):
+    # `bash review-local.sh` is a wrapper that spawns three `claude -p`
+    # judges; if we only signal bash, bash dies but the three children
+    # get reparented to init and keep streaming against the operator's
+    # API key. `start_new_session=True` on Popen (see _stream_*) puts
+    # bash in its own pgid; os.killpg nukes the entire tree.
     for p in procs:
         try:
-            p.terminate()
+            os.killpg(p.pid, signal.SIGTERM)
         except (ProcessLookupError, OSError):
             continue
     for p in procs:
@@ -181,7 +187,7 @@ def _terminate_all_procs() -> None:
             p.wait(timeout=2)
         except subprocess.TimeoutExpired:
             try:
-                p.kill()
+                os.killpg(p.pid, signal.SIGKILL)
                 p.wait(timeout=1)
             except (ProcessLookupError, OSError):
                 pass
@@ -349,6 +355,12 @@ class _Handler(BaseHTTPRequestHandler):
                     text=True,
                     bufsize=1,
                     env=env,
+                    # Own pgid so SIGTERM/SIGKILL via os.killpg reach
+                    # the three `claude -p` children bash spawns
+                    # (review finding M1-followup). Without this the
+                    # children are reparented to init and keep
+                    # streaming against the operator's API key.
+                    start_new_session=True,
                 )
             except FileNotFoundError:
                 self._write_sse({"event": "error", "message": f"bin/review-local.sh missing at {REVIEW_LOCAL_SH}"})
@@ -380,6 +392,7 @@ class _Handler(BaseHTTPRequestHandler):
                 pass
             timed_out = False
             client_gone = False
+            stdout_eof = False
             # Wall-clock cap (review finding m1 on PR #731). Without
             # this, a hung subprocess holds the stream slot forever.
             # select() lets us multiplex the stdout read with a
@@ -401,8 +414,24 @@ class _Handler(BaseHTTPRequestHandler):
                         line = proc.stdout.readline()
                         if not line:
                             # EOF -- subprocess closed its stdout.
-                            timed_out = False
-                            client_gone = False
+                            # Use an explicit flag rather than
+                            # re-querying the selector after
+                            # unregistering: selectors.get_key() RAISES
+                            # KeyError for an unregistered fileobj (it
+                            # does not return None), so the previous
+                            # `if not sel.get_key(proc.stdout): break`
+                            # post-check crashed the handler thread
+                            # with an uncaught KeyError the moment
+                            # stdout hit EOF -- the subprocess exited
+                            # cleanly but the terminal `done` SSE frame
+                            # was NEVER written because the exception
+                            # unwound straight to `finally` before
+                            # reaching the write. Discovered live
+                            # against PR #731 (MiniMax "Invalid API
+                            # key" case): the browser saw the error
+                            # line but no `done` frame, so nothing told
+                            # the operator the run was actually over.
+                            stdout_eof = True
                             sel.unregister(proc.stdout)
                             break
                         # Strip trailing newline; SSE will re-add framing.
@@ -427,15 +456,14 @@ class _Handler(BaseHTTPRequestHandler):
                             # EOF -- operator closed the tab.
                             client_gone = True
                             break
-                if client_gone or timed_out:
-                    break
-                # If we consumed the proc.stdout EOF above, exit cleanly.
-                if not sel.get_key(proc.stdout):
+                if client_gone or timed_out or stdout_eof:
                     break
 
             if timed_out:
-                # Kill the hung subprocess; emit the timeout marker.
-                proc.kill()
+                # Kill the hung subprocess AND its `claude -p` children
+                # (review finding M1-followup). os.killpg sends the
+                # signal to the whole pgid set up by start_new_session.
+                os.killpg(proc.pid, signal.SIGKILL)
                 try:
                     proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
@@ -446,9 +474,10 @@ class _Handler(BaseHTTPRequestHandler):
                     pass
             elif client_gone:
                 # Operator closed the tab / browser navigated away.
-                # Kill the subprocess so we don't leak orphans
-                # (review finding M1).
-                proc.kill()
+                # Kill the subprocess AND its `claude -p` children
+                # (review finding M1 / M1-followup) so the operator's
+                # API quota is not leaked across a tab-close.
+                os.killpg(proc.pid, signal.SIGKILL)
                 try:
                     proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
