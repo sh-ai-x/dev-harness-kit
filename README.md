@@ -239,12 +239,41 @@ long-running process with discrete phases.
 
 ### Plugin at a glance
 
-`/dev-kit:code-viz` walks the plugin and emits one self-contained HTML with
-multi-level views (architecture → code → skill → hook → tools → external)
-plus a per-skill workflow extraction. The same `mermaid` syntax the
-visualizer emits is reproduced inline below; the visualizer's HTML output
-is the multi-level view that folds them all into one page (see the
-screenshot at the end of this section for an example).
+The table and Mermaid diagrams below are the compact, source-backed examples
+from `/dev-kit:code-viz`. Its generated HTML remains the canonical interactive
+view for the full architecture → code → skill → hook → tools → external
+levels and per-skill workflow extraction.
+
+#### Overall skill relationship map
+
+The following architecture map was created in the Archidraw canvas through
+the Archidraw MCP workflow. It inventories all **44 skills** shipped by this
+repository and groups them by the role they play in the development harness:
+foundation and integration, research and planning, build and refactor, review
+and security, ship and repair, quality and documentation, and evaluation and
+operations.
+
+<img src="docs/screenshots/architecture/overall-skill-architecture.png" alt="Overall dev-harness-kit skill relationship map created with Archidraw MCP" width="1200" />
+
+The portable Archidraw scene data is stored alongside the image at
+[`docs/architecture/2026-08-23/overall-skill-architecture.json`](docs/architecture/2026-08-23/overall-skill-architecture.json).
+The date-based directory makes future exports auditable and keeps the source
+scene separate from the rendered PNG.
+
+The top flow is the operational spine: user intent enters through foundation
+configuration, moves through research and planning, is implemented and
+verified by the build skills, passes review and security gates, and reaches
+ship or repair before a human merge. The category columns below that spine are
+the complete skill inventory rather than separate execution steps. The arrows
+from each category header show ownership of the listed skills, while the
+artifacts and GitHub nodes show the two durable integration surfaces: local
+state/TraceLog outputs and pull-request checks.
+
+The shapes carry meaning: ellipses represent lifecycle endpoints or external
+surfaces, rectangles represent reusable skill groups and operations, diamonds
+represent decisions or gates, and arrows represent the direction of the main
+workflow. The dedicated `babysit-pr` workflow remains documented separately;
+it is shown here only as one member of the ship-and-repair skill family.
 
 | Diagram | What it shows |
 |---|---|
@@ -322,7 +351,7 @@ like in a browser:
 
 <img src="docs/screenshots/code-viz/diagram-00.png" alt="L0 Architecture overview rendered by /dev-kit:code-viz — user → skills/commands → hooks → lib/tools/bin → external" width="360" />
 
-> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots. The README only embeds the L0 PNG above; the per-skill workflows render inline as `mermaid` blocks and need no PNG export.
+> Regenerate the code-viz image by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The code-viz L0 image and the separately authored Archidraw Overall Skill Map are both committed exports; update each from its own source when the corresponding architecture changes. The per-skill workflows render inline as `mermaid` blocks and need no PNG export.
 
 ### GH Actions gate workflow
 
