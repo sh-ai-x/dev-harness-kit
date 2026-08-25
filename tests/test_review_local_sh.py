@@ -32,6 +32,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -938,9 +939,14 @@ exit 0
         manifest-existence check is the fix for issue #727's silent-
         Approve regression. A swap of `die` back to a `log` warning
         would reproduce #727 undetected without this test.
+
+        Security finding A10 (PR #741): duration assertion catches a
+        regression that hangs ~15s on a stat() of a stalled network
+        mount before subprocess.run's timeout kills it.
         """
         with tempfile.TemporaryDirectory() as tmp:
             consumer = self._install_manifestless_consumer(Path(tmp))
+            t0 = time.monotonic()
             r = subprocess.run(
                 ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
                 cwd=consumer,
@@ -948,15 +954,22 @@ exit 0
                 text=True,
                 timeout=15,
             )
+            elapsed = time.monotonic() - t0
             self.assertNotEqual(r.returncode, 0, f"expected non-zero exit; stdout={r.stdout!r} stderr={r.stderr!r}")
             self.assertIn("plugin manifest not found", r.stderr,
                 f"expected manifest-not-found die message; stderr={r.stderr!r}")
+            self.assertLess(elapsed, 5.0,
+                f"manifest-existence check should fail fast (<5s); took {elapsed:.2f}s -- likely hung stat() regression")
 
     def test_wrong_manifest_name_dies(self) -> None:
         """Review finding #1 (MAJOR, PR #741): the die() branch that
         rejects a manifest whose `name` != "dev-kit" is the F1-followup
         fix (local judge finding A08). Without this test, removing the
         name check re-opens the substituted-plugin-source gap silently.
+
+        Security finding A10 (PR #741): duration assertion catches a
+        regression that hangs ~15s in the python3 manifest parse heredoc
+        before subprocess.run's timeout kills it.
         """
         with tempfile.TemporaryDirectory() as tmp:
             consumer = self._install_manifestless_consumer(Path(tmp))
@@ -964,6 +977,7 @@ exit 0
             (consumer / ".claude-plugin" / "plugin.json").write_text(
                 json.dumps({"name": "not-dev-kit"}), encoding="utf-8",
             )
+            t0 = time.monotonic()
             r = subprocess.run(
                 ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
                 cwd=consumer,
@@ -971,9 +985,38 @@ exit 0
                 text=True,
                 timeout=15,
             )
+            elapsed = time.monotonic() - t0
             self.assertNotEqual(r.returncode, 0, f"expected non-zero exit; stdout={r.stdout!r} stderr={r.stderr!r}")
             self.assertIn('does not declare name="dev-kit"', r.stderr,
                 f"expected name-mismatch die message; stderr={r.stderr!r}")
+            self.assertLess(elapsed, 5.0,
+                f"manifest-parse + name-check should fail fast (<5s); took {elapsed:.2f}s -- likely hung python3 heredoc regression")
+
+    def test_symlink_manifest_dies(self) -> None:
+        """Security finding A06 (PR #741): `[ ! -f ... ]` accepts a
+        symlink-to-regular-file, and json.load then slurps the link
+        target unbounded. A symlink at .claude-plugin/plugin.json must
+        be refused with a distinct die message so the operator sees
+        "refusing to follow" instead of the misleading parse-error.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            consumer = self._install_manifestless_consumer(Path(tmp))
+            (consumer / ".claude-plugin").mkdir()
+            # Symlink to a benign regular file; the size/symlink guard
+            # must catch it BEFORE the python3 parser runs.
+            target = consumer / "benign.json"
+            target.write_text(json.dumps({"name": "dev-kit"}), encoding="utf-8")
+            (consumer / ".claude-plugin" / "plugin.json").symlink_to(target)
+            r = subprocess.run(
+                ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit on symlink manifest; stdout={r.stdout!r} stderr={r.stderr!r}")
+            self.assertIn("is a symlink", r.stderr,
+                f"expected symlink-refused die message; stderr={r.stderr!r}")
 
 
 if __name__ == "__main__":
