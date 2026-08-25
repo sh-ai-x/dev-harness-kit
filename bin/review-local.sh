@@ -108,9 +108,16 @@ usage() {
 # REPO_ROOT resolves from cwd's git toplevel rather than BASH_SOURCE.
 # That path has no manifest by construction, so --help must exit 0
 # before the hard-fail check fires.
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
-esac
+#
+# Review finding A1 (PR #741): scanning only "${1:-}" meant
+# `--pr 1 --help` (help NOT in first position) still fell through to
+# the manifest guard below and died instead of printing usage. Scan
+# the full argv so --help short-circuits regardless of position.
+for _early_arg in "$@"; do
+  case "$_early_arg" in
+    -h|--help) usage; exit 0 ;;
+  esac
+done
 
 # PLUGIN_SRC: dev-kit plugin root. The local mirror of the GH-Actions
 # `claude -p` invocation MUST pass `--plugin-dir` so the spawned claude
@@ -140,7 +147,21 @@ PLUGIN_SRC="$REPO_ROOT"
 # Redact the $HOME prefix for every operator-facing rendering of the
 # path; PLUGIN_SRC itself stays unredacted for the actual filesystem
 # calls (open(), -f test) that need the real path.
-PLUGIN_SRC_DISPLAY="${PLUGIN_SRC/#$HOME/~}"
+#
+# Review finding C2 (PR #741): when $HOME is empty or unset, the
+# naive `${PLUGIN_SRC/#$HOME/~}` pattern trivially matches the
+# zero-width prefix at position 0, prepending "~" onto the FULL
+# unredacted path ("~/Users/alice/...") instead of redacting it --
+# the exact leak F5 exists to close, defeated by an edge case.
+# `${HOME:-}` is the set-u-safe form; the explicit prefix-match test
+# ensures we only rewrite when PLUGIN_SRC genuinely starts under a
+# non-empty $HOME, falling back to the raw path (unredacted but not
+# mangled) otherwise.
+if [ -n "${HOME:-}" ] && [ "${PLUGIN_SRC#"${HOME}"/}" != "$PLUGIN_SRC" ]; then
+  PLUGIN_SRC_DISPLAY="~/${PLUGIN_SRC#"${HOME}"/}"
+else
+  PLUGIN_SRC_DISPLAY="$PLUGIN_SRC"
+fi
 
 # Security finding F6 (PR #741): the two manifest-guard die() calls
 # below previously used a bare `echo >&2`, bypassing the script's own
@@ -191,7 +212,15 @@ try:
     name = data.get("name", "") if isinstance(data, dict) else ""
     print("OK:" + str(name))
 except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
-    print("ERR:" + type(e).__name__ + ": " + str(e))
+    # Review finding S1 (PR #741): OSError.__str__() embeds the
+    # absolute path passed to open() (e.g. "[Errno 13] Permission
+    # denied: '/Users/alice/repo/.claude-plugin/plugin.json'"),
+    # bypassing the F5 $HOME redaction the die() message otherwise
+    # applies -- the path leak F5 was written to close reappears here
+    # via a different code path. Use e.strerror (just the OS message,
+    # no path) for OSError; str(e) is safe for the other two types.
+    detail = (e.strerror or "I/O error") if isinstance(e, OSError) else str(e)
+    print("ERR:" + type(e).__name__ + ": " + detail)
 ' "$PLUGIN_SRC/.claude-plugin/plugin.json")"
 
 case "$PLUGIN_MANIFEST_PARSE" in
