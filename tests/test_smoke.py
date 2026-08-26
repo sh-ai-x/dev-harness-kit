@@ -26,6 +26,13 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # Phase 5 added skills/research/SKILL.md, Phase 6 added skills/interview/SKILL.md).
 # Phase 7.4 added skills/harness-audit/SKILL.md (39 -> 40).
 # PR #463 dropped skills/lcs/SKILL.md alongside the LCS substrate (40 -> 39).
+# PR #741 added skills/maintenance/SKILL.md -- the maintenance gate
+# previously had no backing skill; bin/review-local.sh + .github/workflows/maintenance.yml
+# referenced /dev-kit:maintenance but `commands/maintenance.md` was missing, so
+# every local babysit run hit "Unknown command" and lenient-defaulted to
+# Approve (the exact #727 regression mode). Created skills/maintenance/
+# SKILL.md + commands/maintenance.md so the maintenance gate's verdict
+# line actually reaches extract_verdict (44 -> 45).
 # PR #492 dropped skills/eval/SKILL.md (fully superseded by skills/evaluate/,
 # which documents itself as a backward-compatible superset) and
 # skills/harness-audit/SKILL.md (self-contained, zero CI/cron wiring, zero
@@ -54,7 +61,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # PR #684 — backup-before-overwrite + 4-state classifier) (43 -> 44).
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 44
+SKILL_COUNT = 45
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

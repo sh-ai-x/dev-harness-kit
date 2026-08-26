@@ -105,6 +105,36 @@ if [ -n "$REPO_ROOT" ]; then
   ln -sfn "$RUN_LOG" "$LIVE_LINK"
   printf 'babysit-pr-local: started PR=%s pid=%s run=%s url=http://127.0.0.1:8766/pr/%s\n' \
     "$PR_NUMBER" "$$" "$RUN_TS" "$PR_NUMBER" >> "$RUN_LOG"
+
+  # Auto-open the HTML viewer in the operator's default browser. The
+  # viewer is at http://127.0.0.1:8766/pr/<N> (served by
+  # bin/review-local-server.py). It is a read-only snapshot renderer
+  # -- opening it does NOT trigger execution; it just shows the
+  # latest persisted log via the same symlink rotation the live
+  # tail file uses.
+  #
+  # - `open <url>` on macOS dispatches to the default browser. On
+  #   non-macOS, fall back to `xdg-open` (Linux) or `wslview` (WSL).
+  # - In CI / non-TTY contexts (`$CI=1`, `$(tty)` empty, or
+  #   `DISPLAY` unset on a Linux server with no X), the commands
+  #   silently fail; we don't care -- the operator can still open
+  #   the URL manually from the stdout banner above.
+  # - Server may not be running yet on a fresh worktree; warn but
+  #   don't fail (the next iteration's `curl` will surface this).
+  if [ -z "${CI:-}" ] && [ -n "${DISPLAY:-${WAYLAND_DISPLAY:-}}" ] || command -v open >/dev/null 2>&1; then
+    VIEWER_URL="http://127.0.0.1:8766/pr/$PR_NUMBER"
+    if command -v curl >/dev/null 2>&1; then
+      if curl -sS -o /dev/null -w "%{http_code}" --max-time 2 "$VIEWER_URL" 2>/dev/null | grep -q '^200$'; then
+        if command -v open >/dev/null 2>&1; then
+          open "$VIEWER_URL" 2>/dev/null || true
+        elif command -v xdg-open >/dev/null 2>&1; then
+          xdg-open "$VIEWER_URL" 2>/dev/null || true
+        fi
+      else
+        printf '  viewer not yet serving on %s (start bin/review-local-server.py to enable auto-open)\n' "$VIEWER_URL" >> "$RUN_LOG"
+      fi
+    fi
+  fi
 fi
 
 # --- delegate to bin/review-local.sh -----------------------------------

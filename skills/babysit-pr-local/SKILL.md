@@ -177,7 +177,12 @@ LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
            The wrapper validates args (refuses --auto-approve), then
            execs `bin/review-local.sh --pr $PR_NUMBER` with the
            provider-resolved env block + secret-scoped API key. The
-           local judge runs /dev-kit:review + /dev-kit:security +
+           wrapper also auto-opens `http://127.0.0.1:8766/pr/$PR_NUMBER`
+           in the operator's default browser once the viewer server
+           responds (200 OK). The viewer is pure read-only -- opening
+           the URL NEVER triggers execution; the babysit iteration
+           loop is driven by the skill itself, not by the page.
+        b. The local judge runs /dev-kit:review + /dev-kit:security +
            /dev-kit:maintenance and emits:
              - exit 0 → Approve (loop terminates next iteration)
              - exit 1 → Changes Requested / Blocked / parse failure
