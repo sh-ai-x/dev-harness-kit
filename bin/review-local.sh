@@ -89,10 +89,15 @@ if [ -z "$REPO_ROOT" ]; then
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || true)"
 fi
 [ -n "$REPO_ROOT" ] || { echo "error: not in a git repo" >&2; exit 1; }
-cd "$REPO_ROOT"
 
-# shellcheck source=lib/review_local_lib.sh
-. "$REPO_ROOT/lib/review_local_lib.sh"
+# Lib sourcing is deferred until AFTER the manifest guards fire
+# (earlier in this script, before this comment). `lib/review_local_lib.sh`
+# provides `provider_env_for`, `provider_config`, etc. — none of which
+# the manifest guards need. Sourcing it BEFORE the guards meant a cwd
+# in a different git repo would hit "No such file or directory" on
+# the lib source before the spoofing check ever fired, masking the
+# real failure mode (review finding #1, PR #741). The deferred source
+# below only runs if the spoofing + manifest guards pass.
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "  $*"; }
@@ -139,6 +144,11 @@ done
 # plugin directory; a missing manifest here means a broken/partial
 # install, and the operator needs a loud failure, not a silent
 # Approve. (Local judge finding F1, PR #741.)
+#
+# IMPORTANT: this block runs BEFORE `cd "$REPO_ROOT"` and BEFORE the
+# lib source -- if either of those were earlier, a cwd in a different
+# git repo would mask the spoofing check with a "No such file"
+# lib-source error (review finding #1, PR #741).
 PLUGIN_SRC="$REPO_ROOT"
 # Security finding A06 (PR #741): `git rev-parse --show-toplevel` above
 # walks up looking for *any* `.git` entry, including a `.git` FILE
@@ -152,6 +162,25 @@ PLUGIN_SRC="$REPO_ROOT"
 # dirname is the operator's intended source by construction; if the
 # realpath of git-toplevel disagrees, the operator is in an unrelated
 # checkout -- refuse to load the plugin from it).
+# Security finding F6 (PR #741): the manifest-guard die() calls
+# previously used a bare `echo >&2`, bypassing the script's own
+# `log` helper and carrying no timestamp -- unlike every other
+# operator-facing line in this script (`log "verdicts: ..."` etc).
+# manifest_guard_log emits a UTC-timestamped line through the same
+# `log` helper before the eventual `die`, so a postmortem grep of
+# .review-local-current/<PR>.log can correlate a guard trip against
+# the surrounding gate timeline.
+#
+# MUST be defined BEFORE any call site (review finding #1, PR #741):
+# bash does not hoist function definitions. The REPO_ROOT-spoofing
+# branch below calls manifest_guard_log at line ~30 of this section,
+# so the definition lives ABOVE all call sites -- otherwise under
+# `set -euo pipefail` the call would fail with "command not found"
+# (exit 127) instead of the intended die() with the security warning.
+manifest_guard_log() {
+  log "$(date -u +%Y-%m-%dT%H:%M:%SZ) manifest-guard: $*"
+}
+
 PLUGIN_SRC_REAL="$(cd "$PLUGIN_SRC" && pwd -P)"
 SCRIPT_REPO_REAL="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 if [ "$PLUGIN_SRC_REAL" != "$SCRIPT_REPO_REAL" ]; then
@@ -182,18 +211,6 @@ if [ -n "${HOME:-}" ] && [ "${PLUGIN_SRC#"${HOME}"/}" != "$PLUGIN_SRC" ]; then
 else
   PLUGIN_SRC_DISPLAY="$PLUGIN_SRC"
 fi
-
-# Security finding F6 (PR #741): the two manifest-guard die() calls
-# below previously used a bare `echo >&2`, bypassing the script's own
-# `log` helper and carrying no timestamp -- unlike every other
-# operator-facing line in this script (`log "verdicts: ..."` etc).
-# manifest_guard_log emits a UTC-timestamped line through the same
-# `log` helper before the eventual `die`, so a postmortem grep of
-# .review-local-current/<PR>.log can correlate a guard trip against
-# the surrounding gate timeline.
-manifest_guard_log() {
-  log "$(date -u +%Y-%m-%dT%H:%M:%SZ) manifest-guard: $*"
-}
 
 if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
   manifest_guard_log "missing manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json"
@@ -342,6 +359,15 @@ case "$PLUGIN_MANIFEST_PARSE" in
     die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json parse produced no output (likely MemoryError / stdout truncation) -- refusing to load a malformed plugin source into the judge subprocess"
     ;;
 esac
+
+# All manifest guards passed; safe to cd into REPO_ROOT and source lib/.
+# (Deferred from line ~92 so a cwd in a different git repo hits the
+# REPO_ROOT-spoofing check above, not a "No such file" lib-source
+# error -- review finding #1, PR #741.)
+cd "$REPO_ROOT"
+
+# shellcheck source=lib/review_local_lib.sh
+. "$REPO_ROOT/lib/review_local_lib.sh"
 
 # format_audit <verdict> [<extra_key=val> ...]
 # Build the human-friendly + machine-parseable audit comment body via
@@ -907,6 +933,57 @@ if [ "$DRY_RUN" = "1" ]; then
 else
   gh pr comment "$PR_NUMBER" --body "$AUDIT_BODY" >/dev/null \
     || log "warning: gh pr comment failed (audit skipped)"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.5 Local archive (per-run persistence for the viewer).
+# ---------------------------------------------------------------------------
+# The wrapper script `bin/babysit-pr-local.sh` writes the raw
+# `bin/review-local.sh` stdout to `<REPO>/.review-local-archive/<PR>/<ts>/log`
+# via `tee -a "$RUN_LOG"`. That log is the human-readable audit
+# stream. This section writes the same run's STRUCTURED metadata
+# (per-gate verdict + combined verdict + L3 evidence + audit body) to
+# `<REPO>/.review-local-archive/<PR>/<ts>/{meta,review,security,maintenance}.json`
+# so the HTML viewer's `/archive/<PR>` + `/archive/<PR>/<run_id>` endpoints
+# can render verdict badges and re-display a run's verdict without
+# re-running the LLM judges.
+#
+# Skip the write in dry-run mode (nothing to archive) and on early
+# exits before the WORST verdict is computed (which would only happen
+# for the `MISSING` path -- all of which already die() before
+# reaching this section).
+if [ "$DRY_RUN" = "0" ] && [ -n "${RUN_LOG:-}" ] && [ -n "${REPO_ROOT:-}" ]; then
+  ARCHIVE_DIR="$(dirname "$RUN_LOG")"
+  # RUN_TS is exported from bin/babysit-pr-local.sh via the env
+  # embedded in the `tee` invocation. Fall back to deriving from the
+  # log filename if the wrapper wasn't used.
+  if [ -z "${RUN_TS:-}" ]; then
+    RUN_TS="$(basename "$ARCHIVE_DIR")"
+  fi
+  HEAD_OID="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  python3 - "$ARCHIVE_DIR" "$RUN_TS" "$HEAD_OID" "$WORST" "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V" "$L3_OK" "$AUDIT_BODY" "${REVIEW_OUTPUT:-}" "${SECURITY_OUTPUT:-}" "${MAINTENANCE_OUTPUT:-}" <<'PYEOF'
+import json
+import sys
+from pathlib import Path
+archive_dir, run_ts, head_oid, worst, review_v, security_v, maintenance_v, l3_ok, audit_body, review_out, security_out, maintenance_out = sys.argv[1:]
+Path(archive_dir).mkdir(parents=True, exist_ok=True)
+meta = {
+    "pr_number": int(Path(archive_dir).parent.name),
+    "started_at": run_ts,
+    "provider": "minimax",
+    "head_oid": head_oid,
+    "worst_verdict": worst,
+    "review_verdict": review_v,
+    "security_verdict": security_v,
+    "maintenance_verdict": maintenance_v,
+    "l3_ok": l3_ok == "1",
+    "audit_body": audit_body,
+}
+(Path(archive_dir) / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+(Path(archive_dir) / "review.json").write_text(json.dumps({"verdict": review_v, "output": review_out}, indent=2, ensure_ascii=False), encoding="utf-8")
+(Path(archive_dir) / "security.json").write_text(json.dumps({"verdict": security_v, "output": security_out}, indent=2, ensure_ascii=False), encoding="utf-8")
+(Path(archive_dir) / "maintenance.json").write_text(json.dumps({"verdict": maintenance_v, "output": maintenance_out}, indent=2, ensure_ascii=False), encoding="utf-8")
+PYEOF
 fi
 
 # ---------------------------------------------------------------------------
