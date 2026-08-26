@@ -518,6 +518,16 @@ fi
 #    fallback decided in §2.
 # ---------------------------------------------------------------------------
 claude_env_args=()
+# Disable the `claude -p` internal 600s wait-ceiling on background
+# subagents. The default ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=600000`)
+# causes the /dev-kit:review skill's 3-agent fan-out to be killed mid-way
+# when any single subagent is slow, producing a missing `**Verdict:**`
+# line that the lenient-default extraction logic in extract_verdict
+# would otherwise map to a false-positive Approve (reproduces issue
+# #727's regression mode). The run_with_timeout 600s wrapper above
+# remains the hard upper bound -- this just removes the EARLIER ceiling
+# so the wrapper can fire instead of the internal one.
+claude_env_args+=("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0")
 if [ "$USE_LOCAL_AUTH" = "0" ]; then
   PROVIDER_ENV=()
   while IFS= read -r line; do
@@ -658,10 +668,24 @@ run_skill() {
   # verdict-extraction logic below maps a missing `**Verdict:**` line
   # to a lenient-default Approve, but a hung subprocess never produces
   # ANY output -- the timeout wrapper guarantees we get *some* signal
-  # (a non-zero exit) within bounded wall-clock, so the surrounding
-  # `|| die` can fire rather than hanging forever.
-  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" \
-    || die "$skill: claude -p exited non-zero (or hit timeout 600) -- review the output above"
+  # (a non-zero exit) within bounded wall-clock.
+  #
+  # Resilience over strict exit-code enforcement: if `claude -p` exits
+  # non-zero BUT the captured stdout already contains a `**Verdict:**`
+  # line (the SessionEnd hook failures that produced the "Hook
+  # cancelled" exit code don't invalidate an already-emitted verdict),
+  # downgrade from `die` to a `log warning` so the captured verdict
+  # reaches the archive. This preserves the audit trail of genuine
+  # approvals even when SessionEnd hooks (a session-lifecycle concern,
+  # not a verdict correctness concern) cause a non-zero exit.
+  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" || {
+    _rc=$?
+    if printf '%s\n' "$out" | grep -qE '^\*\*Verdict:\*\*'; then
+      log "warning: $skill: claude -p exited non-zero (rc=$_rc) but a Verdict line was captured -- using it anyway"
+    else
+      die "$skill: claude -p exited non-zero (rc=$_) or hit timeout 600 -- review the output above"
+    fi
+  }
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"
 }
