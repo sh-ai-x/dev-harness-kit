@@ -50,6 +50,14 @@ try:
 except ImportError:
     from atomic import atomic_write_json, read_json_or_default  # type: ignore
 
+# Single-source-of-truth dotenv parser (issue #711). Dual-import mirrors
+# the `atomic` shim above so the consumer-side install (no
+# `lib/__init__.py` shipped) keeps working.
+try:
+    from .read_env_key import read_env_key as _read_env_key_helper  # type: ignore
+except ImportError:
+    from read_env_key import read_env_key as _read_env_key_helper  # type: ignore
+
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 _TEMPLATES_ROOT = _PLUGIN_ROOT / "templates" / "ci"
@@ -358,24 +366,18 @@ def gh_secret_set_command(repo: str, secret_name: str) -> str:
 def read_env_key(path: Path, key: str) -> str:
     """Return the last `KEY=...` value from a dotenv-style file.
 
-    Skips blank lines and `#` comments. Does NOT handle multi-line values
-    or `export KEY=` prefixes — neither is produced by `bin/set-provider.sh`.
-    Surrounding single or double quotes are stripped. OSError (missing /
-    unreadable) returns empty.
+    Thin wrapper around `lib.read_env_key.read_env_key` so the bash
+    (`bin/set-provider.sh`) and Python (`lib/ci_setup.read_provider`)
+    sides share a single parser (issue #711) and cannot drift on
+    quoting / `export` prefix / CRLF edge cases. Behavior matches the
+    pre-refactor in-line implementation for every previously-pinned
+    test case (see `tests/test_read_env_key.py`); the helper itself
+    additionally handles `export KEY=...` and CRLF line endings that
+    the previous parser silently dropped.
+
+    See `lib/read_env_key.py` for the full rules.
     """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    out = ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        if k.strip() == key:
-            out = v.strip().strip('"').strip("'")
-    return out
+    return _read_env_key_helper(path, key)
 
 
 # Private back-compat alias — same function object. New callers should
@@ -384,6 +386,171 @@ def read_env_key(path: Path, key: str) -> str:
 # follow-up; pinning it here keeps the promotion zero-risk for existing
 # callers (`lib/ci_doctor.py` already updated to the public name).
 _read_env_key = read_env_key
+
+
+# Provider values are free-form strings that operators put into `.env` and
+# `vars.CI_REVIEW_PROVIDER`. They appear in the printed remediation message
+# verbatim — operators may copy-paste it into a shell. Reject shell
+# metacharacters so a typo or hostile value can't invite an `$(rm -rf ~)`
+# copy-paste. Mirrors the spirit of `bin/set-provider.sh:234`'s allow-list
+# (only writes a fixed set of values), without pulling the full script.
+_SHELL_METACHARS_RE = re.compile(r"""[\s;&|`$()<>'"\\]""")
+
+
+def _is_safe_provider_value(value: str) -> bool:
+    """True iff `value` has no shell metacharacters and is non-empty.
+
+    Allowlist: alnum + `._-` only. Empty values are treated as "unset"
+    by the caller, not as a safety violation, so this returns True
+    for the empty string — the caller decides whether to use it.
+    """
+    if not value:
+        return True
+    return not _SHELL_METACHARS_RE.search(value)
+
+
+def _remediation_msg(local_val: str, ci_val: str) -> str:
+    """Render the `gh variable set …` remediation tail for a drift WARN.
+
+    Single source of truth so the three drift branches (local-only,
+    ci-only, both-set-differ) don't drift from each other. The
+    remediation always echoes the LOCAL value (the side the operator
+    can change without `gh` admin rights) and references `bin/set-provider.sh`
+    for the inverse direction.
+    """
+    if local_val and not ci_val:
+        return (
+            f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`"
+        )
+    if ci_val and not local_val:
+        return (
+            f"`gh variable set CI_REVIEW_PROVIDER --body {ci_val}` "
+            f"(or `bin/set-provider.sh {ci_val}` to update local)"
+        )
+    return f"`gh variable set CI_REVIEW_PROVIDER --body {local_val}`"
+
+
+def _read_ci_provider_via_gh() -> tuple[str, str]:
+    """Read `gh variable get CI_REVIEW_PROVIDER`. Returns `(value, degraded_msg)`.
+
+    `value` is the lowercased variable body, or `""` when the variable is
+    unset on the repo (gh exits non-zero with a "not found" stderr — that
+    is a valid "no CI value" state, not a degraded call).
+
+    `degraded_msg` is non-empty when the call is SKIP-worthy: gh absent
+    from PATH, gh not authenticated, subprocess errored, or the variable
+    query failed for any reason OTHER than "not found". The caller emits
+    SKIP in that case (consistent with `_check_gh_auth` / `_list_repo_secrets`
+    in `lib/ci_doctor.py` — ci-doctor prefers "honest can't verify" over a
+    false PASS/WARN when the tool to verify is unavailable).
+
+    Never raises; subprocess.SubprocessError / OSError / TimeoutExpired
+    are caught and surfaced as degraded messages using the exception
+    *type* name only (the full repr can include fragments of argv).
+    """
+    gh = shutil.which("gh")
+    if not gh:
+        return "", "gh not on PATH"
+    try:
+        auth_cp = subprocess.run(
+            [gh, "auth", "status"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return "", f"gh auth error: {type(e).__name__}"
+    if auth_cp.returncode != 0:
+        return "", "gh not authenticated"
+    try:
+        cp = subprocess.run(
+            [gh, "variable", "get", "CI_REVIEW_PROVIDER"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return "", f"gh variable get error: {type(e).__name__}"
+    if cp.returncode != 0:
+        err = (cp.stderr or "").strip().lower()
+        # "Variable not found" / "no variable" means the repo has no
+        # CI_REVIEW_PROVIDER set — that's a valid (empty) value, not a
+        # degraded read. Anything else is a real failure.
+        if "not found" in err or "no variable" in err:
+            return "", ""
+        return "", (
+            f"gh variable get failed: "
+            f"{(cp.stderr or '').strip() or cp.returncode}"
+        )
+    return (cp.stdout or "").strip().lower(), ""
+
+
+def check_provider_consistency(target_dir: Path) -> tuple[str, str]:
+    """Compare local `.env:CI_REVIEW_PROVIDER` with `vars.CI_REVIEW_PROVIDER`.
+
+    The local value is read from `<target_dir>/.env` via `read_env_key()`
+    (same dotenv reader as `read_provider()`). The CI value is read via
+    `gh variable get CI_REVIEW_PROVIDER`; when `gh` is absent or not
+    authenticated, the check degrades to SKIP — same contract as the
+    existing ci-doctor checks (`_check_gh_auth`, `_list_repo_secrets`,
+    `_fetch_open_pr_state`): the audit prefers "honest can't verify" over
+    a false PASS/WARN.
+
+    Returns:
+        `(status, message)` tuple where `status ∈ {OK, WARN, SKIP, FAIL}`:
+          - OK   : both unset, or both set to the same value
+          - WARN : exactly one is set, or both set but differ. Message
+                   includes the diff AND the `gh variable set` remediation
+                   command (the same one `bin/set-provider.sh:234` prints
+                   as a "next steps" hint).
+          - SKIP : gh absent, unauthenticated, `gh variable get` errored
+                   for a reason other than "not found", OR either side
+                   carries shell metacharacters (defensive — operator
+                   must fix the value manually before ci-doctor can
+                   safely echo a remediation).
+          - FAIL : reserved for future use (currently not emitted by this
+                   check). The `Check` dataclass in `lib/ci_doctor.py`
+                   accepts FAIL too, so a future FAIL row would not
+                   require a contract change.
+
+    The check is advisory only — it never flips ci-doctor's verdict. A
+    WARN row appears in `warnings: N` and on screen; SKIP rows are
+    counted in `skipped: N`. See issue #212-D1 for the verdict-neutral
+    contract.
+    """
+    target = Path(target_dir).resolve()
+    local_val = read_env_key(target / ".env", "CI_REVIEW_PROVIDER").strip().lower()
+    ci_val, degraded = _read_ci_provider_via_gh()
+    if degraded:
+        return "SKIP", degraded
+    if not _is_safe_provider_value(local_val):
+        return "SKIP", (
+            "local .env:CI_REVIEW_PROVIDER contains shell metacharacters; "
+            "fix manually before ci-doctor can render a remediation"
+        )
+    if not _is_safe_provider_value(ci_val):
+        return "SKIP", (
+            "vars.CI_REVIEW_PROVIDER contains shell metacharacters; "
+            "fix manually before ci-doctor can render a remediation"
+        )
+    if not local_val and not ci_val:
+        return "OK", "both .env:CI_REVIEW_PROVIDER and vars.CI_REVIEW_PROVIDER are unset"
+    if local_val == ci_val:
+        return "OK", f"both {local_val}"
+    remediation = _remediation_msg(local_val, ci_val)
+    if local_val and not ci_val:
+        return (
+            "WARN",
+            f"local .env=CI_REVIEW_PROVIDER={local_val} but "
+            f"vars.CI_REVIEW_PROVIDER is unset; sync with {remediation}",
+        )
+    if ci_val and not local_val:
+        return (
+            "WARN",
+            f"local .env:CI_REVIEW_PROVIDER is unset but "
+            f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with {remediation}",
+        )
+    return (
+        "WARN",
+        f"local .env=CI_REVIEW_PROVIDER={local_val} but "
+        f"vars.CI_REVIEW_PROVIDER={ci_val}; sync with {remediation}",
+    )
 
 
 def read_provider(target_dir: Path | None = None) -> str:
@@ -1042,6 +1209,33 @@ _KNOWN_STALE_PATTERNS: tuple[tuple[str, str, str], ...] = (
         "verdicts and the workflow_dispatch branch already defaulted to Approve. Re-run with "
         "`--force` to refresh the template; the patched gate defaults missing verdicts to "
         "Approve with a ::warning:: in both event modes.",
+    ),
+    (
+        ".github/workflows/review.yml",
+        # Issue #726: pre-fix gate hard-failed whenever
+        # verdict_source=needs-fallback-bootstrap-pr, contradicting its own
+        # documented fallback contract (the extract-verdict step had already
+        # posted a synthetic 'Verdict: Approve' tagged with that source).
+        # The post-fix gate tolerates the bootstrap case on BOTH sides
+        # (AND on R_SOURCE and S_SOURCE) and falls through to the rank/case
+        # logic; install-broken signatures (default-approve-no-file,
+        # parse-failed-no-verdict, missing source, mixed bootstrap+ran)
+        # still hard-fail (issue #212-C1). The remediation text below
+        # ('Merge this PR's workflow changes to main first.') only appears
+        # in the OLD broken bootstrap-path; the post-fix non-bootstrap
+        # branch uses a different remediation block.
+        "Merge this PR's workflow changes to main first.",
+        "stale bootstrap-PR hard-fail gate in review.yml (issue #726) -- the gate "
+        "used to exit 1 with 'Merge this PR's workflow changes to main first' "
+        "whenever the anthropics/claude-code-action@v1 anti-recursion guard "
+        "skipped both review and security on a PR that modifies "
+        ".github/workflows/*. The fallback contract posts a synthesized "
+        "'Verdict: Approve' tagged verdict_source=needs-fallback-bootstrap-pr; "
+        "the pre-fix gate contradicted this by hard-failing on agent_ran=false. "
+        "Re-run with `--force` to refresh the template; the patched gate tolerates "
+        "the BOTH-bootstrap case via an AND on R_SOURCE+S_SOURCE and falls "
+        "through to the rank/case logic. Mixed or non-bootstrap signatures still "
+        "hard-fail (issue #212-C1 install-broken protection preserved).",
     ),
 )
 

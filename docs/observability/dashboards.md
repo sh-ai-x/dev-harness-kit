@@ -44,6 +44,22 @@ still visually polluting the top of `ls`. Moving the default here makes
 `token-efficiency.md` and `session-monitor.md`, so dashboards belong
 in the same neighborhood.
 
+## Performance
+
+Per-worktree classification (`classify_all_worktrees()` in
+[`tools/token_efficiency_analyzer.py`](../../tools/token_efficiency_analyzer.py))
+spawns 3 git subprocesses per worktree dir
+(`rev-parse --short HEAD`, `rev-parse HEAD`,
+`log origin/main..HEAD`). On a checkout with thousands of `.worktrees/*`
++ legacy `.claude/worktrees/*` + `.codex/worktrees/*` dirs (the dev-harness-kit
+checkout has ~1,500), the loop is fanned out across a bounded
+`ThreadPoolExecutor` so wall time scales as `n_dirs / max_workers` rather
+than `n_dirs * 3`. Two repo-wide probes (`git worktree list --porcelain`,
+`git rev-parse origin/main`) stay hoisted and run exactly once per
+dashboard. The `--no-include-worktree-logs` flag is the escape hatch
+when a `git worktree list` is too slow; it scopes the analyzer to the
+top-level `logs/` only and skips per-dir classification entirely.
+
 ## Related
 
 - [`docs/observability/token-efficiency.md`](token-efficiency.md) — long-form doc for the analyzer

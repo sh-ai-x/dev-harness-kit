@@ -8,18 +8,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "for i in python3 python py; do if \"$i\" -c \"\" </dev/null >/dev/null 2>&1; then exec env SAVE_LOG_ARCHIVE_STALE=1 \"$i\" \"${CLAUDE_PROJECT_DIR}/tools/save_log.py\" --tool claude-code; fi; done"
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
           }
-        ],
-        "_loghooks_managed": true
+        ]
       },
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
+            "command": "for i in python3 python py; do if \"$i\" -c \"\" </dev/null >/dev/null 2>&1; then exec env SAVE_LOG_ARCHIVE_STALE=1 \"$i\" \"${CLAUDE_PROJECT_DIR}/tools/save_log.py\" --tool claude-code; fi; done"
           }
-        ]
+        ],
+        "_loghooks_managed": true
       }
     ],
     "SessionStart": [
@@ -38,18 +38,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "for i in python3 python py; do if \"$i\" -c \"\" </dev/null >/dev/null 2>&1; then exec env SAVE_LOG_ARCHIVE_STALE=1 \"$i\" \"${CLAUDE_PROJECT_DIR}/tools/save_log.py\" --tool claude-code; fi; done"
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
           }
-        ],
-        "_loghooks_managed": true
+        ]
       },
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
+            "command": "for i in python3 python py; do if \"$i\" -c \"\" </dev/null >/dev/null 2>&1; then exec env SAVE_LOG_ARCHIVE_STALE=1 \"$i\" \"${CLAUDE_PROJECT_DIR}/tools/save_log.py\" --tool claude-code; fi; done"
           }
-        ]
+        ],
+        "_loghooks_managed": true
       }
     ]
   },

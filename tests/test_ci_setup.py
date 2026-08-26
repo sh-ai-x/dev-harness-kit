@@ -445,6 +445,40 @@ class TestCiSetup(unittest.TestCase):
                 f"expected stale-gate warning, got {r2.warnings!r}",
             )
 
+    def test_lint_installed_workflows_flags_stale_bootstrap_pr_gate(self):
+        """Issue #726: lint pass detects pre-fix bootstrap-PR hard-fail gate.
+
+        The pre-fix templates/ci/.github/workflows/review.yml shipped a
+        severity gate that hard-failed (exit 1) whenever EITHER review or
+        security job reported agent_ran=false, including on the documented
+        bootstrap-PR case where both jobs synthesize a 'Verdict: Approve'
+        tagged verdict_source=needs-fallback-bootstrap-pr. The distinctive
+        substring 'Merge this PR's workflow changes to main first.' is
+        unique to the OLD broken bootstrap-path remediation text; the
+        post-fix non-bootstrap branch uses a different message.
+        """
+        import tempfile
+        from pathlib import Path as _P
+        with tempfile.TemporaryDirectory() as td:
+            review = _P(td) / ".github" / "workflows" / "review.yml"
+            review.parent.mkdir(parents=True)
+            review.write_text(
+                "dummy\n          Merge this PR's workflow changes to main first.\n"
+            )
+            findings = self.ci_setup.lint_installed_workflows(_P(td))
+            self.assertTrue(
+                any(
+                    "stale bootstrap-PR hard-fail gate" in f
+                    or "issue #726" in f
+                    for f in findings
+                ),
+                f"expected bootstrap-PR gate-tolerance finding, got {findings!r}",
+            )
+            self.assertTrue(
+                any(".github/workflows/review.yml" in f for f in findings),
+                f"expected review.yml in finding path, got {findings!r}",
+            )
+
     def test_lint_kwarg_can_suppress(self):
         """`lint=False` suppresses the warning-class output."""
         import tempfile
@@ -1189,7 +1223,7 @@ class TestCiSetup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "lib"
             target.mkdir()
-            for name in ("ci_setup.py", "atomic.py"):
+            for name in ("ci_setup.py", "atomic.py", "read_env_key.py"):
                 (target / name).write_bytes((plugin_root / "lib" / name).read_bytes())
             result = subprocess.run(
                 [sys.executable, "-c", "from ci_setup import install_ci_config"],

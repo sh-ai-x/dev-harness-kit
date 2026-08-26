@@ -292,6 +292,73 @@ class SetProviderContract(unittest.TestCase):
         self.assertIn("current: anthropic", result.stdout,
                       f"expected stripped value, got: {result.stdout!r}")
 
+    # T15 (issue #714): --check-extensibility exits 0 and lists the
+    # four files an operator must touch when adding a new provider.
+    # The current ALLOWLIST and case arms are identical (the script
+    # is in a known-good state), so the drift check prints "OK: in sync".
+    #
+    # The recipe's bin/set-provider.sh line numbers are derived from
+    # `grep -n` at test time (same approach the script uses internally
+    # in `check_extensibility`) — pinning hard-coded literals would
+    # silently drift when the file is reordered, which is the exact
+    # bug the reviewer caught before this fix shipped.
+    def test_check_extensibility_lists_recipe_and_reports_sync(self) -> None:
+        # Resolve the expected line numbers from the script source so
+        # the assertion tracks any future reorder of the file.
+        grep_allowlist = subprocess.run(
+            ["grep", "-nE", r"^ALLOWLIST=\(", str(SCRIPT)],
+            capture_output=True, text=True, check=True,
+        )
+        allowlist_line = grep_allowlist.stdout.splitlines()[0].split(":", 1)[0]
+        grep_case = subprocess.run(
+            ["grep", "-nE", r'^case "\$NEW" in$', str(SCRIPT)],
+            capture_output=True, text=True, check=True,
+        )
+        case_line = grep_case.stdout.splitlines()[0].split(":", 1)[0]
+        allowlist_needle = f"bin/set-provider.sh:{allowlist_line}"
+        case_needle = f"bin/set-provider.sh:{case_line}"
+
+        result = _run_in_worktree(self.wt, "--check-extensibility")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # All 4 recipe files appear in the output.
+        self.assertIn(allowlist_needle, result.stdout)
+        self.assertIn(case_needle, result.stdout)
+        self.assertIn(".github/workflows/review.yml", result.stdout)
+        self.assertIn(".env.example", result.stdout)
+        # Both the parsed ALLOWLIST and the case arms are rendered, in
+        # sorted order (the script sorts both before comparing).
+        self.assertIn(f"ALLOWLIST ({allowlist_needle})", result.stdout)
+        self.assertIn(f"case arms ({case_needle})", result.stdout)
+        for name in ALLOWLIST:
+            self.assertIn(name, result.stdout)
+        # No drift on the shipped state.
+        self.assertIn("OK: ALLOWLIST and case arms are in sync", result.stdout)
+        self.assertNotIn("DRIFT:", result.stdout)
+
+    # T16 (issue #714): --check-extensibility is documented in --help.
+    def test_help_documents_check_extensibility(self) -> None:
+        result = _run_in_worktree(self.wt, "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--check-extensibility", result.stdout)
+        # The "TO ADD A NEW PROVIDER" recipe block must be reachable
+        # from --help (issue #714 acceptance).
+        self.assertIn("TO ADD A NEW PROVIDER", result.stdout)
+        # Recipe must mention the case block, the arm pattern operators
+        # need to add, and each of the four files to touch. The post-
+        # v0.3.320 recipe phrases step 2 as "add a `openai)` arm to the
+        # `case` block", so we match `case` AND `arm` separately rather
+        # than the contiguous `case arm` substring (which was only in
+        # the pre-#722 wording).
+        for needle in (
+            "ALLOWLIST",
+            "case",
+            "arm",
+            ".github/workflows/review.yml",
+            ".env.example",
+        ):
+            self.assertIn(needle, result.stdout,
+                          f"recipe missing {needle!r}")
+
 
 if __name__ == "__main__":
     unittest.main()
