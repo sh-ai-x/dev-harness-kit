@@ -63,6 +63,7 @@ case "$TOOL" in
       */.aws/credentials|*/.aws/config) SENSITIVE_REASON="AWS credential file" ;;
       */.netrc|*/.npmrc|*/.pypirc)      SENSITIVE_REASON="registry auth file" ;;
       */.kube/config)                   SENSITIVE_REASON="Kubernetes cluster credential" ;;
+      */secrets/*|*/secrets.[yY][aA][mM][lL]|*/secrets.[jJ][sS][oO][nN]) SENSITIVE_REASON="secrets directory file" ;;
     esac
     if [ -z "$SENSITIVE_REASON" ]; then
       case "$BASE" in
@@ -97,7 +98,7 @@ if echo "$CMD" | grep -qE "git push .*--force-with-lease"; then
     "force-with-lease rewrites remote history on this branch. Per rules/git-workflow.md this is allowed only on your own unmerged branch, never after review has started."
 fi
 
-if echo "$CMD" | grep -qE "git push (-u|--set-upstream)"; then
+if echo "$CMD" | grep -qE "git push .*(-u|--set-upstream)"; then
   ask "DESTRUCTIVE CONFIRM" \
     "first push of this branch to the remote — externally visible. Confirm the branch name and target remote are correct."
 fi

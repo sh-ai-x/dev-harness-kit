@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -40,7 +41,12 @@ HOOKS = REPO_ROOT / "hooks"
 
 
 def _bash() -> str:
-    return os.environ.get("BASH", "bash")
+    p = shutil.which(os.environ.get("BASH", "bash"))
+    if not p:
+        # mirror tests/test_hooks_payload.py:_bash — fail loud so the
+        # caller can skip explicitly when bash is unavailable on the host
+        raise RuntimeError("bash not on PATH")
+    return p
 
 
 def _run(script: str, payload: dict, env_extra: dict | None = None,
@@ -86,6 +92,16 @@ CATASTROPHIC = [
 ]
 
 
+# F1 regression — the > form matched but >> /etc/passwd (append an extra
+# root-equivalent line, which is how actual credential-injection attacks
+# begin on a writable host) bypassed the entire tier. The fix broadens
+# `>` to `>?` so both truncate and append are caught.
+APPEND_BYPASS = [
+    "echo x >> /etc/passwd",
+    "echo x >> /etc/shadow",
+]
+
+
 class TestCatastrophicTierAlwaysDenies(unittest.TestCase):
     """These must deny on a DEFAULT install — no DEV_KIT_STRICT needed."""
 
@@ -99,6 +115,16 @@ class TestCatastrophicTierAlwaysDenies(unittest.TestCase):
                 r = _run("bash-guard.sh", _bash_payload(cmd))
                 self.assertEqual(r.returncode, 2,
                                  f"{cmd!r} not denied by default: rc={r.returncode} stderr={r.stderr}")
+                self.assertIn('"deny"', r.stderr)
+
+    def test_denies_append_etc_passwd_bypass(self):
+        """F1 regression: `>> /etc/passwd` (append) was silently allowed while
+        only the `>` truncate form was matched. Both must deny."""
+        for cmd in APPEND_BYPASS:
+            with self.subTest(cmd=cmd):
+                r = _run("bash-guard.sh", _bash_payload(cmd))
+                self.assertEqual(r.returncode, 2,
+                                 f"{cmd!r} bypasses catastrophic tier: rc={r.returncode} stderr={r.stderr}")
                 self.assertIn('"deny"', r.stderr)
 
     def test_denies_with_strict_explicitly_disabled(self):
@@ -175,6 +201,14 @@ class TestDestructiveConfirmAsksOnSecrets(unittest.TestCase):
     def test_asks_on_env_file(self):
         self._assert_ask(_run("destructive-confirm.sh", _write_payload("/repo/.env")), ".env")
 
+    def test_asks_on_secrets_directory(self):
+        """F4 regression: the previous basename check only matched files
+        whose name started with `secrets.` — `secrets/prod.yml` slipped
+        through. The fix adds */secrets/* path-glob coverage."""
+        for path in ("/repo/secrets/prod.yml", "/repo/configs/secrets/api.json"):
+            with self.subTest(path=path):
+                self._assert_ask(_run("destructive-confirm.sh", _write_payload(path)), path)
+
     def test_asks_on_pem_and_ssh_and_aws(self):
         for path in ("/repo/server.pem", "/home/u/.ssh/id_rsa",
                      "/home/u/.aws/credentials", "/home/u/.kube/config"):
@@ -232,6 +266,20 @@ class TestDestructiveConfirmAsksOnGitPlumbing(unittest.TestCase):
                  _bash_payload("git push -u origin feat/x"))
         self.assertIn('"ask"', r.stdout)
 
+    def test_asks_on_push_with_remote_first(self):
+        """F2 regression: the previous regex required `-u` immediately after
+        `git push `, so `git push origin -u main` (the natural form after
+        `git checkout -b feat/x`) was missed. Flag may appear anywhere."""
+        r = _run("destructive-confirm.sh",
+                 _bash_payload("git push origin -u main"))
+        self.assertIn('"ask"', r.stdout, f"stderr={r.stderr}")
+
+    def test_asks_on_set_upstream_with_remote_first(self):
+        """Same breadth check, with the long-form flag."""
+        r = _run("destructive-confirm.sh",
+                 _bash_payload("git push origin --set-upstream feat/x"))
+        self.assertIn('"ask"', r.stdout)
+
     def test_ordinary_git_command_silent(self):
         for cmd in ("git status", "git log --oneline -5", "git diff --cached"):
             with self.subTest(cmd=cmd):
@@ -246,8 +294,12 @@ class TestDestructiveConfirmFailsClosed(unittest.TestCase):
             self.skipTest("destructive-confirm.sh missing")
 
     def test_empty_payload_exits_zero(self):
+        try:
+            bash = _bash()
+        except RuntimeError:
+            self.skipTest("bash not on PATH")
         p = HOOKS / "destructive-confirm.sh"
-        r = subprocess.run([_bash(), str(p)], input="", capture_output=True,
+        r = subprocess.run([bash, str(p)], input="", capture_output=True,
                            text=True, timeout=10)
         self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
 
@@ -258,7 +310,10 @@ class TestDestructiveConfirmFailsClosed(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "")
 
     def test_denies_when_jq_missing(self):
-        import shutil
+        try:
+            bash = _bash()
+        except RuntimeError:
+            self.skipTest("bash not on PATH")
         jq_real = shutil.which("jq")
         if not jq_real:
             self.skipTest("jq not installed — cannot simulate missing-jq")
@@ -270,7 +325,7 @@ class TestDestructiveConfirmFailsClosed(unittest.TestCase):
         util_dirs.discard(os.path.dirname(jq_real))
         minimal_path = os.pathsep.join(sorted(util_dirs)) or "/nonexistent"
         r = subprocess.run(
-            [_bash(), str(HOOKS / "destructive-confirm.sh")],
+            [bash, str(HOOKS / "destructive-confirm.sh")],
             input=json.dumps(_write_payload("/repo/.env")),
             capture_output=True, text=True, timeout=10,
             env={**os.environ, "PATH": minimal_path},
