@@ -41,6 +41,13 @@
 
 ## Hook shells
 
+### Runtime hook ordering
+
+For the committed runtime manifests, `trace-session-end.sh` MUST be the
+first hook for Claude `SessionEnd` and `Stop`, and for Codex `Stop`. It writes
+the terminal trace record before `save_log.py` runs with
+`SAVE_LOG_ARCHIVE_STALE=1` and can archive the trace file.
+
 | Hook | Stage ON | Purpose |
 |------|----------|---------|
 | `tdd-guard` | build | active when `lib/methodology/tdd.py` is loaded (MUST-48). |
