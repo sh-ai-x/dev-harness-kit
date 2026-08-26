@@ -635,7 +635,18 @@ run_skill() {
     # The dry-run log MUST mirror the real argv shape (including
     # --plugin-dir) so reviewers can audit the contract from the log
     # alone -- mirrors what issue #727 regression test asserts.
-    log "would run: env <$PROVIDER env+key> claude --bare --plugin-dir \"$PLUGIN_SRC_DISPLAY\" -p \"$prompt\""
+    # Audit-fidelity note: the dry-run log emits `$PLUGIN_SRC` (the
+    # real filesystem path) instead of `$PLUGIN_SRC_DISPLAY` (the
+    # $HOME-redacted rendering). Review finding #2 (PR #741): the
+    # dry-run is meant to mirror the actual subprocess argv so an
+    # auditor reading the log can reconstruct what the script did;
+    # pretending the real exec got a redacted path would make the
+    # dry-run actively misleading. The real exec uses `$PLUGIN_SRC`
+    # below because the plugin registry needs the unredacted path on
+    # disk; the privacy guarantee (F5/C2) still applies to every
+    # OPERATOR-facing rendering (die messages, audit body). Operators
+    # who need to share this dry-run log should redact it first.
+    log "would run: env <$PROVIDER env+key> claude --bare --plugin-dir \"$PLUGIN_SRC\" -p \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -732,75 +743,25 @@ The summary MUST begin with a single line exactly of the form:
   **Verdict:** Blocked"
 
 if [ "$DRY_RUN" = "1" ]; then
-  # Dry-run stays sequential -- run_skill's dry-run branch is a pure
-  # log print with no subprocess, so parallelizing it buys nothing
-  # and would reorder the "would run:" lines the behavioral test
-  # (test_dry_run_argv_contains_plugin_dir) asserts on in order.
+  # Dry-run is sequential -- run_skill's dry-run branch is a pure log
+  # print with no subprocess, so parallelizing buys nothing and would
+  # reorder the "would run:" lines the behavioral test asserts on in
+  # order.
   [ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
   [ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
   [ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
 else
-  # Parallel gate execution (local-only speedup; NOT part of PR #741's
-  # committed scope -- the LLM judges each independently re-fetch the
-  # PR diff from GitHub via `gh pr diff`, so wall-clock ordering here
-  # has zero effect on verdict content). Mirrors GH-Actions' 3-job
-  # parallel review.yml + maintenance.yml model. bash 3.2 (macOS
-  # default) has no associative arrays, so gate state is tracked via
-  # per-gate scalar variables instead of a dict.
-  RUN_PARALLEL_TMP="$(mktemp -d)"
-  REVIEW_PID=""; SECURITY_PID=""; MAINTENANCE_PID=""
-  REVIEW_RC=0; SECURITY_RC=0; MAINTENANCE_RC=0
-
-  _run_gate_bg() {
-    local gate="$1" skill="$2" prompt="$3" outfile="$4"
-    (
-      set +e
-      # Same TOCTOU re-check as the sequential run_skill path (A06,
-      # PR #741) -- the guard was ~300 lines ago and an attacker on a
-      # shared CI runner could swap the manifest in between. Same
-      # `timeout 600` wrapper (A10, PR #741) -- without it a hung
-      # `claude -p` blocks the whole gate.
-      if [ -n "${PLUGIN_MANIFEST_SHA256:-}" ]; then
-        _now_sha="$(shasum -a 256 "$PLUGIN_MANIFEST_PATH" 2>/dev/null | awk '{print $1}' || true)"
-        if [ "$_now_sha" != "$PLUGIN_MANIFEST_SHA256" ]; then
-          out="TOCTOU: manifest sha256 changed between guard and $gate invocation ($PLUGIN_MANIFEST_SHA256 -> $_now_sha)"
-          printf '%s\n' "$out" > "$outfile"
-          printf '%s\n' "$out" | sed -u "s/^/[${gate}] /"
-          exit 1
-        fi
-      fi
-      out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --bare --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)"
-      rc=$?
-      printf '%s\n' "$out" > "$outfile"
-      printf '%s\n' "$out" | sed -u "s/^/[${gate}] /"
-      exit "$rc"
-    ) &
-  }
-
-  if [ "$RUN_REVIEW" = "1" ]; then
-    log "running /dev-kit:review via provider=$PROVIDER (dry_run=0, parallel)"
-    _run_gate_bg review dev-kit:review "$REVIEW_PROMPT" "$RUN_PARALLEL_TMP/review.out"
-    REVIEW_PID=$!
-  fi
-  if [ "$RUN_SECURITY" = "1" ]; then
-    log "running /dev-kit:security via provider=$PROVIDER (dry_run=0, parallel)"
-    _run_gate_bg security dev-kit:security "$SECURITY_PROMPT" "$RUN_PARALLEL_TMP/security.out"
-    SECURITY_PID=$!
-  fi
-  if [ "$RUN_MAINTENANCE" = "1" ]; then
-    log "running /dev-kit:maintenance via provider=$PROVIDER (dry_run=0, parallel)"
-    _run_gate_bg maintenance dev-kit:maintenance "$MAINTENANCE_PROMPT" "$RUN_PARALLEL_TMP/maintenance.out"
-    MAINTENANCE_PID=$!
-  fi
-
-  [ -n "$REVIEW_PID" ]      && { wait "$REVIEW_PID" || REVIEW_RC=$?; REVIEW_OUTPUT="$(cat "$RUN_PARALLEL_TMP/review.out" 2>/dev/null)"; }
-  [ -n "$SECURITY_PID" ]    && { wait "$SECURITY_PID" || SECURITY_RC=$?; SECURITY_OUTPUT="$(cat "$RUN_PARALLEL_TMP/security.out" 2>/dev/null)"; }
-  [ -n "$MAINTENANCE_PID" ] && { wait "$MAINTENANCE_PID" || MAINTENANCE_RC=$?; MAINTENANCE_OUTPUT="$(cat "$RUN_PARALLEL_TMP/maintenance.out" 2>/dev/null)"; }
-  rm -rf "$RUN_PARALLEL_TMP"
-
-  [ "$REVIEW_RC" -ne 0 ]      && die "dev-kit:review: claude -p exited non-zero (review the output above)"
-  [ "$SECURITY_RC" -ne 0 ]    && die "dev-kit:security: claude -p exited non-zero (review the output above)"
-  [ "$MAINTENANCE_RC" -ne 0 ] && die "dev-kit:maintenance: claude -p exited non-zero (review the output above)"
+  # Real execution stays sequential -- matches the GH-Actions
+  # review.yml + maintenance.yml model where each gate's verdict is
+  # independent of the others, but cross-gate state (the L3 evidence
+  # gather step + the audit comment emit step at §7 below) needs
+  # every gate's stdout available in order to extract a verdict.
+  # Parallel fan-out (3 backgrounded subshells) is a local-only
+  # speedup tracked as a follow-up; it leaked into PR #741 scope in
+  # a prior commit and is being removed here per review finding #1.
+  [ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
+  [ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
+  [ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
 fi
 
 # ---------------------------------------------------------------------------

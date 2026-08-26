@@ -58,12 +58,66 @@ if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
+# --- live tail file + archive ------------------------------------------
+# Persistence contract (matches the user's "viewer is read-only, refresh
+# shows the latest persisted run" requirement):
+#
+#   .review-local-archive/<PR>/<timestamp>-$/log   -- permanent per-run log
+#   .review-local-current/<PR>.log                 -- symlink to the
+#                                                    latest archived log
+#
+# The viewer at http://127.0.0.1:8766/pr/<N> serves this single log
+# file. Opening the URL never triggers execution -- it's pure
+# read-only. On page refresh, the operator sees the SAME log (the
+# most recent completed run's full output, including final verdict).
+# The babysit skill is what starts new runs and rotates the symlink;
+# the viewer just renders whatever file the symlink points at.
+#
+# Why a symlink (not a truncate-and-rewrite): truncating the live
+# file from one browser tab while another is mid-render breaks the
+# viewer's SSE stream and can leave the page on a partial view.
+# Atomically rotating the symlink (`ln -sf` + `rm` of the old link)
+# means readers on the old symlink keep seeing the old log until
+# their next reload, and the new symlink targets the new log
+# immediately. No torn writes, no partial renders.
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$REPO_ROOT" ]; then
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+RUN_TMP=""
+RUN_LOG=""
+LIVE_DIR=""
+LIVE_LOG=""
+LIVE_LINK=""
+if [ -n "$REPO_ROOT" ]; then
+  LIVE_DIR="${REPO_ROOT}/.review-local-current"
+  mkdir -p "$LIVE_DIR"
+  LIVE_LOG="${LIVE_DIR}/${PR_NUMBER}.log"
+  RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  RUN_LOG="${REPO_ROOT}/.review-local-archive/${PR_NUMBER}/${RUN_TS}/log"
+  mkdir -p "$(dirname "$RUN_LOG")"
+  : > "$RUN_LOG"
+  LIVE_LINK="${LIVE_DIR}/${PR_NUMBER}.log"
+  # Point the viewer at the new run's log BEFORE we tee a single line,
+  # so a concurrent viewer reload during the run sees the new file.
+  ln -sfn "$RUN_LOG" "$LIVE_LINK"
+  printf 'babysit-pr-local: started PR=%s pid=%s run=%s url=http://127.0.0.1:8766/pr/%s\n' \
+    "$PR_NUMBER" "$$" "$RUN_TS" "$PR_NUMBER" >> "$RUN_LOG"
+fi
+
 # --- delegate to bin/review-local.sh -----------------------------------
-# SCRIPT_DIR resolves to the directory holding THIS script at runtime,
-# so the lookup stays valid when the wrapper is invoked from any cwd.
 # `exec` replaces the wrapper process with the downstream script; the
 # downstream's exit code becomes the wrapper's exit code 1:1, so the
 # babysit iteration loop's TERMINATE / iterate branches fire
 # deterministically (exit 0 = Approve / exit 1 = Changes|Blocked).
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-exec "$SCRIPT_DIR/review-local.sh" --pr "$PR_NUMBER"
+# The tee wrapper mirrors stdout+stderr to the live tail file so the
+# SSE viewer sees the same line-by-line output the operator sees in
+# their terminal. Without `tee` the server's tail-f would never see
+# new content from this skill — that was the coupling gap before.
+if [ -n "$RUN_LOG" ]; then
+  exec "$SCRIPT_DIR/review-local.sh" --pr "$PR_NUMBER" 2>&1 \
+    | tee -a "$RUN_LOG"
+else
+  exec "$SCRIPT_DIR/review-local.sh" --pr "$PR_NUMBER"
+fi
