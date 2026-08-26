@@ -742,27 +742,20 @@ The summary MUST begin with a single line exactly of the form:
   **Verdict:** Changes Requested
   **Verdict:** Blocked"
 
-if [ "$DRY_RUN" = "1" ]; then
-  # Dry-run is sequential -- run_skill's dry-run branch is a pure log
-  # print with no subprocess, so parallelizing buys nothing and would
-  # reorder the "would run:" lines the behavioral test asserts on in
-  # order.
-  [ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
-  [ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
-  [ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
-else
-  # Real execution stays sequential -- matches the GH-Actions
-  # review.yml + maintenance.yml model where each gate's verdict is
-  # independent of the others, but cross-gate state (the L3 evidence
-  # gather step + the audit comment emit step at §7 below) needs
-  # every gate's stdout available in order to extract a verdict.
-  # Parallel fan-out (3 backgrounded subshells) is a local-only
-  # speedup tracked as a follow-up; it leaked into PR #741 scope in
-  # a prior commit and is being removed here per review finding #1.
-  [ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
-  [ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
-  [ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
-fi
+# Sequential gate execution -- matches the GH-Actions review.yml +
+# maintenance.yml model where each gate's verdict is independent of
+# the others, but cross-gate state (the L3 evidence gather + the audit
+# comment emit step at §7 below) needs every gate's stdout available
+# in order to extract a verdict. Sequential is also the right
+# default for `run_skill`'s dry-run branch (pure log print, no
+# subprocess) -- parallelizing would only reorder the "would run:"
+# lines the behavioral test asserts on in order.
+# Parallel fan-out (3 backgrounded subshells) is a local-only speedup
+# tracked as a separate follow-up; it leaked into PR #741 scope in a
+# prior commit and is being kept out here per review finding #1.
+[ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
+[ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
+[ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
 
 # ---------------------------------------------------------------------------
 # 6. Extract verdicts from captured stdout (mirrors review.yml:220-225).

@@ -85,7 +85,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -z "$REPO_ROOT" ]; then
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || true)"
 fi
-RUN_TMP=""
 RUN_LOG=""
 LIVE_DIR=""
 LIVE_LOG=""
@@ -93,7 +92,7 @@ LIVE_LINK=""
 if [ -n "$REPO_ROOT" ]; then
   LIVE_DIR="${REPO_ROOT}/.review-local-current"
   mkdir -p "$LIVE_DIR"
-  LIVE_LOG="${LIVE_DIR}/${PR_NUMBER}.log"
+  LIVE_LINK="${LIVE_DIR}/${PR_NUMBER}.log"
   RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)-$$"
   RUN_LOG="${REPO_ROOT}/.review-local-archive/${PR_NUMBER}/${RUN_TS}/log"
   mkdir -p "$(dirname "$RUN_LOG")"
@@ -101,6 +100,10 @@ if [ -n "$REPO_ROOT" ]; then
   LIVE_LINK="${LIVE_DIR}/${PR_NUMBER}.log"
   # Point the viewer at the new run's log BEFORE we tee a single line,
   # so a concurrent viewer reload during the run sees the new file.
+  # Remove any leftover regular file from a prior babysit that didn't
+  # use the symlink pattern -- `ln -sfn` would otherwise fail silently
+  # when the target already exists as a regular file.
+  [ -L "$LIVE_LINK" ] || [ ! -e "$LIVE_LINK" ] || rm -f "$LIVE_LINK"
   ln -sfn "$RUN_LOG" "$LIVE_LINK"
   printf 'babysit-pr-local: started PR=%s pid=%s run=%s url=http://127.0.0.1:8766/pr/%s\n' \
     "$PR_NUMBER" "$$" "$RUN_TS" "$PR_NUMBER" >> "$RUN_LOG"
