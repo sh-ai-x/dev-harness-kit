@@ -87,7 +87,6 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 RUN_LOG=""
 LIVE_DIR=""
-LIVE_LOG=""
 LIVE_LINK=""
 if [ -n "$REPO_ROOT" ]; then
   LIVE_DIR="${REPO_ROOT}/.review-local-current"
@@ -97,7 +96,6 @@ if [ -n "$REPO_ROOT" ]; then
   RUN_LOG="${REPO_ROOT}/.review-local-archive/${PR_NUMBER}/${RUN_TS}/log"
   mkdir -p "$(dirname "$RUN_LOG")"
   : > "$RUN_LOG"
-  LIVE_LINK="${LIVE_DIR}/${PR_NUMBER}.log"
   # Point the viewer at the new run's log BEFORE we tee a single line,
   # so a concurrent viewer reload during the run sees the new file.
   # Remove any leftover regular file from a prior babysit that didn't
@@ -118,6 +116,11 @@ fi
 # SSE viewer sees the same line-by-line output the operator sees in
 # their terminal. Without `tee` the server's tail-f would never see
 # new content from this skill — that was the coupling gap before.
+#
+# Depends on `set -o pipefail` (line 27): without it, `tee` always
+# exits 0 and the wrapper would silently always exit 0, breaking the
+# babysit iteration loop's TERMINATE/iterate branches (the operator
+# would never see Changes|Blocked escape to the iterate path).
 if [ -n "$RUN_LOG" ]; then
   exec "$SCRIPT_DIR/review-local.sh" --pr "$PR_NUMBER" 2>&1 \
     | tee -a "$RUN_LOG"

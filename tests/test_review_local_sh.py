@@ -1018,6 +1018,61 @@ exit 0
             self.assertIn("is a symlink", r.stderr,
                 f"expected symlink-refused die message; stderr={r.stderr!r}")
 
+    def test_repo_root_spoofing_dies(self) -> None:
+        """Review finding #1 (PR #741): `manifest_guard_log` was
+        previously called at the REPO_ROOT-spoofing branch BEFORE the
+        function was textually defined. Under `set -euo pipefail` bash
+        fails with "command not found" (exit 127) instead of the
+        intended `die()` with the security warning. Reproduced live
+        with a consumer whose cwd is in a different git toplevel than
+        the script's own BASH_SOURCE checkout.
+
+        The fix moves the function definition ABOVE the call site;
+        this test guards against the ordering regression.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            # Two separate git repos: one for the script (via
+            # PROJECT_ROOT/bin/review-local.sh), one for the cwd.
+            other_repo = tmp_path / "other"
+            other_repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=other_repo, check=True)
+            # Mirror the bin/lib install into the OTHER repo's bin/ so
+            # the script resolves and the script's BASH_SOURCE-anchored
+            # realpath differs from cwd's git-toplevel. Include a valid
+            # manifest so the spoofing branch (which fires AFTER the
+            # existence/name check) is the one that trips.
+            # To trigger the spoofing check, we need:
+            #   - cwd's git-toplevel (REPO_ROOT via line 87) = other_repo
+            #   - script's BASH_SOURCE-anchored realpath (SCRIPT_REPO_REAL) = PROJECT_ROOT
+            # So the script must NOT be installed under other_repo; we
+            # invoke the real PROJECT_ROOT/bin/review-local.sh directly.
+            # That means PROJECT_ROOT needs its own .claude-plugin/
+            # valid manifest (so the script's manifest guard passes
+            # before the spoofing check fires at line ~177) -- and
+            # PROJECT_ROOT already has one (the dev-kit plugin source).
+            r = subprocess.run(
+                ["bash", str(PROJECT_ROOT / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=other_repo,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit on REPO_ROOT spoofing; stdout={r.stdout!r} stderr={r.stderr!r}")
+            # The die() message names the actual attack: "refusing to
+            # load dev-kit plugin from <other_repo> -- git toplevel
+            # disagrees with the script's own checkout" -- plus the
+            # `manifest_guard_log` "spoofing" line that fires right
+            # before it. Either is a valid signal.
+            self.assertTrue(
+                "spoofing" in r.stderr.lower() or "refusing to load" in r.stderr.lower(),
+                f"expected REPO_ROOT-spoofing die message; stderr={r.stderr!r}",
+            )
+            # Crucial: must NOT be a "command not found" error from
+            # calling manifest_guard_log before its definition.
+            self.assertNotIn("manifest_guard_log: command not found", r.stderr,
+                f"manifest_guard_log must be defined before its call site; stderr={r.stderr!r}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
