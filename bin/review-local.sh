@@ -952,15 +952,25 @@ fi
 # exits before the WORST verdict is computed (which would only happen
 # for the `MISSING` path -- all of which already die() before
 # reaching this section).
-if [ "$DRY_RUN" = "0" ] && [ -n "${RUN_LOG:-}" ] && [ -n "${REPO_ROOT:-}" ]; then
-  ARCHIVE_DIR="$(dirname "$RUN_LOG")"
-  # RUN_TS is exported from bin/babysit-pr-local.sh via the env
-  # embedded in the `tee` invocation. Fall back to deriving from the
-  # log filename if the wrapper wasn't used.
+if [ "$DRY_RUN" = "0" ] && [ -n "${REPO_ROOT:-}" ]; then
+  # Determine archive dir + RUN_TS from $RUN_LOG (set by the
+  # bashysit-pr-local.sh wrapper via embedded env) OR fall back to
+  # a fresh `<REPO>/.review-local-archive/<PR>/<ts>/` directory so
+  # this block runs even when bin/review-local.sh is invoked
+  # directly (e.g. by tests, or by an operator without the wrapper).
+  if [ -n "${RUN_LOG:-}" ]; then
+    ARCHIVE_DIR="$(dirname "$RUN_LOG")"
+  else
+    if [ -z "${RUN_TS:-}" ]; then
+      RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    fi
+    ARCHIVE_DIR="${REPO_ROOT}/.review-local-archive/${PR_NUMBER}/${RUN_TS}"
+  fi
   if [ -z "${RUN_TS:-}" ]; then
     RUN_TS="$(basename "$ARCHIVE_DIR")"
   fi
   HEAD_OID="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  mkdir -p "$ARCHIVE_DIR"
   python3 - "$ARCHIVE_DIR" "$RUN_TS" "$HEAD_OID" "$WORST" "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V" "$L3_OK" "$AUDIT_BODY" "${REVIEW_OUTPUT:-}" "${SECURITY_OUTPUT:-}" "${MAINTENANCE_OUTPUT:-}" <<'PYEOF'
 import json
 import sys
