@@ -635,7 +635,7 @@ run_skill() {
     # The dry-run log MUST mirror the real argv shape (including
     # --plugin-dir) so reviewers can audit the contract from the log
     # alone -- mirrors what issue #727 regression test asserts.
-    log "would run: env <$PROVIDER env+key> claude --plugin-dir \"$PLUGIN_SRC_DISPLAY\" -p \"$prompt\""
+    log "would run: env <$PROVIDER env+key> claude --bare --plugin-dir \"$PLUGIN_SRC_DISPLAY\" -p \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -678,7 +678,15 @@ run_skill() {
   # reaches the archive. This preserves the audit trail of genuine
   # approvals even when SessionEnd hooks (a session-lifecycle concern,
   # not a verdict correctness concern) cause a non-zero exit.
-  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" || {
+  # `--bare` skips the dev-kit plugin's SessionStart / UserPromptSubmit
+  # hooks (which hang the `claude -p` CLI today — the regenerate_active_hooks
+  # + linear-session-start + session-start-check chain all spawn
+  # claude -p subprocesses of their own that compete for the CLI's
+  # session-start handshake, leaving the parent `claude -p` blocked
+  # indefinitely). The `--plugin-dir` still loads the dev-kit
+  # SKILL/COMMAND/MANIFEST registry so `/dev-kit:review` etc. resolve;
+  # `--bare` only skips the session-lifecycle hook layer.
+  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --bare --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" || {
     _rc=$?
     if printf '%s\n' "$out" | grep -qE '^\*\*Verdict:\*\*'; then
       log "warning: $skill: claude -p exited non-zero (rc=$_rc) but a Verdict line was captured -- using it anyway"
@@ -761,7 +769,7 @@ else
           exit 1
         fi
       fi
-      out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)"
+      out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --bare --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)"
       rc=$?
       printf '%s\n' "$out" > "$outfile"
       printf '%s\n' "$out" | sed -u "s/^/[${gate}] /"
