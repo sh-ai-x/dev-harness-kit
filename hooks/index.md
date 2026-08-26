@@ -26,7 +26,9 @@
 | Hook                  | Bootstrap | Plan | Design | Build | Review | Security | Ship |
 |-----------------------|:----:|:----:|:----:|:----:|:----:|:----:|:----:|
 | tdd-guard             |  -    |  -    |  -    |  ✅    |  -    |  -    |  -    |
-| bash-guard            |  -    |  -    |  -    |  ✅    |  -    |  -    |  -    |
+| bash-guard (tier 2)   |  -    |  -    |  -    |  ✅    |  -    |  -    |  -    |
+| bash-guard (tier 1)   |  C    |  C    |  C    |  C    |  C    |  C    |  C    |
+| destructive-confirm   |  K    |  K    |  K    |  K    |  K    |  K    |  K    |
 | secret-scan           |  R    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
 | slop-detector         |  -    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
 | stop-verify           |  -    |  ✅    |  ✅    |  ✅    |  ✅    |  ✅    |  ✅    |
@@ -37,7 +39,7 @@
 | l4-todo-scan           |  -    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
 | sub-agent-handoff     |  A    |  A    |  A    |  A    |  A    |  A    |  A    |
 ```
-(R = read-only) (* = fires only when Linear is configured.) (A = always-on with per-worktree opt-out via `.dev-kit/.sub-agent-handoff-disabled`.)
+(R = read-only) (* = fires only when Linear is configured.) (A = always-on with per-worktree opt-out via `.dev-kit/.sub-agent-handoff-disabled`.) (C = catastrophic tier: always denies, ignores both `DEV_KIT_STRICT` and this matrix.) (K = ask-tier: always on, surfaces a human confirmation; opt out with `DEV_KIT_NO_CONFIRM=1`.)
 
 ## Hook shells
 
@@ -51,7 +53,8 @@ the terminal trace record before `save_log.py` runs with
 | Hook | Stage ON | Purpose |
 |------|----------|---------|
 | `tdd-guard` | build | active when `lib/methodology/tdd.py` is loaded (MUST-48). |
-| `bash-guard` | build | blocks dangerous shell patterns (`rm -rf`, force-push, etc.). |
+| `bash-guard` | build (tier 2) / all stages (tier 1) | Two tiers. **Tier 1 (catastrophic)** — `rm -rf /`, `rm -rf ~`, `chown -R /`, `mkfs.*`, `dd of=/dev/sd*`, `curl\|sh`, `npm publish`, `kubectl delete namespace`, `aws s3 rm --recursive`, `terraform destroy -auto-approve`, and any attempt to set `DEV_KIT_HOOK_OFF=.bash-guard`. Denies unconditionally, checked *before* the stage gate, not overridable by `DEV_KIT_STRICT`. **Tier 2 (recoverable)** — `git reset --hard`, `git clean -f`, force-push, `DROP TABLE`, `docker system prune`, `find -delete`, `pkill -9`. Stage-gated to build; advisory unless `DEV_KIT_STRICT=1`. |
+| `destructive-confirm` | all stages (not gated) | PreToolUse `Bash\|Write\|Edit\|MultiEdit` **ask-tier** gate — the only hook that emits `permissionDecision: "ask"` (human confirmation prompt) rather than deny-or-silence. Asks on: writes to `.env` / `*.pem` / `*.key` / `.ssh/*` / `.aws/credentials` / `.netrc` / `.kube/config` / `secrets.*` (`.env.example` and friends are exempt so the prompt stays meaningful); bare `git worktree remove` (bypasses `bin/worktree-remove-safe.sh`, discarding the worktree's `logs/`); `git push --force-with-lease`; and first-time `git push -u`. Opt out with `DEV_KIT_NO_CONFIRM=1`. Fails closed when `jq` is missing. |
 | `l4-todo-scan` | build / review / security | PostToolUse deferred-work marker scan (Iron Law #4). Fails closed on TODO/FIXME/'we'll extend later' markers in non-allowed paths. Allowed paths: `*.md`, `tests/fixtures/**`, `docs/adoption/**`. `L4_STRICT=1` overrides the allowed-path exemption. |
 | `secret-scan` | build / review / security | PostToolUse credential-pattern grep. |
 | `slop-detector` | build / review / security | KO+EN banned-phrase scan. |

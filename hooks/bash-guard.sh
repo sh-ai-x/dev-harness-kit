@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 # bash-guard.sh — PreToolUse hook for Bash. Blocks destructive commands.
-# Default advisory (exit 0); hard-block (exit 2) with --strict.
+#
+# Two tiers, because "destructive" is not one category:
+#
+#   CATASTROPHIC — unrecoverable, no legitimate agent use case.
+#     Always hard-denies. Ignores DEV_KIT_STRICT *and* the stage gate.
+#     `rm -rf /` is never correct in any stage of any workflow, so
+#     gating it behind either switch is indefensible.
+#
+#   RECOVERABLE — destructive but sometimes legitimate (git reset --hard
+#     on your own branch, docker system prune on a dev box). Advisory by
+#     default; hard-denies under DEV_KIT_STRICT=1. Stage-gated, so it
+#     only speaks up in the stages where the matrix enables bash-guard.
+#
+# Why the tier split (this file's history): a single flat list gated on
+# DEV_KIT_STRICT meant the default install printed a warning for `rm -rf /`
+# and then EXECUTED IT. Worse, bash-guard is stage-gated off everywhere
+# except `build` (lib/active_hooks_codec.py), so even DEV_KIT_STRICT=1 left
+# `rm -rf /` unguarded in the other six stages. The catastrophic tier is
+# checked before the stage gate for exactly that reason.
 
 set -eo pipefail
 # Use %/* parameter expansion (POSIX, no external `dirname` required) so
@@ -12,33 +30,65 @@ source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 require_jq bash-guard
 read_stdin_json bash-guard
 [ -z "$INPUT_JSON" ] && exit 0
-hook_stage_active bash-guard || exit 0
 CMD=$(printf '%s' "$INPUT_JSON" | jq -r '.tool_input.command // ""')
 [ -z "$CMD" ] && exit 0
 
-# Destructive patterns
-BLOCKED_PATTERNS=(
+# ---- Tier 1: catastrophic. Unconditional deny, pre-stage-gate. ----
+# Filesystem/root destruction, credential-file clobber, remote code
+# execution, publish-to-the-world. None have a legitimate in-session use;
+# all are unrecoverable or externally visible.
+CATASTROPHIC_PATTERNS=(
   "rm -rf /([[:space:]]|$)"
+  "rm -rf --no-preserve-root"
   "rm -rf ~"
   "rm -rf [\"']?\\\$HOME[\"']?"
-  "git push --force.* main"
-  "git push -f .* main"
-  "git reset --hard"
-  "git clean -f"
-  "DROP TABLE"
-  "DROP DATABASE"
-  "chmod 777"
   "chown -R /"
-  ">/etc/passwd"
-  "curl.*[|].*sh"
-  "wget.*[|].*sh"
+  "chmod -R 777 /"
+  ">[[:space:]]*/etc/passwd"
+  ">[[:space:]]*/etc/shadow"
+  "mkfs\\."
+  "dd[[:space:]].*of=/dev/(sd|nvme|disk|hd)"
+  "curl.*[|][[:space:]]*(ba)?sh([[:space:]]|$)"
+  "wget.*[|][[:space:]]*(ba)?sh([[:space:]]|$)"
   "npm publish"
-  "docker system prune"
-  "eval \$"
+  "terraform destroy.*-auto-approve"
+  "kubectl delete (namespace|ns)[[:space:]]"
+  "aws s3 (rm|rb) .*--recursive"
+  # Self-protection: an agent disabling its own guard is the single
+  # highest-value block this hook makes. Never advisory.
   "DEV_KIT_HOOK_OFF=.bash-guard"
 )
 
-for pattern in "${BLOCKED_PATTERNS[@]}"; do
+for pattern in "${CATASTROPHIC_PATTERNS[@]}"; do
+  if echo "$CMD" | grep -qE "$pattern"; then
+    deny "BASH GUARD (catastrophic)" \
+      "pattern '$pattern' is denied unconditionally — not overridable by DEV_KIT_STRICT or the stage matrix. Command: ${CMD:0:80}"
+  fi
+done
+
+# ---- Tier 2: recoverable. Stage-gated, advisory unless strict. ----
+hook_stage_active bash-guard || exit 0
+
+RECOVERABLE_PATTERNS=(
+  "git push --force([[:space:]]|$)"
+  "git push .*--force.* main"
+  "git push -f .* main"
+  "git reset --hard"
+  "git clean -f"
+  "git branch -D (main|master)"
+  "DROP TABLE"
+  "DROP DATABASE"
+  "TRUNCATE TABLE"
+  "chmod 777"
+  "docker system prune"
+  "docker volume rm"
+  "eval \$"
+  "find .* -delete"
+  "pkill -9"
+  "terraform destroy"
+)
+
+for pattern in "${RECOVERABLE_PATTERNS[@]}"; do
   if echo "$CMD" | grep -qE "$pattern"; then
     if [ "${DEV_KIT_STRICT:-0}" = "1" ]; then
       deny "BASH GUARD (strict)" "pattern '$pattern' blocked."

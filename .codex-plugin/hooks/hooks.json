@@ -27,6 +27,11 @@
           },
           {
             "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/destructive-confirm.sh",
+            "fail_closed": true
+          },
+          {
+            "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/linear-autosync.sh",
             "fail_closed": false
           }
@@ -48,6 +53,11 @@
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/review-yml-isolation.sh",
+            "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/destructive-confirm.sh",
             "fail_closed": true
           }
         ]

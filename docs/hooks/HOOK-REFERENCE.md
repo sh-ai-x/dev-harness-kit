@@ -26,7 +26,8 @@ per-runtime wiring differences), see
 | Hook | What it does | Stage |
 |---|---|---|
 | `tdd-guard` | Blocks `lib/` edits without a failing test | Build |
-| `bash-guard` | Denies destructive `git` / `rm` / shell escapes | Build |
+| `bash-guard` | Two-tier destructive-command block. Tier 1 (catastrophic: `rm -rf /`, `curl\|sh`, `mkfs.*`, `npm publish`, `kubectl delete namespace`, `terraform destroy -auto-approve`, guard self-disable) denies unconditionally in every stage. Tier 2 (recoverable: `git reset --hard`, force-push, `DROP TABLE`, `docker system prune`) is advisory unless `DEV_KIT_STRICT=1` | Tier 1 all / Tier 2 Build |
+| `destructive-confirm` | Ask-tier human confirmation (`permissionDecision: "ask"`) on credential-file writes, bare `git worktree remove`, `--force-with-lease`, and first `git push -u`. Opt out via `DEV_KIT_NO_CONFIRM=1` | All |
 | `secret-scan` | Redacts credential patterns in tool inputs | All |
 | `slop-detector` | Catches AI-typical patterns across phrase + structure banks (KO+EN) | Build + Review + Security |
 | `l4-todo-scan` | PostToolUse deferred-work marker scan (Iron Law L4): fails closed on TODO/FIXME/'we'll extend later'/starting-point/placeholder markers in `Write`/`Edit`/`MultiEdit` payloads outside allowed paths (`*.md`, `tests/fixtures/**`, `docs/adoption/**`). Strict mode via `L4_STRICT=1`. Marker bank SSOT: `hooks/references/l4/markers.md` | Build + Review + Security |
@@ -47,7 +48,8 @@ useful when you're debugging *why* a hook did or didn't run:
 | Hook | Event | Purpose | Mode |
 |---|---|---|---|
 | `tdd-guard.sh` | PreToolUse (Write\|Edit\|MultiEdit) | TDD test-first enforcement | advisory / `--strict` |
-| `bash-guard.sh` | PreToolUse (Bash) | Block destructive commands | advisory / `--strict` |
+| `bash-guard.sh` | PreToolUse (Bash) | Block destructive commands | tier 1 hard-block (always) / tier 2 advisory / `--strict` |
+| `destructive-confirm.sh` | PreToolUse (Bash\|Write\|Edit\|MultiEdit) | Human confirmation before credential writes, worktree removal, force-with-lease, first branch push | ask (`permissionDecision: "ask"`) |
 | `git-guard.sh` | PreToolUse (Bash) | Branch strategy enforcement | hard-block |
 | `pre-push` (.githooks/) | pre-push (local) | Block direct push to `main` + auto-SYNC (not auto-bump) `plugin.json:version` from origin/main on `local < origin/main`; refuses on uncommitted `plugin.json` edits; opt-in LLM-judge intent check via `DEV_KIT_PUSH_INTENT=1`. Calls `bin/sync-version.sh` for the actual version-only sync. | hard-block + auto-commit |
 | `worktree-guard.sh` | PreToolUse (Write\|Edit\|MultiEdit) | Block edits in main checkout | hard-block |
