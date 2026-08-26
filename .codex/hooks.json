@@ -36,18 +36,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "for i in python3 python py; do if \"$i\" -c \"\" </dev/null >/dev/null 2>&1; then env SAVE_LOG_ARCHIVE_STALE=1 \"$i\" tools/save_log.py --tool codex; exit 0; fi; done"
+            "command": "bash \"$PWD/hooks/trace-session-end.sh\""
           }
-        ],
-        "_loghooks_managed": true
+        ]
       },
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$PWD/hooks/trace-session-end.sh\""
+            "command": "for i in python3 python py; do if \"$i\" -c \"\" </dev/null >/dev/null 2>&1; then env SAVE_LOG_ARCHIVE_STALE=1 \"$i\" tools/save_log.py --tool codex; exit 0; fi; done"
           }
-        ]
+        ],
+        "_loghooks_managed": true
       }
     ]
   }
