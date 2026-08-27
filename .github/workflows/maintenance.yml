@@ -98,14 +98,27 @@ jobs:
           set -uo pipefail
           PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
           head_sha=""
+          last_stderr=""
           for attempt in 1 2 3; do
+            # Capture stderr so transient rate-limit (benign) and
+            # auth-token failure (security-relevant) are distinguishable
+            # in the run log. First line of stderr is appended to the
+            # ::warning:: with secrets masked by the GH-Actions runner.
+            last_stderr="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>&1 >/dev/null || true)"
             head_sha="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>/dev/null || true)"
             if [ -n "$head_sha" ]; then
               break
             fi
-            echo "::warning::pr_meta attempt $attempt failed; retrying in 5s"
+            err_first="$(printf '%s' "$last_stderr" | head -1 || true)"
+            echo "::warning::pr_meta attempt $attempt failed; retrying in 5s (stderr: ${err_first:-<empty>})"
             sleep 5
           done
+          if [ -z "$head_sha" ]; then
+            # Loud terminal signal so a degraded capture shows red on
+            # the pr_meta step itself, not only as a downstream G3 STALE.
+            err_first="$(printf '%s' "$last_stderr" | head -1 || true)"
+            echo "::error::pr_meta: 3-attempt retry exhausted; head_sha= empty (stderr: ${err_first:-<empty>}). Downstream G3 will STALE this audit."
+          fi
           echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
