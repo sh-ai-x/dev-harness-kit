@@ -49,16 +49,22 @@ wire field to render its "Cost by Branch" panel. `off` deliberately leaves
 
 ### Byte-level idempotence (issue #708)
 
-`on` is **byte-stable** on re-runs: if the merge result's canonical form
-(`jq -S .`) matches the existing file's canonical form, `on` skips the
-write entirely. Only a semantically meaningful change (new event in the
-source, user adds an unrelated hook, user strips a managed entry) triggers
-a rewrite. This is what allows `hooks/log-on-session-start.sh` to call
-`on` on every SessionStart without dirtying the working tree on every
-session — without this check, every session start would rewrite
+`on` is **byte-stable** on re-runs: if the existing target already
+contains every source command (matched by `.hooks[0].command` within
+each event) — in any order and with or without the `_loghooks_managed`
+sentinel — `on` skips the write entirely. The semantic check runs
+first; the canonical `jq -S .` byte-comparison is kept as a
+belt-and-braces fallback. Only a semantically meaningful change (new
+event in the source, user adds an unrelated hook, user strips a managed
+entry) triggers a rewrite. This is what allows `hooks/log-on-session-start.sh`
+to call `on` on every SessionStart without dirtying the working tree on
+every session — without this check, every session start would rewrite
 `.claude/settings.json` and `.codex/hooks.json` in jq's insertion order
 (which may differ from the existing file's order), preventing `git pull`
-on the main checkout.
+on the main checkout. The semantic check is robust to: an existing
+managed entry whose sentinel was stripped by a hand-edit, a commit
+predating the sentinel convention, or an older install algorithm that
+left the file dirty.
 
 ### Order-preserving merge (issue #708 follow-up)
 
