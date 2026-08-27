@@ -247,11 +247,13 @@ levels and per-skill workflow extraction.
 #### Overall skill relationship map
 
 The following architecture map was created in the Archidraw canvas through
-the Archidraw MCP workflow. It inventories all **44 skills** shipped by this
+the Archidraw MCP workflow. It inventories every skill shipped by this
 repository and groups them by the role they play in the development harness:
 foundation and integration, research and planning, build and refactor, review
 and security, ship and repair, quality and documentation, and evaluation and
-operations.
+operations. Discover the current count with `ls skills/ | wc -l` (subtract 1
+for the internal `_acp` directory) or browse
+[`docs/skills/README.md`](docs/skills/README.md).
 
 <img src="docs/screenshots/architecture/overall-skill-architecture.png" alt="Overall dev-harness-kit skill relationship map created with Archidraw MCP" width="1200" />
 
@@ -485,7 +487,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:pr-verify`](docs/skills/pr-verify.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI" / "LLM-judge still running" false positive before any "ready to merge" claim. |
 | [`/dev-kit:bump`](docs/skills/bump.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
 | [`/dev-kit:sync-version`](docs/skills/sync-version.md) | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically; useful when pre-push is not installed or CI reports a stale branch. |
-| [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow. Runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`, with the same verdict extraction + combined gate + L3-evidence check + optional auto-approve. See [`docs/local-ci.md`](docs/local-ci.md) for the full playbook. |
+| [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow. Runs `/dev-kit:review` + `/dev-kit:security` + the `/dev-kit:maintenance` judge prompt via local `claude -p`, with the same verdict extraction + combined gate + L3-evidence check + optional auto-approve. (`/dev-kit:maintenance` is the LLM-judge prompt dispatched by `.github/workflows/maintenance.yml` — not a standalone skill body. See `commands/review-local.md` and `bin/ci-claude-p.sh` for the contract.) Full playbook in [`docs/local-ci.md`](docs/local-ci.md). |
 
 ### Keeping the project healthy
 

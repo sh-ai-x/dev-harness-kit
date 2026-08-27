@@ -56,7 +56,7 @@ absent, the renderer emits no new section wrappers (only an extended
 inline-CSS block). Existing proposals render identically. See
 `skills/proposal/SKILL.md` §Workflow for the full rule.
 
-## Why a separate skill (not a flag on `/dev-kit:report` or `/dev-kit:plan`)
+## Why a separate skill (not a flag on `/dev-kit:plan`)
 
 The user typed `/dev-kit:proposal` and got a single result. The flag-vs-slash
 choice is the architecture:

@@ -50,7 +50,7 @@ function `render()` takes optional `back_to_href=` and
 `back_to_label=` kwargs; the CLI driver wires them based on the
 filesystem sibling check.
 
-**Why a separate skill, not a flag on `/dev-kit:report` or `/dev-kit:plan`**: the
+**Why a separate skill, not a flag on `/dev-kit:plan`**: the
 user has to remember the flag and slash autocomplete does not surface flags.
 Proposals are a distinct artifact (pre-implementation plans) with a distinct
 lifecycle (designed → reviewed → accepted/rejected → implemented). The slash
@@ -274,8 +274,7 @@ is enforced by the `HtmlEscapeTests` class in `tests/test_proposal_skill.py`
 `test_less_than_greater_than_escaped`).
 
 **No `<script>` tag, no external assets, inline CSS only.** The output is
-safe to email, archive, or open from `file://`. Mirrors the `/dev-kit:report`
-invariant.
+safe to email, archive, or open from `file://`.
 
 ## Editing the proposal
 
