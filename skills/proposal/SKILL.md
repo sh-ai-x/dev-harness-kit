@@ -288,9 +288,8 @@ The YAML is hand-edited, not generated. Re-run
   `render` + `__main__` CLI entry
 - `lib/render_report_html.py` -- sibling renderer (eval + inspect reports)
 - `bin/dev-kit-report.py` -- sibling CLI driver (kept as-is; this skill no
-  longer uses this pattern)
-- `skills/report/SKILL.md` -- sibling skill (still uses the
-  read-only-skill + bin CLI pattern; we deviated from it)
+  longer uses this pattern). The underlying `/dev-kit:report` slash was
+  removed but the lib + driver remain.
 - `skills/plan/SKILL.md` -- Gate 5/5 calls this skill to auto-render the
   design record
 
