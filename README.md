@@ -251,9 +251,11 @@ the Archidraw MCP workflow. It inventories every skill shipped by this
 repository and groups them by the role they play in the development harness:
 foundation and integration, research and planning, build and refactor, review
 and security, ship and repair, quality and documentation, and evaluation and
-operations. Discover the current count with `ls skills/ | wc -l` (subtract 1
-for the internal `_acp` directory) or browse
-[`docs/skills/README.md`](docs/skills/README.md).
+operations. The live inventory is maintained at
+[`docs/skills/README.md`](docs/skills/README.md); `ls skills/*/` from the
+repo root shows every skill directory, including the internal `_acp`
+sibling, and `ls skills/ | wc -l` adds the `skills/README.md` file so a
+plain `wc` over the top level is not a reliable count.
 
 <img src="docs/screenshots/architecture/overall-skill-architecture.png" alt="Overall dev-harness-kit skill relationship map created with Archidraw MCP" width="1200" />
 
