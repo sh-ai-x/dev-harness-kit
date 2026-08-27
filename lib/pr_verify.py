@@ -410,7 +410,16 @@ def _latest_per_job_audits(comments: tuple[dict, ...]) -> dict[str, dict]:
     # search by key= rather than positional slicing to stay robust to
     # the addition of future extras (the position would drift if a new
     # key is added before another in the sort order).
-    extra_re = re.compile(r"(\w+)=(\S+)")
+    #
+    # `(\S*)` (NOT `(\S+)`): an empty value (`key=`) must also match so
+    # we can distinguish "no `head_sha=` extra present" (legacy audit)
+    # from "`head_sha=` present but empty" (workflow gh pr view failed,
+    # GH-Actions rate-limit, transient outage — see review.yml:355). G3
+    # treats these two cases DIFFERENTLY: missing falls back to
+    # `_run_head_sha()`; empty-but-present is STALE (no fallback — that
+    # would return main's HEAD on fork-PR dispatched runs and re-introduce
+    # the fork-PR STALE bug this whole provenance fix closes).
+    extra_re = re.compile(r"(\w+)=(\S*)")
     latest_per_job: dict[str, dict] = {}
     for c in comments:
         body = c.get("body") or ""
@@ -427,13 +436,19 @@ def _latest_per_job_audits(comments: tuple[dict, ...]) -> dict[str, dict]:
         # dispatched-run `headSha` (which can disagree on fork PRs —
         # see `_gate_g3_llm_verdicts` docstring). The key is optional
         # so older audits posted before the G3 fix landed still parse.
-        head_sha = ""
-        sentinel_end = body.find("-->")
-        if sentinel_end >= 0:
-            payload = body[sentinel_end + 3:]
-            for k, v in extra_re.findall(payload):
-                if k == "head_sha":
-                    head_sha = v
+        #
+        # `None` (sentinel) vs `""` (empty-but-present) is load-bearing:
+        # G3's empty-but-present branch must NOT fall back to
+        # `_run_head_sha()`. Use the audit_re match position (not
+        # `body.find("-->")`) so a stray `<!-- -->` block earlier in
+        # the comment body cannot shift the slice window.
+        head_sha: str | None = None
+        payload = body[m.end():]
+        # dict() constructor dedupes a malformed duplicate-key body
+        # (last value wins) — defensive against a future emitter bug.
+        extras = dict(extra_re.findall(payload))
+        if "head_sha" in extras:
+            head_sha = extras["head_sha"]
         created_at = c.get("created_at") or ""
         prior = latest_per_job.get(job)
         if prior is None or created_at > prior["created_at"]:
@@ -591,22 +606,51 @@ def _gate_g3_llm_verdicts(
         # whenever the comment carries it. Older audits posted before
         # this field was added fall back to the original
         # `_run_head_sha()` provenance check.
+        #
+        # Three comment states per job (set by `_latest_per_job_audits`):
+        #   - `head_sha` absent  (None)        → legacy audit, fall back
+        #                                          to `_run_head_sha()`.
+        #   - `head_sha=""`      (empty str)   → workflow gh pr view
+        #                                          failed (network /
+        #                                          rate-limit / outage);
+        #                                          do NOT fall back — the
+        #                                          audit does not
+        #                                          authoritatively bind
+        #                                          to any head. Treat as
+        #                                          STALE so a fork-PR
+        #                                          dispatched run never
+        #                                          slides back into the
+        #                                          `_run_head_sha()`
+        #                                          main-HEAD path.
+        #   - `head_sha=<sha>`   (non-empty)   → authoritative when
+        #                                          matches pr_head_sha.
         run_sha_cache: dict[str, str | None] = {}
         comment_sha_jobs: list[str] = []
         for j in REQUIRED_JOBS:
-            comment_head_sha = audits[j].get("head_sha") or ""
-            if comment_head_sha:
+            comment_head_sha = audits[j].get("head_sha")
+            if comment_head_sha is None:
+                # Legacy shape: no `head_sha=` extra at all. Fall back
+                # to `_run_head_sha()` — same-repo PRs and pre-fix
+                # audits land in this branch.
+                run_id = audits[j]["run_id"]
+                if run_id not in run_sha_cache:
+                    run_sha_cache[run_id] = _run_head_sha(run_id, repo)
+                if run_sha_cache[run_id] != pr_head_sha:
+                    comment_sha_jobs.append(j)
+            elif comment_head_sha == "":
+                # Workflow emitted `head_sha=` but the value resolved
+                # to empty (gh pr view failed). Do NOT fall back to
+                # `_run_head_sha()` — that path returns main's HEAD on
+                # fork-PR dispatched runs and would STALE every
+                # correctly-judged fork PR via the original fork-PR
+                # STALE bug this whole provenance fix closed.
+                comment_sha_jobs.append(j)
+            else:
                 # Skip the `gh run view` round-trip when the comment
                 # already records the PR head SHA — the comment is
                 # authoritative for fork-PR dispatched runs whose run
                 # `headSha` points at `--ref main` instead of the PR.
                 if comment_head_sha != pr_head_sha:
-                    comment_sha_jobs.append(j)
-            else:
-                run_id = audits[j]["run_id"]
-                if run_id not in run_sha_cache:
-                    run_sha_cache[run_id] = _run_head_sha(run_id, repo)
-                if run_sha_cache[run_id] != pr_head_sha:
                     comment_sha_jobs.append(j)
         mismatched_jobs = comment_sha_jobs
         # Collect per-job comment head_sha values so the failure
@@ -614,7 +658,7 @@ def _gate_g3_llm_verdicts(
         # audit carries `head_sha=<PR head>` (matches) while the
         # underlying run's `headSha` (skipped) would not have.
         comment_shas = {
-            j: (audits[j].get("head_sha") or "<missing>")
+            j: (audits[j].get("head_sha") if audits[j].get("head_sha") is not None else "<missing>")
             for j in mismatched_jobs
         }
         if mismatched_jobs:
@@ -656,10 +700,6 @@ def _gate_g3_llm_verdicts(
             "latest_verdict": verdict,
             "source_comment_id": src,
             "pr_head_sha": pr_head_sha,
-            "comment_head_sha_per_job": {
-                j: (audits.get(j, {}).get("head_sha") or None)
-                for j in REQUIRED_JOBS
-            },
             "n_claude_comments_scanned": sum(
                 1 for c in comments
                 if _extract_user_login(c) in TRUSTED_BOT_LOGINS

@@ -163,7 +163,12 @@ def _parse_audit_quartet(body: str) -> dict[str, str]:
     lib/maintenance_gate.py. Missing keys default to absent (caller
     treats empty as "no audit yet").
     """
-    KNOWN = ("verdict", "review", "security", "maintenance", "provider", "source", "head_sha")
+    # `head_sha` is emitted by review.yml / maintenance.yml but the
+    # local status script does NOT consume it (the script surfaces CI
+    # check buckets + verdict, not run-provenance). Leaving `head_sha`
+    # in KNOWN would slice a `head_sha=` substring out of the payload
+    # but never read it — pure dead-key plumbing.
+    KNOWN = ("verdict", "review", "security", "maintenance", "provider", "source")
     out: dict[str, str] = {}
     # Drop the leading HTML sentinel so we only parse the key=value
     # payload that follows.
