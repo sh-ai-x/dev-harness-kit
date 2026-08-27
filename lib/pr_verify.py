@@ -403,6 +403,14 @@ def _latest_per_job_audits(comments: tuple[dict, ...]) -> dict[str, dict]:
         r"<!--\s*dev-kit-verdict-audit\s*-->\s*"
         r"run=(\d+)\s+job=(\w+)\s+status=(\w+)\s+verdict=(\S+)"
     )
+    # Match any `key=value` extra emitted after the canonical quartet on
+    # the parseable line 1. Extras are sorted byte-stable by
+    # `lib/maintenance_gate.format_audit_body`, so the position of each
+    # key=value pair in the payload is deterministic — but we still
+    # search by key= rather than positional slicing to stay robust to
+    # the addition of future extras (the position would drift if a new
+    # key is added before another in the sort order).
+    extra_re = re.compile(r"(\w+)=(\S+)")
     latest_per_job: dict[str, dict] = {}
     for c in comments:
         body = c.get("body") or ""
@@ -413,11 +421,25 @@ def _latest_per_job_audits(comments: tuple[dict, ...]) -> dict[str, dict]:
         if author not in TRUSTED_AUDIT_LOGINS:
             continue
         run_id, job, _status, verdict = m.groups()
+        # `head_sha=` is emitted by the workflow's extract_verdict
+        # step as a record of the PR head SHA the audit pertains to.
+        # When present, G3 prefers this value over `_run_head_sha`'s
+        # dispatched-run `headSha` (which can disagree on fork PRs —
+        # see `_gate_g3_llm_verdicts` docstring). The key is optional
+        # so older audits posted before the G3 fix landed still parse.
+        head_sha = ""
+        sentinel_end = body.find("-->")
+        if sentinel_end >= 0:
+            payload = body[sentinel_end + 3:]
+            for k, v in extra_re.findall(payload):
+                if k == "head_sha":
+                    head_sha = v
         created_at = c.get("created_at") or ""
         prior = latest_per_job.get(job)
         if prior is None or created_at > prior["created_at"]:
             latest_per_job[job] = {
                 "run_id": run_id, "verdict": verdict, "created_at": created_at,
+                "head_sha": head_sha,
             }
     return latest_per_job
 
@@ -558,19 +580,49 @@ def _gate_g3_llm_verdicts(
         # head. Dedupe by run_id — required jobs commonly share one
         # workflow run. A fetch failure (None) is treated as a
         # mismatch, never assumed to be a match.
+        #
+        # Fork PRs dispatched via fork-pr-review.yml run against
+        # `--ref main`, so the run's `headSha` is main's HEAD, NOT the
+        # PR head — using that field would STALE every fork PR even
+        # when the LLM judges correctly evaluated the PR's diff. The
+        # audit comment writer emits `head_sha=<PR headRefOid>` as a
+        # authoritative record of the PR head the run judged, and we
+        # prefer that value over the dispatched run's own `headSha`
+        # whenever the comment carries it. Older audits posted before
+        # this field was added fall back to the original
+        # `_run_head_sha()` provenance check.
         run_sha_cache: dict[str, str | None] = {}
-        mismatched_jobs = []
+        comment_sha_jobs: list[str] = []
         for j in REQUIRED_JOBS:
-            run_id = audits[j]["run_id"]
-            if run_id not in run_sha_cache:
-                run_sha_cache[run_id] = _run_head_sha(run_id, repo)
-            if run_sha_cache[run_id] != pr_head_sha:
-                mismatched_jobs.append(j)
+            comment_head_sha = audits[j].get("head_sha") or ""
+            if comment_head_sha:
+                # Skip the `gh run view` round-trip when the comment
+                # already records the PR head SHA — the comment is
+                # authoritative for fork-PR dispatched runs whose run
+                # `headSha` points at `--ref main` instead of the PR.
+                if comment_head_sha != pr_head_sha:
+                    comment_sha_jobs.append(j)
+            else:
+                run_id = audits[j]["run_id"]
+                if run_id not in run_sha_cache:
+                    run_sha_cache[run_id] = _run_head_sha(run_id, repo)
+                if run_sha_cache[run_id] != pr_head_sha:
+                    comment_sha_jobs.append(j)
+        mismatched_jobs = comment_sha_jobs
+        # Collect per-job comment head_sha values so the failure
+        # message names both sources — useful when a fork-PR dispatched
+        # audit carries `head_sha=<PR head>` (matches) while the
+        # underlying run's `headSha` (skipped) would not have.
+        comment_shas = {
+            j: (audits[j].get("head_sha") or "<missing>")
+            for j in mismatched_jobs
+        }
         if mismatched_jobs:
             verdict = "STALE"
             src = (
                 f"head-SHA provenance mismatch for jobs {mismatched_jobs} "
-                f"(pr_head_sha={pr_head_sha}, run_shas={run_sha_cache})"
+                f"(pr_head_sha={pr_head_sha}, run_shas={run_sha_cache}, "
+                f"comment_shas={comment_shas})"
             )
     elif verdict == "Approve" and pr_pushed_at:
         # Degraded fallback: only reached when pr_head_sha is
@@ -604,6 +656,10 @@ def _gate_g3_llm_verdicts(
             "latest_verdict": verdict,
             "source_comment_id": src,
             "pr_head_sha": pr_head_sha,
+            "comment_head_sha_per_job": {
+                j: (audits.get(j, {}).get("head_sha") or None)
+                for j in REQUIRED_JOBS
+            },
             "n_claude_comments_scanned": sum(
                 1 for c in comments
                 if _extract_user_login(c) in TRUSTED_BOT_LOGINS

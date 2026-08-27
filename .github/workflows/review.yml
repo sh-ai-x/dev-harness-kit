@@ -343,12 +343,23 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "review_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Record which PR head this audit pertains to — fork PRs
+          # dispatched by fork-pr-review.yml execute against `--ref main`,
+          # so `gh run view <run_id>` returns main's HEAD instead of the
+          # PR head and the G3 head-SHA provenance check STALEs every
+          # correctly-judged fork PR. Embed `head_sha=<PR headRefOid>`
+          # in the audit so `lib/pr_verify._gate_g3_llm_verdicts` can
+          # bind the verdict to the PR's CURRENT head even when the run
+          # itself ran against main. Same-repo PRs record the same SHA
+          # either way; the field is unconditionally present.
+          PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""')"
           audit_body="$(python3 -m lib.maintenance_gate --format-audit \
             --run "${{ github.run_id }}" \
             --job review \
             --status "${{ job.status }}" \
             --verdict "${verdict:-MISSING}" \
-            --source lib.maintenance_gate)"
+            --source lib.maintenance_gate \
+            --extra "head_sha=${PR_HEAD_SHA}")"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
 
   security:
@@ -547,12 +558,20 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "security_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Record which PR head this audit pertains to — see the
+          # matching comment in the `review` extract_verdict step
+          # above. Forks dispatched via fork-pr-review.yml run
+          # against `--ref main`, so `gh run view <run_id>.headSha`
+          # would return main's HEAD instead of the PR head; the
+          # audit's `head_sha=` extras field is what G3 binds to.
+          PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""')"
           audit_body="$(python3 -m lib.maintenance_gate --format-audit \
             --run "${{ github.run_id }}" \
             --job security \
             --status "${{ job.status }}" \
             --verdict "${verdict:-MISSING}" \
-            --source lib.maintenance_gate)"
+            --source lib.maintenance_gate \
+            --extra "head_sha=${PR_HEAD_SHA}")"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
 
   gate:

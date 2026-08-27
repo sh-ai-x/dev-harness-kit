@@ -943,6 +943,154 @@ class TestG3HeadShaProvenance(unittest.TestCase):
         self.assertIn("STALE", g.detail)
 
 
+class TestG3CommentHeadShaProvenance(unittest.TestCase):
+    """Regression for PR #750: fork-pr-review.yml dispatches
+    review.yml / maintenance.yml with `--ref main`, so the dispatched
+    run's own `gh run view <run_id> --json headSha` returns main's tip
+    instead of the PR head, and the G3 head-SHA provenance check
+    STALEs every correctly-judged fork PR. The audit comment writer
+    now embeds `head_sha=<PR headRefOid>` on the parseable line so
+    G3 can bind the verdict to the PR head without trusting the
+    run's `headSha`. This test pins that path.
+    """
+
+    _COMMENTS_MATCHING = json.dumps([
+        {"id": "audit-1", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
+        {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
+        {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
+    ])
+
+    def test_comment_head_sha_matches_pr_head_passes(self):
+        """Audit `head_sha=` matches PR head — pass even when the run
+        was dispatched against main (so `_run_head_sha()` would NOT
+        have matched, and in fact must NOT be called at all because
+        the comment is authoritative)."""
+        def fake_gh(args):
+            if args[0] == "run" and args[1] == "view":
+                # Simulate the fork-pr-review dispatch: run headSha is
+                # main's tip, NOT the PR head. A pre-fix gate would
+                # STALE on this mismatch.
+                return json.dumps({"headSha": "3e785d286f360aa7dd44ce5feb30e74945c84479"})
+            return self._COMMENTS_MATCHING
+        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh) as gh_mock:
+            g = pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        # `gh run view` must NOT be consulted when every required
+        # audit carries an authoritative `head_sha=` matching the
+        # current PR head — the comment is the source of truth on
+        # fork-PR dispatched runs.
+        self.assertFalse(any(
+            (len(call.args) > 0 and call.args[0] == "run" and call.args[1] == "view")
+            for call in gh_mock.call_args_list
+        ),
+            "gh run view should be skipped when comment carries a matching head_sha")
+        self.assertTrue(g.passed,
+                        f"matched comment head_sha must pass; got detail={g.detail!r}")
+
+    def test_comment_head_sha_mismatch_stale(self):
+        """Audit `head_sha=` differs from the PR's CURRENT head — the
+        PR advanced and the audit is stale. Must STALE."""
+        comments = json.dumps([
+            {"id": "audit-1", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=oldsha"},
+            {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success verdict=Approve source=lib.maintenance_gate head_sha=oldsha"},
+            {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate head_sha=oldsha"},
+        ])
+        def fake_gh(args):
+            if args[0] == "run" and args[1] == "view":
+                return json.dumps({"headSha": "newsha"})
+            return comments
+        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
+            g = pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertFalse(g.passed)
+        self.assertIn("STALE", g.detail)
+        self.assertIn("oldsha", g.detail)
+        self.assertIn("newsha", g.detail)
+
+    def test_partial_comment_head_sha_only_some_jobs_present(self):
+        """If a re-run only posted a new audit for some jobs while
+        others still carry the older shape (no `head_sha=`), per-job
+        fallback to `_run_head_sha()` must still work — the gate
+        must not crash on partial coverage."""
+        comments = json.dumps([
+            # review: has head_sha matching
+            {"id": "audit-1", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
+            # security: legacy shape (no head_sha=), run headSha matches
+            {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=43 job=security status=success verdict=Approve source=lib.maintenance_gate"},
+            # maintenance: legacy shape, run headSha STALE
+            {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=44 job=maintenance status=success verdict=Approve source=lib.maintenance_gate"},
+        ])
+        run_view_cache = {
+            "42": {"headSha": "newsha"},
+            "43": {"headSha": "newsha"},
+            "44": {"headSha": "oldsha"},
+        }
+        def fake_gh(args):
+            if args[0] == "run" and args[1] == "view":
+                run_id = args[2]
+                return json.dumps(run_view_cache[run_id])
+            return comments
+        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
+            g = pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertFalse(g.passed)
+        self.assertIn("STALE", g.detail)
+        # Only the maintenance job (legacy shape + stale run headSha)
+        # should be in mismatched_jobs — security used legacy shape
+        # but the run matched, so it's fine.
+        self.assertIn("maintenance", g.detail)
+        self.assertNotIn("security", g.detail.split("(")[0])
+
+    def test_audit_author_untrusted_ignores_head_sha(self):
+        """A non-trusted-login comment that happens to carry
+        `head_sha=...` must NOT bind G3 — only github-actions[bot]
+        audits are authoritative."""
+        comments = json.dumps([
+            {"id": "forged", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
+            {"id": "forged", "user": "random-mallory", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha-fake"},
+            {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success verdict=Approve source=lib.maintenance_gate"},
+            {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate"},
+        ])
+        def fake_gh(args):
+            if args[0] == "run" and args[1] == "view":
+                return json.dumps({"headSha": "newsha"})
+            return comments
+        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
+            g = pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertTrue(g.passed,
+                        "comment head_sha from non-trusted login must NOT influence G3")
+
+
 if __name__ == "__main__":
     unittest.main()
 

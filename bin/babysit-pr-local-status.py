@@ -163,7 +163,7 @@ def _parse_audit_quartet(body: str) -> dict[str, str]:
     lib/maintenance_gate.py. Missing keys default to absent (caller
     treats empty as "no audit yet").
     """
-    KNOWN = ("verdict", "review", "security", "maintenance", "provider", "source")
+    KNOWN = ("verdict", "review", "security", "maintenance", "provider", "source", "head_sha")
     out: dict[str, str] = {}
     # Drop the leading HTML sentinel so we only parse the key=value
     # payload that follows.

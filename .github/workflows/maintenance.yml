@@ -256,12 +256,20 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "maintenance_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Record which PR head this audit pertains to — see the
+          # matching comment in `review.yml`'s `extract_verdict`
+          # step. Fork-PR dispatch in `fork-pr-review.yml` runs
+          # against `--ref main`, so `gh run view` returns main's
+          # HEAD instead of the PR head; the `head_sha=` extras
+          # field is what G3 binds the provenance check to.
+          PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""')"
           audit_body="$(python3 -m lib.maintenance_gate --format-audit \
             --run "${{ github.run_id }}" \
             --job maintenance \
             --status "${{ job.status }}" \
             --verdict "${verdict:-MISSING}" \
-            --source lib.maintenance_gate)"
+            --source lib.maintenance_gate \
+            --extra "head_sha=${PR_HEAD_SHA}")"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
 
   gate:
