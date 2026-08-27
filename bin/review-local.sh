@@ -366,6 +366,48 @@ esac
 # error -- review finding #1, PR #741.)
 cd "$REPO_ROOT"
 
+# Resolve the dev-kit plugin root once at startup. The spawned
+# `claude -p` must load the plugin via `--plugin-dir` so that
+# /dev-kit:* slash commands resolve; without the flag the spawned
+# CLI exits immediately with "Unknown command" and the verdict
+# pipeline synthesizes a lenient-default Approve (false positive).
+# Mirror of bin/ci-claude-p.sh:142-148.
+# `die`/`log` MUST be defined before any call site (issue #619 D2
+# regression: the manifest check below runs from the cwd-independence
+# path which can fire BEFORE the script's argument parser — calling
+# `die` while it is still undefined yields `die: command not found`
+# and exit 127 instead of the intended exit 1). Both helpers stay
+# minimal: `lib/review_local_lib.sh` (sourced below) re-defines them
+# only if the script is sourced into an interactive shell, not when
+# executed. The first definition wins for the script body.
+die() {
+  # Echo to stderr (gets merged into the SSE pipe's captured
+  # stdout via `claude -p 2>&1` in run_skill, OR directly into the
+  # script's stdout otherwise). Exit code 1 so the python
+  # maintenance_gate flags it as a parse failure.
+  echo "error: $*" >&2
+  exit 1
+}
+log() { echo "  $*"; }
+
+# `--help` short-circuits BEFORE the manifest check (issue #619 D2
+# regression: the cwd-independence test installs a partial consumer
+# without `.claude-plugin/plugin.json`, then runs `--help` from outside
+# the consumer to prove the script resolves REPO_ROOT from cwd's git
+# toplevel. Without this early exit the script dies on the manifest
+# check instead of returning the help banner).
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+}
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
+PLUGIN_SRC="$REPO_ROOT"
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC/.claude-plugin/plugin.json"
+fi
+
 # shellcheck source=lib/review_local_lib.sh
 . "$REPO_ROOT/lib/review_local_lib.sh"
 
@@ -448,6 +490,33 @@ if [ -n "$PROVIDER_FLAG" ]; then
 elif [ -n "${CI_REVIEW_PROVIDER:-}" ]; then
   PROVIDER="$CI_REVIEW_PROVIDER"
   PROVIDER_EXPLICIT=1
+elif [ -n "${MINIMAX_API_KEY:-}" ]; then
+  # Infer from the operator's shell env: a process-level
+  # MINIMAX_API_KEY export means the operator is already using
+  # the minimax provider (typically set by `bin/set-provider.sh
+  # minimax` in their interactive shell). Treat it as an explicit
+  # ask so the ANTHROPIC_BASE_URL / MODEL injection runs.
+  PROVIDER=minimax
+  PROVIDER_EXPLICIT=1
+elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  PROVIDER=deepseek
+  PROVIDER_EXPLICIT=1
+elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+  # Third-party providers (minimax, deepseek, etc.) configure via
+  # ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN rather than
+  # <PROVIDER>_API_KEY. Detect the provider from the host part of
+  # the base URL. The mapping matches the case arms in §3 below.
+  case "${ANTHROPIC_BASE_URL}" in
+    *minimax*)  PROVIDER=minimax  ;;
+    *deepseek*) PROVIDER=deepseek ;;
+    *) PROVIDER=anthropic ;;  # base URL with no third-party host
+  esac
+  PROVIDER_EXPLICIT=1
+elif [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "${ANTHROPIC_API_KEY#sk-ant-}" != "$ANTHROPIC_API_KEY" ]; then
+  # sk-ant- prefix = direct anthropic API key, not a third-party
+  # auth token. Operator has direct anthropic creds.
+  PROVIDER=anthropic
+  PROVIDER_EXPLICIT=1
 else
   PROVIDER="$(python3 -c "
 import sys
@@ -479,16 +548,28 @@ esac
 # (DEV_KIT_GITHUB_TOKEN, <PROVIDER>_API_KEY); we want the second one.
 read_provider_api_key() {
   python3 -c "
-import sys
+import sys, os
 from pathlib import Path
 sys.path.insert(0, 'lib')
 from ci_setup import read_env_key, required_secrets_for_provider
 provider = '${PROVIDER}'
 target = Path('${REPO_ROOT}')
-for name in required_secrets_for_provider(provider):
+# Operator shells often export ANTHROPIC_AUTH_TOKEN (the Anthropic-
+# SDK-shaped name) instead of the per-provider MINIMAX_API_KEY
+# (the .env-template shape). Accept either so the local viewer
+# works without re-running bin/set-provider.sh in the operator's
+# interactive shell. The ANTHROPIC_AUTH_TOKEN form is what
+# bin/set-provider.sh minimax exports for interactive Claude Code
+# sessions (mirrors the upstream Anthropic SDK env-var names).
+extra_fallbacks = {
+    'minimax':   ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'],
+    'deepseek':  ['ANTHROPIC_AUTH_TOKEN'],
+    'anthropic': [],
+}.get(provider, [])
+for name in list(required_secrets_for_provider(provider)) + extra_fallbacks:
     if name == 'DEV_KIT_GITHUB_TOKEN':
         continue
-    v = read_env_key(target / '.env', name)
+    v = read_env_key(target / '.env', name) or os.environ.get(name) or ''
     if v:
         print(v)
         sys.exit(0)
@@ -728,7 +809,13 @@ run_skill() {
     if printf '%s\n' "$out" | grep -qE '^\*\*Verdict:\*\*'; then
       log "warning: $skill: claude -p exited non-zero (rc=$_rc) but a Verdict line was captured -- using it anyway"
     else
-      die "$skill: claude -p exited non-zero (rc=$_) or hit timeout 600 -- review the output above"
+      # Echo the captured stdout/stderr BEFORE die() so the SSE
+      # viewer (bin/review-local-server.py) sees what `claude -p`
+      # actually said before the exit-status summary. Without this,
+      # every failure looks identical ("claude -p exited non-zero")
+      # and the operator has no signal to diagnose.
+      printf '%s\n' "$out"
+      die "$skill: claude -p exited non-zero (rc=$_rc) or hit timeout 600 -- review the output above"
     fi
   }
   LAST_SKILL_STDOUT="$out"
