@@ -442,11 +442,19 @@ def _latest_per_job_audits(comments: tuple[dict, ...]) -> dict[str, dict]:
         # `_run_head_sha()`. Use the audit_re match position (not
         # `body.find("-->")`) so a stray `<!-- -->` block earlier in
         # the comment body cannot shift the slice window.
+        #
+        # CRITICAL: limit extras parsing to the parseable line 1 only.
+        # `extra_re = (\w+)=(\S*)` matches any `key=value` substring, so
+        # without a line-1 scope a `head_sha=<value>` mention in later
+        # markdown (URLs, code blocks, table cells) would override the
+        # parseable-line value via dict() last-wins. The empty-but-present
+        # STALE branch is defensively load-bearing ONLY when line 1 is
+        # the sole source of truth.
         head_sha: str | None = None
-        payload = body[m.end():]
+        parseable_line = body[m.end():].split("\n", 1)[0]
         # dict() constructor dedupes a malformed duplicate-key body
         # (last value wins) — defensive against a future emitter bug.
-        extras = dict(extra_re.findall(payload))
+        extras = dict(extra_re.findall(parseable_line))
         if "head_sha" in extras:
             head_sha = extras["head_sha"]
         created_at = c.get("created_at") or ""

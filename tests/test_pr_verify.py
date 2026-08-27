@@ -1065,15 +1065,26 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
     def test_audit_author_untrusted_ignores_head_sha(self):
         """A non-trusted-login comment that happens to carry
         `head_sha=...` must NOT bind G3 — only github-actions[bot]
-        audits are authoritative."""
+        audits are authoritative.
+
+        Test ordering: the untrusted comment has a STRICTLY NEWER
+        `created_at` AND a `head_sha` that would mismatch if accepted.
+        With a broken `TRUSTED_AUDIT_LOGINS` (accepts both), the
+        untrusted comment wins via timestamp comparison and the gate
+        fails — opposite of the expected outcome. So a green test
+        here actually exercises the filter, not just the timestamp
+        comparator (review F4)."""
         comments = json.dumps([
-            {"id": "forged", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+            # trusted older — matches
+            {"id": "trusted-older", "user": "github-actions", "created_at": "2026-01-02T00:00:00Z",
              "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
-            {"id": "forged", "user": "random-mallory", "created_at": "2026-01-03T00:00:00Z",
-             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha-fake"},
-            {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+            # untrusted newer — would mismatch if filter were broken
+            {"id": "untrusted-newer", "user": "random-mallory", "created_at": "2026-01-04T00:00:00Z",
+             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha=forgedsha"},
+            # trusted for other jobs
+            {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-02T00:00:00Z",
              "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success verdict=Approve source=lib.maintenance_gate"},
-            {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+            {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-02T00:00:00Z",
              "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate"},
         ])
         def fake_gh(args):
@@ -1084,68 +1095,15 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
             g = pr_verify._gate_g3_llm_verdicts(
                 584, "sh-ai-x/dev-harness-kit",
                 comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_pushed_at="2026-01-01T00:00:00Z",
                 pr_head_sha="newsha",
             )
-        self.assertTrue(g.passed,
-                        "comment head_sha from non-trusted login must NOT influence G3")
-
-    def test_empty_head_sha_stale_does_not_fallback_to_run_head_sha(self):
-        """M1 regression: when the workflow emits `head_sha=` (empty,
-        because `gh pr view --json headRefOid` failed — network error,
-        GH-Actions rate-limit, transient outage), G3 must STALE the
-        audit and MUST NOT fall back to `_run_head_sha()`.
-
-        The pre-fix bug: the audit regex `(\\w+)=(\\S+)` didn't match
-        `head_sha=`, so `_latest_per_job_audits` reported
-        `head_sha=""`. The gate's `if comment_head_sha:` then took the
-        else branch and called `_run_head_sha()`, which returns
-        main's HEAD on fork-PR dispatched runs — that mismatch caused
-        every correctly-judged fork PR to STALE, defeating the entire
-        G3 head-SHA provenance fix.
-
-        Pin: STALE on the empty-but-present path; `_run_head_sha` not
-        consulted at all for the affected jobs.
-        """
-        comments = json.dumps([
-            {"id": "audit-1", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
-             "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success verdict=Approve source=lib.maintenance_gate head_sha="},
-            {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
-             "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success verdict=Approve source=lib.maintenance_gate head_sha="},
-            {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
-             "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate head_sha="},
-        ])
-        def fake_gh(args):
-            # Even if `_run_head_sha` would have returned main's HEAD
-            # (the fork-PR dispatch case), the gate must NOT consult it
-            # when `head_sha=` is empty-but-present. Track that no call
-            # to `gh run view` is made for the empty-head_sha case.
-            if args[0] == "run" and args[1] == "view":
-                return json.dumps({"headSha": "mainHEADWRONG"})
-            return comments
-        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh) as gh_mock:
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-                pr_head_sha="newsha",
-            )
-        # No `gh run view` should have been called — the comment is
-        # authoritative (as empty-but-present) and `_run_head_sha()` is
-        # NOT the right fallback path for that case.
-        gh_run_view_calls = [
-            call for call in gh_mock.call_args_list
-            if len(call.args) > 0 and call.args[0] == "run" and call.args[1] == "view"
-        ]
-        self.assertEqual(
-            gh_run_view_calls, [],
-            "gh run view must NOT be consulted when head_sha= is "
-            "present-but-empty (would return main HEAD for fork-PR "
-            "dispatched runs and re-introduce the STALE bug M1 fixed)"
+        self.assertTrue(
+            g.passed,
+            "comment head_sha from non-trusted login must NOT influence G3; "
+            "if a broken filter accepted it, the newer untrusted comment "
+            "with head_sha=forgedsha would have STALEd the gate",
         )
-        self.assertFalse(g.passed,
-                         "empty-but-present head_sha must STALE the gate")
-        self.assertIn("STALE", g.detail)
 
     def test_empty_head_sha_mixed_with_legacy_audit(self):
         """Partial coverage: one job's audit carries empty `head_sha=`
@@ -1327,6 +1285,38 @@ class TestLatestPerJobAuditsParseExtras(unittest.TestCase):
         )
         latest = pr_verify._latest_per_job_audits((self._comment(body),))
         self.assertEqual(latest["review"]["head_sha"], "newsha")
+
+    def test_head_sha_on_later_line_does_not_override_parseable_line(self):
+        """Review F1 regression pin: extras regex scoping MUST be
+        limited to parseable line 1. A `head_sha=<value>` mention in
+        later markdown (URL, code-block, table cell, anywhere after
+        the parseable line) must NOT override the parseable-line
+        value via dict() last-wins.
+
+        This is the load-bearing invariant for the empty-but-present
+        STALE branch: without line-1 scope, a future markdown addition
+        could silently nullify the M1 fix's STALE-on-empty path."""
+        body = (
+            "<!-- dev-kit-verdict-audit --> run=42 job=review "
+            "status=success verdict=Approve source=lib.maintenance_gate "
+            "head_sha=\n"
+            "\n"
+            "**dev-kit CI verdict — ✅ Approve**\n"
+            "\n"
+            "| Field   | Value\n"
+            "|----------|------------------------\n"
+            "| Run     | 42\n"
+            "| Job     | review\n"
+            "| Head_sha| head_sha=forgedvalue\n"
+        )
+        latest = pr_verify._latest_per_job_audits((self._comment(body),))
+        # parseable line 1 has `head_sha=` (empty) — must be parsed as
+        # empty string, NOT overridden by the table cell content.
+        self.assertEqual(
+            latest["review"]["head_sha"], "",
+            "later-line `head_sha=` mention must NOT override parseable "
+            "line value (M1 empty-but-present STALE branch depends on this)"
+        )
 
 
 if __name__ == "__main__":

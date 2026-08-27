@@ -88,6 +88,20 @@ jobs:
         with:
           fetch-depth: 1
 
+      # TOCTOU hardening: capture PR_HEAD_SHA at JOB START, before
+      # any LLM judge step. See the matching block in `review.yml`'s
+      # `review:` / `security:` jobs for rationale. Empty value is
+      # intentional and G3 STALEs the empty-but-present case rather
+      # than falling back to `_run_head_sha()`.
+      - name: Capture PR head SHA at run-start (TOCTOU hardening)
+        id: pr_meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
+          head_sha="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""')"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+
       - name: Install dev-kit plugin from local checkout
         run: |
           mkdir -p ~/.claude/plugins/marketplaces
@@ -256,21 +270,21 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "maintenance_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
-          # Record which PR head this audit pertains to — see the
-          # matching comment in `review.yml`'s `extract_verdict`
-          # step. Fork-PR dispatch in `fork-pr-review.yml` runs
-          # against `--ref main`, so `gh run view` returns main's
-          # HEAD instead of the PR head; the `head_sha=` extras
-          # field is what G3 binds the provenance check to.
-          PR_HEAD_SHA="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""')"
-          audit_body="$(python3 -m lib.maintenance_gate --format-audit \
-            --run "${{ github.run_id }}" \
-            --job maintenance \
-            --status "${{ job.status }}" \
-            --verdict "${verdict:-MISSING}" \
-            --source lib.maintenance_gate \
-            --extra "head_sha=${PR_HEAD_SHA}")"
-          gh pr comment "$PR_NUMBER" --body "$audit_body"
+          # PR_HEAD_SHA is captured at job-start by the `pr_meta`
+          # step above (NOT fetched here) to close the TOCTOU. Audit
+          # posting flows through the composite action so all three
+          # judge jobs share one shell.
+      - name: Post verdict audit comment
+        if: always()
+        uses: ./.github/actions/post-verdict-audit
+        with:
+          pr_number: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          run_id: ${{ github.run_id }}
+          job: maintenance
+          status: ${{ job.status }}
+          verdict: ${{ steps.extract_verdict.outputs.verdict }}
+          head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   gate:
     name: maintenance gate (verdict + docs-updated)
