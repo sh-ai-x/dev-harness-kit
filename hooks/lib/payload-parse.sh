@@ -101,8 +101,15 @@ emit_guard_event() {
     subject="$(printf '%s' "${INPUT_JSON:-}" | jq -r '.tool_name // .tool_input.file_path // "unknown"' 2>/dev/null || printf 'unknown')"
     run_id="${DEV_KIT_RUN_ID:-hook-$(date -u +%Y%m%d)}"
     workflow_id="${DEV_KIT_WORKFLOW_ID:-hook:${hook_prefix}}"
-    evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" \
-        '{policy_id:$policy, reason:$why, ground_truth:(env.DEV_KIT_GROUND_TRUTH // null)}' 2>/dev/null || printf '{}')"
+    # Policy-driven default ground_truth (issue #663). Blocked guards are
+    # presumed unsafe (the policy triggered), allowed guards presumed
+    # legitimate (the policy did not trigger). Operators can override via
+    DEV_KIT_GROUND_TRUTH for golden / adversarial runs.
+    local default_gt="legitimate"
+    [ "$outcome" = "blocked" ] && default_gt="unsafe"
+    local explicit_gt="${DEV_KIT_GROUND_TRUTH:-$default_gt}"
+    evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" --arg gt "$explicit_gt" \
+        '{policy_id:$policy, reason:$why, ground_truth:$gt}' 2>/dev/null || printf '{}')"
     local event_type="guard.blocked"
     [ "$outcome" = "allowed" ] && event_type="guard.allowed"
     [ "$outcome" = "ask" ] && event_type="guard.ask"

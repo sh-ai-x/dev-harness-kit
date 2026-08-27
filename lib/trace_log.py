@@ -19,6 +19,7 @@ additive; never repurpose existing field names.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -32,6 +33,20 @@ EVENT_REQUIRED_FIELDS = (
     "subject_id", "parent_id", "ts", "outcome", "source", "evidence_ref",
 )
 EVENT_RECORD_REQUIRED_FIELDS = EVENT_REQUIRED_FIELDS + ("schema_version",)
+
+
+def _default_identity() -> Dict[str, str]:
+    """Auto-stamp producer identity for stability submetric (issue #663 SSOT).
+
+    Reads from env so the env-based default wins; if env is unset, falls
+    back to a best-effort platform-derived value. Empty string for fields
+    that have no signal — the reducer treats empty/missing as 'no identity
+    recorded' so the user can opt-in by setting DEV_KIT_* env vars.
+    """
+    agent = os.environ.get("DEV_KIT_AGENT", "claude-code")
+    provider = os.environ.get("DEV_KIT_PROVIDER", "")
+    model = os.environ.get("DEV_KIT_MODEL", "")
+    return {"agent": agent, "provider": provider, "model": model}
 
 
 @dataclass(frozen=True)
@@ -209,12 +224,36 @@ def append_event(root: Path, event: Mapping[str, Any]) -> Path:
     """Append one validated workflow event without changing workflow outcome."""
     import fcntl
 
-    record = validate_event(event)
+    # Auto-stamp producer identity for the stability submetric (issue #663).
+    # Only fill fields the caller did not provide — explicit values win so
+    # tests / producers can override per-event. Empty string is the
+    # documented "no identity recorded" signal.
+    stamped = dict(event)
+    for key, value in _default_identity().items():
+        stamped.setdefault(key, value)
+    record = validate_event(stamped)
     path = _event_path(Path(root))
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
+    # Open in "a+" so we can seek+read for the dedupe guard. Pure "a"
+    # would refuse readlines() with UnsupportedOperation.
+    with path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
+            # Dedupe-on-write guard: if a producer hands us the same
+            # event_id twice, regenerate once before persisting. Scan only
+            # the last 64 lines so the hot path stays O(1) on steady-state
+            # logs (avoids reading a long-lived trajectory on every append).
+            try:
+                handle.seek(0)
+                recent = handle.readlines()[-64:]
+            except OSError:
+                recent = []
+            recent_ids = {
+                (json.loads(line).get("event_id") if line.strip() else None)
+                for line in recent
+            }
+            if record["event_id"] in recent_ids:
+                record["event_id"] = new_event_id()
             handle.write(json.dumps(record, sort_keys=True) + "\n")
             handle.flush()
         finally:

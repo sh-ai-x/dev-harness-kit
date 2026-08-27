@@ -649,12 +649,31 @@ def _step_post_collect(
             {"reason": blocked_reason, "output": f"phases/{phase}/step{step_num}-output.json"},
             ctx.get("started_event_id"),
         )
+        # Verify chain: a blocked step is a verification failure (issue
+        # #663 evidence shape). parent_id points at step.started so the
+        # reducer can pair the blocked run with its preceding intent.
+        _emit_effectiveness_event(
+            root, phase, step_num, "verify.failed", "blocked",
+            {"required_checks_passed": False, "retry_count": 0,
+             "independent": False, "reason": blocked_reason, "via": "executor"},
+            ctx.get("started_event_id"),
+        )
         return 2
     if exit_code != 0:
         update_step_status(root, phase, step_num, status="error", error_message=f"claude exited {exit_code}")
         _emit_effectiveness_event(
             root, phase, step_num, "step.failed", "error",
             {"exit_code": exit_code, "output": f"phases/{phase}/step{step_num}-output.json"},
+            ctx.get("started_event_id"),
+        )
+        # Verify chain: a non-zero exit is a verification failure. parent
+        # ties back to step.started so the reducer joins lifecycle +
+        # verify into one causal chain.
+        _emit_effectiveness_event(
+            root, phase, step_num, "verify.failed", "failed",
+            {"required_checks_passed": False, "retry_count": 0,
+             "independent": False, "reason": "exit_code",
+             "exit_code": exit_code, "via": "executor"},
             ctx.get("started_event_id"),
         )
         return exit_code
@@ -672,6 +691,17 @@ def _step_post_collect(
                 "output_committed": output_committed,
                 "output": f"phases/{phase}/step{step_num}-output.json",
             },
+            ctx.get("started_event_id"),
+        )
+        # Verify chain on the success path: pass-with-required-checks
+        # emitted right after the write so the reducer pairs it with
+        # write.observed via ts ordering (parent_id also points at
+        # the write for explicit causation; _first_pass picks verifies
+        # with ts >= write.ts either way).
+        _emit_effectiveness_event(
+            root, phase, step_num, "verify.passed", "passed",
+            {"required_checks_passed": True, "retry_count": 0,
+             "independent": True, "via": "executor"},
             ctx.get("started_event_id"),
         )
 

@@ -141,3 +141,116 @@ def test_load_handles_unknown_step_fields(tmp_path: Path) -> None:
     loaded = TraceLog.load(future)
     assert loaded.steps[0].extra == {"future_field": "kept-as-extra"}
     assert loaded.steps[0].skill == "plan"
+
+
+# ---------------------------------------------------------------------------
+# issue #663 — identity auto-stamp + dedupe-on-write guard
+# ---------------------------------------------------------------------------
+
+def test_default_identity_shape_is_dict_of_str() -> None:
+    """_default_identity() returns the three string fields the stability
+    submetric reads. provider/model default to empty so callers can opt in
+    via DEV_KIT_PROVIDER / DEV_KIT_MODEL without changing the schema."""
+    from lib.trace_log import _default_identity
+
+    identity = _default_identity()
+    assert isinstance(identity, dict)
+    assert set(identity.keys()) == {"agent", "provider", "model"}
+    for key, value in identity.items():
+        assert isinstance(value, str), f"{key} must be a string, got {type(value)!r}"
+    assert identity["agent"], "agent must be non-empty (defaults to claude-code)"
+
+
+def test_default_identity_respects_env_overrides(monkeypatch) -> None:
+    """Setting DEV_KIT_AGENT / DEV_KIT_PROVIDER / DEV_KIT_MODEL overrides the
+    defaults so the reducer can attribute events to a specific producer."""
+    from lib.trace_log import _default_identity
+
+    monkeypatch.setenv("DEV_KIT_AGENT", "codex")
+    monkeypatch.setenv("DEV_KIT_PROVIDER", "openai")
+    monkeypatch.setenv("DEV_KIT_MODEL", "gpt-5")
+    identity = _default_identity()
+    assert identity == {"agent": "codex", "provider": "openai", "model": "gpt-5"}
+
+
+def test_append_event_auto_stamps_identity(tmp_path: Path) -> None:
+    """append_event fills missing agent/provider/model from env defaults."""
+    from lib.trace_log import append_event, read_events
+
+    event = {
+        "event_id": "evt-1",
+        "run_id": "run-1",
+        "workflow_id": "wf-1",
+        "stage": "build",
+        "event_type": "step.started",
+        "subject_id": "subj",
+        "parent_id": None,
+        "ts": now_utc(),
+        "outcome": "started",
+        "source": "test",
+        "evidence_ref": {},
+    }
+    append_event(tmp_path, event)
+    [stored] = read_events(tmp_path)
+    assert stored["agent"] == "claude-code"
+    assert stored["provider"] == ""
+    assert stored["model"] == ""
+
+
+def test_append_event_preserves_explicit_identity(tmp_path: Path) -> None:
+    """Caller-supplied agent/provider/model must win over the env default."""
+    from lib.trace_log import append_event, read_events
+
+    event = {
+        "event_id": "evt-1",
+        "run_id": "run-1",
+        "workflow_id": "wf-1",
+        "stage": "build",
+        "event_type": "step.started",
+        "subject_id": "subj",
+        "parent_id": None,
+        "ts": now_utc(),
+        "outcome": "started",
+        "source": "test",
+        "evidence_ref": {},
+        "agent": "codex",
+        "provider": "openai",
+        "model": "gpt-5",
+    }
+    append_event(tmp_path, event)
+    [stored] = read_events(tmp_path)
+    assert stored["agent"] == "codex"
+    assert stored["provider"] == "openai"
+    assert stored["model"] == "gpt-5"
+
+
+def test_append_event_dedupe_on_write_collision(tmp_path: Path) -> None:
+    """Two consecutive append_event() calls with the same hardcoded event_id
+    must produce two distinct stored event_ids — the dedupe-on-write guard
+    in append_event regenerates the second one. The hot path stays O(1) on
+    a healthy file (only the last 64 lines are scanned)."""
+    from lib.trace_log import append_event, read_events
+
+    base = {
+        "run_id": "run-1",
+        "workflow_id": "wf-1",
+        "stage": "build",
+        "event_type": "step.started",
+        "subject_id": "subj",
+        "parent_id": None,
+        "ts": now_utc(),
+        "outcome": "started",
+        "source": "test",
+        "evidence_ref": {},
+    }
+    event_a = dict(base, event_id="collision-uuid")
+    event_b = dict(base, event_id="collision-uuid")
+    append_event(tmp_path, event_a)
+    append_event(tmp_path, event_b)
+
+    stored = read_events(tmp_path)
+    assert len(stored) == 2
+    assert stored[0]["event_id"] == "collision-uuid"
+    # Second must differ — the dedupe guard regenerated it.
+    assert stored[1]["event_id"] != "collision-uuid"
+    assert stored[0]["event_id"] != stored[1]["event_id"]

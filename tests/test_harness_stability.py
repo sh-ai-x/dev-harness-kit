@@ -105,17 +105,24 @@ def test_trace_event_accepts_agent_provider_model_fields(tmp_path: Path) -> None
     assert events[0]["model"] == "opus-4.1"
 
 
-def test_trace_event_without_identity_fields_still_validates(tmp_path: Path) -> None:
-    """Identity fields are optional; the existing event contract is
-    unchanged for events that do not carry them.
+def test_trace_event_without_identity_fields_still_validates(tmp_path: Path, monkeypatch) -> None:
+    """Identity fields are auto-stamped by append_event when the
+    caller does not provide them. Producers opt out of the default
+    by setting DEV_KIT_AGENT="" / DEV_KIT_PROVIDER="" /
+    DEV_KIT_MODEL="" — the reducer treats empty strings as "no
+    identity recorded" so the stability submetric stays reachable.
     """
+    monkeypatch.setenv("DEV_KIT_AGENT", "")
+    monkeypatch.setenv("DEV_KIT_PROVIDER", "")
+    monkeypatch.setenv("DEV_KIT_MODEL", "")
     _event(tmp_path, event_id="s1", event_type="step.started", subject="e1",
            outcome="started", ts="2026-08-12T00:00:00Z")
     events = read_events(tmp_path)
     assert len(events) == 1
-    assert "agent" not in events[0]
-    assert "provider" not in events[0]
-    assert "model" not in events[0]
+    # Identity keys are present (auto-stamped) but empty.
+    assert events[0].get("agent") == ""
+    assert events[0].get("provider") == ""
+    assert events[0].get("model") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -264,10 +271,19 @@ def test_event_order_invariance_under_replay(tmp_path: Path) -> None:
 # Missing evidence is INSUFFICIENT_EVIDENCE, never zero
 # ---------------------------------------------------------------------------
 
-def test_missing_identity_evidence_emits_insufficient_evidence(tmp_path: Path) -> None:
+def test_missing_identity_evidence_emits_insufficient_evidence(tmp_path: Path, monkeypatch) -> None:
     """When no events carry agent/provider/model identity, the stability
     submetric's status is INSUFFICIENT_EVIDENCE and its score is the
-    INSUFFICIENT_EVIDENCE sentinel (not 0.0)."""
+    INSUFFICIENT_EVIDENCE sentinel (not 0.0).
+
+    With append_event now auto-stamping agent=claude-code, the
+    missing-identity path is only reachable when the producer opts
+    out via DEV_KIT_AGENT="" (env-empty values round-trip through
+    bool() as False, so the reducer's has_identity stays False).
+    """
+    monkeypatch.setenv("DEV_KIT_AGENT", "")
+    monkeypatch.setenv("DEV_KIT_PROVIDER", "")
+    monkeypatch.setenv("DEV_KIT_MODEL", "")
     _full_event_corpus(tmp_path)
     stability = (
         build_report(tmp_path)["components"]["measurement_integrity"]["submetrics"]["stability"]
