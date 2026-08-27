@@ -181,36 +181,46 @@ manifest_guard_log() {
   log "$(date -u +%Y-%m-%dT%H:%M:%SZ) manifest-guard: $*"
 }
 
+# Security finding F5 (PR #741): the raw absolute path leaks the
+# operator's OS username (e.g. /Users/alice/...) into the dry-run argv
+# log and any die() message -- both land in
+# .review-local-current/<PR>.log, an operator-scoped but on-disk file.
+# Redact the $HOME prefix for every operator-facing rendering of a
+# path; the caller keeps the unredacted value for actual filesystem
+# calls (open(), -f test, cd) that need the real path.
+#
+# Review finding C2 (PR #741): when $HOME is empty or unset, the
+# naive `${p/#$HOME/~}` pattern trivially matches the zero-width
+# prefix at position 0, prepending "~" onto the FULL unredacted path
+# ("~/Users/alice/...") instead of redacting it -- the exact leak F5
+# exists to close, defeated by an edge case. `${HOME:-}` is the
+# set-u-safe form; the explicit prefix-match test ensures we only
+# rewrite when the path genuinely starts under a non-empty $HOME,
+# falling back to the raw path (unredacted but not mangled) otherwise.
+_redact_home() {
+  local p="$1"
+  if [ -n "${HOME:-}" ] && [ "${p#"${HOME}"/}" != "$p" ]; then
+    printf '~/%s' "${p#"${HOME}"/}"
+  else
+    printf '%s' "$p"
+  fi
+}
+
 PLUGIN_SRC_REAL="$(cd "$PLUGIN_SRC" && pwd -P)"
 SCRIPT_REPO_REAL="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 if [ "$PLUGIN_SRC_REAL" != "$SCRIPT_REPO_REAL" ]; then
-  manifest_guard_log "REPO_ROOT spoofing: git-toplevel $PLUGIN_SRC_REAL != script-anchored $SCRIPT_REPO_REAL (likely submodule / .git gitlink)"
-  die "refusing to load dev-kit plugin from $PLUGIN_SRC_REAL -- git toplevel disagrees with the script's own checkout ($SCRIPT_REPO_REAL). Run from the repo root, not a submodule/worktree-link directory."
+  # Security finding A09 (PR #749 self-review): this die() lands in
+  # .review-local-current/<PR>.log same as every manifest-guard
+  # message below -- it must use the redacted form too, not the raw
+  # $HOME-bearing path.
+  PLUGIN_SRC_REAL_DISPLAY="$(_redact_home "$PLUGIN_SRC_REAL")"
+  SCRIPT_REPO_DISPLAY="$(_redact_home "$SCRIPT_REPO_REAL")"
+  manifest_guard_log "REPO_ROOT spoofing: git-toplevel $PLUGIN_SRC_REAL_DISPLAY != script-anchored $SCRIPT_REPO_DISPLAY (likely submodule / .git gitlink)"
+  die "refusing to load dev-kit plugin from $PLUGIN_SRC_REAL_DISPLAY -- git toplevel disagrees with the script's own checkout ($SCRIPT_REPO_DISPLAY). Run from the repo root, not a submodule/worktree-link directory."
 fi
 PLUGIN_SRC="$PLUGIN_SRC_REAL"
 
-# Security finding F5 (PR #741): the raw absolute $PLUGIN_SRC leaks the
-# operator's OS username (e.g. /Users/alice/...) into the dry-run argv
-# log and any die() message below -- both land in
-# .review-local-current/<PR>.log, an operator-scoped but on-disk file.
-# Redact the $HOME prefix for every operator-facing rendering of the
-# path; PLUGIN_SRC itself stays unredacted for the actual filesystem
-# calls (open(), -f test) that need the real path.
-#
-# Review finding C2 (PR #741): when $HOME is empty or unset, the
-# naive `${PLUGIN_SRC/#$HOME/~}` pattern trivially matches the
-# zero-width prefix at position 0, prepending "~" onto the FULL
-# unredacted path ("~/Users/alice/...") instead of redacting it --
-# the exact leak F5 exists to close, defeated by an edge case.
-# `${HOME:-}` is the set-u-safe form; the explicit prefix-match test
-# ensures we only rewrite when PLUGIN_SRC genuinely starts under a
-# non-empty $HOME, falling back to the raw path (unredacted but not
-# mangled) otherwise.
-if [ -n "${HOME:-}" ] && [ "${PLUGIN_SRC#"${HOME}"/}" != "$PLUGIN_SRC" ]; then
-  PLUGIN_SRC_DISPLAY="~/${PLUGIN_SRC#"${HOME}"/}"
-else
-  PLUGIN_SRC_DISPLAY="$PLUGIN_SRC"
-fi
+PLUGIN_SRC_DISPLAY="$(_redact_home "$PLUGIN_SRC")"
 
 if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
   manifest_guard_log "missing manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json"
@@ -326,14 +336,30 @@ except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
     # no path) for OSError; str(e) is safe for the other two types.
     detail = (e.strerror or "I/O error") if isinstance(e, OSError) else str(e)
     print("ERR:" + type(e).__name__ + ": " + detail)
-' "$PLUGIN_SRC/.claude-plugin/plugin.json" 2>&1)" || PLUGIN_MANIFEST_PARSE="ERR:Timeout: python3 manifest parser exceeded 20s (hung filesystem I/O or OOM)"
+' "$PLUGIN_SRC/.claude-plugin/plugin.json" 2>&1)" && _manifest_parse_rc=0 || _manifest_parse_rc=$?
 # Security finding A10 (PR #741): an infinite/recursive symlink or a
 # hung NFS mount would block the python3 heredoc indefinitely (no
 # upper bound); wrapping with `timeout 20` ensures a stuck parse
 # surfaces as an explicit ERR:Timeout branch instead of hanging the
 # gate forever (timeout exit code 124 is mapped to an ERR string
-# above so the case statement below can treat it uniformly with other
-# parse failures).
+# below so the case statement further down can treat it uniformly
+# with other parse failures).
+#
+# Security finding A10 (PR #749 self-review): the previous `||`
+# clause fired on ANY non-zero exit, not just the 124 that
+# `run_with_timeout` returns on an actual SIGALRM timeout --
+# MemoryError, RecursionError, or an uncaught exception outside the
+# (OSError, UnicodeDecodeError, json.JSONDecodeError) catch tuple all
+# overwrote the real captured traceback with a misleading "hung
+# filesystem I/O or OOM" message. Only synthesize the timeout ERR
+# string when the exit code is actually 124; otherwise surface the
+# real captured stdout/stderr (or a generic exit-code marker if
+# nothing was captured).
+if [ "$_manifest_parse_rc" -eq 124 ]; then
+  PLUGIN_MANIFEST_PARSE="ERR:Timeout: python3 manifest parser exceeded 20s (hung filesystem I/O or OOM)"
+elif [ "$_manifest_parse_rc" -ne 0 ]; then
+  PLUGIN_MANIFEST_PARSE="ERR:ExitCode ${_manifest_parse_rc}: ${PLUGIN_MANIFEST_PARSE:-python3 manifest parser exited with no captured output}"
+fi
 
 case "$PLUGIN_MANIFEST_PARSE" in
   OK:dev-kit)
@@ -625,6 +651,23 @@ fi
 #    fallback decided in §2.
 # ---------------------------------------------------------------------------
 claude_env_args=()
+
+# Review finding (PR #749 self-review): `--bare` skips more than the
+# session-lifecycle hook chain -- per `claude --help` it also skips
+# keychain reads and CLAUDE.md auto-discovery. Keychain reads are
+# exactly what USE_LOCAL_AUTH=1 depends on (it deliberately leaves
+# claude_env_args empty so `claude` falls back to the operator's own
+# OAuth/keychain session, per §2/§3 above); passing `--bare` on that
+# path would silently break the documented local-auth fallback. Only
+# use `--bare` on the provider-key path (USE_LOCAL_AUTH=0), which
+# mirrors the GH-Actions sibling `bin/ci-claude-p.sh` always having an
+# explicit key injected and never relying on keychain/CLAUDE.md state.
+if [ "$USE_LOCAL_AUTH" = "1" ]; then
+  CLAUDE_BARE_FLAG=()
+else
+  CLAUDE_BARE_FLAG=(--bare)
+fi
+
 # Disable the `claude -p` internal 600s wait-ceiling on background
 # subagents. The default ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=600000`)
 # causes the /dev-kit:review skill's 3-agent fan-out to be killed mid-way
@@ -753,7 +796,7 @@ run_skill() {
     # disk; the privacy guarantee (F5/C2) still applies to every
     # OPERATOR-facing rendering (die messages, audit body). Operators
     # who need to share this dry-run log should redact it first.
-    log "would run: env <$PROVIDER env+key> claude --bare --plugin-dir \"$PLUGIN_SRC\" -p \"$prompt\""
+    log "would run: env <$PROVIDER env+key> claude ${CLAUDE_BARE_FLAG[*]+"${CLAUDE_BARE_FLAG[*]} "}--plugin-dir \"$PLUGIN_SRC\" -p \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -796,15 +839,20 @@ run_skill() {
   # reaches the archive. This preserves the audit trail of genuine
   # approvals even when SessionEnd hooks (a session-lifecycle concern,
   # not a verdict correctness concern) cause a non-zero exit.
-  # `--bare` skips the dev-kit plugin's SessionStart / UserPromptSubmit
-  # hooks (which hang the `claude -p` CLI today — the regenerate_active_hooks
-  # + linear-session-start + session-start-check chain all spawn
-  # claude -p subprocesses of their own that compete for the CLI's
-  # session-start handshake, leaving the parent `claude -p` blocked
-  # indefinitely). The `--plugin-dir` still loads the dev-kit
-  # SKILL/COMMAND/MANIFEST registry so `/dev-kit:review` etc. resolve;
-  # `--bare` only skips the session-lifecycle hook layer.
-  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude --bare --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" || {
+  # `--bare` (only passed on the USE_LOCAL_AUTH=0 provider-key path --
+  # see the CLAUDE_BARE_FLAG decision in §3 above) skips the dev-kit
+  # plugin's SessionStart / UserPromptSubmit hooks (which hang the
+  # `claude -p` CLI today — the regenerate_active_hooks + linear-
+  # session-start + session-start-check chain all spawn claude -p
+  # subprocesses of their own that compete for the CLI's session-start
+  # handshake, leaving the parent `claude -p` blocked indefinitely).
+  # Per `claude --help`, `--bare` ALSO skips keychain reads and
+  # CLAUDE.md auto-discovery -- it is not limited to the session-
+  # lifecycle hook layer, which is why USE_LOCAL_AUTH=1 (the keychain-
+  # backed fallback) must not receive this flag. The `--plugin-dir`
+  # still loads the dev-kit SKILL/COMMAND/MANIFEST registry either way
+  # so `/dev-kit:review` etc. resolve.
+  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude ${CLAUDE_BARE_FLAG[@]+"${CLAUDE_BARE_FLAG[@]}"} --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" || {
     _rc=$?
     if printf '%s\n' "$out" | grep -qE '^\*\*Verdict:\*\*'; then
       log "warning: $skill: claude -p exited non-zero (rc=$_rc) but a Verdict line was captured -- using it anyway"

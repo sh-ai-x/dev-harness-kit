@@ -10,6 +10,7 @@ when_to_use:
 allowed-tools: Read Grep Glob Bash
 model: opus
 disable-model-invocation: false
+user-invocable: true
 ---
 > [← Skills index](../../README.md)
 

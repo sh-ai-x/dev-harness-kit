@@ -146,16 +146,18 @@ class TestReviewLocalShell(unittest.TestCase):
         alive but every line was `Unknown command: /dev-kit:*`.
         """
         src = SCRIPT.read_text(encoding="utf-8")
-        # PR #749 hardened the invocation with `--bare` (skips the
-        # dev-kit plugin's SessionStart/UserPromptSubmit hook chain,
-        # which otherwise hangs the spawned `claude -p` CLI) and a
-        # `run_with_timeout 600` wrapper; `--plugin-dir` is still the
-        # load-bearing flag this regression guards, so match the
-        # current argv shape rather than the pre-hardening literal.
+        # PR #749 hardened the invocation with a `run_with_timeout 600`
+        # wrapper and a conditional `--bare` (only passed on the
+        # USE_LOCAL_AUTH=0 provider-key path -- see CLAUDE_BARE_FLAG;
+        # `--bare` also skips keychain reads, which would break the
+        # USE_LOCAL_AUTH=1 keychain fallback, so it's gated rather than
+        # unconditional). `--plugin-dir` is still the load-bearing flag
+        # this regression guards, so match the current argv shape
+        # rather than the pre-hardening literal.
         self.assertIn(
-            'claude --bare --plugin-dir "$PLUGIN_SRC" -p "$prompt"',
+            'claude ${CLAUDE_BARE_FLAG[@]+"${CLAUDE_BARE_FLAG[@]}"} --plugin-dir "$PLUGIN_SRC" -p "$prompt"',
             src,
-            'review-local.sh must call `claude --bare --plugin-dir "$PLUGIN_SRC" -p "$prompt"`',
+            'review-local.sh must call `claude ... --plugin-dir "$PLUGIN_SRC" -p "$prompt"`',
         )
         self.assertNotIn(
             'claude -p "$prompt" 2>&1',
