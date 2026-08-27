@@ -133,6 +133,77 @@ class TestReviewLocalShell(unittest.TestCase):
         self.assertNotIn("gh ", r.stderr)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_plugin_dir_passed_to_spawned_claude(self) -> None:
+        """Regression: bin/review-local.sh must pass --plugin-dir to
+        every spawned `claude -p` so /dev-kit:* slash commands resolve.
+        Without it, every judge exits in <1s with "Unknown command"
+        and the wrapper silently defaults verdicts to Approve.
+
+        This was originally issue #727 (closed PR #728), then
+        re-surfaced as the "HTML viewer shows nothing useful" bug
+        during PR #731's 2026-08-23 babysit -- the SSE pipe was
+        alive but every line was `Unknown command: /dev-kit:*`.
+        """
+        src = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'claude -p --plugin-dir "$PLUGIN_SRC" "$prompt"',
+            src,
+            "review-local.sh must call `claude -p --plugin-dir \"$PLUGIN_SRC\" \"$prompt\"`",
+        )
+        self.assertNotIn(
+            'claude -p "$prompt" 2>&1',
+            src,
+            "review-local.sh still contains a bare `claude -p \"$prompt\" 2>&1` site",
+        )
+        self.assertIn('PLUGIN_SRC="$REPO_ROOT"', src)
+        self.assertIn(".claude-plugin/plugin.json", src)
+
+    def test_provider_inferred_from_process_env(self) -> None:
+        """Regression: when the operator's interactive shell has
+        `MINIMAX_API_KEY` exported (typical of `bin/set-provider.sh
+        minimax` running in their login shell) but NO
+        `CI_REVIEW_PROVIDER` flag/env/.env, bin/review-local.sh
+        should still infer `minimax` and inject the
+        ANTHROPIC_BASE_URL / MODEL block. Otherwise the script
+        silently falls back to "local claude CLI auth" and the
+        spawned `claude -p` either fails (no auth) or uses a
+        different endpoint than the operator's interactive Claude
+        Code session.
+
+        Source-text contract: the MINIMAX_API_KEY check must come
+        BEFORE the .env-readback fallback in the provider resolution
+        block. Without the inference, the HTML viewer shows the
+        "falling back to local claude CLI auth" line and emits
+        "Unknown command: /dev-kit:*" (because the spawned
+        `claude -p` has no `--plugin-dir` style context loaded).
+        """
+        src = SCRIPT.read_text(encoding="utf-8")
+        # The MINIMAX_API_KEY inference must be present and ordered
+        # before the lib.ci_setup.read_provider() fallback.
+        self.assertIn(
+            'elif [ -n "${MINIMAX_API_KEY:-}" ]; then',
+            src,
+            "review-local.sh must check MINIMAX_API_KEY env to infer minimax provider",
+        )
+        # Same for anthropic + deepseek.
+        self.assertIn(
+            'elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then',
+            src,
+            "review-local.sh must check DEEPSEEK_API_KEY env to infer deepseek provider",
+        )
+        # The check ordering must put process env BEFORE the
+        # lib/ci_setup.read_provider() python fallback.
+        minimax_pos = src.find('elif [ -n "${MINIMAX_API_KEY:-}" ]')
+        fallback_pos = src.find("from ci_setup import read_provider")
+        self.assertGreater(
+            minimax_pos, 0,
+            "MINIMAX_API_KEY inference block missing",
+        )
+        self.assertGreater(
+            fallback_pos, minimax_pos,
+            "MINIMAX_API_KEY inference must come BEFORE the lib.ci_setup.read_provider fallback",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Stub-binary behavioural coverage.
