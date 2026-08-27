@@ -6,8 +6,12 @@ description: >-
   in lockstep. Bound to the PR head SHA captured by the caller (the
   caller MUST capture `head_sha` at run-start to close the TOCTOU that
   would otherwise transfer an Approve to an unjudged commit pushed
-  between judge completion and audit posting — see review.yml:317 and
-  maintenance.yml:225 for the `pr_meta` step that feeds this action).
+  between judge completion and audit posting — see review.yml:176 and
+  maintenance.yml:90 for the `pr_meta` step that feeds this action).
+
+  NOTE: composite actions do not expose `github.*` or `job.*` contexts,
+  so `run_id`, `job`, `status`, `pr_number`, and `head_sha` are all
+  passed as explicit inputs by the caller.
 
 inputs:
   pr_number:
@@ -17,13 +21,13 @@ inputs:
     description: "GitHub token with `pull-requests: write` scope"
     required: true
   run_id:
-    description: GitHub Actions run id (use `${{ github.run_id }}`)
+    description: GitHub Actions run id (caller passes the github.run_id context)
     required: true
   job:
     description: Job name (`review` / `security` / `maintenance`)
     required: true
   status:
-    description: Job status (`success` / `failure` / etc.) — pass `${{ job.status }}`
+    description: Job status (`success` / `failure` / etc.) — caller passes the job.status context
     required: true
   verdict:
     description: >-
