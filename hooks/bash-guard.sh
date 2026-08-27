@@ -19,6 +19,15 @@
 # except `build` (lib/active_hooks_codec.py), so even DEV_KIT_STRICT=1 left
 # `rm -rf /` unguarded in the other six stages. The catastrophic tier is
 # checked before the stage gate for exactly that reason.
+#
+# Root-subpath + `--` separator coverage (B1/B2, review on commit d3476e9):
+# the original bare-root pattern (`rm -rf /` followed by space-or-end) let
+# `rm -rf /etc`, `rm -rf /usr/local/bin`, and `rm -rf -- /` through
+# unguarded — each at least as destructive as the bare-root case the tier
+# exists to catch. Fixed by widening the pattern to system-directory
+# subpaths (any depth) plus the canonical `--` end-of-flags form; /home
+# and /root only deny on an exact top-level hit so routine absolute-path
+# cleanup under a user's own directory still works.
 
 set -eo pipefail
 # Use %/* parameter expansion (POSIX, no external `dirname` required) so
@@ -38,7 +47,19 @@ CMD=$(printf '%s' "$INPUT_JSON" | jq -r '.tool_input.command // ""')
 # execution, publish-to-the-world. None have a legitimate in-session use;
 # all are unrecoverable or externally visible.
 CATASTROPHIC_PATTERNS=(
-  "rm -rf /([[:space:]]|$)"
+  # Bare root, with or without the `--` end-of-flags separator agents
+  # reflexively add before an absolute path (`rm -rf -- /`).
+  "rm -rf (-- )?/([[:space:]]|$)"
+  # Root subpaths under system directories, at any depth — not just an
+  # exact `/etc` hit. `rm -rf /usr/local/bin` is as catastrophic as
+  # `rm -rf /usr`; the boundary after the dir name is space, `/`
+  # (continuing into a subpath), or end-of-string so `/etcetera` does
+  # not false-positive on `/etc`.
+  "rm -rf (-- )?/(etc|var|usr|opt|srv|boot|bin|sbin|lib|lib64)([[:space:]/]|$)"
+  # /home and /root: only the exact top-level target denies (wiping ALL
+  # users' data), not every subpath — `rm -rf /home/user/build-cache` is
+  # a normal cleanup op an agent should be able to run.
+  "rm -rf (-- )?/(home|root)([[:space:]]|$)"
   "rm -rf --no-preserve-root"
   "rm -rf ~"
   "rm -rf [\"']?\\\$HOME[\"']?"

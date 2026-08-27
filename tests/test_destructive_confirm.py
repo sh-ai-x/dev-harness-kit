@@ -101,6 +101,32 @@ APPEND_BYPASS = [
     "echo x >> /etc/shadow",
 ]
 
+# B1/B2 regression (review on commit d3476e9, confirmed independently by
+# the review + security judges) — the bare-root pattern only matched
+# `rm -rf /` followed by space-or-end, so any root-subpath target
+# (`rm -rf /etc`, `/usr/local/bin`) and the canonical `--` end-of-flags
+# separator (`rm -rf -- /`) fell through unguarded on every install.
+ROOT_SUBPATH_BYPASS = [
+    "rm -rf /etc",
+    "rm -rf /var",
+    "rm -rf /usr/local/bin",
+    "rm -rf /etc /var /usr",
+    "rm -rf -- /",
+    "rm -rf -- /etc",
+    "rm -rf /home",
+    "rm -rf /root",
+]
+
+# Must NOT be caught by the B1/B2 fix — absolute paths under scratch
+# space or a user's own subdirectory are routine agent cleanup, and
+# /etcetera must not false-positive on the /etc boundary check.
+ROOT_SUBPATH_SAFE = [
+    "rm -rf /tmp/foo",
+    "rm -rf /home/user/build-cache",
+    "rm -rf /workspace/build",
+    "rm -rf /etcetera",
+]
+
 
 class TestCatastrophicTierAlwaysDenies(unittest.TestCase):
     """These must deny on a DEFAULT install — no DEV_KIT_STRICT needed."""
@@ -126,6 +152,30 @@ class TestCatastrophicTierAlwaysDenies(unittest.TestCase):
                 self.assertEqual(r.returncode, 2,
                                  f"{cmd!r} bypasses catastrophic tier: rc={r.returncode} stderr={r.stderr}")
                 self.assertIn('"deny"', r.stderr)
+
+    def test_denies_root_subpath_and_flag_separator_bypass(self):
+        """B1/B2 regression: the bare-root pattern only matched `rm -rf /`
+        with nothing (or whitespace) after it, so `rm -rf /etc`,
+        `rm -rf /usr/local/bin`, and `rm -rf -- /` all fell through
+        unguarded — each at least as catastrophic as the case the tier
+        exists to catch."""
+        for cmd in ROOT_SUBPATH_BYPASS:
+            with self.subTest(cmd=cmd):
+                r = _run("bash-guard.sh", _bash_payload(cmd))
+                self.assertEqual(r.returncode, 2,
+                                 f"{cmd!r} bypasses catastrophic tier: rc={r.returncode} stderr={r.stderr}")
+                self.assertIn('"deny"', r.stderr)
+
+    def test_root_subpath_fix_does_not_overreach(self):
+        """The B1/B2 fix widens matching to system-directory subpaths at
+        any depth; it must NOT catch scratch-space paths, a user's own
+        absolute-path cleanup, or `/etcetera` (boundary false-positive on
+        the `/etc` prefix)."""
+        for cmd in ROOT_SUBPATH_SAFE:
+            with self.subTest(cmd=cmd):
+                r = _run("bash-guard.sh", _bash_payload(cmd))
+                self.assertEqual(r.returncode, 0,
+                                 f"{cmd!r} incorrectly denied: stderr={r.stderr}")
 
     def test_denies_with_strict_explicitly_disabled(self):
         """DEV_KIT_STRICT=0 must not re-open the catastrophic tier."""
