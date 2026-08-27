@@ -32,6 +32,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -145,10 +146,18 @@ class TestReviewLocalShell(unittest.TestCase):
         alive but every line was `Unknown command: /dev-kit:*`.
         """
         src = SCRIPT.read_text(encoding="utf-8")
+        # PR #749 hardened the invocation with a `run_with_timeout 600`
+        # wrapper and a conditional `--bare` (only passed on the
+        # USE_LOCAL_AUTH=0 provider-key path -- see CLAUDE_BARE_FLAG;
+        # `--bare` also skips keychain reads, which would break the
+        # USE_LOCAL_AUTH=1 keychain fallback, so it's gated rather than
+        # unconditional). `--plugin-dir` is still the load-bearing flag
+        # this regression guards, so match the current argv shape
+        # rather than the pre-hardening literal.
         self.assertIn(
-            'claude -p --plugin-dir "$PLUGIN_SRC" "$prompt"',
+            'claude ${CLAUDE_BARE_FLAG[@]+"${CLAUDE_BARE_FLAG[@]}"} --plugin-dir "$PLUGIN_SRC" -p "$prompt"',
             src,
-            "review-local.sh must call `claude -p --plugin-dir \"$PLUGIN_SRC\" \"$prompt\"`",
+            'review-local.sh must call `claude ... --plugin-dir "$PLUGIN_SRC" -p "$prompt"`',
         )
         self.assertNotIn(
             'claude -p "$prompt" 2>&1',
@@ -851,6 +860,297 @@ class TestCwdIndependence(unittest.TestCase):
         # And NO "not in a git repo" error — that would mean the
         # BASH_SOURCE regression is back.
         self.assertNotIn("not in a git repo", r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Issue #727: regression for `claude -p` missing `--plugin-dir`. The
+# GH-Actions sibling `bin/ci-claude-p.sh` correctly passes
+# `--plugin-dir "$PLUGIN_SRC"` so /dev-kit:review, /dev-kit:security,
+# /dev-kit:maintenance slash commands resolve. The local mirror
+# previously called bare `claude -p "$prompt"`, so the slash commands
+# resolved to "Unknown command" and the gate silently defaulted all
+# three verdicts to Approve (a false positive).
+#
+# Tests lock the fix:
+#   1. test_dry_run_argv_contains_plugin_dir: behavioral -- spawns the
+#      script with stub `gh` + `claude`, runs --dry-run, asserts the
+#      captured claude argv contains `--plugin-dir`.
+#   2. test_plugin_src_script_source: static check on the script source
+#      for the PLUGIN_SRC derivation + the manifest guard. Cheap;
+#      catches accidental removal even if the stub infra regresses.
+#   3. test_missing_manifest_dies / test_wrong_manifest_name_dies:
+#      behavioral negative-path coverage for the two `die()` branches
+#      that ARE the fix (review finding #1, PR #741) -- without these,
+#      a `die` -> `log` warning swap re-introduces issue #727 silently,
+#      since neither of the two tests above exercises the failure path.
+# ---------------------------------------------------------------------------
+class TestReviewLocalPluginDir(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.stub_bin = Path(self._tmp.name) / "bin"
+        self.stub_bin.mkdir()
+        self.call_log = Path(self._tmp.name) / "calls.log"
+        real_path = os.environ.get("PATH", "/usr/bin:/bin")
+        self.new_path = f"{self.stub_bin}:{real_path}"
+
+    def _write_stub(self, name: str, body: str) -> None:
+        p = self.stub_bin / name
+        p.write_text(body, encoding="utf-8")
+        p.chmod(p.stat().st_mode | 0o111)
+
+    def _stub_gh_open_pr(self) -> None:
+        pr_json = json.dumps({
+            "state": "OPEN",
+            "title": "feat: anything",
+            "body": "",
+            "reviewDecision": "",
+            "files": ["lib/x.py"],
+        })
+        self._write_stub("gh", f"""#!/usr/bin/env bash
+echo "GH_CALLED: $*" >> '{self.call_log}'
+case "$1" in
+  pr)
+    case "$2" in
+      view) printf '%s\\n' '{pr_json}'; exit 0 ;;
+      comment) exit 0 ;;
+      review) exit 0 ;;
+    esac ;;
+  repo) echo 'owner/repo'; exit 0 ;;
+  api) echo '[]'; exit 0 ;;
+esac
+exit 0
+""")
+
+    def _stub_claude(self) -> None:
+        self._write_stub("claude", f"""#!/usr/bin/env bash
+echo "CLAUDE_CALLED: $*" >> '{self.call_log}'
+exit 0
+""")
+
+    def _run_with_stubs(self, *args: str) -> subprocess.CompletedProcess:
+        return _run(
+            *args,
+            path=self.new_path,
+            env={
+                "CI_REVIEW_PROVIDER": "anthropic",
+                "ANTHROPIC_API_KEY": "sk-ant-fake-for-test",
+            },
+        )
+
+    def test_dry_run_argv_contains_plugin_dir(self) -> None:
+        """Issue #727: every `claude -p` invocation MUST carry
+        `--plugin-dir "$PLUGIN_SRC"` so the spawned process loads
+        /dev-kit:* slash commands. Regression: bare `claude -p "$prompt"`
+        made /dev-kit:review / /dev-kit:security / /dev-kit:maintenance
+        resolve to "Unknown command" and the gate silently defaulted
+        all three verdicts to Approve.
+
+        We assert on the dry-run log (which mirrors the real argv shape
+        per the script's contract) instead of capturing real `claude`
+        argv, because the stub-binary path is fully hermetic and the
+        dry-run print is the audit-visible record of what the gate
+        *would* have done.
+        """
+        self._stub_gh_open_pr()
+        self._stub_claude()
+        r = self._run_with_stubs("--pr", "1", "--dry-run")
+        # Each gate emits a `would run: env ... claude --plugin-dir ... -p
+        # ...` line (review finding #5, PR #741: --plugin-dir precedes
+        # -p to match bin/ci-claude-p.sh:198-203's canonical argv
+        # order). Count them; 3 gates -> >=3 dry-run prints. Match on
+        # "claude " (not "claude -p") so the assertion stays valid
+        # regardless of exact flag ordering.
+        would_run_lines = [
+            line for line in r.stdout.splitlines()
+            if line.strip().startswith("would run:") and "claude " in line
+        ]
+        self.assertGreaterEqual(
+            len(would_run_lines), 3,
+            f"expected >=3 'would run: claude ...' lines (one per gate); "
+            f"got {len(would_run_lines)}. stdout={r.stdout!r} "
+            f"stderr={r.stderr!r}",
+        )
+        for i, line in enumerate(would_run_lines):
+            self.assertIn(
+                "--plugin-dir", line,
+                f"dry-run print #{i} missing --plugin-dir (issue #727): "
+                f"{line!r}",
+            )
+            self.assertIn(
+                " -p ", line,
+                f"dry-run print #{i} missing -p flag: {line!r}",
+            )
+
+    def test_plugin_src_script_source(self) -> None:
+        """Static check on the script source. Catches accidental removal
+        of PLUGIN_SRC even if the integration stub infra regresses.
+        """
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('PLUGIN_SRC="$REPO_ROOT"', text,
+            "PLUGIN_SRC derivation missing -- issue #727 not fixed")
+        self.assertIn(".claude-plugin/plugin.json", text,
+            "PLUGIN_SRC guard (manifest check) missing")
+        self.assertIn('--plugin-dir "$PLUGIN_SRC"', text,
+            "claude -p call missing --plugin-dir -- issue #727 not fixed")
+
+    def _install_manifestless_consumer(self, tmp_path: Path) -> Path:
+        """Mirror TestCwdIndependence's install pattern: bin/ + lib/
+        only, no .claude-plugin/. Returns the consumer directory.
+        """
+        consumer = tmp_path / "consumer"
+        consumer.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=consumer, check=True)
+        for filetype, rels in (
+            ("bin", ("review-local.sh",)),
+            ("lib", ("review_local_lib.sh", "maintenance_gate.py", "atomic.py", "__init__.py")),
+        ):
+            (consumer / filetype).mkdir()
+            for name in rels:
+                src = PROJECT_ROOT / filetype / name
+                dst = consumer / filetype / name
+                dst.write_bytes(src.read_bytes())
+                dst.chmod(dst.stat().st_mode | 0o111)
+        return consumer
+
+    def test_missing_manifest_dies(self) -> None:
+        """Review finding #1 (MAJOR, PR #741): the die() branch at the
+        manifest-existence check is the fix for issue #727's silent-
+        Approve regression. A swap of `die` back to a `log` warning
+        would reproduce #727 undetected without this test.
+
+        Security finding A10 (PR #741): duration assertion catches a
+        regression that hangs ~15s on a stat() of a stalled network
+        mount before subprocess.run's timeout kills it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            consumer = self._install_manifestless_consumer(Path(tmp))
+            t0 = time.monotonic()
+            r = subprocess.run(
+                ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            elapsed = time.monotonic() - t0
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit; stdout={r.stdout!r} stderr={r.stderr!r}")
+            self.assertIn("plugin manifest not found", r.stderr,
+                f"expected manifest-not-found die message; stderr={r.stderr!r}")
+            self.assertLess(elapsed, 5.0,
+                f"manifest-existence check should fail fast (<5s); took {elapsed:.2f}s -- likely hung stat() regression")
+
+    def test_wrong_manifest_name_dies(self) -> None:
+        """Review finding #1 (MAJOR, PR #741): the die() branch that
+        rejects a manifest whose `name` != "dev-kit" is the F1-followup
+        fix (local judge finding A08). Without this test, removing the
+        name check re-opens the substituted-plugin-source gap silently.
+
+        Security finding A10 (PR #741): duration assertion catches a
+        regression that hangs ~15s in the python3 manifest parse heredoc
+        before subprocess.run's timeout kills it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            consumer = self._install_manifestless_consumer(Path(tmp))
+            (consumer / ".claude-plugin").mkdir()
+            (consumer / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "not-dev-kit"}), encoding="utf-8",
+            )
+            t0 = time.monotonic()
+            r = subprocess.run(
+                ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            elapsed = time.monotonic() - t0
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit; stdout={r.stdout!r} stderr={r.stderr!r}")
+            self.assertIn('does not declare name="dev-kit"', r.stderr,
+                f"expected name-mismatch die message; stderr={r.stderr!r}")
+            self.assertLess(elapsed, 5.0,
+                f"manifest-parse + name-check should fail fast (<5s); took {elapsed:.2f}s -- likely hung python3 heredoc regression")
+
+    def test_symlink_manifest_dies(self) -> None:
+        """Security finding A06 (PR #741): `[ ! -f ... ]` accepts a
+        symlink-to-regular-file, and json.load then slurps the link
+        target unbounded. A symlink at .claude-plugin/plugin.json must
+        be refused with a distinct die message so the operator sees
+        "refusing to follow" instead of the misleading parse-error.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            consumer = self._install_manifestless_consumer(Path(tmp))
+            (consumer / ".claude-plugin").mkdir()
+            # Symlink to a benign regular file; the size/symlink guard
+            # must catch it BEFORE the python3 parser runs.
+            target = consumer / "benign.json"
+            target.write_text(json.dumps({"name": "dev-kit"}), encoding="utf-8")
+            (consumer / ".claude-plugin" / "plugin.json").symlink_to(target)
+            r = subprocess.run(
+                ["bash", str(consumer / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=consumer,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit on symlink manifest; stdout={r.stdout!r} stderr={r.stderr!r}")
+            self.assertIn("is a symlink", r.stderr,
+                f"expected symlink-refused die message; stderr={r.stderr!r}")
+
+    def test_repo_root_spoofing_dies(self) -> None:
+        """Review finding #1 (PR #741): `manifest_guard_log` was
+        previously called at the REPO_ROOT-spoofing branch BEFORE the
+        function was textually defined. Under `set -euo pipefail` bash
+        fails with "command not found" (exit 127) instead of the
+        intended `die()` with the security warning. Reproduced live
+        with a consumer whose cwd is in a different git toplevel than
+        the script's own BASH_SOURCE checkout.
+
+        The fix moves the function definition ABOVE the call site;
+        this test guards against the ordering regression.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            # Two separate git repos: one for the script (via
+            # PROJECT_ROOT/bin/review-local.sh), one for the cwd.
+            other_repo = tmp_path / "other"
+            other_repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=other_repo, check=True)
+            # Mirror the bin/lib install into the OTHER repo's bin/ so
+            # the script resolves and the script's BASH_SOURCE-anchored
+            # realpath differs from cwd's git-toplevel. Include a valid
+            # manifest so the spoofing branch (which fires AFTER the
+            # existence/name check) is the one that trips.
+            # To trigger the spoofing check, we need:
+            #   - cwd's git-toplevel (REPO_ROOT via line 87) = other_repo
+            #   - script's BASH_SOURCE-anchored realpath (SCRIPT_REPO_REAL) = PROJECT_ROOT
+            # So the script must NOT be installed under other_repo; we
+            # invoke the real PROJECT_ROOT/bin/review-local.sh directly.
+            # That means PROJECT_ROOT needs its own .claude-plugin/
+            # valid manifest (so the script's manifest guard passes
+            # before the spoofing check fires at line ~177) -- and
+            # PROJECT_ROOT already has one (the dev-kit plugin source).
+            r = subprocess.run(
+                ["bash", str(PROJECT_ROOT / "bin" / "review-local.sh"), "--pr", "1", "--dry-run"],
+                cwd=other_repo,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertNotEqual(r.returncode, 0, f"expected non-zero exit on REPO_ROOT spoofing; stdout={r.stdout!r} stderr={r.stderr!r}")
+            # The die() message names the actual attack: "refusing to
+            # load dev-kit plugin from <other_repo> -- git toplevel
+            # disagrees with the script's own checkout" -- plus the
+            # `manifest_guard_log` "spoofing" line that fires right
+            # before it. Either is a valid signal.
+            self.assertTrue(
+                "spoofing" in r.stderr.lower() or "refusing to load" in r.stderr.lower(),
+                f"expected REPO_ROOT-spoofing die message; stderr={r.stderr!r}",
+            )
+            # Crucial: must NOT be a "command not found" error from
+            # calling manifest_guard_log before its definition.
+            self.assertNotIn("manifest_guard_log: command not found", r.stderr,
+                f"manifest_guard_log must be defined before its call site; stderr={r.stderr!r}")
 
 
 if __name__ == "__main__":

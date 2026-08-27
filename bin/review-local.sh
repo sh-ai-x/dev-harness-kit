@@ -89,6 +89,307 @@ if [ -z "$REPO_ROOT" ]; then
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || true)"
 fi
 [ -n "$REPO_ROOT" ] || { echo "error: not in a git repo" >&2; exit 1; }
+
+# Lib sourcing is deferred until AFTER the manifest guards fire
+# (earlier in this script, before this comment). `lib/review_local_lib.sh`
+# provides `provider_env_for`, `provider_config`, etc. — none of which
+# the manifest guards need. Sourcing it BEFORE the guards meant a cwd
+# in a different git repo would hit "No such file or directory" on
+# the lib source before the spoofing check ever fired, masking the
+# real failure mode (review finding #1, PR #741). The deferred source
+# below only runs if the spoofing + manifest guards pass.
+
+die() { echo "error: $*" >&2; exit 1; }
+log() { echo "  $*"; }
+
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+}
+
+# `--help` MUST short-circuit before the manifest check below. The
+# cwd-independence smoke test (TestCwdIndependence) installs a minimal
+# consumer (bin/ + lib/ only, no .claude-plugin/) and runs the script
+# with --help from a directory outside that consumer, to prove
+# REPO_ROOT resolves from cwd's git toplevel rather than BASH_SOURCE.
+# That path has no manifest by construction, so --help must exit 0
+# before the hard-fail check fires.
+#
+# Review finding A1 (PR #741): scanning only "${1:-}" meant
+# `--pr 1 --help` (help NOT in first position) still fell through to
+# the manifest guard below and died instead of printing usage. Scan
+# the full argv so --help short-circuits regardless of position.
+for _early_arg in "$@"; do
+  case "$_early_arg" in
+    -h|--help) usage; exit 0 ;;
+  esac
+done
+
+# PLUGIN_SRC: dev-kit plugin root. The local mirror of the GH-Actions
+# `claude -p` invocation MUST pass `--plugin-dir` so the spawned claude
+# process loads the slash commands (/dev-kit:review, /dev-kit:security,
+# /dev-kit:maintenance). Without it the slash commands resolve to
+# "Unknown command" and the gate silently defaults to Approve. The
+# GH-Actions sibling `bin/ci-claude-p.sh` already does this -- see
+# `bin/ci-claude-p.sh:200` for the canonical reference implementation.
+#
+# HARD FAIL (not warn) when the manifest is missing. A prior version
+# of this check only warned and let execution continue into
+# `claude -p --plugin-dir <incomplete source>`, which reproduces the
+# exact #727 regression this script exists to fix: the slash commands
+# resolve to "Unknown command", no `**Verdict:**` line appears, and
+# the lenient-default logic (see extract_verdict below) silently maps
+# the empty verdict to Approve. A fix that only works when the
+# operator's plugin source happens to be intact is not a fix -- it
+# narrows the trigger condition. Real consumer installs DO ship the
+# plugin directory; a missing manifest here means a broken/partial
+# install, and the operator needs a loud failure, not a silent
+# Approve. (Local judge finding F1, PR #741.)
+#
+# IMPORTANT: this block runs BEFORE `cd "$REPO_ROOT"` and BEFORE the
+# lib source -- if either of those were earlier, a cwd in a different
+# git repo would mask the spoofing check with a "No such file"
+# lib-source error (review finding #1, PR #741).
+PLUGIN_SRC="$REPO_ROOT"
+# Security finding A06 (PR #741): `git rev-parse --show-toplevel` above
+# walks up looking for *any* `.git` entry, including a `.git` FILE
+# (submodule gitlink, git-worktree pointer, malicious .git symlink) that
+# resolves to an attacker-controlled checkout. If the operator's cwd is
+# inside such a subdirectory the toplevel resolves to the attacker's
+# repo, PLUGIN_SRC inherits it, and the manifest guard validates
+# attacker-supplied content as if it were dev-kit. Realpath-canonicalize
+# the resolved path AND verify git agrees this is a working tree under
+# the same physical repo as the script (the script's own BASH_SOURCE
+# dirname is the operator's intended source by construction; if the
+# realpath of git-toplevel disagrees, the operator is in an unrelated
+# checkout -- refuse to load the plugin from it).
+# Security finding F6 (PR #741): the manifest-guard die() calls
+# previously used a bare `echo >&2`, bypassing the script's own
+# `log` helper and carrying no timestamp -- unlike every other
+# operator-facing line in this script (`log "verdicts: ..."` etc).
+# manifest_guard_log emits a UTC-timestamped line through the same
+# `log` helper before the eventual `die`, so a postmortem grep of
+# .review-local-current/<PR>.log can correlate a guard trip against
+# the surrounding gate timeline.
+#
+# MUST be defined BEFORE any call site (review finding #1, PR #741):
+# bash does not hoist function definitions. The REPO_ROOT-spoofing
+# branch below calls manifest_guard_log at line ~30 of this section,
+# so the definition lives ABOVE all call sites -- otherwise under
+# `set -euo pipefail` the call would fail with "command not found"
+# (exit 127) instead of the intended die() with the security warning.
+manifest_guard_log() {
+  log "$(date -u +%Y-%m-%dT%H:%M:%SZ) manifest-guard: $*"
+}
+
+# Security finding F5 (PR #741): the raw absolute path leaks the
+# operator's OS username (e.g. /Users/alice/...) into the dry-run argv
+# log and any die() message -- both land in
+# .review-local-current/<PR>.log, an operator-scoped but on-disk file.
+# Redact the $HOME prefix for every operator-facing rendering of a
+# path; the caller keeps the unredacted value for actual filesystem
+# calls (open(), -f test, cd) that need the real path.
+#
+# Review finding C2 (PR #741): when $HOME is empty or unset, the
+# naive `${p/#$HOME/~}` pattern trivially matches the zero-width
+# prefix at position 0, prepending "~" onto the FULL unredacted path
+# ("~/Users/alice/...") instead of redacting it -- the exact leak F5
+# exists to close, defeated by an edge case. `${HOME:-}` is the
+# set-u-safe form; the explicit prefix-match test ensures we only
+# rewrite when the path genuinely starts under a non-empty $HOME,
+# falling back to the raw path (unredacted but not mangled) otherwise.
+_redact_home() {
+  local p="$1"
+  if [ -n "${HOME:-}" ] && [ "${p#"${HOME}"/}" != "$p" ]; then
+    printf '~/%s' "${p#"${HOME}"/}"
+  else
+    printf '%s' "$p"
+  fi
+}
+
+PLUGIN_SRC_REAL="$(cd "$PLUGIN_SRC" && pwd -P)"
+SCRIPT_REPO_REAL="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+if [ "$PLUGIN_SRC_REAL" != "$SCRIPT_REPO_REAL" ]; then
+  # Security finding A09 (PR #749 self-review): this die() lands in
+  # .review-local-current/<PR>.log same as every manifest-guard
+  # message below -- it must use the redacted form too, not the raw
+  # $HOME-bearing path.
+  PLUGIN_SRC_REAL_DISPLAY="$(_redact_home "$PLUGIN_SRC_REAL")"
+  SCRIPT_REPO_DISPLAY="$(_redact_home "$SCRIPT_REPO_REAL")"
+  manifest_guard_log "REPO_ROOT spoofing: git-toplevel $PLUGIN_SRC_REAL_DISPLAY != script-anchored $SCRIPT_REPO_DISPLAY (likely submodule / .git gitlink)"
+  die "refusing to load dev-kit plugin from $PLUGIN_SRC_REAL_DISPLAY -- git toplevel disagrees with the script's own checkout ($SCRIPT_REPO_DISPLAY). Run from the repo root, not a submodule/worktree-link directory."
+fi
+PLUGIN_SRC="$PLUGIN_SRC_REAL"
+
+PLUGIN_SRC_DISPLAY="$(_redact_home "$PLUGIN_SRC")"
+
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  manifest_guard_log "missing manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json"
+  die "dev-kit plugin manifest not found at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json -- refusing to run the LLM judge against an incomplete plugin source (this would silently reproduce issue #727)"
+fi
+# Security finding A06 (PR #741): `[ ! -f ... ]` is satisfied by a
+# symlink-to-regular-file AND has no size cap, so a symlink targeting
+# /dev/zero or a multi-GB regular file makes json.load slurp the whole
+# target without bound (DoS / OOM). Require the manifest to be a regular
+# file with a sane upper bound (1 MB is generous -- the dev-kit manifest
+# is ~1 KB). The size check happens after the existence check so a
+# missing manifest still reports the more helpful "not found" message
+# instead of a misleading "too large".
+PLUGIN_MANIFEST_PATH="$PLUGIN_SRC/.claude-plugin/plugin.json"
+if [ -L "$PLUGIN_MANIFEST_PATH" ]; then
+  manifest_guard_log "refusing symlink at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json"
+  die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json is a symlink -- refusing to follow it (substitution / DoS vector; install the manifest as a regular file)"
+fi
+PLUGIN_MANIFEST_SIZE="$(wc -c < "$PLUGIN_MANIFEST_PATH" 2>/dev/null || echo 0)"
+if [ "${PLUGIN_MANIFEST_SIZE:-0}" -gt 1048576 ]; then
+  manifest_guard_log "manifest too large at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json (${PLUGIN_MANIFEST_SIZE} bytes)"
+  die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json is ${PLUGIN_MANIFEST_SIZE} bytes (cap is 1048576) -- refusing to json.load an oversized file (DoS vector)"
+fi
+# Capture a sha256 of the validated manifest so the invocation block
+# below can re-check that the file hasn't been swapped between guard
+# and use (TOCTOU window covers several hundred lines of provider /
+# env / arg resolution; security finding A06, PR #741).
+PLUGIN_MANIFEST_SHA256="$(shasum -a 256 "$PLUGIN_MANIFEST_PATH" 2>/dev/null | awk '{print $1}' || true)"
+if [ -z "${PLUGIN_MANIFEST_SHA256:-}" ]; then
+  manifest_guard_log "manifest sha256 read failed at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json"
+  die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json could not be sha256-hashed -- refusing to proceed without a stable TOCTOU anchor"
+fi
+# Local judge finding A08 (security review, PR #741): the existence
+# check above only proves *a* manifest is present, not that it's
+# dev-kit's. A repo with a substituted `.claude-plugin/plugin.json`
+# (typosquat, downgrade, attacker-authored) would pass the check above
+# and get loaded into the judge subprocess via `--plugin-dir`.
+# Validate the `name` field matches "dev-kit" -- cheap, deterministic,
+# and closes the gap the finding describes without adding a new
+# dependency (python3 is already a script-wide dependency).
+#
+# Security finding F3 (PR #741): the original version of this parse
+# collapsed every failure mode (missing name key, JSON syntax error,
+# non-UTF-8 bytes) to the same empty string, so the die() message
+# below couldn't distinguish "manifest has no name field" from
+# "manifest is corrupted" -- both looked like `(got "")`. The
+# `OK:<name>` / `ERR:<ExceptionType>: <message>` prefix lets the bash
+# side branch on parse-success vs parse-failure and surface the real
+# exception type + message on failure, without a second python3 call.
+# Portable subprocess timeout (no GNU coreutils `timeout` on macOS by
+# default; would break the cwd-independence test consumer). Uses perl
+# as the wrapper because perl ships with every macOS install and its
+# POSIX signal/alarm interface cleanly handles fork+exec+wait with
+# SIGALRM-based timeout. The bash + background-watchdog pattern has
+# subtle orphan-sleep semantics under bash 3.2 (the watchdog subshell's
+# `sleep` grandchildren survive `kill -KILL` on the subshell PID and
+# make the trailing `wait` block until the full timeout elapses) --
+# perl's `alarm` + `waitpid` avoids all of that.
+#
+# Returns 124 on timeout (matches GNU `timeout(1)` exit code), or the
+# child's real exit code otherwise. stdout from the child is forwarded
+# to the perl parent's stdout (so `$()` substitution captures it).
+run_with_timeout() {
+  local timeout_s="$1"; shift
+  perl -e '
+    use strict; use warnings;
+    my $timeout = shift @ARGV;
+    my $cmd = shift @ARGV;
+    my $pid = fork // die "fork: $!";
+    if ($pid == 0) {
+      exec { $cmd } ($cmd, @ARGV);
+      die "exec: $!";
+    }
+    my $rc;
+    eval {
+      local $SIG{ALRM} = sub { die "alarm\n" };
+      alarm $timeout;
+      waitpid($pid, 0);
+      alarm 0;
+      $rc = $? >> 8;
+    };
+    if ($@ && $@ eq "alarm\n") {
+      kill 9, $pid;
+      waitpid($pid, 0);
+      exit 124;
+    }
+    exit $rc;
+  ' "$timeout_s" "$@"
+}
+
+PLUGIN_MANIFEST_PARSE="$(run_with_timeout 20 python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        data = json.load(f)
+    # A manifest that parses to a non-dict JSON value (list, string,
+    # number, null, bool) has no "name" field to speak of. Treat it
+    # the same as "name field absent" (empty string) rather than
+    # letting .get() raise AttributeError on a non-dict -- that
+    # exception previously fell outside the catch tuple below and
+    # produced an opaque "(failed to parse ())" die() message instead
+    # of the informative empty-name-mismatch message this branch is
+    # meant to give (review finding F2, PR #741).
+    name = data.get("name", "") if isinstance(data, dict) else ""
+    print("OK:" + str(name))
+except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+    # Review finding S1 (PR #741): OSError.__str__() embeds the
+    # absolute path passed to open() (e.g. "[Errno 13] Permission
+    # denied: '/Users/alice/repo/.claude-plugin/plugin.json'"),
+    # bypassing the F5 $HOME redaction the die() message otherwise
+    # applies -- the path leak F5 was written to close reappears here
+    # via a different code path. Use e.strerror (just the OS message,
+    # no path) for OSError; str(e) is safe for the other two types.
+    detail = (e.strerror or "I/O error") if isinstance(e, OSError) else str(e)
+    print("ERR:" + type(e).__name__ + ": " + detail)
+' "$PLUGIN_SRC/.claude-plugin/plugin.json" 2>&1)" && _manifest_parse_rc=0 || _manifest_parse_rc=$?
+# Security finding A10 (PR #741): an infinite/recursive symlink or a
+# hung NFS mount would block the python3 heredoc indefinitely (no
+# upper bound); wrapping with `timeout 20` ensures a stuck parse
+# surfaces as an explicit ERR:Timeout branch instead of hanging the
+# gate forever (timeout exit code 124 is mapped to an ERR string
+# below so the case statement further down can treat it uniformly
+# with other parse failures).
+#
+# Security finding A10 (PR #749 self-review): the previous `||`
+# clause fired on ANY non-zero exit, not just the 124 that
+# `run_with_timeout` returns on an actual SIGALRM timeout --
+# MemoryError, RecursionError, or an uncaught exception outside the
+# (OSError, UnicodeDecodeError, json.JSONDecodeError) catch tuple all
+# overwrote the real captured traceback with a misleading "hung
+# filesystem I/O or OOM" message. Only synthesize the timeout ERR
+# string when the exit code is actually 124; otherwise surface the
+# real captured stdout/stderr (or a generic exit-code marker if
+# nothing was captured).
+if [ "$_manifest_parse_rc" -eq 124 ]; then
+  PLUGIN_MANIFEST_PARSE="ERR:Timeout: python3 manifest parser exceeded 20s (hung filesystem I/O or OOM)"
+elif [ "$_manifest_parse_rc" -ne 0 ]; then
+  PLUGIN_MANIFEST_PARSE="ERR:ExitCode ${_manifest_parse_rc}: ${PLUGIN_MANIFEST_PARSE:-python3 manifest parser exited with no captured output}"
+fi
+
+case "$PLUGIN_MANIFEST_PARSE" in
+  OK:dev-kit)
+    : # valid manifest; proceed
+    ;;
+  OK:*)
+    manifest_guard_log "name mismatch at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json (got \"${PLUGIN_MANIFEST_PARSE#OK:}\")"
+    die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json does not declare name=\"dev-kit\" (got \"${PLUGIN_MANIFEST_PARSE#OK:}\") -- refusing to load a substituted or malformed plugin source into the judge subprocess"
+    ;;
+  ERR:*)
+    manifest_guard_log "parse failure at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json (${PLUGIN_MANIFEST_PARSE#ERR:})"
+    die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json failed to parse (${PLUGIN_MANIFEST_PARSE#ERR:}) -- refusing to load a malformed plugin source into the judge subprocess"
+    ;;
+  *)
+    # A10 (PR #741): an empty $PLUGIN_MANIFEST_PARSE would otherwise
+    # expand `${PLUGIN_MANIFEST_PARSE#ERR:}` to an empty string and
+    # produce the uninformative "failed to parse ()" message. With the
+    # timeout wrapper above, this branch should now be unreachable
+    # (timeout exit 124 is captured into ERR:Timeout:...), but the
+    # distinct message below means a future regression that re-introduces
+    # a silent parse failure surfaces an actionable postmortem.
+    manifest_guard_log "parse produced no output at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json (likely MemoryError or stdout truncation)"
+    die "dev-kit plugin manifest at $PLUGIN_SRC_DISPLAY/.claude-plugin/plugin.json parse produced no output (likely MemoryError / stdout truncation) -- refusing to load a malformed plugin source into the judge subprocess"
+    ;;
+esac
+
+# All manifest guards passed; safe to cd into REPO_ROOT and source lib/.
+# (Deferred from line ~92 so a cwd in a different git repo hits the
+# REPO_ROOT-spoofing check above, not a "No such file" lib-source
+# error -- review finding #1, PR #741.)
 cd "$REPO_ROOT"
 
 # Resolve the dev-kit plugin root once at startup. The spawned
@@ -151,10 +452,6 @@ format_audit() {
                --verdict "$verdict" --source bin_review_local )
   for kv in "$@"; do args+=( --extra "$kv" ); done
   python3 -m lib.maintenance_gate --format-audit "${args[@]}"
-}
-
-usage() {
-  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
 }
 
 # ---------------------------------------------------------------------------
@@ -354,6 +651,33 @@ fi
 #    fallback decided in §2.
 # ---------------------------------------------------------------------------
 claude_env_args=()
+
+# Review finding (PR #749 self-review): `--bare` skips more than the
+# session-lifecycle hook chain -- per `claude --help` it also skips
+# keychain reads and CLAUDE.md auto-discovery. Keychain reads are
+# exactly what USE_LOCAL_AUTH=1 depends on (it deliberately leaves
+# claude_env_args empty so `claude` falls back to the operator's own
+# OAuth/keychain session, per §2/§3 above); passing `--bare` on that
+# path would silently break the documented local-auth fallback. Only
+# use `--bare` on the provider-key path (USE_LOCAL_AUTH=0), which
+# mirrors the GH-Actions sibling `bin/ci-claude-p.sh` always having an
+# explicit key injected and never relying on keychain/CLAUDE.md state.
+if [ "$USE_LOCAL_AUTH" = "1" ]; then
+  CLAUDE_BARE_FLAG=()
+else
+  CLAUDE_BARE_FLAG=(--bare)
+fi
+
+# Disable the `claude -p` internal 600s wait-ceiling on background
+# subagents. The default ceiling (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=600000`)
+# causes the /dev-kit:review skill's 3-agent fan-out to be killed mid-way
+# when any single subagent is slow, producing a missing `**Verdict:**`
+# line that the lenient-default extraction logic in extract_verdict
+# would otherwise map to a false-positive Approve (reproduces issue
+# #727's regression mode). The run_with_timeout 600s wrapper above
+# remains the hard upper bound -- this just removes the EARLIER ceiling
+# so the wrapper can fire instead of the internal one.
+claude_env_args+=("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0")
 if [ "$USE_LOCAL_AUTH" = "0" ]; then
   PROVIDER_ENV=()
   while IFS= read -r line; do
@@ -458,7 +782,21 @@ run_skill() {
   local prompt="$2"
   log "running /$skill via provider=$PROVIDER (dry_run=$DRY_RUN)"
   if [ "$DRY_RUN" = "1" ]; then
-    log "would run: env <$PROVIDER env+key> claude -p --plugin-dir \"$PLUGIN_SRC\" \"<prompt>\""
+    # The dry-run log MUST mirror the real argv shape (including
+    # --plugin-dir) so reviewers can audit the contract from the log
+    # alone -- mirrors what issue #727 regression test asserts.
+    # Audit-fidelity note: the dry-run log emits `$PLUGIN_SRC` (the
+    # real filesystem path) instead of `$PLUGIN_SRC_DISPLAY` (the
+    # $HOME-redacted rendering). Review finding #2 (PR #741): the
+    # dry-run is meant to mirror the actual subprocess argv so an
+    # auditor reading the log can reconstruct what the script did;
+    # pretending the real exec got a redacted path would make the
+    # dry-run actively misleading. The real exec uses `$PLUGIN_SRC`
+    # below because the plugin registry needs the unredacted path on
+    # disk; the privacy guarantee (F5/C2) still applies to every
+    # OPERATOR-facing rendering (die messages, audit body). Operators
+    # who need to share this dry-run log should redact it first.
+    log "would run: env <$PROVIDER env+key> claude ${CLAUDE_BARE_FLAG[*]+"${CLAUDE_BARE_FLAG[*]} "}--plugin-dir \"$PLUGIN_SRC\" -p \"$prompt\""
     LAST_SKILL_STDOUT=""
     return 0
   fi
@@ -473,23 +811,66 @@ run_skill() {
   # exactly the local-auth-fallback case (USE_LOCAL_AUTH=1 leaves
   # claude_env_args empty on purpose -- see §2/§3 above).
   local out
-  out="$(env ${claude_env_args[@]+"${claude_env_args[@]}"} claude -p --plugin-dir "$PLUGIN_SRC" "$prompt" 2>&1)" \
-    || {
+  # Security finding A06/A10 (PR #741): re-verify the manifest sha256
+  # immediately before the `claude --plugin-dir` invocation closes the
+  # TOCTOU window opened by the ~300-line gap between guard and use.
+  # If the file was swapped, refuse to load the (possibly attacker-
+  # controlled) plugin into the judge subprocess.
+  if [ -n "${PLUGIN_MANIFEST_SHA256:-}" ]; then
+    _now_sha="$(shasum -a 256 "$PLUGIN_MANIFEST_PATH" 2>/dev/null | awk '{print $1}' || true)"
+    if [ "$_now_sha" != "$PLUGIN_MANIFEST_SHA256" ]; then
+      manifest_guard_log "TOCTOU: manifest sha256 changed between guard ($PLUGIN_MANIFEST_SHA256) and use ($_now_sha)"
+      die "$skill: plugin manifest was modified between guard and invocation (sha256 $PLUGIN_MANIFEST_SHA256 -> $_now_sha) -- refusing to load a swapped plugin source into the judge subprocess"
+    fi
+  fi
+  # Security finding A10 (PR #741): wrap the `claude -p` call in
+  # `timeout 600` so a hung plugin load (MCP server handshake, network
+  # call inside a Skill) can't block the gate indefinitely. The
+  # verdict-extraction logic below maps a missing `**Verdict:**` line
+  # to a lenient-default Approve, but a hung subprocess never produces
+  # ANY output -- the timeout wrapper guarantees we get *some* signal
+  # (a non-zero exit) within bounded wall-clock.
+  #
+  # Resilience over strict exit-code enforcement: if `claude -p` exits
+  # non-zero BUT the captured stdout already contains a `**Verdict:**`
+  # line (the SessionEnd hook failures that produced the "Hook
+  # cancelled" exit code don't invalidate an already-emitted verdict),
+  # downgrade from `die` to a `log warning` so the captured verdict
+  # reaches the archive. This preserves the audit trail of genuine
+  # approvals even when SessionEnd hooks (a session-lifecycle concern,
+  # not a verdict correctness concern) cause a non-zero exit.
+  # `--bare` (only passed on the USE_LOCAL_AUTH=0 provider-key path --
+  # see the CLAUDE_BARE_FLAG decision in §3 above) skips the dev-kit
+  # plugin's SessionStart / UserPromptSubmit hooks (which hang the
+  # `claude -p` CLI today — the regenerate_active_hooks + linear-
+  # session-start + session-start-check chain all spawn claude -p
+  # subprocesses of their own that compete for the CLI's session-start
+  # handshake, leaving the parent `claude -p` blocked indefinitely).
+  # Per `claude --help`, `--bare` ALSO skips keychain reads and
+  # CLAUDE.md auto-discovery -- it is not limited to the session-
+  # lifecycle hook layer, which is why USE_LOCAL_AUTH=1 (the keychain-
+  # backed fallback) must not receive this flag. The `--plugin-dir`
+  # still loads the dev-kit SKILL/COMMAND/MANIFEST registry either way
+  # so `/dev-kit:review` etc. resolve.
+  out="$(run_with_timeout 600 env ${claude_env_args[@]+"${claude_env_args[@]}"} claude ${CLAUDE_BARE_FLAG[@]+"${CLAUDE_BARE_FLAG[@]}"} --plugin-dir "$PLUGIN_SRC" -p "$prompt" 2>&1)" || {
+    _rc=$?
+    if printf '%s\n' "$out" | grep -qE '^\*\*Verdict:\*\*'; then
+      log "warning: $skill: claude -p exited non-zero (rc=$_rc) but a Verdict line was captured -- using it anyway"
+    else
       # Echo the captured stdout/stderr BEFORE die() so the SSE
-      # viewer sees what `claude -p` actually said before the
-      # exit-status summary. Without this, every failure looks
-      # identical ("claude -p exited non-zero (review the output
-      # above)") and the operator has no signal to diagnose.
+      # viewer (bin/review-local-server.py) sees what `claude -p`
+      # actually said before the exit-status summary. Without this,
+      # every failure looks identical ("claude -p exited non-zero")
+      # and the operator has no signal to diagnose.
       printf '%s\n' "$out"
-      die "$skill: claude -p exited non-zero"
-    }
+      die "$skill: claude -p exited non-zero (rc=$_rc) or hit timeout 600 -- review the output above"
+    fi
+  }
   LAST_SKILL_STDOUT="$out"
   printf '%s\n' "$out"
 }
 
-if [ "$RUN_REVIEW" = "1" ]; then
-  run_skill "dev-kit:review" \
-    "/dev-kit:review --diff $REPO_FULL/pull/$PR_NUMBER
+REVIEW_PROMPT="/dev-kit:review --diff $REPO_FULL/pull/$PR_NUMBER
 
 Render the standard two-layer output (PR summary at top, per-finding
 inline comments). The summary MUST begin with a single line exactly
@@ -503,12 +884,8 @@ Map verdict strictly to severity (do NOT inflate):
   - critical >= 1     -> **Verdict:** Blocked
   - major >= 1, critical = 0 -> **Verdict:** Changes Requested
   - no critical, no major -> **Verdict:** Approve"
-  REVIEW_OUTPUT="$LAST_SKILL_STDOUT"
-fi
 
-if [ "$RUN_SECURITY" = "1" ]; then
-  run_skill "dev-kit:security" \
-    "/dev-kit:security --diff $REPO_FULL/pull/$PR_NUMBER
+SECURITY_PROMPT="/dev-kit:security --diff $REPO_FULL/pull/$PR_NUMBER
 
 Render the security summary (per-category breakdown table + Verdict).
 The summary MUST begin with a single line exactly of the form:
@@ -516,12 +893,8 @@ The summary MUST begin with a single line exactly of the form:
   **Verdict:** Approve
   **Verdict:** Changes Requested
   **Verdict:** Blocked"
-  SECURITY_OUTPUT="$LAST_SKILL_STDOUT"
-fi
 
-if [ "$RUN_MAINTENANCE" = "1" ]; then
-  run_skill "dev-kit:maintenance" \
-    "/dev-kit:maintenance --diff $REPO_FULL/pull/$PR_NUMBER
+MAINTENANCE_PROMPT="/dev-kit:maintenance --diff $REPO_FULL/pull/$PR_NUMBER
 
 Apply the 20-checkbox code-sanity rubric (CC-1..8, OE-1..8, VM-1..4).
 The summary MUST begin with a single line exactly of the form:
@@ -529,8 +902,21 @@ The summary MUST begin with a single line exactly of the form:
   **Verdict:** Approve
   **Verdict:** Changes Requested
   **Verdict:** Blocked"
-  MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"
-fi
+
+# Sequential gate execution -- matches the GH-Actions review.yml +
+# maintenance.yml model where each gate's verdict is independent of
+# the others, but cross-gate state (the L3 evidence gather + the audit
+# comment emit step at §7 below) needs every gate's stdout available
+# in order to extract a verdict. Sequential is also the right
+# default for `run_skill`'s dry-run branch (pure log print, no
+# subprocess) -- parallelizing would only reorder the "would run:"
+# lines the behavioral test asserts on in order.
+# Parallel fan-out (3 backgrounded subshells) is a local-only speedup
+# tracked as a separate follow-up; it leaked into PR #741 scope in a
+# prior commit and is being kept out here per review finding #1.
+[ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
+[ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
+[ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
 
 # ---------------------------------------------------------------------------
 # 6. Extract verdicts from captured stdout (mirrors review.yml:220-225).
