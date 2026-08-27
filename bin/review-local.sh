@@ -936,57 +936,6 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 10.5 Local archive (per-run persistence for the viewer).
-# ---------------------------------------------------------------------------
-# The wrapper script `bin/babysit-pr-local.sh` writes the raw
-# `bin/review-local.sh` stdout to `<REPO>/.review-local-archive/<PR>/<ts>/log`
-# via `tee -a "$RUN_LOG"`. That log is the human-readable audit
-# stream. This section writes the same run's STRUCTURED metadata
-# (per-gate verdict + combined verdict + L3 evidence + audit body) to
-# `<REPO>/.review-local-archive/<PR>/<ts>/{meta,review,security,maintenance}.json`
-# so the HTML viewer's `/archive/<PR>` + `/archive/<PR>/<run_id>` endpoints
-# can render verdict badges and re-display a run's verdict without
-# re-running the LLM judges.
-#
-# Skip the write in dry-run mode (nothing to archive) and on early
-# exits before the WORST verdict is computed (which would only happen
-# for the `MISSING` path -- all of which already die() before
-# reaching this section).
-if [ "$DRY_RUN" = "0" ] && [ -n "${RUN_LOG:-}" ] && [ -n "${REPO_ROOT:-}" ]; then
-  ARCHIVE_DIR="$(dirname "$RUN_LOG")"
-  # RUN_TS is exported from bin/babysit-pr-local.sh via the env
-  # embedded in the `tee` invocation. Fall back to deriving from the
-  # log filename if the wrapper wasn't used.
-  if [ -z "${RUN_TS:-}" ]; then
-    RUN_TS="$(basename "$ARCHIVE_DIR")"
-  fi
-  HEAD_OID="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-  python3 - "$ARCHIVE_DIR" "$RUN_TS" "$HEAD_OID" "$WORST" "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V" "$L3_OK" "$AUDIT_BODY" "${REVIEW_OUTPUT:-}" "${SECURITY_OUTPUT:-}" "${MAINTENANCE_OUTPUT:-}" <<'PYEOF'
-import json
-import sys
-from pathlib import Path
-archive_dir, run_ts, head_oid, worst, review_v, security_v, maintenance_v, l3_ok, audit_body, review_out, security_out, maintenance_out = sys.argv[1:]
-Path(archive_dir).mkdir(parents=True, exist_ok=True)
-meta = {
-    "pr_number": int(Path(archive_dir).parent.name),
-    "started_at": run_ts,
-    "provider": "minimax",
-    "head_oid": head_oid,
-    "worst_verdict": worst,
-    "review_verdict": review_v,
-    "security_verdict": security_v,
-    "maintenance_verdict": maintenance_v,
-    "l3_ok": l3_ok == "1",
-    "audit_body": audit_body,
-}
-(Path(archive_dir) / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
-(Path(archive_dir) / "review.json").write_text(json.dumps({"verdict": review_v, "output": review_out}, indent=2, ensure_ascii=False), encoding="utf-8")
-(Path(archive_dir) / "security.json").write_text(json.dumps({"verdict": security_v, "output": security_out}, indent=2, ensure_ascii=False), encoding="utf-8")
-(Path(archive_dir) / "maintenance.json").write_text(json.dumps({"verdict": maintenance_v, "output": maintenance_out}, indent=2, ensure_ascii=False), encoding="utf-8")
-PYEOF
-fi
-
-# ---------------------------------------------------------------------------
 # 11. Final exit (mirrors review.yml:557-561).
 # ---------------------------------------------------------------------------
 case "$WORST" in
