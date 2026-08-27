@@ -986,10 +986,22 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
         # audit carries an authoritative `head_sha=` matching the
         # current PR head — the comment is the source of truth on
         # fork-PR dispatched runs.
-        self.assertFalse(any(
-            (len(call.args) > 0 and call.args[0] == "run" and call.args[1] == "view")
-            for call in gh_mock.call_args_list
-        ),
+        #
+        # `_run_gh(args: list[str])` is called with one positional arg
+        # (the list), so `call.args` is a 1-tuple — compare against
+        # `call.args[0][0]` / `call.args[0][1]`, NOT `call.args[0]`.
+        # (Earlier iterations of this test had a vacuous assertion
+        # that always passed; see review F1 follow-up on PR #754.)
+        gh_run_view_calls = [
+            call for call in gh_mock.call_args_list
+            if call.args
+            and isinstance(call.args[0], list)
+            and len(call.args[0]) >= 2
+            and call.args[0][0] == "run"
+            and call.args[0][1] == "view"
+        ]
+        self.assertEqual(
+            gh_run_view_calls, [],
             "gh run view should be skipped when comment carries a matching head_sha")
         self.assertTrue(g.passed,
                         f"matched comment head_sha must pass; got detail={g.detail!r}")
@@ -1180,9 +1192,16 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
                 pr_pushed_at="2026-01-02T00:00:00Z",
                 pr_head_sha="newsha",
             )
+        # `_run_gh(args: list[str])` is called with one positional arg
+        # (the list), so `call.args` is a 1-tuple — compare against
+        # `call.args[0][0]` / `call.args[0][1]`, NOT `call.args[0]`.
         gh_run_view_calls = [
             call for call in gh_mock.call_args_list
-            if len(call.args) > 0 and call.args[0] == "run" and call.args[1] == "view"
+            if call.args
+            and isinstance(call.args[0], list)
+            and len(call.args[0]) >= 2
+            and call.args[0][0] == "run"
+            and call.args[0][1] == "view"
         ]
         self.assertEqual(
             gh_run_view_calls, [],

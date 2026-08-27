@@ -84,23 +84,33 @@ jobs:
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-
       # TOCTOU hardening: capture PR_HEAD_SHA at JOB START, before
-      # any LLM judge step. See the matching block in `review.yml`'s
-      # `review:` / `security:` jobs for rationale. Empty value is
-      # intentional and G3 STALEs the empty-but-present case rather
-      # than falling back to `_run_head_sha()`.
+      # `actions/checkout` even — `pr_meta` does not depend on the
+      # checkout and the tighter the start-time window, the smaller
+      # the residual race. See the matching block in `review.yml`'s
+      # `review:` / `security:` jobs for the full rationale and
+      # retry policy.
       - name: Capture PR head SHA at run-start (TOCTOU hardening)
         id: pr_meta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -uo pipefail
           PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
-          head_sha="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""')"
+          head_sha=""
+          for attempt in 1 2 3; do
+            head_sha="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>/dev/null || true)"
+            if [ -n "$head_sha" ]; then
+              break
+            fi
+            echo "::warning::pr_meta attempt $attempt failed; retrying in 5s"
+            sleep 5
+          done
           echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
 
       - name: Install dev-kit plugin from local checkout
         run: |

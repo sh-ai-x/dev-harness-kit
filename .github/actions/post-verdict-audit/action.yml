@@ -63,6 +63,12 @@ runs:
         HEAD_SHA: ${{ inputs.head_sha }}
       shell: bash
       run: |
+        set -euo pipefail
+        # Defensive guard: a missing GH_TOKEN would silently post
+        # an empty audit comment via `gh pr comment` (no auth, no
+        # failure, just a 4xx that slips through the action's exit
+        # status). Fail loud and early instead.
+        [[ -n "$GH_TOKEN" ]] || { echo "::error::gh_token input is empty"; exit 1; }
         # The composite action is intentionally thin: format the
         # audit body via `lib.maintenance_gate.format_audit_body` and
         # post via `gh pr comment`. The caller supplies PR_HEAD_SHA
