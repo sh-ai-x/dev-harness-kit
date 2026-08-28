@@ -26,7 +26,12 @@ class RenderProposalMainTests(unittest.TestCase):
     #   (2) `proposals_dir not in src_resolved.parents` — defense in depth
     # Either error message indicates successful rejection. Tests below
     # accept both messages.
-    REJECT_PATTERNS = ("path traversal", "invalid proposal name", "invalid proposal topic")
+    REJECT_PATTERNS = (
+        "path traversal",
+        "invalid proposal name",
+        "invalid proposal topic",
+        "invalid bucket",  # status-routed shape: `<bucket>/<main>/<sub>` where bucket is review/accepted/rejected
+    )
 
     def _run(self, args: list[str], tmp_cwd: Path) -> subprocess.CompletedProcess:
         env = os.environ.copy()
@@ -97,6 +102,7 @@ class RenderProposalMainTests(unittest.TestCase):
             self.assertNotIn("path traversal", r.stderr)
             self.assertNotIn("invalid proposal name", r.stderr)
             self.assertNotIn("invalid proposal topic", r.stderr)
+            self.assertNotIn("invalid bucket", r.stderr)
 
 
 if __name__ == "__main__":

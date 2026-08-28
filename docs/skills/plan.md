@@ -52,7 +52,7 @@ The step file's `Verification & Status Update` section ends with two mandatory H
 
 ### Proposal auto-invoke
 
-Gate 5/5's final step calls the `proposal` skill so the design record is materialized before `/dev-kit:build` runs, making the chain **plan → proposal → build**. The topic slug is `<main>/<sub>`: `<main>` is the umbrella (hardcoded to `harness-architecture` for this project); `<sub>` is the phase directory name from Gate 4/5 — one name shared by the phase directory, the proposal sub-topic, and the worktree branch base's `<phase>` segment. The skill writes `docs/proposals/<main>/<sub>.yaml` (each PRD § becomes one proposal section; frontmatter status is `design-discussion`) and invokes `Skill("proposal", topic="<main>/<sub>")` — `plan`'s `disallowed-tools: Bash` does not block this since `Skill` is a separate tool. If the sub-topic slug is malformed, or the file already exists with different content, the proposal skill refuses and Gate 5/5 surfaces the conflict for the user to resolve.
+Gate 5/5's final step calls the `proposal` skill so the design record is materialized before `/dev-kit:build` runs, making the chain **plan → proposal → build**. The topic slug is `<main>/<sub>`: `<main>` is the umbrella (hardcoded to `harness-architecture` for this project); `<sub>` is the phase directory name from Gate 4/5 — one name shared by the phase directory, the proposal sub-topic, and the worktree branch base's `<phase>` segment. The skill writes `docs/proposals/<bucket>/<main>/<sub>.yaml` (each PRD § becomes one proposal section; frontmatter status is `design-discussion`, auto-routes to the `review/` bucket) and invokes `Skill("proposal", topic="<main>/<sub>")` — `plan`'s `disallowed-tools: Bash` does not block this since `Skill` is a separate tool. If the sub-topic slug is malformed, or the file already exists with different content, the proposal skill refuses and Gate 5/5 surfaces the conflict for the user to resolve.
 
 ## Usage
 
@@ -70,7 +70,7 @@ Gate 5/5's final step calls the `proposal` skill so the design record is materia
 - `.dev-kit/decision-log.md` — accumulated Q&A and score deltas (cumulative across iterations).
 - `.dev-kit/loop-log.json` — narrowing per cycle (MUST-16).
 - `.dev-kit/hand-off/plan→build.md`.
-- `docs/proposals/<main>/<sub>.{yaml,html}` — the auto-rendered design record.
+- `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}` — the auto-rendered design record (bucket auto-routed from YAML `status:`).
 
 ## Related
 

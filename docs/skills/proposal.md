@@ -4,7 +4,7 @@
 
 **Category:** `design` · **Alpha:** `state` · **Invocation:** `/dev-kit:proposal` (human-invoked)
 
-`proposal` renders any `docs/proposals/<main>/<sub>.yaml` design document into a single self-contained HTML page at `docs/proposals/<main>/<sub>.html`, for sharing with reviewers before implementation begins. It is a distinct skill (rather than a flag on `/dev-kit:plan`) because proposals are a distinct artifact with their own lifecycle — `draft → design-discussion → ready-for-review → accepted/rejected/superseded` — and because slash-command autocomplete doesn't surface flags, so a dedicated entrypoint is the only reliable way for the user to find it.
+`proposal` renders any `docs/proposals/<bucket>/<main>/<sub>.yaml` design document (where `<bucket>` is auto-routed from the YAML's `status:` field — `review`/`accepted`/`rejected`) into a single self-contained HTML page at `docs/proposals/<bucket>/<main>/<sub>.html`, for sharing with reviewers before implementation begins. It is a distinct skill (rather than a flag on `/dev-kit:plan`) because proposals are a distinct artifact with their own lifecycle — `draft → design-discussion → ready-for-review → accepted/rejected/superseded` — and because slash-command autocomplete doesn't surface flags, so a dedicated entrypoint is the only reliable way for the user to find it.
 
 ## When to use it
 
@@ -15,39 +15,50 @@
 
 ## How it works
 
-Every proposal lives at `docs/proposals/<main>/<sub>.{yaml,html}`: `<main>` is the umbrella grouping N related sub-proposals (e.g. `harness-architecture`), and `<sub>` is the sub-topic slug (e.g. `protocol-layer`, `00-index`) — the file is named after the sub-topic, not `index.{yaml,html}`, so it stays recognizable on a flat directory listing or static-site host.
+Every proposal lives at `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}`:
 
-The render pipeline: (1) list available topics via `python3 -m lib.render_proposal_html --list`; (2) render one topic via `python3 -m lib.render_proposal_html <main>/<sub>`, which writes the HTML; (3) print the output path so the user can open it (`open docs/proposals/<main>/<sub>.html` on macOS, or any browser via `file://`); (4) stop — the skill never edits the YAML, only renders it. The render logic is a pure function in `lib/render_proposal_html.py` plus a `__main__` CLI entry; there is no separate `bin/dev-kit-proposal.py` binary, since the proposal skill is the only caller.
+- `<bucket>` is one of `review` / `accepted` / `rejected`, auto-routed from the YAML's `status:` field via `STATUS_TO_BUCKET` (`draft`/`design-discussion`/`ready-for-review` → `review`; `accepted` → `accepted`; `rejected`/`superseded` → `rejected`). Pass `<bucket>/<main>/<sub>` explicitly to override.
+- `<main>` is the umbrella grouping N related sub-proposals (e.g. `harness-architecture`).
+- `<sub>` is the sub-topic slug (e.g. `protocol-layer`, `00-index`) — the file is named after the sub-topic, not `index.{yaml,html}`, so it stays recognizable on a flat directory listing or static-site host.
 
-The renderer auto-attaches a `<nav class="back-link">` element (`← 00-index`) at the top of every non-index sub-topic page when a sibling `00-index.yaml` exists in the same umbrella directory; the 00-index page itself gets no back link. The pure `render()` function takes optional `back_to_href=`/`back_to_label=` kwargs, which the CLI driver wires based on the filesystem sibling check.
+The render pipeline: (1) list available topics via `python3 -m lib.render_proposal_html --list` (scans all three buckets + the legacy flat shape); (2) render one topic via `python3 -m lib.render_proposal_html <main>/<sub>` (bucket auto-routes from the YAML's `status:`) or `<bucket>/<main>/<sub>` (explicit override), which writes the HTML into the status-routed layout; (3) print the output path so the user can open it (`open docs/proposals/<bucket>/<main>/<sub>.html` on macOS, or any browser via `file://`); (4) stop — the skill never edits the YAML, only renders it. `--migrate` is a one-shot that moves legacy flat proposals into the bucket each YAML declares (idempotent). The render logic is a pure function in `lib/render_proposal_html.py` plus a `__main__` CLI entry; there is no separate `bin/dev-kit-proposal.py` binary, since the proposal skill is the only caller.
 
-**Cross-references**: inside a proposal body, link to a sibling as `[label](<other-sub>.html)` (bare relative path, since both files live in the same `<main>/` directory) or `../<other-main>/<sub>.html` for a cross-umbrella link. The relative-path safety check allows bare relative paths and `../<sibling>.html`, but rejects dangerous schemes (`javascript:`, `data:`, `vbscript:`, `file:`).
+The renderer auto-attaches a `<nav class="back-link">` element (`← 00-index`) at the top of every non-index sub-topic page when a sibling `00-index.yaml` exists in either the source umbrella directory OR the output bucket directory; the 00-index page itself gets no back link. The pure `render()` function takes optional `back_to_href=`/`back_to_label=` kwargs, which the CLI driver wires based on the filesystem sibling check.
 
-The topic slug must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (one `/` separator, no leading/trailing slash, no `.` segments). The legacy filenames `proposal.yaml` and `index.yaml` are reserved and skipped as leftovers from a previous refactor.
+**Cross-references**: inside a proposal body, link to a sibling as `[label](<other-sub>.html)` (bare relative path, since both files live in the same `<bucket>/<main>/` directory) or `../<other-main>/<sub>.html` for a cross-umbrella link. The relative-path safety check allows bare relative paths and `../<sibling>.html`, but rejects dangerous schemes (`javascript:`, `data:`, `vbscript:`, `file:`).
+
+The topic slug matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (legacy 2-level) or `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (3-level, with the bucket name matching `review|accepted|rejected`). One `/` separator per level, no leading/trailing slash, no `.` segments. The legacy filenames `proposal.yaml` and `index.yaml` are reserved and skipped as leftovers from a previous refactor.
 
 ## Usage
 
 ```bash
-/dev-kit:proposal [<main>/<sub>]
-/dev-kit:proposal --list
+/dev-kit:proposal [<main>/<sub>]              # bucket auto-routes from YAML status
+/dev-kit:proposal [<bucket>/<main>/<sub>]     # explicit bucket override
+/dev-kit:proposal --list                       # list all (across all 3 buckets + legacy)
+/dev-kit:proposal --all                        # render every proposal
+/dev-kit:proposal --migrate                    # one-shot move legacy flat -> bucket dirs
 ```
 
 | Form | Effect |
 |---|---|
-| `--list` | Lists available proposal topics. |
-| `<main>/<sub>` | Renders that topic's YAML to HTML. |
+| `--list` | Lists available proposal topics across all three buckets and the legacy flat shape. |
+| `--all` | Renders every discovered proposal to its routed bucket. |
+| `--migrate` | One-shot: moves every legacy flat `<main>/<sub>.{yaml,html}` into the bucket its YAML's `status:` declares. Idempotent. |
+| `<main>/<sub>` | Renders that topic's YAML to HTML (bucket auto-routes). |
+| `<bucket>/<main>/<sub>` | Renders that topic to the explicit bucket, ignoring YAML status. |
 
 ## Output
 
 ```
-## /dev-kit:proposal -- <main>/<sub>
+## /dev-kit:proposal -- <bucket>/<main>/<sub>
 
-**Source**: docs/proposals/<main>/<sub>.yaml
-**Output**: docs/proposals/<main>/<sub>.html (one self-contained HTML doc, inline CSS only, no JS, dark-mode aware)
+**Source**: docs/proposals/<bucket>/<main>/<sub>.yaml
+**Output**: docs/proposals/<bucket>/<main>/<sub>.html (one self-contained HTML doc, inline CSS only, no JS, dark-mode aware)
 **Status**: <status from YAML frontmatter>
+**Bucket**: <review|accepted|rejected, auto-routed from `status:`>
 **Sections**: <count>
 
-**Open in browser**: `open docs/proposals/<main>/<sub>.html` (macOS)
+**Open in browser**: `open docs/proposals/<bucket>/<main>/<sub>.html` (macOS)
 ```
 
 ## Why `alpha: state`

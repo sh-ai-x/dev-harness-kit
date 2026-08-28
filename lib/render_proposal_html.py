@@ -87,6 +87,34 @@ STATUS_TAG_CLASS = {
     "superseded": "tag-warn",
 }
 
+# Status-routed layout (see module docstring). The bucket set is a tight
+# whitelist; adding a fourth name is a deliberate design choice (tests
+# pin `BUCKETS == {"review", "accepted", "rejected"}`).
+BUCKETS = ("review", "accepted", "rejected")
+
+STATUS_TO_BUCKET = {
+    "draft": "review",
+    "design-discussion": "review",
+    "ready-for-review": "review",
+    "accepted": "accepted",
+    "rejected": "rejected",
+    "superseded": "rejected",
+}
+
+
+def bucket_for_status(status: str) -> str:
+    """Return the filesystem bucket for a proposal status. Unknown
+    statuses fall back to `review` so a typo in the YAML still produces
+    a routable path rather than crashing the renderer."""
+    return STATUS_TO_BUCKET.get(status, "review")
+
+
+# Reserved file stems that previous refactors used as canonical
+# names; they must not surface as a sub-topic slug in any bucket dir
+# or in the legacy flat layout. Hoisted to a single source of truth
+# (CC-8 review) so `_list_proposals` and `_migrate` stay in sync.
+RESERVED_SLUGS = frozenset({"proposal", "index"})
+
 INLINE_CSS = """
 :root {
   color-scheme: light dark;
@@ -1053,98 +1081,313 @@ def render_from_yaml(text: str) -> str:
 # the path-traversal guard, atomic-write, and error reporting are
 # colocated with the render logic.
 
-# Topic slug: `<main>/<sub>`. Both halves are kebab/snake; one `/` separator
-# is allowed; no leading/trailing slash, no double slash, no `.` segments.
-_NAME_OK_RE = re.compile(
+# Topic slug (CLI argument) accepts two shapes:
+#
+#   2-level:  `<main>/<sub>`           (legacy flat layout -- still readable)
+#   3-level:  `<bucket>/<main>/<sub>`  (status-routed layout -- the default)
+#
+# Both halves of `<main>/<sub>` are kebab/snake; one `/` separator per
+# half is allowed; no leading/trailing slash, no double slash, no `.`
+# segments. The 3-level shape requires `<bucket>` to be one of the
+# three whitelist names in `BUCKETS` -- any other bucket name is
+# rejected with an actionable error message.
+_TWO_LEVEL_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+)
+_THREE_LEVEL_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+    r"/[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+    r"/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 )
 
 
-def _list_proposals(project_root: Path) -> list[str]:
-    """Return sorted `<main>/<sub>` topic slugs whose `<sub>.yaml` exists.
+def _parse_topic_slug(topic: str) -> tuple[Optional[str], str, str]:
+    """Parse a CLI topic arg into (bucket, main, sub).
 
-    Walks every `<main>/` under `docs/proposals/` and, for each
-    `<sub>.yaml` directly at the umbrella level, returns the joined
-    `<main>/<sub>` slug. Reserved legacy canonical names (`proposal`,
-    `index`) are skipped -- those are the names the previous
-    refactors used and they would otherwise be mistaken for a
-    sub-topic slug. Sub-directories (the old "one-level-per-topic"
-    shape) and flat files (the pre-refactor shape) are skipped. The
-    order is `<main>` then `<sub>`, both alphabetical.
+    Returns:
+        - (None, main, sub) for 2-level `<main>/<sub>` -- bucket auto-routes
+          from the YAML's `status:` field via `bucket_for_status`.
+        - (bucket, main, sub) for 3-level `<bucket>/<main>/<sub>` -- the
+          explicit bucket wins and the YAML status is ignored.
+
+    Raises ValueError with an actionable message for malformed slugs.
+    """
+    if _THREE_LEVEL_RE.fullmatch(topic):
+        bucket, main, sub = topic.split("/", 2)
+        if bucket not in BUCKETS:
+            raise ValueError(
+                f"invalid bucket {bucket!r}; must be one of {list(BUCKETS)} "
+                f"(in topic {topic!r})"
+            )
+        return bucket, main, sub
+    if _TWO_LEVEL_RE.fullmatch(topic):
+        main, sub = topic.split("/", 1)
+        return None, main, sub
+    raise ValueError(
+        f"invalid proposal topic {topic!r}: must be `<main>/<sub>` "
+        f"(legacy) or `<bucket>/<main>/<sub>` (status-routed)"
+    )
+
+
+def _list_proposals(project_root: Path) -> list[str]:
+    """Return sorted topic slugs discovered across both layouts.
+
+    Status-routed shape: `<bucket>/<main>/<sub>` for every `<sub>.yaml`
+    directly under `docs/proposals/<bucket>/<main>/`. Walks every
+    bucket in `BUCKETS`.
+
+    Legacy flat shape: `<main>/<sub>` for every `<sub>.yaml` directly
+    under `docs/proposals/<main>/` (i.e. outside any bucket dir).
+
+    Reserved file stems (`proposal`, `index`) are skipped in BOTH
+    shapes -- those are the names the previous refactors used and they
+    would otherwise be mistaken for a sub-topic slug. Sub-directories
+    inside a bucket (the old "one-level-per-topic" shape) are skipped.
+    The sort order is `(bucket-or-empty, main, sub)`, all alphabetical.
     """
     pdir = project_root / "docs" / "proposals"
     if not pdir.exists():
         return []
-    # Reserved file stems that previous refactors used as canonical
-    # names; they must not surface as a sub-topic slug.
-    reserved = {"proposal", "index"}
     slugs: list[str] = []
-    for main_dir in sorted(pdir.iterdir()):
-        if not main_dir.is_dir():
+    # Dedupe by (main, sub): when a topic exists in BOTH the legacy
+    # flat layout AND a bucket dir, the bucket entry wins (it's the
+    # SSOT after `--migrate`). The legacy entry is hidden to keep
+    # `--all` from rendering the same output twice (PR #756 review).
+    seen_bucketed: set[tuple[str, str]] = set()
+
+    # Status-routed shape first -- these win on collision.
+    for bucket in sorted(BUCKETS):
+        bucket_dir = pdir / bucket
+        if not bucket_dir.is_dir():
             continue
-        for entry in sorted(main_dir.iterdir()):
-            if not (entry.is_file() and entry.name.endswith(".yaml")):
+        for main_dir in sorted(bucket_dir.iterdir()):
+            if not main_dir.is_dir():
                 continue
-            sub = entry.name[: -len(".yaml")]
-            if sub in reserved:
+            for sub_entry in sorted(main_dir.iterdir()):
+                if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
+                    continue
+                sub = sub_entry.name[: -len(".yaml")]
+                if sub in RESERVED_SLUGS:
+                    continue
+                seen_bucketed.add((main_dir.name, sub))
+                slugs.append(f"{bucket}/{main_dir.name}/{sub}")
+
+    # Legacy flat shape (top-level dirs only -- NOT bucket dirs).
+    # Only emit a legacy slug if no bucket copy exists for the same
+    # (main, sub) -- the bucket one already won.
+    for entry in sorted(pdir.iterdir()):
+        if not entry.is_dir():
+            continue
+        if entry.name in BUCKETS:
+            continue
+        for sub_entry in sorted(entry.iterdir()):
+            if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
                 continue
-            slugs.append(f"{main_dir.name}/{sub}")
+            sub = sub_entry.name[: -len(".yaml")]
+            if sub in RESERVED_SLUGS:
+                continue
+            if (entry.name, sub) in seen_bucketed:
+                continue
+            slugs.append(f"{entry.name}/{sub}")
     return slugs
 
 
+def _migrate(project_root: Path) -> int:
+    """Move legacy flat `<main>/<sub>.{yaml,html}` files into the
+    bucket directory selected by each YAML's `status:` field.
+
+    Files already under a bucket dir are left alone (the function is
+    idempotent -- re-running it after a partial migration is safe).
+    Files with an unrecognised `status:` are routed to `review` so a
+    typo doesn't strand it in the legacy shape.
+
+    Returns the process exit code (0 on success).
+    """
+    pdir = project_root / "docs" / "proposals"
+    if not pdir.exists():
+        return 0
+    moves = 0
+    for main_dir in sorted(pdir.iterdir()):
+        if not main_dir.is_dir() or main_dir.name in BUCKETS:
+            continue
+        for sub_entry in sorted(main_dir.iterdir()):
+            if not sub_entry.name.endswith((".yaml", ".html")):
+                continue
+            sub = sub_entry.name.rsplit(".", 1)[0]
+            if sub in RESERVED_SLUGS:
+                continue
+            yaml_path = main_dir / f"{sub}.yaml"
+            if not yaml_path.is_file():
+                continue
+            try:
+                p = parse_proposal_yaml(yaml_path.read_text(encoding="utf-8"))
+            except (ValueError, KeyError, yaml.YAMLError) as e:
+                print(
+                    f"warning: skipping {yaml_path}: parse error ({e}); "
+                    f"leave it in the legacy layout and fix the YAML first",
+                    file=sys.stderr,
+                )
+                continue
+            bucket = bucket_for_status(p.status)
+            target_dir = pdir / bucket / main_dir.name
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for ext in (".yaml", ".html"):
+                src = main_dir / f"{sub}{ext}"
+                if not src.is_file():
+                    continue
+                dst = target_dir / f"{sub}{ext}"
+                if dst.exists():
+                    # Don't clobber an existing bucketed copy on a
+                    # re-run; the bucketed one is the SSOT.
+                    continue
+                src.rename(dst)
+                moves += 1
+    print(f"migrated {moves} file(s) into bucket layout")
+    return 0
+
+
 def _render_one(project_root: Path, topic: str) -> int:
-    """Render one proposal topic. Returns process exit code."""
-    if not _NAME_OK_RE.fullmatch(topic):
-        print(
-            f"error: invalid proposal topic {topic!r}: "
-            f"must match `<main>/<sub>` (kebab/snake, no dots, no traversal)",
-            file=sys.stderr,
-        )
+    """Render one proposal topic. Returns process exit code.
+
+    `topic` may be either `<main>/<sub>` (legacy 2-level -- bucket is
+    auto-routed from the YAML's `status:` field) or `<bucket>/<main>/<sub>`
+    (3-level -- the explicit bucket wins).
+
+    The source YAML is read from the legacy flat location OR from any
+    bucket directory; the rendered HTML is written to the resolved
+    bucket directory (creating it on demand).
+    """
+    try:
+        explicit_bucket, main, sub = _parse_topic_slug(topic)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
 
     proposals_dir = (project_root / "docs" / "proposals").resolve()
-    main_dir = proposals_dir / topic.split("/", 1)[0]
-    sub = topic.split("/", 1)[1]
-    src = main_dir / f"{sub}.yaml"
-    out = main_dir / f"{sub}.html"
+    main_dir = proposals_dir / main
 
-    src_resolved = src.resolve()
-    out_resolved = out.resolve()
-    if proposals_dir not in src_resolved.parents or proposals_dir not in out_resolved.parents:
-        print(f"error: path traversal blocked ({topic!r})", file=sys.stderr)
-        return 1
+    # Locate the source YAML. Bucket candidates are searched FIRST so a
+    # bucketed proposal is the SSOT even when a stale legacy flat copy
+    # also exists for the same (main, sub). The legacy flat is the
+    # fallback for pre-migration repos only (PR #756 review).
+    candidate_srcs: list[Path] = []
+    if explicit_bucket is not None:
+        candidate_srcs.append(proposals_dir / explicit_bucket / main / f"{sub}.yaml")
+    for bucket in BUCKETS:
+        candidate_srcs.append(proposals_dir / bucket / main / f"{sub}.yaml")
+    candidate_srcs.append(main_dir / f"{sub}.yaml")
 
-    if not src.exists():
-        print(f"error: source not found: {src}", file=sys.stderr)
+    src: Optional[Path] = None
+    for c in candidate_srcs:
+        c_resolved = c.resolve()
+        if proposals_dir not in c_resolved.parents:
+            continue
+        if c.is_file():
+            src = c
+            break
+
+    if src is None:
+        # De-duplicate to give a stable "source not found" hint listing
+        # only the primary candidate paths (skip duplicates when 3-level
+        # topic points to the same dir as the flat layout).
+        seen: set[str] = set()
+        tried: list[str] = []
+        for c in candidate_srcs:
+            s = str(c)
+            if s in seen:
+                continue
+            seen.add(s)
+            tried.append(s)
+        print(f"error: source not found: tried: {tried}", file=sys.stderr)
         print(
-            f"hint: create {src} (or run --list to see existing topics)",
+            f"hint: create {proposals_dir / main / f'{sub}.yaml'} "
+            f"(or run --list to see existing topics)",
             file=sys.stderr,
         )
+        return 1
+
+    src_resolved = src.resolve()
+    if proposals_dir not in src_resolved.parents:
+        print(f"error: path traversal blocked ({topic!r})", file=sys.stderr)
         return 1
 
     text = src.read_text(encoding="utf-8")
     try:
         p = parse_proposal_yaml(text)
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, yaml.YAMLError) as e:
         print(f"error: failed to parse {src}: {e}", file=sys.stderr)
         return 1
 
+    # Resolve the bucket for the rendered output.
+    out_bucket = explicit_bucket if explicit_bucket is not None else bucket_for_status(p.status)
+    out_dir = proposals_dir / out_bucket / main
+    out_resolved_check = (out_dir / f"{sub}.html").resolve()
+    if proposals_dir not in out_resolved_check.parents:
+        print(f"error: path traversal blocked ({topic!r})", file=sys.stderr)
+        return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{sub}.html"
+
+    # Status-change workflow: when the YAML lives in a different
+    # bucket than the resolved output bucket, move the YAML too so
+    # YAML and HTML stay co-located after a status advance (PR #756
+    # review). The HTML is about to be written at `out`; we only need
+    # to relocate the YAML if its parent dir != out_dir. Skip when
+    # the source is the same as the output dir (no-op).
+    src_bucket = None
+    for _bucket in (explicit_bucket, *BUCKETS):
+        candidate = proposals_dir / (_bucket or "") / main / f"{sub}.yaml"
+        if candidate == src:
+            src_bucket = _bucket
+            break
+    if src_bucket is not None and src_bucket != out_bucket:
+        new_yaml = out_dir / f"{sub}.yaml"
+        new_yaml.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(new_yaml)
+        # Re-point `src` at the new location so any later references
+        # use the moved YAML.
+        src = new_yaml
+
     # Auto-attach a "back to index" nav bar when a sibling
-    # `00-index.yaml` exists in the same umbrella dir AND the current
-    # page is not the index itself. The renderer is a pure function
-    # (no I/O) so the sibling check lives in the CLI driver, not
-    # `render()`.
+    # `00-index.html` exists in the OUTPUT bucket dir AND the current
+    # page is not the index itself. Wiring only on the output side
+    # avoids dangling links when the source dir has 00-index.yaml but
+    # the sibling HTML was never rendered (PR #756 review). The
+    # renderer is a pure function (no I/O) so the sibling check lives
+    # in the CLI driver, not `render()`.
     back_to_href: Optional[str] = None
     if sub != "00-index":
-        sibling_index = main_dir / "00-index.yaml"
-        if sibling_index.is_file():
+        # Look at the actual rendered HTML on disk; fall back to
+        # writing 00-index.html in the SAME render pass when the
+        # sibling YAML is in the same output bucket dir.
+        if (out_dir / "00-index.html").is_file():
             back_to_href = "00-index.html"
+        elif (out_dir / "00-index.yaml").is_file():
+            # Sibling index YAML exists but hasn't been rendered yet;
+            # render it now so the back-link target resolves.
+            sibling_text = (out_dir / "00-index.yaml").read_text(encoding="utf-8")
+            try:
+                sibling_p = parse_proposal_yaml(sibling_text)
+            except (ValueError, KeyError, yaml.YAMLError) as e:
+                print(
+                    f"warning: 00-index sibling for {sub!r} failed to parse ({e}); "
+                    f"back-link suppressed for this render",
+                    file=sys.stderr,
+                )
+            else:
+                sibling_html = render(sibling_p, back_to_href=None)
+                atomic_write_text(out_dir / "00-index.html", sibling_html)
+                back_to_href = "00-index.html"
 
     html_doc = render(p, back_to_href=back_to_href)
 
     atomic_write_text(out, html_doc)
     size_kb = len(html_doc.encode("utf-8")) / 1024
-    print(f"wrote {out} ({size_kb:.1f} KB, source: {src.relative_to(proposals_dir)})")
+    print(
+        f"wrote {out} ({size_kb:.1f} KB, source: {src.relative_to(proposals_dir)}, "
+        f"bucket: {out_bucket})"
+    )
     return 0
 
 
@@ -1152,16 +1395,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m lib.render_proposal_html",
         description=(
-            "Render docs/proposals/<main>/<sub>.yaml to "
-            "docs/proposals/<main>/<sub>.html"
+            "Render docs/proposals/<bucket>/<main>/<sub>.yaml to "
+            "docs/proposals/<bucket>/<main>/<sub>.html "
+            "(bucket auto-routes from YAML `status:`; legacy "
+            "<main>/<sub> still readable)."
         ),
     )
     parser.add_argument(
         "topic",
         nargs="?",
         help=(
-            "topic slug `<main>/<sub>` (sources: "
-            "docs/proposals/<main>/<sub>.yaml)"
+            "topic slug `<main>/<sub>` (legacy) or "
+            "`<bucket>/<main>/<sub>` (status-routed, where bucket is "
+            "review|accepted|rejected)"
         ),
     )
     parser.add_argument(
@@ -1176,8 +1422,18 @@ def main(argv: list[str] | None = None) -> int:
         "--all", action="store_true",
         help="render every proposal topic and exit",
     )
+    parser.add_argument(
+        "--migrate", action="store_true",
+        help=(
+            "one-shot: move legacy flat `<main>/<sub>.{yaml,html}` "
+            "files into the bucket dir matching each YAML's `status:`"
+        ),
+    )
     args = parser.parse_args(argv)
     root = Path(args.project_root).resolve()
+
+    if args.migrate:
+        return _migrate(root)
 
     if args.list:
         names = _list_proposals(root)
