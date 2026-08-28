@@ -656,14 +656,22 @@ class BackToIndexNavTests(unittest.TestCase):
         self.assertIn('href="a&quot;b.html"', html)
 
     def test_cli_subtopic_with_index_sibling_emits_back_link(self):
-        """The CLI's auto-detect wires the back link when the bucket dir
-        contains both the current sub-topic AND a sibling `00-index.yaml`.
-        With status-routing, draft -> `review/`, so the back-link is
-        wired from `review/<main>/00-index.yaml`."""
+        """The CLI's auto-detect wires the back link when the OUTPUT
+        bucket dir contains both the current sub-topic AND a sibling
+        `00-index.yaml` (the index HTML is auto-rendered in the same
+        pass so the link target resolves — PR #756 dangling-link fix)."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            self._make(root, "main", "00-index")
-            self._make(root, "main", "alpha")
+            # Place both YAMLs in the output bucket dir from the start
+            # so the auto-render path triggers.
+            bucket_dir = root / "docs" / "proposals" / "review" / "main"
+            bucket_dir.mkdir(parents=True, exist_ok=True)
+            (bucket_dir / "00-index.yaml").write_text(
+                "title: T\nstatus: draft\nsections: []\n", encoding="utf-8"
+            )
+            (bucket_dir / "alpha.yaml").write_text(
+                "title: T\nstatus: draft\nsections: []\n", encoding="utf-8"
+            )
             rc = rph._render_one(root, "main/alpha")
             self.assertEqual(rc, 0)
             out = (
@@ -672,6 +680,10 @@ class BackToIndexNavTests(unittest.TestCase):
             self.assertIn('class="back-link"', out)
             self.assertIn('href="00-index.html"', out)
             self.assertIn("← 00-index", out)
+            # Sibling 00-index.html was auto-rendered in the same pass.
+            self.assertTrue(
+                (root / "docs" / "proposals" / "review" / "main" / "00-index.html").is_file()
+            )
 
     def test_cli_index_page_has_no_back_link(self):
         """The 00-index page is the navigation root; it does NOT need
@@ -1269,6 +1281,33 @@ class StatusRoutedRenderTests(unittest.TestCase):
             target = root / "docs" / "proposals" / "review" / "main" / "alpha.html"
             self.assertTrue(target.is_file(), f"missing {target}")
 
+    def test_yaml_moves_with_status_change(self):
+        """Status-change workflow (PR #756 review): re-rendering a
+        YAML whose status changed moves the YAML to the new bucket
+        so YAML and HTML stay co-located. No stale YAML in the old
+        bucket after a re-render."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Place the YAML in `review/` directly with status=accepted
+            # (simulates an operator editing status without moving the
+            # file). Render -> YAML must move to `accepted/`.
+            bucket_dir = root / "docs" / "proposals" / "review" / "main"
+            bucket_dir.mkdir(parents=True, exist_ok=True)
+            (bucket_dir / "alpha.yaml").write_text(
+                "title: T\nstatus: accepted\nsections: []\n", encoding="utf-8"
+            )
+            rc = rph._render_one(root, "main/alpha")
+            self.assertEqual(rc, 0)
+            self.assertTrue(
+                (root / "docs" / "proposals" / "accepted" / "main" / "alpha.yaml").is_file()
+            )
+            self.assertTrue(
+                (root / "docs" / "proposals" / "accepted" / "main" / "alpha.html").is_file()
+            )
+            self.assertFalse(
+                (root / "docs" / "proposals" / "review" / "main" / "alpha.yaml").exists()
+            )
+
     def test_three_level_topic_explicit_bucket_overrides_yaml_status(self):
         """When the user passes `accepted/main/sub`, the YAML's status
         is ignored — the explicit bucket wins. This lets a reviewer
@@ -1340,16 +1379,41 @@ class StatusRoutedListTests(unittest.TestCase):
             )
 
     def test_list_includes_legacy_flat_shape(self):
+        """Legacy flat topics that have NO bucket copy are still listed
+        (backward compat). Topics that DO have a bucket copy are
+        deduped -- the bucket entry wins (PR #756 review)."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self._make_in_bucket(root, "review", "main1", "alpha", "draft")
             self._make_legacy(root, "legacy-main", "legacy-sub")
             topics = rph._list_proposals(root)
+            # Bucket entries come first (buckets scanned before legacy
+            # flat so the dedup collision resolves to the bucket copy).
             self.assertEqual(
                 topics,
                 [
-                    "legacy-main/legacy-sub",
                     "review/main1/alpha",
+                    "legacy-main/legacy-sub",
+                ],
+            )
+
+    def test_list_dedupes_when_same_topic_in_legacy_and_bucket(self):
+        """A (main, sub) that exists in BOTH the legacy flat layout
+        AND a bucket dir must appear exactly once, as the bucket
+        entry -- the legacy is hidden (PR #756 review)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Same (main, sub) under both legacy and bucketed.
+            self._make_in_bucket(root, "accepted", "shared", "topic", "accepted")
+            self._make_legacy(root, "shared", "topic")
+            # Unique legacy entry stays.
+            self._make_legacy(root, "legacy-only", "lonely")
+            topics = rph._list_proposals(root)
+            self.assertEqual(
+                topics,
+                [
+                    "accepted/shared/topic",
+                    "legacy-only/lonely",
                 ],
             )
 

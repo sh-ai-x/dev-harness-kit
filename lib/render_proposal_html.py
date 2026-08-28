@@ -108,6 +108,13 @@ def bucket_for_status(status: str) -> str:
     a routable path rather than crashing the renderer."""
     return STATUS_TO_BUCKET.get(status, "review")
 
+
+# Reserved file stems that previous refactors used as canonical
+# names; they must not surface as a sub-topic slug in any bucket dir
+# or in the legacy flat layout. Hoisted to a single source of truth
+# (CC-8 review) so `_list_proposals` and `_migrate` stay in sync.
+RESERVED_SLUGS = frozenset({"proposal", "index"})
+
 INLINE_CSS = """
 :root {
   color-scheme: light dark;
@@ -1141,24 +1148,14 @@ def _list_proposals(project_root: Path) -> list[str]:
     pdir = project_root / "docs" / "proposals"
     if not pdir.exists():
         return []
-    reserved = {"proposal", "index"}
     slugs: list[str] = []
+    # Dedupe by (main, sub): when a topic exists in BOTH the legacy
+    # flat layout AND a bucket dir, the bucket entry wins (it's the
+    # SSOT after `--migrate`). The legacy entry is hidden to keep
+    # `--all` from rendering the same output twice (PR #756 review).
+    seen_bucketed: set[tuple[str, str]] = set()
 
-    # Legacy flat shape (top-level dirs only -- NOT bucket dirs).
-    for entry in sorted(pdir.iterdir()):
-        if not entry.is_dir():
-            continue
-        if entry.name in BUCKETS:
-            continue
-        for sub_entry in sorted(entry.iterdir()):
-            if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
-                continue
-            sub = sub_entry.name[: -len(".yaml")]
-            if sub in reserved:
-                continue
-            slugs.append(f"{entry.name}/{sub}")
-
-    # Status-routed shape (bucket dirs) -- alphabetical for stable output.
+    # Status-routed shape first -- these win on collision.
     for bucket in sorted(BUCKETS):
         bucket_dir = pdir / bucket
         if not bucket_dir.is_dir():
@@ -1170,9 +1167,28 @@ def _list_proposals(project_root: Path) -> list[str]:
                 if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
                     continue
                 sub = sub_entry.name[: -len(".yaml")]
-                if sub in reserved:
+                if sub in RESERVED_SLUGS:
                     continue
+                seen_bucketed.add((main_dir.name, sub))
                 slugs.append(f"{bucket}/{main_dir.name}/{sub}")
+
+    # Legacy flat shape (top-level dirs only -- NOT bucket dirs).
+    # Only emit a legacy slug if no bucket copy exists for the same
+    # (main, sub) -- the bucket one already won.
+    for entry in sorted(pdir.iterdir()):
+        if not entry.is_dir():
+            continue
+        if entry.name in BUCKETS:
+            continue
+        for sub_entry in sorted(entry.iterdir()):
+            if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
+                continue
+            sub = sub_entry.name[: -len(".yaml")]
+            if sub in RESERVED_SLUGS:
+                continue
+            if (entry.name, sub) in seen_bucketed:
+                continue
+            slugs.append(f"{entry.name}/{sub}")
     return slugs
 
 
@@ -1190,7 +1206,6 @@ def _migrate(project_root: Path) -> int:
     pdir = project_root / "docs" / "proposals"
     if not pdir.exists():
         return 0
-    reserved = {"proposal", "index"}
     moves = 0
     for main_dir in sorted(pdir.iterdir()):
         if not main_dir.is_dir() or main_dir.name in BUCKETS:
@@ -1199,7 +1214,7 @@ def _migrate(project_root: Path) -> int:
             if not sub_entry.name.endswith((".yaml", ".html")):
                 continue
             sub = sub_entry.name.rsplit(".", 1)[0]
-            if sub in reserved:
+            if sub in RESERVED_SLUGS:
                 continue
             yaml_path = main_dir / f"{sub}.yaml"
             if not yaml_path.is_file():
@@ -1251,16 +1266,16 @@ def _render_one(project_root: Path, topic: str) -> int:
     proposals_dir = (project_root / "docs" / "proposals").resolve()
     main_dir = proposals_dir / main
 
-    # Locate the source YAML. Three search roots:
-    #   1. The explicit bucket dir (3-level topics only).
-    #   2. The legacy flat dir (backward compat).
-    #   3. Any bucket dir (auto-detect by scanning).
+    # Locate the source YAML. Bucket candidates are searched FIRST so a
+    # bucketed proposal is the SSOT even when a stale legacy flat copy
+    # also exists for the same (main, sub). The legacy flat is the
+    # fallback for pre-migration repos only (PR #756 review).
     candidate_srcs: list[Path] = []
     if explicit_bucket is not None:
         candidate_srcs.append(proposals_dir / explicit_bucket / main / f"{sub}.yaml")
-    candidate_srcs.append(main_dir / f"{sub}.yaml")
     for bucket in BUCKETS:
         candidate_srcs.append(proposals_dir / bucket / main / f"{sub}.yaml")
+    candidate_srcs.append(main_dir / f"{sub}.yaml")
 
     src: Optional[Path] = None
     for c in candidate_srcs:
@@ -1314,24 +1329,56 @@ def _render_one(project_root: Path, topic: str) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{sub}.html"
 
+    # Status-change workflow: when the YAML lives in a different
+    # bucket than the resolved output bucket, move the YAML too so
+    # YAML and HTML stay co-located after a status advance (PR #756
+    # review). The HTML is about to be written at `out`; we only need
+    # to relocate the YAML if its parent dir != out_dir. Skip when
+    # the source is the same as the output dir (no-op).
+    src_bucket = None
+    for _bucket in (explicit_bucket, *BUCKETS):
+        candidate = proposals_dir / (_bucket or "") / main / f"{sub}.yaml"
+        if candidate == src:
+            src_bucket = _bucket
+            break
+    if src_bucket is not None and src_bucket != out_bucket:
+        new_yaml = out_dir / f"{sub}.yaml"
+        new_yaml.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(new_yaml)
+        # Re-point `src` at the new location so any later references
+        # use the moved YAML.
+        src = new_yaml
+
     # Auto-attach a "back to index" nav bar when a sibling
-    # `00-index.yaml` exists in the SOURCE's umbrella dir AND the
-    # current page is not the index itself. The renderer is a pure
-    # function (no I/O) so the sibling check lives in the CLI driver,
-    # not `render()`.
-    #
-    # We check both (a) the source umbrella dir (so a legacy flat
-    # `<main>/00-index.yaml` still wires the back-link even when the
-    # HTML output is in a bucket dir) and (b) the output bucket dir
-    # (so two co-routed proposals share the same parent for the
-    # back-link anchor).
+    # `00-index.html` exists in the OUTPUT bucket dir AND the current
+    # page is not the index itself. Wiring only on the output side
+    # avoids dangling links when the source dir has 00-index.yaml but
+    # the sibling HTML was never rendered (PR #756 review). The
+    # renderer is a pure function (no I/O) so the sibling check lives
+    # in the CLI driver, not `render()`.
     back_to_href: Optional[str] = None
     if sub != "00-index":
-        source_umbrella = src.parent
-        for candidate in (source_umbrella, out_dir):
-            if (candidate / "00-index.yaml").is_file():
+        # Look at the actual rendered HTML on disk; fall back to
+        # writing 00-index.html in the SAME render pass when the
+        # sibling YAML is in the same output bucket dir.
+        if (out_dir / "00-index.html").is_file():
+            back_to_href = "00-index.html"
+        elif (out_dir / "00-index.yaml").is_file():
+            # Sibling index YAML exists but hasn't been rendered yet;
+            # render it now so the back-link target resolves.
+            sibling_text = (out_dir / "00-index.yaml").read_text(encoding="utf-8")
+            try:
+                sibling_p = parse_proposal_yaml(sibling_text)
+            except (ValueError, KeyError, yaml.YAMLError) as e:
+                print(
+                    f"warning: 00-index sibling for {sub!r} failed to parse ({e}); "
+                    f"back-link suppressed for this render",
+                    file=sys.stderr,
+                )
+            else:
+                sibling_html = render(sibling_p, back_to_href=None)
+                atomic_write_text(out_dir / "00-index.html", sibling_html)
                 back_to_href = "00-index.html"
-                break
 
     html_doc = render(p, back_to_href=back_to_href)
 
