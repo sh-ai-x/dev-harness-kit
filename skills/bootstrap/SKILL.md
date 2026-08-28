@@ -24,9 +24,9 @@ If Y: also runs `lib/ci_setup.py:install_ci_config()` to install the 15 CI workf
 If N (or `--skip-ci`): prints the unavailable-features list below and exits with code 0. CI can be added later via `/dev-kit:ci-setup --force`.
 
 ## Iron Law (no exceptions)
-**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--yes` (skip the prompt, default `Y`), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
+**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 6.6 git-defaults, equivalent to answering `n`), `--yes` (skip the prompt, default `Y`), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
 
-## 7-Step Orchestration (4 auto + 1 prompt + 1 ci-setup + 1 user review)
+## 8-Step Orchestration (4 auto + 1 prompt + 1 ci-setup + 2 git-defaults + 1 user review)
 
 ```
 [1] sanity                -> stdout only (file only with --persist-audit)
@@ -45,6 +45,10 @@ If N (or `--skip-ci`): prints the unavailable-features list below and exits with
        |-- 1.7 lint pass (warnings non-fatal)
        |-- 4 post-install checklist
        | (skip if N; skip verify if --skip-verify)
+[6.5] git-defaults prompt -> "Also configure operator-global git defaults (rebase.autoStash + pull.rebase)? [Y/n]"
+       | (Y default; auto if --yes; skip if --skip-git-defaults)
+[6.6] git-defaults        -> bin/setup-git-defaults.sh (only if Y/--yes; writes ~/.gitconfig)
+       | (idempotent; --check available; --dry-run available; safe to re-run)
 [7] exit -> HOTL review -> next: /dev-kit:build (or /dev-kit:plan for idea -> PRD.md synthesis)
 ```
 
@@ -196,6 +200,41 @@ End state matches the legacy `/dev-kit:bootstrap-full` slash exactly.
 Skips `install_ci_config()`. Prints the unavailable-features list (below) and exits 0. Operators can add CI later via `/dev-kit:ci-setup --force`.
 
 Equivalent to passing `--skip-ci` (no prompt, assume `n`).
+
+## git-defaults prompt (sub-stage 6.5)
+
+After ci-setup (Y/n), the skill prompts:
+
+```
+Also configure operator-global git defaults (rebase.autoStash + pull.rebase)? [Y/n]
+```
+
+### Y branch (default)
+
+Delegates to `bin/setup-git-defaults.sh` — idempotent, reads each key via
+`git config --global --get`, skips if already at the expected value, otherwise
+writes the value and prints `✓ set <key>=<value>`. Safe to re-run; the script
+is the single source of truth for which keys belong in the operator's
+`~/.gitconfig`.
+
+Settings applied (see `SETTINGS=()` in `bin/setup-git-defaults.sh`):
+
+| Key | Value | Why |
+|---|---|---|
+| `rebase.autoStash` | `true` | `git pull --rebase` refuses to start on a dirty tree without it; this is the canonical fix from `git config --global rebase.autoStash true`. |
+| `pull.rebase` | `true` | Makes `git pull` default to rebase so the dev-kit workflow + `hooks/git-guard.sh` behave predictably. |
+
+Operators can preview or re-apply at any time:
+
+```bash
+bin/setup-git-defaults.sh              # apply (idempotent)
+bin/setup-git-defaults.sh --check      # see what's missing
+bin/setup-git-defaults.sh --dry-run    # preview
+```
+
+### n branch
+
+Skips `bin/setup-git-defaults.sh`. Operators can run it manually any time using the commands above. Equivalent to passing `--skip-git-defaults` (no prompt, assume `n`).
 
 ## What is unavailable without ci-setup
 
