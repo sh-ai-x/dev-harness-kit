@@ -14,6 +14,8 @@
 #   bin/review-local.sh --pr N --auto-approve
 #   bin/review-local.sh --pr N --review-only
 #   bin/review-local.sh --pr N --maintenance-only --dry-run
+#   bin/review-local.sh --pr N --injection-only
+#   bin/review-local.sh --pr N --no-injection-scan
 #   bin/review-local.sh --help
 #
 # Flags:
@@ -33,6 +35,17 @@
 #   --review-only         Run only /dev-kit:review (skip security + maintenance).
 #   --security-only       Run only /dev-kit:security.
 #   --maintenance-only    Run only /dev-kit:maintenance.
+#   --injection-only      Run only the deterministic prompt-injection
+#                         pre-gate (skips all three LLM judges). Useful
+#                         as a fast pre-merge sanity check on a fork PR
+#                         before paying the cost of the LLM fan-out.
+#                         Same engine as .github/workflows/review.yml
+#                         `injection_scan` job.
+#   --no-injection-scan    Skip the deterministic pre-gate even when the
+#                         other gates run. Off by default; turn it on
+#                         only for local debugging — the gate is cheap
+#                         and catches hostile PRs before the LLM judges
+#                         are invoked.
 #   --all                 Run all three (default).
 #   --no-touch-probe      Treat every PR as production-touching (skip
 #                         the auto-detect file-path probe) but STILL
@@ -465,6 +478,7 @@ DRY_RUN=0
 RUN_REVIEW=1
 RUN_SECURITY=1
 RUN_MAINTENANCE=1
+RUN_INJECTION_SCAN=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -473,10 +487,12 @@ while [ $# -gt 0 ]; do
     --auto-approve)     AUTO_APPROVE=1; shift ;;
     --no-touch-probe)   TOUCH_PROBE=0; shift ;;
     --dry-run)          DRY_RUN=1; shift ;;
-    --review-only)      RUN_SECURITY=0; RUN_MAINTENANCE=0; shift ;;
-    --security-only)    RUN_REVIEW=0; RUN_MAINTENANCE=0; shift ;;
-    --maintenance-only) RUN_REVIEW=0; RUN_SECURITY=0; shift ;;
-    --all)              RUN_REVIEW=1; RUN_SECURITY=1; RUN_MAINTENANCE=1; shift ;;
+    --review-only)      RUN_SECURITY=0; RUN_MAINTENANCE=0; RUN_INJECTION_SCAN=0; shift ;;
+    --security-only)    RUN_REVIEW=0; RUN_MAINTENANCE=0; RUN_INJECTION_SCAN=0; shift ;;
+    --maintenance-only) RUN_REVIEW=0; RUN_SECURITY=0; RUN_INJECTION_SCAN=0; shift ;;
+    --injection-only)   RUN_REVIEW=0; RUN_SECURITY=0; RUN_MAINTENANCE=0; shift ;;
+    --all)              RUN_REVIEW=1; RUN_SECURITY=1; RUN_MAINTENANCE=1; RUN_INJECTION_SCAN=1; shift ;;
+    --no-injection-scan) RUN_INJECTION_SCAN=0; shift ;;
     -h|--help)          usage; exit 0 ;;
     *)                  die "unknown flag: $1 (try --help)" ;;
   esac
@@ -919,6 +935,35 @@ The summary MUST begin with a single line exactly of the form:
 [ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
 
 # ---------------------------------------------------------------------------
+# 5b. Pre-gate static injection scan (mirrors review.yml `injection_scan`).
+#
+# Runs BEFORE the LLM judges would have, so a hostile PR with Critical
+# markers fails fast (saves the ~3-5 min LLM judge minutes). Same
+# `tools/prompt_injection_scan.py` engine used in GH-Actions; verdict
+# contract:
+#   exit 0 + verdict=Approve        → continue
+#   exit 1 + verdict=Changes*       → soft fail (rank 1, non-blocking)
+#   exit 2 + verdict=Blocked        → hard fail (rank 2, gate fails)
+# ---------------------------------------------------------------------------
+INJECTION_V="Approve"
+if [ "$RUN_INJECTION_SCAN" = "1" ]; then
+  log "running prompt-injection static scan (channel=pr-body+diff)"
+  if [ "$DRY_RUN" = "1" ]; then
+    log "would run: python3 tools/prompt_injection_scan.py --file <pr-diff>"
+  else
+    PR_BODY_LOCAL="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""' 2>/dev/null || echo "")"
+    PR_DIFF_LOCAL="$(gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null || true)"
+    SCAN_RAW="$(printf '%s\n\n%s' "$PR_BODY_LOCAL" "$PR_DIFF_LOCAL" | python3 tools/prompt_injection_scan.py --json 2>/dev/null || echo '{"verdict":"Approve"}')"
+    INJECTION_V="$(printf '%s' "$SCAN_RAW" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict","Approve"))')"
+    log "injection_scan verdict: $INJECTION_V"
+    if [ "$INJECTION_V" = "Blocked" ]; then
+      log "::error::prompt-injection scan flagged the PR as Blocked"
+      die "injection_scan: $INJECTION_V — refusing gate"
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 6. Extract verdicts from captured stdout (mirrors review.yml:220-225).
 # ---------------------------------------------------------------------------
 # Reuses the same helper the workflow shells out to: extracts the LAST
@@ -937,7 +982,7 @@ else
   [ "$RUN_SECURITY" = "1" ]    && SECURITY_V="$(extract_verdict "${SECURITY_OUTPUT:-}")"
   [ "$RUN_MAINTENANCE" = "1" ] && MAINTENANCE_V="$(extract_verdict "${MAINTENANCE_OUTPUT:-}")"
 fi
-log "verdicts: review='${REVIEW_V:-<missing>}' security='${SECURITY_V:-<missing>}' maintenance='${MAINTENANCE_V:-<missing>}'"
+log "verdicts: review='${REVIEW_V:-<missing>}' security='${SECURITY_V:-<missing>}' maintenance='${MAINTENANCE_V:-<missing>}' injection_scan='${INJECTION_V:-<missing>}'"
 
 # ---------------------------------------------------------------------------
 # 7. Combined verdict gate (mirrors review.yml:539-561).
@@ -973,7 +1018,7 @@ fi
 # Worst-of wins across the enabled skills.
 WORST="Approve"
 V_RANK=0
-for V in "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V"; do
+for V in "$REVIEW_V" "$SECURITY_V" "$MAINTENANCE_V" "$INJECTION_V"; do
   R=$(rank "$V")
   if [ "$R" -gt "$V_RANK" ]; then V_RANK="$R"; WORST="$V"; fi
 done
