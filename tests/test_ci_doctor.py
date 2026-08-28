@@ -1233,5 +1233,98 @@ class TestCheckTemplatesCurrent(unittest.TestCase):
                              f"expected SKIP on unknown version; got {rows[0]}")
 
 
+class TestCheckProviderConsistency(unittest.TestCase):
+    """Issue #712: ci-doctor must surface `.env` vs `vars.CI_REVIEW_PROVIDER`
+    drift as a `CI_REVIEW_PROVIDER consistency` row.
+
+    The check is wired into `audit()` after `_check_provider_declared` so
+    the drift probe appears next to the existing provider-declared row.
+    Maps the engine's `(OK, WARN, SKIP)` contract to the
+    `{PASS, WARN, SKIP}` Check state set used by the audit surface.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cd = _load_ci_doctor()
+        cls.ci_setup = _load_ci_setup()
+
+    def _consistency_rows(self, r):
+        return [c for c in r.checks if "CI_REVIEW_PROVIDER consistency" in c.label]
+
+    def _audit_with_consistency(self, status: str, message: str):
+        """Run `audit()` with `check_provider_consistency` mocked.
+
+        The tempdir has no `.env.example`, no workflow files, no marker,
+        no git remote — so the install-shape + provider + secrets checks
+        would all FAIL and pollute `r.ok`. Patch those out so the only
+        check under test is the provider-consistency check.
+        """
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            with patch.object(self.cd, "_check_required_files", return_value=[]):
+                with patch.object(self.cd, "_check_marker_payload", return_value=[]):
+                    with patch.object(self.cd, "_check_provider_declared", return_value=[]):
+                        with patch.object(self.cd, "_check_gh_auth",
+                                          return_value=self.cd.Check("gh auth", "SKIP", "")):
+                            with patch.object(self.cd, "_check_secrets", return_value=[]):
+                                with patch.object(self.cd, "_check_workflow_diagnostics",
+                                                  return_value=[]):
+                                    with patch.object(self.cd, "_check_open_pr", return_value=[]):
+                                        with patch.object(self.cd, "check_provider_consistency",
+                                                          return_value=(status, message)):
+                                            return self.cd.audit(target)
+
+    def test_consistency_row_is_emitted_in_audit(self):
+        """The check is wired into `audit()` — at least one consistency row appears.
+
+        Pre-fix: zero rows; the function exists but is never appended.
+        Post-fix: one row per `audit()` call with the engine's status
+        translated to the Check state set.
+        """
+        r = self._audit_with_consistency("OK", "both unset")
+        rows = self._consistency_rows(r)
+        self.assertEqual(
+            len(rows), 1,
+            f"expected exactly one consistency row; got: "
+            f"{[(c.label, c.state, c.detail) for c in rows]}",
+        )
+
+    def test_ok_status_maps_to_pass_state(self):
+        """Engine `OK` → audit `PASS` (Check state set is {PASS, FAIL, SKIP, INFO, WARN})."""
+        r = self._audit_with_consistency("OK", "both unset")
+        rows = self._consistency_rows(r)
+        self.assertEqual(rows[0].state, "PASS",
+                         f"OK must map to PASS; got {rows[0]}")
+        self.assertIn("unset", rows[0].detail)
+
+    def test_warn_status_preserved(self):
+        """Engine `WARN` → audit `WARN` (drift is advisory, never flips verdict)."""
+        r = self._audit_with_consistency(
+            "WARN",
+            "local .env=CI_REVIEW_PROVIDER=anthropic but vars.CI_REVIEW_PROVIDER=minimax; "
+            "sync with `gh variable set CI_REVIEW_PROVIDER --body anthropic`",
+        )
+        rows = self._consistency_rows(r)
+        self.assertEqual(rows[0].state, "WARN",
+                         f"WARN must map to WARN; got {rows[0]}")
+        self.assertIn("anthropic", rows[0].detail)
+        self.assertIn("minimax", rows[0].detail)
+        self.assertIn("gh variable set", rows[0].detail)
+        # WARN must not flip `r.ok` — same contract as the other WARN rows.
+        self.assertTrue(r.ok, "WARN row must not flip the audit verdict")
+
+    def test_skip_status_preserved(self):
+        """Engine `SKIP` → audit `SKIP` (gh absent / unauth is honest can't-verify)."""
+        r = self._audit_with_consistency("SKIP", "gh not on PATH")
+        rows = self._consistency_rows(r)
+        self.assertEqual(rows[0].state, "SKIP",
+                         f"SKIP must map to SKIP; got {rows[0]}")
+        self.assertIn("gh", rows[0].detail)
+        # SKIP must not flip `r.ok`.
+        self.assertTrue(r.ok, "SKIP row must not flip the audit verdict")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

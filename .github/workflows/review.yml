@@ -159,6 +159,52 @@ jobs:
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
     steps:
+      # TOCTOU hardening: capture PR_HEAD_SHA at JOB START, before
+      # `actions/checkout` even — `pr_meta` does not depend on the
+      # checkout and the tighter the start-time window, the smaller
+      # the residual race. A PR author who pushes between judge
+      # completion and audit posting would otherwise transfer the
+      # Approve to an unjudged commit (the dispatched-run `headSha`
+      # also points at run-start but is unreliable for fork-PR
+      # `--ref main` runs). The captured value flows into
+      # post-verdict-audit below; empty value is intentional and
+      # G3 treats it as STALE (M1 fix).
+      #
+      # 3-attempt retry absorbs transient `gh pr view` failures
+      # (rate-limit, network blip) at near-zero cost; an exhausted
+      # retry falls through to `head_sha=` empty and the M1 STALE
+      # branch takes over.
+      - name: Capture PR head SHA at run-start (TOCTOU hardening)
+        id: pr_meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
+          head_sha=""
+          last_stderr=""
+          for attempt in 1 2 3; do
+            # Capture stderr so transient rate-limit (benign) and
+            # auth-token failure (security-relevant) are distinguishable
+            # in the run log. First line of stderr is appended to the
+            # ::warning:: with secrets masked by the GH-Actions runner.
+            last_stderr="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>&1 >/dev/null || true)"
+            head_sha="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>/dev/null || true)"
+            if [ -n "$head_sha" ]; then
+              break
+            fi
+            err_first="$(printf '%s' "$last_stderr" | head -1 || true)"
+            echo "::warning::pr_meta attempt $attempt failed; retrying in 5s (stderr: ${err_first:-<empty>})"
+            sleep 5
+          done
+          if [ -z "$head_sha" ]; then
+            # Loud terminal signal so a degraded capture shows red on
+            # the pr_meta step itself, not only as a downstream G3 STALE.
+            err_first="$(printf '%s' "$last_stderr" | head -1 || true)"
+            echo "::error::pr_meta: 3-attempt retry exhausted; head_sha= empty (stderr: ${err_first:-<empty>}). Downstream G3 will STALE this audit."
+          fi
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
@@ -343,13 +389,24 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "review_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
-          audit_body="$(python3 -m lib.maintenance_gate --format-audit \
-            --run "${{ github.run_id }}" \
-            --job review \
-            --status "${{ job.status }}" \
-            --verdict "${verdict:-MISSING}" \
-            --source lib.maintenance_gate)"
-          gh pr comment "$PR_NUMBER" --body "$audit_body"
+          # PR_HEAD_SHA is captured at job-start by the `pr_meta` step
+          # above (NOT fetched here) to close the TOCTOU that would
+          # transfer an Approve to an unjudged commit pushed between
+          # judge completion and audit posting. Audit-shell logic
+          # lives in the composite action so all three judge jobs
+          # share one source of truth; the empty-but-present value
+          # is intentional and G3 distinguishes it from absent.
+      - name: Post verdict audit comment
+        if: always()
+        uses: ./.github/actions/post-verdict-audit
+        with:
+          pr_number: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          run_id: ${{ github.run_id }}
+          job: review
+          status: ${{ job.status }}
+          verdict: ${{ steps.extract_verdict.outputs.verdict }}
+          head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   security:
     name: /dev-kit:security (10-dim OWASP)
@@ -376,6 +433,42 @@ jobs:
     env:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
     steps:
+      # TOCTOU hardening: capture PR_HEAD_SHA at JOB START, before
+      # `actions/checkout` even — `pr_meta` does not depend on the
+      # checkout and the tighter the start-time window, the smaller
+      # the residual race. See the matching block in the `review:`
+      # job above for the full rationale and retry policy.
+      - name: Capture PR head SHA at run-start (TOCTOU hardening)
+        id: pr_meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
+          head_sha=""
+          last_stderr=""
+          for attempt in 1 2 3; do
+            # Capture stderr so transient rate-limit (benign) and
+            # auth-token failure (security-relevant) are distinguishable
+            # in the run log. First line of stderr is appended to the
+            # ::warning:: with secrets masked by the GH-Actions runner.
+            last_stderr="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>&1 >/dev/null || true)"
+            head_sha="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid // ""' 2>/dev/null || true)"
+            if [ -n "$head_sha" ]; then
+              break
+            fi
+            err_first="$(printf '%s' "$last_stderr" | head -1 || true)"
+            echo "::warning::pr_meta attempt $attempt failed; retrying in 5s (stderr: ${err_first:-<empty>})"
+            sleep 5
+          done
+          if [ -z "$head_sha" ]; then
+            # Loud terminal signal so a degraded capture shows red on
+            # the pr_meta step itself, not only as a downstream G3 STALE.
+            err_first="$(printf '%s' "$last_stderr" | head -1 || true)"
+            echo "::error::pr_meta: 3-attempt retry exhausted; head_sha= empty (stderr: ${err_first:-<empty>}). Downstream G3 will STALE this audit."
+          fi
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
@@ -547,13 +640,21 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "security_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
-          audit_body="$(python3 -m lib.maintenance_gate --format-audit \
-            --run "${{ github.run_id }}" \
-            --job security \
-            --status "${{ job.status }}" \
-            --verdict "${verdict:-MISSING}" \
-            --source lib.maintenance_gate)"
-          gh pr comment "$PR_NUMBER" --body "$audit_body"
+          # PR_HEAD_SHA is captured at job-start by the `pr_meta`
+          # step above (NOT fetched here) to close the TOCTOU. Audit
+          # posting flows through the composite action so all three
+          # judge jobs share one shell.
+      - name: Post verdict audit comment
+        if: always()
+        uses: ./.github/actions/post-verdict-audit
+        with:
+          pr_number: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          run_id: ${{ github.run_id }}
+          job: security
+          status: ${{ job.status }}
+          verdict: ${{ steps.extract_verdict.outputs.verdict }}
+          head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   gate:
     name: severity gate (review + security)

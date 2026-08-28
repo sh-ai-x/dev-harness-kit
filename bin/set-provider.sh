@@ -17,6 +17,8 @@
 #   bin/set-provider.sh anthropic --dry-run      # show what would change
 #   bin/set-provider.sh --show                   # alias for no-arg form
 #   bin/set-provider.sh --help
+#   bin/set-provider.sh --check-extensibility    # list files to touch to
+#                                               #   add a new provider
 #
 # Allowlist: minimax, anthropic, deepseek (must match the choice list
 # declared in .github/workflows/review.yml -> workflow_dispatch.inputs).
@@ -29,6 +31,20 @@
 # And the matching CI_REVIEW_PROVIDER repo variable so the workflow
 # knows which secret to read:
 #   gh variable set CI_REVIEW_PROVIDER --body "<provider>"
+#
+# TO ADD A NEW PROVIDER (e.g. `openai`) — five touchpoints:
+#   1. bin/set-provider.sh — append `openai` to ALLOWLIST=() near the top.
+#   2. bin/set-provider.sh — add a `openai)` arm to the `case` block that
+#      prints `gh secret set OPENAI_API_KEY --body '<value>'`.
+#   3. .github/workflows/review.yml — extend the
+#      `workflow_dispatch.inputs.review_provider.options:` list to include
+#      `openai` (this is the choice list the manual dispatch UI shows).
+#   4. .env.example — document the new `<NAME>_API_KEY=<value>` line and
+#      add `openai` to the inline allowlist comment.
+#   5. Run `bin/set-provider.sh --check-extensibility` for a live diff
+#      of the files + line numbers an operator must touch today. This
+#      is the fastest way to see what drifted since this list was
+#      written; do not rely on these bullets alone.
 
 set -euo pipefail
 
@@ -38,6 +54,75 @@ PROVIDER_KEY="CI_REVIEW_PROVIDER"
 ALLOWLIST=(minimax anthropic deepseek)
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# Print the live list of files + line numbers an operator must touch to
+# onboard a new provider. Stable (no timestamps / no random IDs) so the
+# output is safe to diff in regression tests. Uses `grep -n` against
+# this script + the workflow so the answers do not go stale when the
+# comment block above is hand-edited.
+check_extensibility() {
+  local script_path review_yml env_example
+  script_path="bin/set-provider.sh"
+  review_yml=".github/workflows/review.yml"
+  env_example=".env.example"
+
+  local allowlist_line case_start case_end choices_line env_key_line
+  allowlist_line="$(grep -n '^ALLOWLIST=' "$script_path" | head -1 | cut -d: -f1)"
+  case_start="$(grep -n '^case "\$NEW" in' "$script_path" | head -1 | cut -d: -f1)"
+  case_end="$(grep -n '^esac' "$script_path" | tail -1 | cut -d: -f1)"
+  # Anchor on the editable `options:` block (line 59 in review.yml). The
+  # previous two-step grep fell back to a prose comment when the literal
+  # `'workflow_dispatch.inputs.review_provider'` had no match, leaving an
+  # operator stranded on `review.yml:28`. Anchor on the line shape itself.
+  choices_line="$(grep -n '^[[:space:]]*options:' "$review_yml" | head -1 | cut -d: -f1)"
+  # Anchor on the assignment line (`CI_REVIEW_PROVIDER=minimax`), not the
+  # prose comment at `.env.example:25`. Same rationale as choices_line.
+  env_key_line="$(grep -n '^CI_REVIEW_PROVIDER=' "$env_example" | head -1 | cut -d: -f1)"
+
+  echo "Extensibility checklist for adding a new provider"
+  echo "================================================="
+  echo
+  echo "Current ALLOWLIST (line ${allowlist_line:-?}) in ${script_path}:"
+  echo "    ${ALLOWLIST[*]}"
+  echo
+  echo "Files an operator must edit (with current line numbers):"
+  echo "  1. ${script_path}:${allowlist_line:-?}    # ALLOWLIST=(...)  — append the new name."
+  echo "  2. ${script_path}:${case_start:-?}-${case_end:-?}  # case \"\$NEW\" in … esac  — add a <name>) arm printing 'gh secret set <NAME>_API_KEY --body <value>'."
+  echo "  3. ${review_yml}:${choices_line:-?}      # workflow_dispatch.inputs.review_provider.options  — extend the choice list."
+  echo "  4. ${env_example}:${env_key_line:-?}     # CI_REVIEW_PROVIDER + the matching <NAME>_API_KEY line."
+  echo
+  echo "After editing, run:"
+  echo "  gh secret set <NAME>_API_KEY --body '<value>'   # CI-only secret"
+  echo "  gh variable set CI_REVIEW_PROVIDER --body '<name>'  # so the workflow picks the right secret"
+  echo
+  echo "Recipe reference: bin/set-provider.sh --help  (TO ADD A NEW PROVIDER section)"
+
+  # Drift audit (PR #725, issue #714 follow-up): parse ALLOWLIST and the
+  # `case "$NEW" in` arms at runtime and report whether the two lists
+  # agree. Same grep -n / sort pipeline that the original recipe used;
+  # never hard-codes line numbers, so reordering the file never makes
+  # this verdict stale. Pinned by tests/test_set_provider.py::T15.
+  local allowlist_parsed case_arms_parsed
+  allowlist_parsed=$(grep -E '^ALLOWLIST=\(' "$script_path" \
+                     | sed -E 's/^ALLOWLIST=\((.*)\).*/\1/' \
+                     | tr ' ' '\n' | grep -v '^$' | sort)
+  case_arms_parsed=$(sed -nE '/^case "\$NEW" in$/,/^esac$/p' "$script_path" \
+                     | sed -nE 's/^[[:space:]]+([a-zA-Z0-9_-]+)\).*/\1/p' \
+                     | sort)
+  echo
+  echo "=== ALLOWLIST (${script_path}:${allowlist_line}) ==="
+  if [ -n "$allowlist_parsed" ]; then printf '%s\n' $allowlist_parsed; fi
+  echo
+  echo "=== case arms (${script_path}:${case_start}) ==="
+  if [ -n "$case_arms_parsed" ]; then printf '%s\n' $case_arms_parsed; fi
+  echo
+  if [ "$allowlist_parsed" = "$case_arms_parsed" ]; then
+    echo "OK: ALLOWLIST and case arms are in sync."
+  else
+    echo "DRIFT: ALLOWLIST and case arms disagree:"
+    diff <(printf '%s\n' $allowlist_parsed) <(printf '%s\n' $case_arms_parsed) || true
+  fi
+}
 
 show_help() {
   sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
@@ -57,25 +142,14 @@ is_allowed() {
 
 # Read CI_REVIEW_PROVIDER from .env (last occurrence wins; comments and
 # blanks ignored). Echoes the value, or empty string when unset.
-# Strips surrounding single/double quotes from the value to match
-# `lib/ci_setup._read_env_key()` so the two sides agree on quoted inputs.
+# Delegates to `lib/read_env_key.read_env_key` (issue #711) so the bash
+# and Python sides cannot drift on quoting / `export` prefix / CRLF
+# edge cases. The helper's full rules are pinned by
+# tests/test_read_env_key.py; the previous in-bash parser was deleted.
 read_provider_from_env_file() {
-  local f="$1" line key val last=""
+  local f="$1"
   [ -f "$f" ] || return 0
-  while IFS= read -r line; do
-    case "$line" in
-      "#"*|"") continue ;;
-    esac
-    key="${line%%=*}"
-    val="${line#*=}"
-    if [ "$key" = "$PROVIDER_KEY" ]; then
-      last="${val%\"}"
-      last="${last#\"}"
-      last="${last%\'}"
-      last="${last#\'}"
-    fi
-  done < "$f"
-  printf '%s' "$last"
+  python3 -c "from lib.read_env_key import read_env_key; from pathlib import Path; import sys; print(read_env_key(Path(sys.argv[1]), sys.argv[2]), end='')" "$f" "$PROVIDER_KEY"
 }
 
 # Echo the current effective provider: process env → .env → .env.example
@@ -159,6 +233,7 @@ if [ $# -eq 0 ]; then
 else
   case "$1" in
     -h|--help) show_help; exit 0 ;;
+    --check-extensibility) check_extensibility; exit 0 ;;
     --show)    SHOW_ONLY=1 ;;
     --dry-run) DRY_RUN=1; PROVIDER_ARG="${2:-}"; [ -n "$PROVIDER_ARG" ] || die "--dry-run requires a provider name" ;;
     -*)        die "unknown flag: $1 (try --help)" ;;

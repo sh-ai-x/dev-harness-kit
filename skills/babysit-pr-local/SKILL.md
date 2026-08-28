@@ -260,7 +260,7 @@ blocker list, exit 1. Never silently retry past the cap.
 | 4 (WAIT) | sleep 30s for CI | same sleep 30s for deterministic CI |
 | 4L (NEW) | n/a | `bin/babysit-pr-local.sh --pr N` → `bin/review-local.sh --pr N` |
 | 5 (FETCH LOGS) | for failing CI checks | identical (deterministic CI still runs) |
-| 7.5 (LOCAL VERIFY) | `--local-verify` opt-in, default OFF | always ON; default `pytest -q` |
+| 7.5 (LOCAL VERIFY) | n/a (no broad pre-push gate) | always ON; default `pytest -q` |
 | 11 (LOG) | `source=babysit-pr` | `source=babysit-pr-local mode=local review=<verdict>` |
 | 12 (SLEEP) | `gh pr checks --watch` / 20s | 20s only (no `--watch`) |
 
@@ -352,6 +352,34 @@ the disambiguator).
 
 A claim of "fixed" without the `local:` + `audit:` + `combine:` lines
 violates MUST-L3.
+
+## Visual status surface
+
+`bin/babysit-pr-local-status.py` is a read-only SSOT script that prints
+one ANSI line summarizing the current branch's PR gate state. It
+exposes that line to three render points from a single source:
+
+| Render point | How to enable |
+|---|---|
+| **Claude Code status bar** | Extend `bin/dev-kit-hooks-status.py`'s `status()` dict with a `pr_gate` key that shells out to this script. The existing user-level `~/.claude/statusline-command.sh` (already wired at `~/.claude/settings.json`) can then pick up the third line via `jq -r '.pr_gate'`. |
+| **Codex TUI footer** | Paste the following into `~/.codex/config.toml`:<br>`[tui.status_line]`<br>`type = "command"`<br>`command = "/Users/sanghee/dev/dev-harness-kit/bin/babysit-pr-local-status.py"` |
+| **Babysitter tail** | Append one line of `python3 bin/babysit-pr-local-status.py` after the per-iteration `LOG` block above (after step 11). The same line that the statusLine surfaces. |
+
+Example output:
+
+```
+PR#605 feat/foo │ review=✓ sec=✓ maint=✗ │ CI 3✓ 1✗ │ babysit iter=4
+```
+
+Glyphs: `✓` green (pass), `✗` red/yellow (fail/blocked/changes-requested),
+`·` yellow (pending), `?` dim (gh unavailable / parse error). The script
+exits 0 unconditionally and degrades every `gh` call to `?` glyphs on
+1s timeout — a broken status line is worse than no status line.
+
+The audit-comment parser handles space-in-value (e.g.
+`verdict=Changes Requested`) by walking known-key positions and slicing
+between them; the byte-stable line-1 shape is owned by
+`lib/maintenance_gate.py`'s `format_audit()`.
 
 ---
 

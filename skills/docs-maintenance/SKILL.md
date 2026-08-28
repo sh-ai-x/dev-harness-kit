@@ -45,7 +45,12 @@ Check both directions: every documented path/command/feature must exist (false-p
 
 - Open the project `README.md` (or whichever README the repo uses) and read it end-to-end before touching anything else. Every claim in it is a candidate for the validation pass in step 4.
 - Read the documentation index files, relevant rules, manifests, and the scripts the README names.
-- For staleness, rely on `tools/check_doc_lifecycle.py` (CI). The `rg`/`git log` heuristic that used to live here now lives only in the proposal that introduced the gate; this skill is the audit, not the staleness sniff.
+- Run the **time-staleness** gate (`tools/check_doc_lifecycle.py`) — the CI-blocking check that fails on `stale_after < today` for any rules/*.md. This is the calendar-clock half of staleness only.
+- Run the **content-staleness** sweep on top of it — these are NOT replacements for the time-staleness gate; they are the complementary half that the gate cannot express:
+  - `rg --no-heading -n 'INTEGRATION\.md|AX\.md|feat-remove|/dev-kit:report|/dev-kit:issue-create'` over `**/*.md` — flags references to deleted files, deprecated slashes, and superseded skills. Anything that hits is a false-positive candidate and must be resolved or marked historical.
+  - `rg --no-heading -n '\b[A-Z]{2,}_[A-Z_]+\b' docs/ README*.md` (excluding code fences) — flags env-var and CLI-token references; cross-check each against the current `tools/*.py` and `hooks/*.sh` for whether the symbol still exists.
+  - `git log --oneline --since='6 months ago' -- docs/ rules/ skills/` — surfaces renamed, moved, or deleted files. Any path that was renamed/moved/deleted in that window and still appears in prose is a stale-link candidate.
+  - `git diff --stat <previous-release-tag>..HEAD -- docs/ skills/` — gives the actual churn so the audit can prioritize the high-traffic files.
 
 ### 2. Classify before changing
 

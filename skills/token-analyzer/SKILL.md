@@ -59,11 +59,11 @@ slash commands.
 
    ```
    [ok] sessions=14  files_scanned=14  total_cost=$1.23  estimated_savings=$0.01  stale_cost=$0.00  transcripts=14
-   Open: ./token-dashboard-dev-harness-kit-30d.html
+   Open: ./docs/observability/dashboard-dev-harness-kit-30d.html
    ```
 
    The `transcripts=N` field counts the per-session sidecar pages written
-   under `./token-dashboard-dev-harness-kit-30d.assets/<worktree>/`. The
+   under `./docs/observability/dashboard-dev-harness-kit-30d.assets/<worktree>/`. The
    dashboard links them from its **Transcript Index** section via relative
    `<a href>`, so keep the `.assets/` dir next to the `.html` when sharing.
    Do not try to read the HTML back into the conversation -- it is a
@@ -83,7 +83,7 @@ The CLI accepts:
 | `--days <n>` | `30` | Look-back window |
 | `--logs-dir <path>` | `./logs` | Root for `claude-code/` + `codex/` subdirs (recursively walked) |
 | `--branch <name>` | _(all)_ | Filter to a single branch (case-insensitive substring on `gitBranch`). Empty = no filter. |
-| `--out <path>` | `token-dashboard-<repo>-<days>d.html` | Output HTML path (sidecars land in `<out-stem>.assets/`) |
+| `--out <path>` | `docs/observability/dashboard-<repo>-<days>d.html` | Output HTML path (sidecars land in `<out-stem>.assets/`) |
 | `--transcripts` / `--no-transcripts` | `--transcripts` (on) | Write per-session full-transcript sidecar pages under `<out>.assets/` and link them from the Transcript Index. `--no-transcripts` = index-only, inert Open cells |
 | `--cost-gate-tokens <int>` | `200000` | Per-session `input + cache_read` gate; sessions over this trigger stderr WARN |
 | `--cost-gate-usd <float>` | `5.00` | Per-session USD gate; sessions over this trigger stderr WARN |
@@ -96,7 +96,7 @@ before running.
 
 ## Output
 
-One HTML file (default name `token-dashboard-<repo>-30d.html`).
+One HTML file (default name `docs/observability/dashboard-<repo>-30d.html`).
 Self-contained: inline `<style>`, no `<script>`, no external assets.
 Dark-mode aware. Safe to email, archive, or open from `file://`.
 Both `claude-code` and `codex` CLI transcripts are first-class sources;
@@ -255,4 +255,4 @@ PR pipeline can block on it.
 - `/dev-kit:log` -- captures the input this skill consumes
 
 Next: open the output HTML in a browser, or share the relative file path
-(e.g. `./token-dashboard-<repo>-30d.html`, never absolute) with the user.
+(e.g. `./docs/observability/dashboard-<repo>-30d.html`, never absolute) with the user.

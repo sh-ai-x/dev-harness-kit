@@ -1434,7 +1434,7 @@ class TestWorktreeAwareness(unittest.TestCase):
                     "--logs-dir", str(td_path / "logs"),
                 ])
             self.assertEqual(rc, 0)
-            html_path = Path("token-dashboard-dev-harness-kit-3650d.html")
+            html_path = Path("docs/observability/dashboard-dev-harness-kit-3650d.html")
             try:
                 src = html_path.read_text()
                 self.assertIn("Cost by Worktree", src)
@@ -2027,6 +2027,99 @@ class TestWorktreeStaleness(unittest.TestCase):
         self.assertEqual(len(short_head_calls), 5, f"per-dir short HEAD: {short_head_calls}")
         self.assertEqual(len(head_full_calls), 5, f"per-dir full HEAD: {head_full_calls}")
         self.assertEqual(len(log_calls), 5, f"per-dir log: {log_calls}")
+
+    def test_classify_all_worktrees_runs_per_dir_probes_concurrently(self):
+        """Issue #728: ``classify_all_worktrees`` previously iterated
+        worktree dirs sequentially, so each ``git`` subprocess added its
+        full latency to wall time. On a checkout with ~1500 dirs that
+        single-handedly pushed the analyzer past 20 minutes of wall
+        time even though every per-dir probe is independent. The fix
+        fans out per-dir classification across a bounded thread pool;
+        the two repo-wide probes (worktree list, origin/main SHA) stay
+        hoisted as before.
+
+        This test pins two contracts:
+
+        1. The number of probes issued is unchanged from the sequential
+           baseline (no extra round-trips introduced by parallelism).
+        2. The probes run with a measured concurrency > 1, i.e. at
+           least two git subprocess invocations overlap in wall time.
+        """
+        import subprocess
+        import threading
+        import time
+
+        from token_efficiency_analyzer import classify_all_worktrees
+
+        with tempfile.TemporaryDirectory(prefix="wt-parallel-") as td:
+            root = Path(td)
+            # 8 dirs is enough to expose concurrency without making the
+            # test slow; each dir sleeps a known amount inside its
+            # per-dir probes so we can count overlapping callers.
+            for n in range(8):
+                (root / ".worktrees" / f"feat-{n}").mkdir(parents=True)
+
+            porcelain = (
+                f"worktree {root / 'main-checkout'}\n"
+                f"HEAD 0000000000000000000000000000000000000000\n"
+                f"branch refs/heads/main\n"
+            )
+            in_flight = 0
+            peak_in_flight = 0
+            lock = threading.Lock()
+            call_log: list[str] = []
+
+            def fake_run(args, **_kwargs):
+                nonlocal in_flight, peak_in_flight
+                cmd = " ".join(str(a) for a in args)
+                call_log.append(cmd)
+                if "worktree list --porcelain" in cmd:
+                    return subprocess.CompletedProcess(args, 0, stdout=porcelain, stderr="")
+                if "rev-parse origin/main" in cmd:
+                    return subprocess.CompletedProcess(
+                        args, 0, stdout="feedface" * 8, stderr="",
+                    )
+                if "rev-parse --short HEAD" in cmd:
+                    pass  # fall through to per-dir timing path
+                elif "rev-parse HEAD" in cmd and "origin/main" not in cmd:
+                    pass
+                elif "log origin/main..HEAD" in cmd:
+                    pass
+                else:
+                    return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+                with lock:
+                    in_flight += 1
+                    peak_in_flight = max(peak_in_flight, in_flight)
+                # Hold each per-dir probe long enough that even a slow
+                # CI runner overlaps at least 2 callers when fanned out.
+                time.sleep(0.05)
+                with lock:
+                    in_flight -= 1
+                if "rev-parse --short HEAD" in cmd:
+                    return subprocess.CompletedProcess(args, 0, stdout="abc1234", stderr="")
+                return subprocess.CompletedProcess(args, 0, stdout="feedface" * 8, stderr="")
+
+            meta = classify_all_worktrees(root, git_runner=fake_run)
+
+        self.assertEqual(len(meta), 1 + 8)  # sentinel + 8 dirs
+        # Repo-wide probes still hoisted (Issue #timeout-sweep contract).
+        self.assertEqual(
+            sum(1 for c in call_log if "worktree list --porcelain" in c), 1,
+        )
+        self.assertEqual(
+            sum(1 for c in call_log if "rev-parse origin/main" in c), 1,
+        )
+        # Per-dir probes still issued exactly once per dir.
+        self.assertEqual(
+            sum(1 for c in call_log if "rev-parse --short HEAD" in c), 8,
+        )
+        # At least 2 per-dir probes must overlap. Sequential execution
+        # would keep peak_in_flight at 1.
+        self.assertGreaterEqual(
+            peak_in_flight, 2,
+            f"expected concurrent per-dir probes (peak={peak_in_flight}); "
+            f"did classify_all_worktrees fall back to sequential mode?",
+        )
 
     def test_classify_worktree_dir_swallows_timeout(self):
         """Issue #timeout-sweep: a single slow / hung worktree must not

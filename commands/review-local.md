@@ -90,5 +90,5 @@ bin/review-local.sh --pr 123 --review-only
 - `lib/ci_setup.py` — provider resolution + secret name lookup.
 - `bin/set-provider.sh` — local provider switch.
 - `.github/workflows/review.yml` — the GH-Actions equivalent (unchanged).
-- `docs/local-ci.md` — full local-CI playbook (including `--local-verify`
-  on `/dev-kit:babysit-pr`).
+- `docs/local-ci.md` — full local-CI playbook (including the pre-push test gate
+  on `/dev-kit:babysit-pr-local`).

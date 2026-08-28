@@ -96,7 +96,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 
 | Skill | Alpha | Summary |
 |---|---|---|
-| [`proposal`](proposal.md) | `state` | Renders `docs/proposals/<main>/<sub>.yaml` to a self-contained review HTML. |
+| [`proposal`](proposal.md) | `state` | Renders `docs/proposals/<bucket>/<main>/<sub>.yaml` (status auto-routed from YAML `status:`) to a self-contained review HTML. |
 | [`evidence-plan`](evidence-plan.md) | `state` | Idea → cited research → HTML proposal (human confirms) → `/dev-kit:plan` hand-off, before the expensive 5-gate PRD work runs. |
 | [`interview`](interview.md) | `enforcement` | 5-field safety-contract interview that gates plan emission. |
 | [`research`](research.md) | `enforcement` | 0-arg research gate: cache/direct/multi/human escalation + citation enforcement. |

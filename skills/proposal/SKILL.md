@@ -1,7 +1,7 @@
 ---
 name: proposal
 category: design
-description: 0-arg HTML renderer for design proposals / plans. Renders any docs/proposals/<main>/<sub>.yaml to docs/proposals/<main>/<sub>.html for pre-implementation review, with structured before / after + pros / cons / limitations analysis.
+description: 0-arg HTML renderer for design proposals / plans. Renders any docs/proposals/<bucket>/<main>/<sub>.yaml (status auto-routed from YAML `status:`) to a self-contained HTML doc for pre-implementation review, with structured before / after + pros / cons / limitations analysis.
 alpha: state
 when_to_use: |
   - User types /dev-kit:proposal
@@ -17,13 +17,31 @@ user-invocable: true
 
 # /dev-kit:proposal -- design proposal HTML viewer
 
-Renders any `docs/proposals/<main>/<sub>.yaml` to a single self-contained
-HTML document at `docs/proposals/<main>/<sub>.html`. The skill is
-generic across proposals; the MCP harness content (issue #280) is one example
-input, not the skill's purpose.
+Renders any proposal YAML to a single self-contained HTML document.
+The skill is generic across proposals; the MCP harness content
+(issue #280) is one example input, not the skill's purpose.
 
-**Layout invariant**: every proposal lives at
-`docs/proposals/<main>/<sub>.{yaml,html}`.
+**Status-routed layout invariant** (default for new renders): every
+proposal lives at `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}`
+where `<bucket>` is one of `review`, `accepted`, `rejected`. The bucket
+is auto-routed from the YAML's `status:` field via `STATUS_TO_BUCKET`:
+
+      draft               -> review
+      design-discussion   -> review
+      ready-for-review    -> review
+      accepted            -> accepted
+      rejected            -> rejected
+      superseded          -> rejected
+
+Unknown statuses fall back to `review` so a typo in the YAML still
+produces a routable path. Pass `<bucket>/<main>/<sub>` explicitly to
+override (e.g. `accepted/main/sub` forces `accepted/` regardless of
+the YAML's `status:`).
+
+**Legacy flat layout** (`docs/proposals/<main>/<sub>.{yaml,html}` --
+no bucket prefix) is read-only supported: `--list` scans both shapes
+and `--migrate` moves legacy files into the bucket each YAML declares.
+New writes always go to the status-routed shape.
 
 - `<main>` is the umbrella (e.g. `harness-architecture` -- one umbrella
   groups N related sub-proposals; for issue #280 the umbrella holds 12
@@ -33,9 +51,9 @@ input, not the skill's purpose.
   sub-topic -- not `index.{yaml,html}` -- so the leaf is recognisable
   on a flat directory listing and from a static-site host.
 
-Cross-references from the 00-index page (`<main>/00-index.html`) to a
-sibling are bare `<sub>.html` (no `../` needed, because all files live
-in the same `<main>/` directory and resolve as siblings under `file://`
+Cross-references from the 00-index page to a sibling are bare
+`<sub>.html` (no `../` needed, because all files live in the same
+`<bucket>/<main>/` directory and resolve as siblings under `file://`
 and on any static-site host). The relative-path safety check
 specifically allows bare relative paths and `../<sibling>.html` for
 cross-document links; the dangerous schemes (`javascript:`, `data:`,
@@ -44,13 +62,13 @@ cross-document links; the dangerous schemes (`javascript:`, `data:`,
 **Back-to-index nav**: the renderer's CLI auto-attaches a
 `<nav class="back-link">` element at the top of every non-index
 sub-topic page (rendered as `← 00-index` linking to `00-index.html`)
-when a sibling `00-index.yaml` exists in the same umbrella dir. The
-00-index page itself gets no back link (it IS the index). The pure
-function `render()` takes optional `back_to_href=` and
-`back_to_label=` kwargs; the CLI driver wires them based on the
-filesystem sibling check.
+when a sibling `00-index.yaml` exists in either the source umbrella
+dir or the output bucket dir. The 00-index page itself gets no back
+link (it IS the index). The pure function `render()` takes optional
+`back_to_href=` and `back_to_label=` kwargs; the CLI driver wires
+them based on the filesystem sibling check.
 
-**Why a separate skill, not a flag on `/dev-kit:report` or `/dev-kit:plan`**: the
+**Why a separate skill, not a flag on `/dev-kit:plan`**: the
 user has to remember the flag and slash autocomplete does not surface flags.
 Proposals are a distinct artifact (pre-implementation plans) with a distinct
 lifecycle (designed → reviewed → accepted/rejected → implemented). The slash
@@ -59,11 +77,13 @@ is the entrypoint; the YAML→HTML render is the work.
 ## What it does
 
 1. List available proposal topics: `python3 -m lib.render_proposal_html --list`
-2. Render one: `python3 -m lib.render_proposal_html <main>/<sub>` writes
-   `docs/proposals/<main>/<sub>.html`
+2. Render one: `python3 -m lib.render_proposal_html <main>/<sub>` (status
+   auto-routes) or `python3 -m lib.render_proposal_html <bucket>/<main>/<sub>`
+   (explicit bucket override) writes
+   `docs/proposals/<bucket>/<main>/<sub>.html`
 3. Print the file path so the user can open it in a browser
-   (`open docs/proposals/<main>/<sub>.html` on macOS, or any browser
-   via `file://`).
+   (`open docs/proposals/<bucket>/<main>/<sub>.html` on macOS, or any
+   browser via `file://`).
 4. Stop. The skill does not edit the YAML -- the user authors the proposal;
    this skill renders.
 
@@ -274,8 +294,7 @@ is enforced by the `HtmlEscapeTests` class in `tests/test_proposal_skill.py`
 `test_less_than_greater_than_escaped`).
 
 **No `<script>` tag, no external assets, inline CSS only.** The output is
-safe to email, archive, or open from `file://`. Mirrors the `/dev-kit:report`
-invariant.
+safe to email, archive, or open from `file://`.
 
 ## Editing the proposal
 
@@ -289,9 +308,8 @@ The YAML is hand-edited, not generated. Re-run
   `render` + `__main__` CLI entry
 - `lib/render_report_html.py` -- sibling renderer (eval + inspect reports)
 - `bin/dev-kit-report.py` -- sibling CLI driver (kept as-is; this skill no
-  longer uses this pattern)
-- `skills/report/SKILL.md` -- sibling skill (still uses the
-  read-only-skill + bin CLI pattern; we deviated from it)
+  longer uses this pattern). The underlying `/dev-kit:report` slash was
+  removed but the lib + driver remain.
 - `skills/plan/SKILL.md` -- Gate 5/5 calls this skill to auto-render the
   design record
 

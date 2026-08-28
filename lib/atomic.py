@@ -27,7 +27,7 @@ def atomic_write_json(path: Path, data: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
         os.replace(tmp, path)
-    except Exception:
+    except (OSError, ValueError, TypeError):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
@@ -41,7 +41,7 @@ def atomic_write_text(path: Path, content: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp, path)
-    except Exception:
+    except (OSError, UnicodeEncodeError):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise

@@ -24,6 +24,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETTINGS = REPO_ROOT / ".claude" / "settings.json"
+CODEX_HOOKS = REPO_ROOT / ".codex" / "hooks.json"
+
+
+def _hook_command(entry: dict) -> str:
+    hooks = entry.get("hooks", [])
+    return hooks[0].get("command", "") if hooks else ""
 
 
 class SettingsPermissionsContract(unittest.TestCase):
@@ -71,6 +77,34 @@ class SettingsPermissionsContract(unittest.TestCase):
             "Edit(.worktrees/**) must remain in permissions.allow so "
             "/dev-kit:build sub-agents can write to worktrees without prompting.",
         )
+
+    def test_trace_hook_precedes_managed_log_hook(self) -> None:
+        """Pin the trace-first lifecycle ordering in committed manifests."""
+        with SETTINGS.open() as f:
+            claude_hooks = json.load(f)["hooks"]
+        with CODEX_HOOKS.open() as f:
+            codex_hooks = json.load(f)["hooks"]
+
+        for manifest, events in (
+            ("Claude", claude_hooks),
+            ("Codex", codex_hooks),
+        ):
+            event_names = ("SessionEnd", "Stop") if manifest == "Claude" else ("Stop",)
+            for event_name in event_names:
+                entries = events[event_name]
+                self.assertGreaterEqual(
+                    len(entries), 2, f"{manifest} {event_name} needs both lifecycle hooks"
+                )
+                self.assertIn(
+                    "trace-session-end.sh",
+                    _hook_command(entries[0]),
+                    f"{manifest} {event_name} must run trace-session-end first",
+                )
+                self.assertTrue(
+                    entries[1].get("_loghooks_managed") is True,
+                    f"{manifest} {event_name} managed marker must stay on save_log",
+                )
+                self.assertIn("save_log.py", _hook_command(entries[1]))
 
 
 if __name__ == "__main__":

@@ -199,7 +199,7 @@ flowchart TD
   PROGRESS -->|no, repair PR 1| R2[repair PR 2]
   R2 --> OBSERVE
   PROGRESS -->|no, repair PR 2| EX[exception evidence bundle]
-  VERIFY -->|all required gates pass| MERGE[eligible for automatic merge]
+  VERIFY -->|all required gates pass| MERGE[human merge hand-off]
 ```
 
 GitHub's `auto-fix-pr` is only an event adapter into the same repair state; it
@@ -239,19 +239,61 @@ long-running process with discrete phases.
 
 ### Plugin at a glance
 
-`/dev-kit:code-viz` walks the plugin and emits one self-contained HTML with
-multi-level views (architecture → code → skill → hook → tools → external)
-plus a per-skill workflow extraction. The same `mermaid` syntax the
-visualizer emits is reproduced inline below; the visualizer's HTML output
-is the multi-level view that folds them all into one page (see the
-screenshot at the end of this section for an example).
+The table and Mermaid diagrams below are the compact, source-backed examples
+from `/dev-kit:code-viz`. Its generated HTML remains the canonical interactive
+view for the full architecture → code → skill → hook → tools → external
+levels and per-skill workflow extraction.
+
+#### Overall skill relationship map
+
+The following architecture map was created in the Archidraw canvas through
+the Archidraw MCP workflow. It inventories every skill shipped by this
+repository and groups them by the role they play in the development harness:
+foundation and integration, research and planning, build and refactor, review
+and security, ship and repair, quality and documentation, and evaluation and
+operations. The live inventory is maintained at
+[`docs/skills/README.md`](docs/skills/README.md); `ls skills/*/` from the
+repo root shows every skill directory, including the internal `_acp`
+sibling, and `ls skills/ | wc -l` adds the `skills/README.md` file so a
+plain `wc` over the top level is not a reliable count.
+
+<img src="docs/screenshots/architecture/overall-skill-architecture.png" alt="Overall dev-harness-kit skill relationship map created with Archidraw MCP" width="1200" />
+
+The portable Archidraw scene data is stored alongside the image at
+[`docs/architecture/2026-08-23/overall-skill-architecture.json`](docs/architecture/2026-08-23/overall-skill-architecture.json).
+The date-based directory makes future exports auditable and keeps the source
+scene separate from the rendered PNG.
+
+#### Dedicated babysit-pr architecture
+
+The separate Archidraw MCP export below shows the complete bounded repair loop
+for `babysit-pr`, including its human merge hand-off. It is a repair state
+machine, not a fixed number of commits. The detailed explanation is in the
+[babysit-pr architecture reference](docs/architecture/2026-08-24/babysit-pr-architecture.md).
+
+<img src="docs/screenshots/architecture/babysit-pr-architecture.png" alt="babysit-pr bounded repair loop architecture created with Archidraw MCP" width="1200" />
+
+The top flow is the operational spine: user intent enters through foundation
+configuration, moves through research and planning, is implemented and
+verified by the build skills, passes review and security gates, and reaches
+ship or repair before a human merge. The category columns below that spine are
+the complete skill inventory rather than separate execution steps. The arrows
+from each category header show ownership of the listed skills, while the
+artifacts and GitHub nodes show the two durable integration surfaces: local
+state/TraceLog outputs and pull-request checks.
+
+The shapes carry meaning: ellipses represent lifecycle endpoints or external
+surfaces, rectangles represent reusable skill groups and operations, diamonds
+represent decisions or gates, and arrows represent the direction of the main
+workflow. The dedicated `babysit-pr` workflow remains documented separately;
+it is shown here only as one member of the ship-and-repair skill family.
 
 | Diagram | What it shows |
 |---|---|
 | L0 Architecture | Layered topology — user → skills/commands → hooks → lib/tools/bin → external (GH Actions / MCP / CLI). |
 | [`/dev-kit:plan` workflow](docs/skills/plan.md) | The 5-gate pipeline (frame → validate → non-goals → decompose → emit) with the ambiguity-loop back-edge from emit to frame. |
 | [`/dev-kit:security` workflow](docs/skills/security.md) | OWASP Top-10 (A01–A10) parallel fan-out — the deep security lens of code review. |
-| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 15-step repair state machine; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
+| [`/dev-kit:babysit-pr` workflow](docs/skills/babysit-pr.md) | 14-step repair state machine plus a pre-loop opt-out check and an outcome checkpoint; the dotted back-edge from `INCREMENT` to `OPT-OUT CHECK` is the bounded-iteration loop that re-polls CI until verdicts flip green. |
 
 #### `/dev-kit:plan` — 5 gates with ambiguity loop
 
@@ -288,7 +330,7 @@ flowchart TD
   A10["A10 · Mishandling Exceptional Conditions<br/>bare except, fail-open defaults, panic-driven errors"]
 ```
 
-#### `/dev-kit:babysit-pr` — 15-step repair loop with retry back-edge
+#### `/dev-kit:babysit-pr` — bounded repair loop with retry back-edge
 
 ```mermaid
 flowchart TD
@@ -301,7 +343,8 @@ flowchart TD
   s5["step 5 · FETCH LOGS<br/>gh run view --log-failed for each failing check in changed"] --> s6
   s6["step 6 · DIAGNOSE<br/>identify ONE root cause per failing check"] --> s7
   s7["step 7 · APPLY FIX<br/>modify code; one logical change per iteration"] --> s8
-  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s9
+  s8["step 8 · VERIFY LOCAL<br/>HARD GATE, re-run the same failing command"] --> s8o
+  s8o["step 8.5 · OUTCOME<br/>persist progress and recovery state"] --> s9
   s9["step 9 · COMMIT<br/>git add specific paths + conventional commit"] --> s10
   s10["step 10 · PUSH<br/>git push origin HEAD"] --> s11
   s11["step 11 · LOG<br/>append one line to .dev-kit/babysit.log"] --> s12
@@ -322,7 +365,7 @@ like in a browser:
 
 <img src="docs/screenshots/code-viz/diagram-00.png" alt="L0 Architecture overview rendered by /dev-kit:code-viz — user → skills/commands → hooks → lib/tools/bin → external" width="360" />
 
-> Regenerate by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The PNG set is updated whenever a skill body, hook matrix, or workflow file changes; do not hand-edit the screenshots. The README only embeds the L0 PNG above; the per-skill workflows render inline as `mermaid` blocks and need no PNG export.
+> Regenerate the code-viz image by running `/dev-kit:code-viz --screenshots=docs/screenshots/code-viz --top-skills=20` (the generator is the script embedded in `skills/code-viz/SKILL.md`). The code-viz L0 image and the separately authored Archidraw Overall Skill Map are both committed exports; update each from its own source when the corresponding architecture changes. The per-skill workflows render inline as `mermaid` blocks and need no PNG export.
 
 ### GH Actions gate workflow
 
@@ -369,7 +412,7 @@ two items:
 2. **`[N/M] LABEL → desc`** — used by `plan`'s 5-step framing.
 3. **`## Gate N/M — label` / `## Phase N — label`** — numbered gates.
 4. **Numbered list under `## Algorithm`** — used by `babysit-pr`'s 14-step
-   repair loop.
+   repair loop, plus its explicit pre-loop and outcome checkpoint.
 5. **`## <SectionName>` headers** as implicit phases.
 
 Skills without an extractable workflow are listed as text chips in a "no
@@ -435,18 +478,18 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:plan`](docs/skills/plan.md) | Turns an idea into `PRD.md` + a step-by-step build checklist. |
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
-| [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<main>/<sub>.yaml` to a self-contained HTML page with structured before/after + pros/cons/limitations for pre-impl review. |
+| [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` (bucket auto-routed from YAML `status:`) to a self-contained HTML page with structured before/after + pros/cons/limitations for pre-impl review. |
 
 ### Getting a PR over the line
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:babysit-pr`](docs/skills/babysit-pr.md) | Watches your open PR, fixes failing checks, pushes, and repeats until CI is green and review approves. Add `--local-verify` to gate iterations on a local test pass before pushing (saves GH-Actions minutes). |
+| [`/dev-kit:babysit-pr`](docs/skills/babysit-pr.md) | Watches your open PR, fixes failing checks, pushes, and repeats until CI is green and review approves. For a local test pass before every push (saves GH-Actions minutes), use `/dev-kit:babysit-pr-local`. |
 | [`/dev-kit:babysit-pr-local`](docs/skills/babysit-pr-local.md) | Same algorithm, but the LLM-judge verdict loop runs locally via `bin/review-local.sh` instead of GH-Actions. Use when GH-Actions minutes are exhausted and you want a faster feedback loop. |
 | [`/dev-kit:pr-verify`](docs/skills/pr-verify.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI" / "LLM-judge still running" false positive before any "ready to merge" claim. |
 | [`/dev-kit:bump`](docs/skills/bump.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
 | [`/dev-kit:sync-version`](docs/skills/sync-version.md) | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically; useful when pre-push is not installed or CI reports a stale branch. |
-| [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow. Runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`, with the same verdict extraction + combined gate + L3-evidence check + optional auto-approve. See [`docs/local-ci.md`](docs/local-ci.md) for the full playbook. |
+| [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow. Runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`. `/dev-kit:maintenance` is the code-sanity gate (CC-1..8 / OE-1..8 / VM-1..4) implemented by `skills/maintenance/SKILL.md`; see `commands/maintenance.md` and `.github/workflows/maintenance.yml` for the contract. Same verdict extraction + combined gate + L3-evidence check + optional auto-approve. Full playbook in [`docs/local-ci.md`](docs/local-ci.md). |
 
 ### Keeping the project healthy
 

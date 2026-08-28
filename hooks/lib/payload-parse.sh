@@ -105,6 +105,7 @@ emit_guard_event() {
         '{policy_id:$policy, reason:$why, ground_truth:(env.DEV_KIT_GROUND_TRUTH // null)}' 2>/dev/null || printf '{}')"
     local event_type="guard.blocked"
     [ "$outcome" = "allowed" ] && event_type="guard.allowed"
+    [ "$outcome" = "ask" ] && event_type="guard.ask"
     python3 -m lib.trace_log append-event \
         --root "$root" --type "$event_type" --run-id "$run_id" \
         --workflow-id "$workflow_id" --stage guard --subject-id "$subject" \
@@ -120,4 +121,27 @@ deny() {
         '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:($hp + ": " + $r)}}' \
         >&2
     exit 2
+}
+
+# ask HOOK_PREFIX REASON — emit PreToolUse "ask" envelope and exit 0.
+#
+# The third permission tier, alongside `deny` (hard block, exit 2) and
+# plain `exit 0` (silent allow). `ask` surfaces a confirmation prompt to
+# the human before the tool runs — the only Claude Code mechanism that
+# does so. Use it for destructive-but-legitimate operations where a hard
+# deny would be wrong (the agent genuinely needs to push a branch, remove
+# a worktree, or write a credential file) but silent execution is worse.
+#
+# Contract difference from `deny`: the envelope goes to STDOUT with exit
+# 0, not stderr with exit 2. Claude Code reads a PreToolUse decision from
+# stdout JSON; an exit-2 "ask" would be coerced to a block. Emitting to
+# stderr here would make the hook fail open (decision ignored, tool runs
+# unconfirmed) — that is the bug this contract exists to prevent.
+ask() {
+    local hook_prefix="$1"
+    local reason="$2"
+    emit_guard_event "$hook_prefix" "$reason" ask
+    jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:($hp + ": " + $r)}}'
+    exit 0
 }

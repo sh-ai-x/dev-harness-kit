@@ -219,7 +219,9 @@ def _transition_completed(step: dict, now: str, *, duration_seconds: Optional[fl
             started = datetime.fromisoformat(step["started_at"])
             finished = datetime.fromisoformat(now)
             duration_seconds = max(0.0, (finished - started).total_seconds())
-        except Exception:
+        except (ValueError, TypeError):
+            # Malformed started_at — leave duration_seconds unset so the
+            # downstream consumer can distinguish "unknown" from "0.0s".
             duration_seconds = None
     if duration_seconds is not None:
         step["duration_seconds"] = float(duration_seconds)
@@ -582,6 +584,20 @@ def _step_pre_spawn(
     }
 
 
+def _safe_duration_seconds(started_at_iso: str, end_iso: str) -> float:
+    """Compute (end - start) total seconds with a non-negative floor.
+
+    Raises ``ValueError`` (malformed ISO) or ``TypeError`` (non-string
+    input) on unparseable input. The narrow ``except (ValueError,
+    TypeError)`` in ``_step_post_collect`` catches those and falls
+    back to 0.0; the helper itself stays narrow so anything else
+    (programmer errors, BaseException) propagates.
+    """
+    started = datetime.fromisoformat(started_at_iso)
+    ended = datetime.fromisoformat(end_iso)
+    return max(0.0, (ended - started).total_seconds())
+
+
 def _step_post_collect(
     root: Path,
     phase: str,
@@ -605,9 +621,8 @@ def _step_post_collect(
       6. Mark `completed` with measured duration.
     """
     try:
-        started = datetime.fromisoformat(ctx["started_at_iso"])
-        duration = max(0.0, (datetime.fromisoformat(now_iso()) - started).total_seconds())
-    except Exception:
+        duration = _safe_duration_seconds(ctx["started_at_iso"], now_iso())
+    except (ValueError, TypeError):
         duration = 0.0
 
     # Issue #221 RC3: parse `<!-- status: blocked -->` BEFORE marking completed.

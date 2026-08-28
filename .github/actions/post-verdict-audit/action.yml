@@ -1,0 +1,85 @@
+name: "Post verdict audit comment"
+description: >-
+  Compose + post the canonical `<!-- dev-kit-verdict-audit -->` comment
+  emitted by review / security / maintenance workflow jobs. Single
+  source of truth for the audit shell so the workflow files don't drift
+  in lockstep. Bound to the PR head SHA captured by the caller (the
+  caller MUST capture `head_sha` at run-start to close the TOCTOU that
+  would otherwise transfer an Approve to an unjudged commit pushed
+  between judge completion and audit posting — see review.yml:176 and
+  maintenance.yml:90 for the `pr_meta` step that feeds this action).
+
+  NOTE: composite actions do not expose `github.*` or `job.*` contexts,
+  so `run_id`, `job`, `status`, `pr_number`, and `head_sha` are all
+  passed as explicit inputs by the caller.
+
+inputs:
+  pr_number:
+    description: PR number to post the audit comment on
+    required: true
+  gh_token:
+    description: "GitHub token with `pull-requests: write` scope"
+    required: true
+  run_id:
+    description: GitHub Actions run id (caller passes the github.run_id context)
+    required: true
+  job:
+    description: Job name (`review` / `security` / `maintenance`)
+    required: true
+  status:
+    description: Job status (`success` / `failure` / etc.) — caller passes the job.status context
+    required: true
+  verdict:
+    description: >-
+      Resolved judge verdict word (`Approve` / `Changes Requested` /
+      `Blocked` / `MISSING`). Pre-extracted by the caller.
+    required: true
+  source:
+    description: Source tag (defaults to `lib.maintenance_gate`)
+    required: false
+    default: "lib.maintenance_gate"
+  head_sha:
+    description: >-
+      PR headRefOid captured at RUN-START (NOT after the judge step).
+      Required so G3's provenance check binds the verdict to the head
+      the judge actually evaluated. Empty string is intentional —
+      G3 distinguishes `head_sha=` (empty, gh pr view failed) from
+      absent (legacy audit) and STALEs the empty case rather than
+      falling back to `_run_head_sha()`.
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Format + post verdict audit comment
+      env:
+        GH_TOKEN: ${{ inputs.gh_token }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        RUN_ID: ${{ inputs.run_id }}
+        JOB: ${{ inputs.job }}
+        STATUS: ${{ inputs.status }}
+        VERDICT: ${{ inputs.verdict }}
+        SOURCE: ${{ inputs.source }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Defensive guard: a missing GH_TOKEN would silently post
+        # an empty audit comment via `gh pr comment` (no auth, no
+        # failure, just a 4xx that slips through the action's exit
+        # status). Fail loud and early instead.
+        [[ -n "$GH_TOKEN" ]] || { echo "::error::gh_token input is empty"; exit 1; }
+        # The composite action is intentionally thin: format the
+        # audit body via `lib.maintenance_gate.format_audit_body` and
+        # post via `gh pr comment`. The caller supplies PR_HEAD_SHA
+        # already-captured at run-start; this action does NOT re-fetch
+        # it (that would re-open the TOCTOU the caller-side `pr_meta`
+        # step closes).
+        audit_body="$(python3 -m lib.maintenance_gate --format-audit \
+          --run "$RUN_ID" \
+          --job "$JOB" \
+          --status "$STATUS" \
+          --verdict "${VERDICT:-MISSING}" \
+          --source "$SOURCE" \
+          --extra "head_sha=${HEAD_SHA}")"
+        gh pr comment "$PR_NUMBER" --body "$audit_body"

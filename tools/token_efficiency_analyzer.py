@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -909,6 +910,14 @@ def classify_all_worktrees(
     ``{"state": "main", ...}`` so consumers can dereference it without a
     separate branch.
 
+    Per-dir classification is fanned out across a bounded thread pool
+    (Issue #728). With ~1500 worktree dirs on this checkout the previous
+    sequential loop spent ~20 min wall-time spawning ~4500 git
+    subprocesses; parallel mode preserves the existing
+    ``git_runner=fake_run`` test seam (each task still receives the same
+    callable) while collapsing the runtime to roughly ``n_dirs /
+    max_workers`` rounds of subprocess latency.
+
     Returns ``{dirname: meta}`` where ``dirname`` matches ``worktree_from_cwd``
     output (basename of the worktree dir, or ``"(main)"``).
     Silently skips any worktree dir whose classification comes back ``unknown``
@@ -945,19 +954,40 @@ def classify_all_worktrees(
         precomputed_origin_main = (main_proc.stdout or "").strip()
     else:
         precomputed_origin_main = ""
+    # Materialize the candidate list (sorted, dirs only) BEFORE fanning out
+    # so the result dict preserves insertion order across both sequential
+    # and parallel execution paths. Issue #timeout-sweep: classify_worktree_dir
+    # still spawns 3 git subprocesses per dir (`rev-parse --short HEAD`,
+    # `rev-parse HEAD`, `log origin/main..HEAD`); on a checkout with ~1500
+    # worktrees this single-handedly blew the analyzer past 20 minutes of
+    # wall time (Issue #728). Fan the per-dir classification out across a
+    # bounded thread pool — git subprocesses release the GIL around the
+    # syscall, threads are the right primitive here, and the existing
+    # `git_runner=fake_run` test seam is preserved because each task still
+    # receives the same `git_runner` callable.
+    candidates: list[Path] = []
     for root_name in WORKTREE_ROOT_NAMES:
         wt_root = Path(repo_root) / root_name
         if not wt_root.exists() or not wt_root.is_dir():
             continue
         for child in sorted(wt_root.iterdir()):
-            if not child.is_dir():
-                continue
-            meta[child.name] = classify_worktree_dir(
-                child, Path(repo_root),
-                git_runner=git_runner, timeout=timeout,
-                precomputed_porcelain=precomputed_porcelain,
-                precomputed_origin_main=precomputed_origin_main,
-            )
+            if child.is_dir():
+                candidates.append(child)
+    if candidates:
+        max_workers = max(1, min(8, (os.cpu_count() or 1) * 2))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(
+                    classify_worktree_dir,
+                    child, Path(repo_root),
+                    git_runner=git_runner, timeout=timeout,
+                    precomputed_porcelain=precomputed_porcelain,
+                    precomputed_origin_main=precomputed_origin_main,
+                ): child
+                for child in candidates
+            }
+            for fut, child in futures.items():
+                meta[child.name] = fut.result()
     return meta
 
 
@@ -2633,7 +2663,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Auto-discover logs from .worktrees/*/logs/ and legacy worktree roots (default: True). "
                              "Pass --no-include-worktree-logs to disable. Implicitly disabled when --logs-dir "
                              "is set explicitly.")
-    parser.add_argument("--out", default=None, help="Output HTML path (default: token-dashboard-<repo>-<days>d.html).")
+    parser.add_argument("--out", default=None, help="Output HTML path (default: docs/observability/dashboard-<repo>-<days>d.html).")
     parser.add_argument("--cost-gate-tokens", type=int, default=DEFAULT_COST_GATE_TOKENS,
                         help=f"Per-session input+cache_read gate (default {DEFAULT_COST_GATE_TOKENS:,}).")
     parser.add_argument("--cost-gate-usd", type=float, default=DEFAULT_COST_GATE_USD,
@@ -2694,7 +2724,7 @@ def main(argv: list[str] | None = None) -> int:
         return _emit_json(snap)
 
     out_path = Path(args.out) if args.out else Path(
-        f"token-dashboard-{snap.request.repo}-{snap.request.days}d.html"
+        f"docs/observability/dashboard-{snap.request.repo}-{snap.request.days}d.html"
     )
     transcripts_written = _render_html(snap, out_path, transcripts_enabled=args.transcripts)
 

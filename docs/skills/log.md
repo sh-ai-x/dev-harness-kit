@@ -47,6 +47,38 @@ wire field to render its "Cost by Branch" panel. `off` deliberately leaves
 `tools/save_log.py` and `logs/` in place — they cost nothing, and a future
 `on` skips the setup step.
 
+### Byte-level idempotence (issue #708)
+
+`on` is **byte-stable** on re-runs: if the existing target already
+contains every source command (matched by `.hooks[0].command` within
+each event) — in any order and with or without the `_loghooks_managed`
+sentinel — `on` skips the write entirely. The semantic check runs
+first; the canonical `jq -S .` byte-comparison is kept as a
+belt-and-braces fallback. Only a semantically meaningful change (new
+event in the source, user adds an unrelated hook, user strips a managed
+entry) triggers a rewrite. This is what allows `hooks/log-on-session-start.sh`
+to call `on` on every SessionStart without dirtying the working tree on
+every session — without this check, every session start would rewrite
+`.claude/settings.json` and `.codex/hooks.json` in jq's insertion order
+(which may differ from the existing file's order), preventing `git pull`
+on the main checkout. The semantic check is robust to: an existing
+managed entry whose sentinel was stripped by a hand-edit, a commit
+predating the sentinel convention, or an older install algorithm that
+left the file dirty.
+
+### Order-preserving merge (issue #708 follow-up)
+
+The byte-level check above is necessary but not sufficient: `jq -S .`
+sorts dict keys but preserves **array order**, so the merge itself can
+reorder an event's entries and still produce a different byte sequence
+even though no semantic content changed. The merge therefore operates
+**in place** — for each source entry, replace the first matching existing
+entry (carrying the sentinel forward), or append if no match exists.
+This means a project whose `.claude/settings.json` ships managed entries
+at index 0 (the order some commits landed with) is left untouched when
+the source would have appended them at the end; `git pull` no longer
+re-creates a stale diff every session.
+
 ## Usage
 
 ```bash
@@ -121,6 +153,34 @@ main-checkout `logs/` path remains unchanged for compatibility.
 When `AGENT_LOG_ROOT` is set, `/dev-kit:token-analyzer` automatically discovers
 the repository's external log bucket and uses the sidecar's `worktree` field for
 Cost by Worktree attribution, including after the source worktree is removed.
+
+### Cleanup-safe worktree removal
+
+The `bin/worktree-remove-safe.sh` wrapper complements `AGENT_LOG_ROOT` by
+archiving a worktree's `logs/` tree into the durable store **before** `git
+worktree remove` deletes the directory. Default archive target mirrors the
+Stop-hook write path:
+
+| `AGENT_LOG_ROOT` | Archive target |
+|---|---|
+| unset | `<main>/logs/.archive/<branch>/<ts>/` |
+| set | `<AGENT_LOG_ROOT>/<repo>/.archive/<branch>/<ts>/` |
+
+```bash
+# Default: warn on archival error, do not block removal
+bin/worktree-remove-safe.sh /path/to/repo.worktrees/feat-x
+
+# Forward args to git worktree remove after --
+bin/worktree-remove-safe.sh /path/to/repo.worktrees/feat-x -- --force
+
+# Strict mode: block removal if archival fails (CI / automation)
+DEV_KIT_WORKTREE_REMOVE_STRICT=1 bin/worktree-remove-safe.sh /path/to/repo.worktrees/feat-x
+```
+
+The wrapper is idempotent (copy, not move) and fail-safe (returns a JSON
+status dict, never raises). See `tools/worktree_cleanup.py` for the
+programmatic contract and `tests/test_worktree_cleanup.py` for the
+contract test. The wrapper closes the second half of issue #689.
 
 ## Output
 

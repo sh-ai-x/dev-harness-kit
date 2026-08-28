@@ -856,5 +856,102 @@ class TestResolutionRecordMethodHint(unittest.TestCase):
         self.assertIn("case", sig.parameters)
 
 
+class TestSummarySubcommand(unittest.TestCase):
+    """`summary` wraps `scan` + `report` in one CLI call. It's the
+    "just tell me what's in the store now" flow: a fresh scan bumps
+    already-known signatures, then renders the full store. No judging
+    step happens here — that's still a separate `record --from-json`
+    call."""
+
+    def setUp(self):
+        sys.path.insert(0, str(LIB))
+        from ci_triage import _cli, render_report
+        self._cli = _cli
+        self.render_report = render_report
+
+    def _make_store(self, tmp: Path) -> Path:
+        """Write a minimal store file so `report` has something to render."""
+        store_path = tmp / "store.json"
+        store_path.write_text(json.dumps({
+            "schema_version": 3,
+            "cases": [{
+                "id": "sig_test_001",
+                "workflow": "test.yml",
+                "status": "open",
+                "primary_cause": "harness",
+                "secondary_cause": "state-contamination",
+                "evidence": "synthetic evidence for the test",
+                "repro": "echo synthetic",
+                "regression_test": "N/A: synthetic test case",
+                "proposal": "no-op",
+                "hook_proposal": None,
+                "occurrences": [{"commit": "deadbeef00000000000000000000000000000000",
+                                 "run_id": 1, "date": "2026-08-24T00:00:00Z",
+                                 "url": "https://example/runs/1"}],
+            }],
+        }))
+        return store_path
+
+    def test_no_scan_renders_store_without_calling_scan(self):
+        """`summary --no-scan` skips the scan and just prints the report.
+        scan() must not be invoked."""
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            store_path = self._make_store(tmp)
+            with patch("ci_triage.scan") as scan_mock, \
+                 patch("sys.argv", ["ci_triage", "--store", str(store_path),
+                                    "summary", "--no-scan"]):
+                rc = self._cli()
+            self.assertEqual(rc, 0)
+            scan_mock.assert_not_called()
+
+    def test_no_scan_output_contains_existing_case(self):
+        """`summary --no-scan` output must include the rendered case."""
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            store_path = self._make_store(tmp)
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with patch("sys.argv", ["ci_triage", "--store", str(store_path),
+                                    "summary", "--no-scan"]), \
+                 redirect_stdout(buf):
+                self._cli()
+            out = buf.getvalue()
+            self.assertIn("sig_test_001", out)
+            self.assertIn("harness", out)
+
+    def test_count_invokes_scan_then_renders_report(self):
+        """`summary --count N` must call scan() with N, then render the
+        post-scan store. The scan mock returns no new failures."""
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            store_path = self._make_store(tmp)
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            fake_scan = {
+                "commits": [],
+                "unjudged": [],
+                "already_known": [],
+            }
+            with patch("ci_triage.scan", return_value=fake_scan) as scan_mock, \
+                 patch("sys.argv", ["ci_triage", "--store", str(store_path),
+                                    "summary", "--count", "5"]), \
+                 redirect_stdout(buf):
+                rc = self._cli()
+            self.assertEqual(rc, 0)
+            scan_mock.assert_called_once()
+            # scan() is keyword-only; check the kwargs.
+            _, kwargs = scan_mock.call_args
+            self.assertEqual(kwargs.get("count"), 5)
+            self.assertEqual(kwargs.get("store_path"), store_path)
+            self.assertIsNone(kwargs.get("commits"))
+            out = buf.getvalue()
+            # After scan (which bumped no new), the report still includes
+            # the pre-existing case we wrote into the store.
+            self.assertIn("sig_test_001", out)
+
+
 if __name__ == "__main__":
     unittest.main()

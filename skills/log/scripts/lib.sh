@@ -127,6 +127,9 @@ read_json_or_empty() {
 # Merge source loghooks into a target settings.json (Claude or Codex).
 # Idempotent: replaces existing entries with the same .hooks[0].command,
 # adds new ones, marks every inserted entry with _loghooks_managed=true.
+# Byte-stable: a re-run with no semantic change leaves the target file
+# unchanged on disk (issue #708), so SessionStart auto-installation does
+# not dirty the working tree on every session.
 # Preserves all other top-level keys (e.g. permissions, $schema).
 #
 # A08 mitigation: every merged entry's command MUST match the documented
@@ -164,32 +167,95 @@ merge_loghooks_into() {
         return 6
     fi
 
-    printf '%s' "$current" | jq \
+    # Build the merge result but do NOT write yet — the byte-level
+    # idempotence check below compares canonical forms and skips the
+    # write when the file already matches (issue #708).
+    #
+    # Order-preserving merge: for each source entry, REPLACE the first
+    # matching existing entry in place (carrying the sentinel forward),
+    # or APPEND if no match exists. This preserves the existing array
+    # order of user-authored hooks AND of loghooks entries that were
+    # committed in a different position than the source ships today
+    # (a regression of issue #708: the previous filter+append logic
+    # moved matching entries to the end of the array, dirtying the
+    # working tree on every SessionStart that touched a file where
+    # origin/main's committed order differed from the merge's output
+    # order — e.g. the [loghooks, trace] order shipped in some
+    # .claude/settings.json vs the [trace, loghooks] order this merge
+    # produced).
+    local merged
+    merged="$(printf '%s' "$current" | jq \
         --slurpfile src "$src" \
         --arg sentinel "$LOGHOOKS_SENTINEL" '
         .hooks = (.hooks // {})
         | reduce ([$src[0].hooks // {} | keys[]] | unique[]) as $event (
             .;
             .hooks[$event] = (
-                (
-                    (.hooks[$event] // [])
-                    | map(
-                        select(
-                            (.hooks[0].command // "") as $cmd
-                            | ($src[0].hooks[$event] // [])
-                              | map(.hooks[0].command // "")
-                              | index($cmd)
-                            | not
-                        )
-                    )
-                )
-                + (
-                    ($src[0].hooks[$event] // [])
-                    | map(. + {($sentinel): true})
+                reduce ($src[0].hooks[$event] // [])[] as $s (
+                    (.hooks[$event] // []);
+                    . as $cur
+                    | (($cur | map(.hooks[0].command // "")) | index($s.hooks[0].command // "")) as $idx
+                    | if $idx != null then
+                        $cur | .[$idx] = ($s + {($sentinel): true})
+                      else
+                        $cur + [$s + {($sentinel): true}]
+                      end
                 )
             )
           )
-        ' | write_json_atomic "$target"
+        ')"
+
+    # Idempotence: skip the write when the existing target already
+    # contains every source entry, in any order and with or without
+    # the sentinel. Without this, every SessionStart re-rewrites the
+    # file when the existing entry's sentinel state differs from what
+    # the merge produces — dirtying the working tree on every session
+    # and blocking `git pull`. The check is staged:
+    #
+    #   1. Semantic — does existing contain every source command (by
+    #      .hooks[0].command match within each event)? If yes, the
+    #      install is done. Robust to: existing entries with the sentinel
+    #      already attached (merge would re-add a "no-op" sentinel);
+    #      existing entries with additional non-managed sentinels
+    #      (preserved through the merge); pre-existing entry-order
+    #      drift from older install algorithms (preserved; a one-time
+    #      rewrite to normalize would dirty the tree even when no
+    #      install work is needed).
+    #   2. Canonical (`jq -S .`) — byte-stable equality. Catches the
+    #      case where existing matches merged exactly after key-order
+    #      normalization but failed the semantic check (impossible in
+    #      practice; kept as a belt-and-braces fallback).
+    #
+    # Why not just normalize (sort the hooks arrays in merged output)?
+    # Because the order in HEAD's committed .claude/settings.json is
+    # authoritative for projects that ship a baseline — rewriting to a
+    # sorted order would dirty a freshly-cloned checkout on its first
+    # SessionStart.
+    if [[ -f "$target" ]]; then
+        local existing
+        existing="$(cat "$target" 2>/dev/null || true)"
+        if [[ -n "$existing" ]] && \
+            printf '%s' "$existing" | jq -e \
+                --slurpfile src "$src" --arg sentinel "$LOGHOOKS_SENTINEL" '
+                . as $e
+                | [$src[0].hooks // {} | to_entries[]] as $src_events
+                | all($src_events[]; . as $src_ev |
+                    ([$e.hooks[$src_ev.key] // [] | .[].hooks[0].command // ""]) as $have
+                    | ([$src_ev.value // [] | .[].hooks[0].command // ""]) as $need
+                    | ($need | length == 0) or ($need | all(. as $n | $have | index($n)))
+                  )
+                ' >/dev/null 2>&1; then
+            return 0
+        fi
+        local existing_canonical merged_canonical
+        existing_canonical="$(jq -S . "$target" 2>/dev/null || true)"
+        merged_canonical="$(printf '%s' "$merged" | jq -S . 2>/dev/null || true)"
+        if [[ "$existing_canonical" == "$merged_canonical" ]]; then
+            return 0
+        fi
+    fi
+
+    printf '%s' "$merged" | write_json_atomic "$target"
 }
 
 # Remove all hook entries marked _loghooks_managed from a settings.json.

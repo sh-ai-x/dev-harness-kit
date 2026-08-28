@@ -28,6 +28,11 @@
           },
           {
             "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/destructive-confirm.sh",
+            "fail_closed": true
+          },
+          {
+            "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-autosync.sh",
             "fail_closed": false
           }
@@ -50,6 +55,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/review-yml-isolation.sh",
             "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/destructive-confirm.sh",
+            "fail_closed": true
           }
         ]
       }
@@ -60,19 +70,18 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
-            "timeout": 120,
+            "timeout": 60,
             "fail_closed": true
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-auto-cut.sh",
-            "timeout": 120,
+            "timeout": 60,
             "fail_closed": false
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-task-change.sh",
-            "timeout": 60,
             "fail_closed": false
           },
           {
@@ -123,6 +132,15 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-session-start.sh",
+            "fail_closed": false
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-janitor-session-start.sh",
             "fail_closed": false
           }
         ]
