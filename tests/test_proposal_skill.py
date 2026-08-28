@@ -1445,6 +1445,31 @@ class MigrateTests(unittest.TestCase):
                 (root / "docs" / "proposals" / "review" / "main1" / "alpha.yaml").is_file()
             )
 
+    def test_migrate_skips_malformed_yaml_and_continues(self):
+        """Reviewer finding (PR #756): one bad legacy YAML must NOT abort
+        the migration. The catch must include yaml.YAMLError (not just
+        ValueError), and the surrounding loop must keep processing
+        remaining files."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Good file (routes to accepted) and bad file (yaml.YAMLError).
+            self._make_legacy(root, "main1", "good", "accepted")
+            (root / "docs" / "proposals" / "main2").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "proposals" / "main2" / "bad.yaml").write_text(
+                "title: T\nstatus: draft\n  oops_indent_broken:\n",
+                encoding="utf-8",
+            )
+            rc = rph._migrate(root)
+            self.assertEqual(rc, 0)
+            # The good file moved to its bucket; the bad one stayed put.
+            self.assertTrue(
+                (root / "docs" / "proposals" / "accepted" / "main1" / "good.yaml").is_file()
+            )
+            self.assertTrue(
+                (root / "docs" / "proposals" / "main2" / "bad.yaml").is_file(),
+                "malformed YAML must be left in the legacy layout so the operator can fix it",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

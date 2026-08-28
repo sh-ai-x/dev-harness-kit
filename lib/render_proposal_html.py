@@ -1092,7 +1092,6 @@ _THREE_LEVEL_RE = re.compile(
     r"/[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
     r"/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 )
-_NAME_OK_RE = _TWO_LEVEL_RE  # legacy alias for older call sites
 
 
 def _parse_topic_slug(topic: str) -> tuple[Optional[str], str, str]:
@@ -1207,7 +1206,7 @@ def _migrate(project_root: Path) -> int:
                 continue
             try:
                 p = parse_proposal_yaml(yaml_path.read_text(encoding="utf-8"))
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError, yaml.YAMLError) as e:
                 print(
                     f"warning: skipping {yaml_path}: parse error ({e}); "
                     f"leave it in the legacy layout and fix the YAML first",
@@ -1300,7 +1299,7 @@ def _render_one(project_root: Path, topic: str) -> int:
     text = src.read_text(encoding="utf-8")
     try:
         p = parse_proposal_yaml(text)
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, yaml.YAMLError) as e:
         print(f"error: failed to parse {src}: {e}", file=sys.stderr)
         return 1
 
