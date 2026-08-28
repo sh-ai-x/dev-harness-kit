@@ -467,7 +467,14 @@ class PerTopicLayoutTests(unittest.TestCase):
     """
 
     def _make(self, root: Path, main: str, sub: str, body: str = "title: T\nstatus: draft\nsections: []\n") -> Path:
-        main_dir = root / "docs" / "proposals" / main
+        # Place the source in the bucket dir that matches the YAML
+        # status. This makes the file tests an end-to-end match: the
+        # CLI's source-search-and-write sequence lands the rendered
+        # HTML in the same bucket where the YAML already lives, which
+        # is the realistic workflow (author the YAML, place it in the
+        # right bucket, render).
+        bucket = "review" if "status: draft" in body else "accepted"
+        main_dir = root / "docs" / "proposals" / bucket / main
         main_dir.mkdir(parents=True, exist_ok=True)
         (main_dir / f"{sub}.yaml").write_text(body, encoding="utf-8")
         return main_dir
@@ -475,6 +482,8 @@ class PerTopicLayoutTests(unittest.TestCase):
     def test_list_proposals_returns_two_level_slugs_alphabetical(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
+            # Default status is `draft` -> routes to `review/`. The
+            # listed slug is the bucket-prefixed 3-level form.
             for main, sub in [("z", "zebra"), ("a", "alpha"), ("a", "middle"),
                               ("a", "00-index"), ("m", "topic")]:
                 self._make(root, main, sub)
@@ -491,11 +500,11 @@ class PerTopicLayoutTests(unittest.TestCase):
             self.assertEqual(
                 topics,
                 [
-                    "a/00-index",
-                    "a/alpha",
-                    "a/middle",
-                    "m/topic",
-                    "z/zebra",
+                    "review/a/00-index",
+                    "review/a/alpha",
+                    "review/a/middle",
+                    "review/m/topic",
+                    "review/z/zebra",
                 ],
             )
 
@@ -505,14 +514,24 @@ class PerTopicLayoutTests(unittest.TestCase):
             self.assertEqual(rph._list_proposals(root), [])
 
     def test_render_one_writes_flat_filename(self):
+        """A draft YAML renders into `<bucket>/<main>/<sub>.html` where
+        bucket is auto-routed from the YAML's `status:` field (draft ->
+        review). The legacy flat `<main>/<sub>.html` shape MUST NOT be
+        written."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self._make(root, "main", "alpha")
             rc = rph._render_one(root, "main/alpha")
             self.assertEqual(rc, 0)
-            out = root / "docs" / "proposals" / "main" / "alpha.html"
+            out = root / "docs" / "proposals" / "review" / "main" / "alpha.html"
             self.assertTrue(out.is_file(), f"missing {out}")
-            # The old `<sub>/index.html` shape MUST NOT exist.
+            # The old flat `<sub>.html` shape MUST NOT exist.
+            legacy_out = root / "docs" / "proposals" / "main" / "alpha.html"
+            self.assertFalse(
+                legacy_out.exists(),
+                f"stray legacy flat write at {legacy_out}",
+            )
+            # The old `<sub>/index.html` shape MUST NOT exist either.
             self.assertFalse(
                 (root / "docs" / "proposals" / "main" / "alpha").exists(),
                 f"stray sub-topic dir created: {root / 'docs/proposals/main/alpha'}",
@@ -567,8 +586,8 @@ class PerTopicLayoutTests(unittest.TestCase):
         """The pre-refactor layouts (flat `<name>.yaml`, one-level
         `<name>/proposal.yaml`, and the intermediate two-level
         `<main>/<sub>/index.{yaml,html}`) MUST NOT surface as topics.
-        This pins the flat-filename invariant against any future
-        regression that re-introduces the old shapes."""
+        This pins the bucket-prefixed flat-filename invariant against
+        any future regression that re-introduces the old shapes."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "docs" / "proposals").mkdir(parents=True)
@@ -577,14 +596,15 @@ class PerTopicLayoutTests(unittest.TestCase):
             # One-level dir with the pre-refactor proposal.yaml name
             (root / "docs" / "proposals" / "old-shape").mkdir(parents=True)
             (root / "docs" / "proposals" / "old-shape" / "proposal.yaml").write_text("legacy", encoding="utf-8")
-            # Two-level-with-index intermediate shape
+            # Two-level-with-index intermediate shape (under a non-bucket
+            # dir -- the legacy flat layout)
             intermediate = root / "docs" / "proposals" / "intermediate" / "old-sub"
             intermediate.mkdir(parents=True)
             (intermediate / "index.yaml").write_text("legacy", encoding="utf-8")
-            # Valid flat-filename two-level topic
+            # Valid two-level topic in the bucket dir
             self._make(root, "real-main", "real-sub")
             topics = rph._list_proposals(root)
-            self.assertEqual(topics, ["real-main/real-sub"])
+            self.assertEqual(topics, ["review/real-main/real-sub"])
 
 
 # ----- Back-to-index nav (auto-detected when sibling 00-index exists) -------
@@ -636,17 +656,19 @@ class BackToIndexNavTests(unittest.TestCase):
         self.assertIn('href="a&quot;b.html"', html)
 
     def test_cli_subtopic_with_index_sibling_emits_back_link(self):
-        """The CLI's auto-detect wires the back link when the umbrella
-        contains both the current sub-topic AND a sibling `00-index.yaml`."""
+        """The CLI's auto-detect wires the back link when the bucket dir
+        contains both the current sub-topic AND a sibling `00-index.yaml`.
+        With status-routing, draft -> `review/`, so the back-link is
+        wired from `review/<main>/00-index.yaml`."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self._make(root, "main", "00-index")
             self._make(root, "main", "alpha")
             rc = rph._render_one(root, "main/alpha")
             self.assertEqual(rc, 0)
-            out = (root / "docs" / "proposals" / "main" / "alpha.html").read_text(
-                encoding="utf-8"
-            )
+            out = (
+                root / "docs" / "proposals" / "review" / "main" / "alpha.html"
+            ).read_text(encoding="utf-8")
             self.assertIn('class="back-link"', out)
             self.assertIn('href="00-index.html"', out)
             self.assertIn("← 00-index", out)
@@ -659,9 +681,9 @@ class BackToIndexNavTests(unittest.TestCase):
             self._make(root, "main", "00-index")
             rc = rph._render_one(root, "main/00-index")
             self.assertEqual(rc, 0)
-            out = (root / "docs" / "proposals" / "main" / "00-index.html").read_text(
-                encoding="utf-8"
-            )
+            out = (
+                root / "docs" / "proposals" / "review" / "main" / "00-index.html"
+            ).read_text(encoding="utf-8")
             # CSS class definitions for `.back-link` are present (in
             # INLINE_CSS) but the actual <nav> element is not.
             self.assertNotIn('<nav class="back-link">', out)
@@ -676,9 +698,9 @@ class BackToIndexNavTests(unittest.TestCase):
             self._make(root, "main", "lone-sub")
             rc = rph._render_one(root, "main/lone-sub")
             self.assertEqual(rc, 0)
-            out = (root / "docs" / "proposals" / "main" / "lone-sub.html").read_text(
-                encoding="utf-8"
-            )
+            out = (
+                root / "docs" / "proposals" / "review" / "main" / "lone-sub.html"
+            ).read_text(encoding="utf-8")
             self.assertNotIn('<nav class="back-link">', out)
 
 
@@ -1121,6 +1143,307 @@ class BeforeAfterRenderTests(unittest.TestCase):
             dividers_before_ba, 1,
             f"expected exactly 1 divider before ba-section, got {dividers_before_ba}",
         )
+
+
+# ----- Status bucket routing (review / accepted / rejected) -----------------
+
+
+class StatusBucketMappingTests(unittest.TestCase):
+    """The lifecycle state of a proposal lives in the YAML's `status:` field.
+    The CLI maps that field to a filesystem bucket via STATUS_TO_BUCKET so
+    that `accepted`/`rejected`/`superseded` proposals are visually isolated
+    from proposals still under review."""
+
+    def test_known_statuses_map_to_documented_buckets(self):
+        cases = {
+            "draft": "review",
+            "design-discussion": "review",
+            "ready-for-review": "review",
+            "accepted": "accepted",
+            "rejected": "rejected",
+            "superseded": "rejected",
+        }
+        for status, expected_bucket in cases.items():
+            self.assertEqual(
+                rph.STATUS_TO_BUCKET[status], expected_bucket,
+                f"status {status!r} should map to {expected_bucket!r}",
+            )
+
+    def test_unknown_status_falls_back_to_review(self):
+        """A status value not in the table falls back to `review` so a
+        typo in the YAML still produces a routable path rather than
+        crashing the renderer."""
+        self.assertEqual(rph.STATUS_TO_BUCKET.get("my-custom-state", "review"), "review")
+
+    def test_buckets_set_is_exactly_three_names(self):
+        """The bucket set is a tight whitelist. Adding a fourth name
+        is a deliberate choice — pin it."""
+        self.assertEqual(
+            sorted(rph.BUCKETS), ["accepted", "rejected", "review"],
+        )
+
+
+class TopicSlugParsingTests(unittest.TestCase):
+    """The CLI accepts two topic shapes:
+
+    - Legacy 2-level `<main>/<sub>` (status auto-routes from YAML).
+    - Explicit 3-level `<bucket>/<main>/<sub>` (bucket override).
+
+    `_parse_topic_slug` returns either a (bucket, main, sub) tuple or
+    raises ValueError with an actionable message. Empty bucket / empty
+    main / empty sub is rejected; the regex used elsewhere does the
+    rest of the validation.
+    """
+
+    def test_two_level_topic_returns_none_bucket(self):
+        bucket, main, sub = rph._parse_topic_slug("umbrella/topic")
+        self.assertIsNone(bucket)
+        self.assertEqual(main, "umbrella")
+        self.assertEqual(sub, "topic")
+
+    def test_three_level_topic_with_known_bucket(self):
+        bucket, main, sub = rph._parse_topic_slug("accepted/umbrella/topic")
+        self.assertEqual(bucket, "accepted")
+        self.assertEqual(main, "umbrella")
+        self.assertEqual(sub, "topic")
+
+    def test_three_level_topic_with_unknown_bucket_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            rph._parse_topic_slug("bogus/umbrella/topic")
+        self.assertIn("bogus", str(ctx.exception))
+        self.assertIn("review", str(ctx.exception))
+
+    def test_four_level_topic_rejected(self):
+        with self.assertRaises(ValueError):
+            rph._parse_topic_slug("accepted/umbrella/topic/extra")
+
+    def test_one_level_topic_rejected(self):
+        with self.assertRaises(ValueError):
+            rph._parse_topic_slug("umbrella")
+
+
+class StatusRoutedRenderTests(unittest.TestCase):
+    """`_render_one` reads a YAML proposal and writes the HTML into the
+    bucket directory selected by either (a) the explicit `<bucket>/` prefix
+    on the topic arg or (b) the YAML's `status:` field via
+    `STATUS_TO_BUCKET`. The CLI auto-creates the bucket dir when missing.
+    """
+
+    _YAML_TPL = "title: T\nstatus: {status}\nsections: []\n"
+
+    def _make(self, root: Path, main: str, sub: str, status: str) -> Path:
+        main_dir = root / "docs" / "proposals" / main
+        main_dir.mkdir(parents=True, exist_ok=True)
+        (main_dir / f"{sub}.yaml").write_text(
+            self._YAML_TPL.format(status=status), encoding="utf-8",
+        )
+        return main_dir
+
+    def test_two_level_topic_routes_by_yaml_status_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make(root, "main", "alpha", "accepted")
+            rc = rph._render_one(root, "main/alpha")
+            self.assertEqual(rc, 0)
+            target = root / "docs" / "proposals" / "accepted" / "main" / "alpha.html"
+            self.assertTrue(target.is_file(), f"missing {target}")
+            # The HTML must NOT be written at the legacy flat location.
+            legacy = root / "docs" / "proposals" / "main" / "alpha.html"
+            self.assertFalse(legacy.exists(), f"unexpected legacy write at {legacy}")
+
+    def test_two_level_topic_routes_by_yaml_status_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make(root, "main", "alpha", "rejected")
+            rc = rph._render_one(root, "main/alpha")
+            self.assertEqual(rc, 0)
+            target = root / "docs" / "proposals" / "rejected" / "main" / "alpha.html"
+            self.assertTrue(target.is_file(), f"missing {target}")
+
+    def test_two_level_topic_routes_draft_to_review(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make(root, "main", "alpha", "draft")
+            rc = rph._render_one(root, "main/alpha")
+            self.assertEqual(rc, 0)
+            target = root / "docs" / "proposals" / "review" / "main" / "alpha.html"
+            self.assertTrue(target.is_file(), f"missing {target}")
+
+    def test_three_level_topic_explicit_bucket_overrides_yaml_status(self):
+        """When the user passes `accepted/main/sub`, the YAML's status
+        is ignored — the explicit bucket wins. This lets a reviewer
+        manually re-route a proposal without editing YAML frontmatter
+        first (useful for transient states)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make(root, "main", "alpha", "rejected")
+            rc = rph._render_one(root, "accepted/main/alpha")
+            self.assertEqual(rc, 0)
+            target = root / "docs" / "proposals" / "accepted" / "main" / "alpha.html"
+            self.assertTrue(target.is_file(), f"missing {target}")
+            # The YAML-declared bucket must NOT have received a render.
+            wrong = root / "docs" / "proposals" / "rejected" / "main" / "alpha.html"
+            self.assertFalse(wrong.exists(), f"unexpected write at {wrong}")
+
+    def test_unknown_three_level_bucket_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make(root, "main", "alpha", "draft")
+            rc = rph._render_one(root, "bogus/main/alpha")
+            self.assertEqual(rc, 1)
+
+    def test_auto_creates_bucket_directory(self):
+        """A first-render into a bucket that doesn't exist yet must
+        create the directory on disk; otherwise the write fails."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make(root, "main", "alpha", "accepted")
+            proposals_dir = root / "docs" / "proposals"
+            self.assertFalse((proposals_dir / "accepted").exists())
+            rc = rph._render_one(root, "main/alpha")
+            self.assertEqual(rc, 0)
+            self.assertTrue((proposals_dir / "accepted" / "main").is_dir())
+
+
+class StatusRoutedListTests(unittest.TestCase):
+    """`_list_proposals` returns `<bucket>/<main>/<sub>` for every
+    YAML under each bucket dir, plus `<main>/<sub>` for legacy flat
+    layout (read-only). Sort order is bucket, main, sub — all
+    alphabetical."""
+
+    _YAML_TPL = "title: T\nstatus: {status}\nsections: []\n"
+
+    def _make_in_bucket(self, root: Path, bucket: str, main: str, sub: str, status: str) -> None:
+        d = root / "docs" / "proposals" / bucket / main
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sub}.yaml").write_text(self._YAML_TPL.format(status=status), encoding="utf-8")
+
+    def _make_legacy(self, root: Path, main: str, sub: str) -> None:
+        d = root / "docs" / "proposals" / main
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sub}.yaml").write_text("title: T\nstatus: draft\nsections: []\n", encoding="utf-8")
+
+    def test_list_scans_all_three_buckets(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_in_bucket(root, "review", "main1", "topic1", "draft")
+            self._make_in_bucket(root, "accepted", "main1", "topic2", "accepted")
+            self._make_in_bucket(root, "rejected", "main1", "topic3", "rejected")
+            topics = rph._list_proposals(root)
+            self.assertEqual(
+                topics,
+                [
+                    "accepted/main1/topic2",
+                    "rejected/main1/topic3",
+                    "review/main1/topic1",
+                ],
+            )
+
+    def test_list_includes_legacy_flat_shape(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_in_bucket(root, "review", "main1", "alpha", "draft")
+            self._make_legacy(root, "legacy-main", "legacy-sub")
+            topics = rph._list_proposals(root)
+            self.assertEqual(
+                topics,
+                [
+                    "legacy-main/legacy-sub",
+                    "review/main1/alpha",
+                ],
+            )
+
+    def test_list_skips_reserved_legacy_names_in_each_bucket(self):
+        """The reserved `proposal` / `index` legacy canonical names must
+        not surface as sub-topic slugs in any bucket."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for bucket in ("review", "accepted", "rejected"):
+                d = root / "docs" / "proposals" / bucket / "main"
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "proposal.yaml").write_text("x", encoding="utf-8")
+                (d / "index.yaml").write_text("x", encoding="utf-8")
+                (d / "real.yaml").write_text(
+                    "title: T\nstatus: draft\nsections: []\n", encoding="utf-8",
+                )
+            topics = rph._list_proposals(root)
+            self.assertEqual(
+                topics,
+                [
+                    "accepted/main/real",
+                    "rejected/main/real",
+                    "review/main/real",
+                ],
+            )
+
+    def test_list_empty_when_proposals_dir_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(rph._list_proposals(Path(td)), [])
+
+
+class MigrateTests(unittest.TestCase):
+    """`--migrate` moves legacy flat `<main>/<sub>.{yaml,html}` files
+    into `<bucket>/<main>/<sub>.{yaml,html}` based on each YAML's
+    `status:` field. Files already under a bucket dir are left alone.
+    Unknown statuses fall back to `review`."""
+
+    _YAML_TPL = "title: T\nstatus: {status}\nsections: []\n"
+
+    def _make_legacy(self, root: Path, main: str, sub: str, status: str) -> None:
+        d = root / "docs" / "proposals" / main
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sub}.yaml").write_text(self._YAML_TPL.format(status=status), encoding="utf-8")
+        (d / f"{sub}.html").write_text("<html>old</html>", encoding="utf-8")
+
+    def test_migrate_moves_legacy_into_bucket_by_status(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_legacy(root, "main1", "alpha", "accepted")
+            self._make_legacy(root, "main2", "beta", "rejected")
+            self._make_legacy(root, "main3", "gamma", "draft")
+            rc = rph._migrate(root)
+            self.assertEqual(rc, 0)
+            # Each pair lives under the bucket its YAML declared.
+            self.assertTrue(
+                (root / "docs" / "proposals" / "accepted" / "main1" / "alpha.yaml").is_file()
+            )
+            self.assertTrue(
+                (root / "docs" / "proposals" / "rejected" / "main2" / "beta.yaml").is_file()
+            )
+            self.assertTrue(
+                (root / "docs" / "proposals" / "review" / "main3" / "gamma.yaml").is_file()
+            )
+            # Legacy locations are empty after migrate.
+            self.assertFalse(
+                (root / "docs" / "proposals" / "main1" / "alpha.yaml").exists()
+            )
+
+    def test_migrate_leaves_already_bucketed_files_alone(self):
+        """Files already under `<bucket>/<main>/` are NOT touched —
+        migrate is idempotent."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_legacy(root, "main1", "alpha", "accepted")
+            # Run migrate once.
+            rph._migrate(root)
+            # Capture the bucketed file's content.
+            bucketed = root / "docs" / "proposals" / "accepted" / "main1" / "alpha.yaml"
+            content_before = bucketed.read_text(encoding="utf-8")
+            # Run migrate again — nothing changes.
+            rc = rph._migrate(root)
+            self.assertEqual(rc, 0)
+            content_after = bucketed.read_text(encoding="utf-8")
+            self.assertEqual(content_before, content_after)
+
+    def test_migrate_unknown_status_routes_to_review(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_legacy(root, "main1", "alpha", "made-up-state")
+            rc = rph._migrate(root)
+            self.assertEqual(rc, 0)
+            self.assertTrue(
+                (root / "docs" / "proposals" / "review" / "main1" / "alpha.yaml").is_file()
+            )
 
 
 if __name__ == "__main__":

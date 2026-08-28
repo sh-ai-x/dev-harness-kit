@@ -1,13 +1,15 @@
 # /dev-kit:proposal — Skill README
 
-> Render a hand-authored `docs/proposals/<name>.yaml` proposal into a single
+> Render a hand-authored `docs/proposals/<bucket>/<main>/<sub>.yaml` proposal
+> (or legacy flat `docs/proposals/<main>/<sub>.yaml`) into a single
 > self-contained HTML document for pre-implementation review and sharing.
 > Slash command: `/dev-kit:proposal`.
 
 ## What this skill does
 
-Renders any YAML file under `docs/proposals/` into a sibling `<name>.html`
-next to it. The HTML is:
+Renders any YAML file under `docs/proposals/` into a sibling `<sub>.html`
+alongside it. The bucket (`review` / `accepted` / `rejected`) is
+auto-routed from the YAML's `status:` field. The HTML is:
 
 - **Self-contained** — inline CSS only, no `<script>`, no external
   `<link rel="stylesheet">`, no remote `<img>`. Safe to email, archive, or
@@ -84,14 +86,15 @@ lib/
 └── render_proposal_html.py  # pure renderer + __main__ CLI entry point
 
 docs/proposals/
-├── 00-index.yaml            # proposal source (YAML in, HTML out)
-├── 00-index.html            # generated HTML (rendered artifact)
-├── 01-protocol-layer.yaml
-├── 01-protocol-layer.html
-└── ...                      # one .yaml + .html per proposal
+├── review/                  # status: draft, design-discussion, ready-for-review
+│   └── <main>/<sub>.{yaml,html}
+├── accepted/                # status: accepted
+│   └── <main>/<sub>.{yaml,html}
+└── rejected/                # status: rejected, superseded
+    └── <main>/<sub>.{yaml,html}
 
 tests/
-└── test_proposal_skill.py   # parse + render + escape + determinism tests
+└── test_proposal_skill.py   # parse + render + escape + bucket-routing tests
 ```
 
 The proposal skill **deviates** from the project's typical skill pattern
@@ -100,7 +103,7 @@ The proposal skill **deviates** from the project's typical skill pattern
 - The proposal skill has `Write` permission (it writes the HTML).
 - The CLI lives in `lib/render_proposal_html.py`'s `__main__` block,
   not in a separate `bin/dev-kit-proposal.py`.
-- The skill invokes `python3 -m lib.render_proposal_html <name>` directly.
+- The skill invokes `python3 -m lib.render_proposal_html <topic>` directly.
 
 Rationale (from `skills/proposal/SKILL.md` §Architecture): the proposal
 skill is the only caller, the maintainer workflow is *edit YAML, regenerate
@@ -113,21 +116,28 @@ with the render logic.
 ### Slash command (human)
 
 ```
-/dev-kit:proposal <name>          # render one proposal
-/dev-kit:proposal --list          # list available proposals
-/dev-kit:proposal --all           # render every proposal
+/dev-kit:proposal <main>/<sub>            # render one (bucket auto-routes from YAML status)
+/dev-kit:proposal accepted/<main>/<sub>   # render one with explicit bucket override
+/dev-kit:proposal --list                  # list available proposals
+/dev-kit:proposal --all                   # render every proposal
+/dev-kit:proposal --migrate               # one-shot move legacy flat proposals into bucket dirs
 ```
 
-`<name>` is the file stem — `00-index` renders `docs/proposals/00-index.yaml`
-to `docs/proposals/00-index.html`.
+`<bucket>` is one of `review`, `accepted`, `rejected` -- the CLI picks
+the bucket from the file's `status:` field by default, but accepts an
+explicit override. The legacy 2-level `<main>/<sub>` form is still
+accepted for backward compatibility (CLI scans both shapes when listing,
+renders to the status-routed shape when writing).
 
 ### Direct CLI (debug + scripting)
 
 ```bash
 # from the repo root
-python3 -m lib.render_proposal_html 00-index         # render one
-python3 -m lib.render_proposal_html --list            # list available
-python3 -m lib.render_proposal_html --all             # render all
+python3 -m lib.render_proposal_html main/alpha                   # auto-route by status
+python3 -m lib.render_proposal_html accepted/main/alpha          # explicit bucket
+python3 -m lib.render_proposal_html --list                       # list across all 3 buckets + legacy
+python3 -m lib.render_proposal_html --all                        # render every topic
+python3 -m lib.render_proposal_html --migrate                    # legacy -> bucket dirs
 python3 -m lib.render_proposal_html my-slug --project-root /path/to/repo
 ```
 
@@ -146,24 +156,26 @@ html = render(p, now="2026-07-23")              # pass fixed `now` for determini
 
 | Code | Meaning |
 |---|---|
-| 0 | render succeeded; `--list` returns 0 even when no proposals are found (prints `(no proposals found under docs/proposals/)`) |
-| 1 | invalid name, source not found, YAML parse failure, path-traversal blocked, `--all` with no proposals |
+| 0 | render succeeded; `--list` returns 0 even when no proposals are found (prints `(no proposals found under docs/proposals/)`); `--migrate` returns 0 even when there is nothing to move |
+| 1 | invalid topic (must match `<main>/<sub>` or `<bucket>/<main>/<sub>`), source not found, YAML parse failure, path-traversal blocked, `--all` with no proposals |
 
 ## Output (in chat)
 
 ```
-## /dev-kit:proposal -- <name>
+## /dev-kit:proposal -- <bucket>/<main>/<sub>
 
-**Source**: docs/proposals/<name>.yaml
-**Output**: docs/proposals/<name>.html (one self-contained HTML doc, inline CSS only, no JS, dark-mode aware)
+**Source**: docs/proposals/<bucket>/<main>/<sub>.yaml
+**Output**: docs/proposals/<bucket>/<main>/<sub>.html (one self-contained HTML doc, inline CSS only, no JS, dark-mode aware)
 **Status**: <status from YAML frontmatter>
+**Bucket**: <review|accepted|rejected, auto-routed from `status:`>
 **Sections**: <count>
 
-**Open in browser**: `open docs/proposals/<name>.html` (macOS)
+**Open in browser**: `open docs/proposals/<bucket>/<main>/<sub>.html` (macOS)
 ```
 
 The output file is the deliverable. Open it directly with
-`open docs/proposals/<name>.html` on macOS, or any browser via `file://`.
+`open docs/proposals/<bucket>/<main>/<sub>.html` on macOS, or any browser
+via `file://`.
 
 ## Authoring a proposal
 
@@ -313,13 +325,20 @@ rendered, versioned, and surfaced for review.
 
 ## How to add a new proposal
 
-1. Create `docs/proposals/<slug>.yaml` with the shape above.
-2. Run `/dev-kit:proposal <slug>` to render the HTML.
-3. Open `docs/proposals/<slug>.html` in a browser and review.
+1. Create `docs/proposals/<bucket>/<main>/<slug>.yaml` with the shape
+   above. The CLI auto-routes into the bucket each YAML's `status:`
+   declares — for a fresh draft, place the file under
+   `docs/proposals/review/<main>/<slug>.yaml` (or let the CLI place it
+   there when you render).
+2. Run `/dev-kit:proposal <main>/<slug>` (auto-routes) or
+   `/dev-kit:proposal <bucket>/<main>/<slug>` (explicit).
+3. Open `docs/proposals/<bucket>/<main>/<slug>.html` in a browser and
+   review.
 4. Commit both `.yaml` and `.html` — the HTML is the shareable artifact
    (viewable offline from `file://`).
 5. Update the `status:` field as the proposal progresses through review.
-   Re-run `/dev-kit:proposal <slug>` to refresh the HTML after each edit.
+   Re-run `/dev-kit:proposal <main>/<slug>` after each edit; the CLI
+   moves the file to the new bucket on every render.
 
 ## How to handle a vendor pattern change
 
