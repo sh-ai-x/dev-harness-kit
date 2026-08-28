@@ -637,8 +637,8 @@ git add -A && git commit -m "chore: bootstrap dev-kit"
 git push -u origin main
 
 # 4a. (Optional, idempotent) Re-apply git defaults later
-#      bin/setup-git-defaults.sh --check   # see what is missing
-#      bin/setup-git-defaults.sh           # re-apply
+bin/setup-git-defaults.sh --check   # see what is missing
+bin/setup-git-defaults.sh           # re-apply
 ```
 
 **Use `--force` on the very first install** (`/dev-kit:ci-setup --force`, which

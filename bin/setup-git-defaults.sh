@@ -46,7 +46,11 @@ SETTINGS=(
   "pull.rebase=true"
 )
 
-die() { echo "error: $*" >&2; exit 1; }
+# Runtime errors (git missing, etc.) — exit 1. CLI errors below exit 2
+# to match the documented Exit codes header. Tests T10/T11 only assert
+# `returncode != 0`, so either die_* preserves the contract.
+die_runtime() { echo "error: $*" >&2; exit 1; }
+die_cli()     { echo "error: $*" >&2; exit 2; }
 
 show_help() {
   sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
@@ -61,7 +65,7 @@ current_value() {
 }
 
 # Pre-flight: git must be installed.
-command -v git >/dev/null 2>&1 || die "git binary not found in PATH; install git and re-run"
+command -v git >/dev/null 2>&1 || die_runtime "git binary not found in PATH; install git and re-run"
 
 # Arg parsing.
 DRY_RUN=0
@@ -71,12 +75,16 @@ while [[ $# -gt 0 ]]; do
     -h|--help)        show_help; exit 0 ;;
     -n|--dry-run)     DRY_RUN=1; shift ;;
     --check)          CHECK_ONLY=1; shift ;;
-    -*)               die "unknown flag: $1 (try --help)" ;;
-    *)                die "unexpected positional arg: $1 (try --help)" ;;
+    -*)               die_cli "unknown flag: $1 (try --help)" ;;
+    *)                die_cli "unexpected positional arg: $1 (try --help)" ;;
   esac
 done
 
-echo "Git global config: $HOME/.gitconfig"
+# Note: git itself resolves the config file (`git config --global` writes
+# to `~/.gitconfig` when XDG is unset, otherwise to
+# `$XDG_CONFIG_HOME/git/config`). Don't claim a single path here — the
+# script delegates the actual write to git's own canonical lookup.
+echo "Configuring git global defaults via 'git config --global'."
 echo
 
 changed=0
