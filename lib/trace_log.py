@@ -220,6 +220,54 @@ def validate_event(event: Mapping[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+# Dedupe scan window: how many trailing lines the append-time guard
+# inspects for a colliding event_id, and the byte budget used to reach
+# them. Reading only the tail keeps the hot path independent of total
+# log length (a full readlines() is O(N) per append, i.e. O(N^2) over a
+# trajectory). _DEDUPE_SCAN_BYTES is a generous per-line allowance; if
+# the tail happens to hold more than _DEDUPE_SCAN_LINES lines within
+# that budget we simply keep the last _DEDUPE_SCAN_LINES of them.
+_DEDUPE_SCAN_LINES = 64
+_DEDUPE_SCAN_BYTES = _DEDUPE_SCAN_LINES * 4096
+
+
+def _recent_event_ids(fd: int) -> set:
+    """Return event_ids from the last ``_DEDUPE_SCAN_LINES`` log lines.
+
+    Reads only the tail of the file via ``os.pread`` so the caller's
+    text-stream position (positioned for append) is never disturbed and
+    the cost does not grow with log length. Malformed or truncated lines
+    are skipped rather than raising — the dedupe guard is an
+    optimisation, and a corrupt tail must not block a valid append.
+    """
+    try:
+        size = os.fstat(fd).st_size
+    except OSError:
+        return set()
+    if size <= 0:
+        return set()
+    offset = max(0, size - _DEDUPE_SCAN_BYTES)
+    try:
+        blob = os.pread(fd, size - offset, offset)
+    except OSError:
+        return set()
+    lines = blob.decode("utf-8", errors="replace").splitlines()
+    if offset > 0 and lines:
+        # The first line is very likely truncated mid-record — drop it.
+        lines = lines[1:]
+    ids = set()
+    for line in lines[-_DEDUPE_SCAN_LINES:]:
+        if not line.strip():
+            continue
+        try:
+            event_id = json.loads(line).get("event_id")
+        except (ValueError, AttributeError):
+            continue
+        if event_id:
+            ids.add(event_id)
+    return ids
+
+
 def append_event(root: Path, event: Mapping[str, Any]) -> Path:
     """Append one validated workflow event without changing workflow outcome."""
     import fcntl
@@ -234,24 +282,14 @@ def append_event(root: Path, event: Mapping[str, Any]) -> Path:
     record = validate_event(stamped)
     path = _event_path(Path(root))
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Open in "a+" so we can seek+read for the dedupe guard. Pure "a"
-    # would refuse readlines() with UnsupportedOperation.
+    # Open in "a+" so the dedupe guard can read the tail under the same
+    # exclusive lock that guards the append.
     with path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             # Dedupe-on-write guard: if a producer hands us the same
-            # event_id twice, regenerate once before persisting. Scan only
-            # the last 64 lines so the hot path stays O(1) on steady-state
-            # logs (avoids reading a long-lived trajectory on every append).
-            try:
-                handle.seek(0)
-                recent = handle.readlines()[-64:]
-            except OSError:
-                recent = []
-            recent_ids = {
-                (json.loads(line).get("event_id") if line.strip() else None)
-                for line in recent
-            }
+            # event_id twice, regenerate once before persisting.
+            recent_ids = _recent_event_ids(handle.fileno())
             if record["event_id"] in recent_ids:
                 record["event_id"] = new_event_id()
             handle.write(json.dumps(record, sort_keys=True) + "\n")

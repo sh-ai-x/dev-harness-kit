@@ -956,6 +956,62 @@ class TestRunStepBody(unittest.TestCase):
             # First-occurrence feat commit lands; chore may be no-op.
             self.assertIn("feat(test-phase): step 0 — my-name", log)
 
+    def test_verify_passed_is_parented_to_write_observed(self):
+        """`verify.passed` must carry `parent_id == write.observed.event_id`.
+
+        `lib.harness_effectiveness._first_pass` computes
+        `causally_linked = first.parent_id == write.event_id`. If the
+        executor parents the verify to `step.started` instead, the link is
+        permanently False and `first_pass_quality` collapses to 10.0 (ROT)
+        while still entering `overall_score` at weight 0.25 — strictly worse
+        than emitting nothing. This test pins the causal edge.
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            (ctx["wt"] / "made_change.txt").write_text("hi\n")
+            rc = ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            self.assertEqual(rc, 0)
+            events = read_events(root)
+            writes = [e for e in events if e["event_type"] == "write.observed"]
+            verifies = [e for e in events if e["event_type"] == "verify.passed"]
+            self.assertEqual(len(writes), 1, f"expected 1 write.observed, got {len(writes)}")
+            self.assertEqual(len(verifies), 1, f"expected 1 verify.passed, got {len(verifies)}")
+            self.assertEqual(
+                verifies[0]["parent_id"], writes[0]["event_id"],
+                "verify.passed must be parented to write.observed so "
+                "_first_pass.causally_linked holds",
+            )
+
+    def test_first_pass_quality_scores_100_on_executor_path(self):
+        """End-to-end: the executor's own events must satisfy `_first_pass`.
+
+        Guards the PR's `first_pass_quality = 100.0` claim against the real
+        reducer rather than a hand-built fixture.
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.harness_effectiveness import _first_pass
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            (ctx["wt"] / "made_change.txt").write_text("hi\n")
+            ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            component = _first_pass(read_events(root))
+            self.assertEqual(component["score"], 100.0, component)
+
 
 # --- issue #94: status-transition table ---------------------------------
 

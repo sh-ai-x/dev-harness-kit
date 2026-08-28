@@ -103,10 +103,20 @@ emit_guard_event() {
     workflow_id="${DEV_KIT_WORKFLOW_ID:-hook:${hook_prefix}}"
     # Policy-driven default ground_truth (issue #663). Blocked guards are
     # presumed unsafe (the policy triggered), allowed guards presumed
-    # legitimate (the policy did not trigger). Operators can override via
-    DEV_KIT_GROUND_TRUTH for golden / adversarial runs.
+    # legitimate (the policy did not trigger). The `ask` tier is neither:
+    # it defers to a human who may still reject, so it is labelled
+    # `pending` rather than borrowing the `legitimate` label. Operators
+    # can override via DEV_KIT_GROUND_TRUTH for golden / adversarial runs.
+    #
+    # NOTE: every line in this block must stay commented. A bare
+    # `DEV_KIT_GROUND_TRUTH ...` line here parses fine under `bash -n`
+    # but executes as a command at runtime (exit 127), and the callers
+    # (bash-guard.sh, destructive-confirm.sh, secret-scan.sh) run under
+    # `set -eo pipefail` — the shell would die here, before deny() writes
+    # its permissionDecision envelope, making every guard fail OPEN.
     local default_gt="legitimate"
     [ "$outcome" = "blocked" ] && default_gt="unsafe"
+    [ "$outcome" = "ask" ] && default_gt="pending"
     local explicit_gt="${DEV_KIT_GROUND_TRUTH:-$default_gt}"
     evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" --arg gt "$explicit_gt" \
         '{policy_id:$policy, reason:$why, ground_truth:$gt}' 2>/dev/null || printf '{}')"

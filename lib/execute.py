@@ -683,7 +683,7 @@ def _step_post_collect(
     wrote_files = _commit_step(wt, feat_msg)
     output_committed = _commit_step(wt, f"chore({phase}): step {step_num} output")
     if wrote_files or output_committed:
-        _emit_effectiveness_event(
+        write_event_id = _emit_effectiveness_event(
             root, phase, step_num, "write.observed", "written",
             {
                 "exit_code": exit_code,
@@ -693,16 +693,20 @@ def _step_post_collect(
             },
             ctx.get("started_event_id"),
         )
-        # Verify chain on the success path: pass-with-required-checks
-        # emitted right after the write so the reducer pairs it with
-        # write.observed via ts ordering (parent_id also points at
-        # the write for explicit causation; _first_pass picks verifies
-        # with ts >= write.ts either way).
+        # Verify chain on the success path. `_first_pass`
+        # (lib/harness_effectiveness.py) computes
+        # `causally_linked = first.parent_id == write.event_id`, so the
+        # verify MUST be parented to the write.observed event id — not to
+        # step.started. Parenting both to started_event_id makes
+        # causally_linked permanently False and collapses the score to
+        # 10.0 (ROT) while still entering overall_score at weight 0.25.
+        # write_event_id is None only when the append failed; fall back
+        # to the lifecycle anchor so the chain stays readable.
         _emit_effectiveness_event(
             root, phase, step_num, "verify.passed", "passed",
             {"required_checks_passed": True, "retry_count": 0,
              "independent": True, "via": "executor"},
-            ctx.get("started_event_id"),
+            write_event_id or ctx.get("started_event_id"),
         )
 
     if push:

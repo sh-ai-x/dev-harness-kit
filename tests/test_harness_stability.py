@@ -306,6 +306,82 @@ def test_insufficient_evidence_constant_is_distinct_from_zero() -> None:
     assert isinstance(INSUFFICIENT_EVIDENCE, str)
 
 
+def test_stability_scores_when_identity_is_present(tmp_path: Path) -> None:
+    """Identity coverage and provider-neutrality must be independently
+    satisfiable.
+
+    Regression for the mutual-exclusion bug: `neutral_ids` was appended
+    only when `not has_identity and not has_coupling`, so stamping
+    `agent` on every event drove `agent_provider_neutrality` (and, via
+    `event_type_neutral`, `gate_portability`) to 0%. Because stability
+    coverage is `min()` of the five submetrics, the score was
+    unreachable *both* with and without identity — identity present gave
+    neutrality 0, identity absent gave identity-coverage 0.
+
+    Neutrality measures harness *coupling* (agent/provider/model keys
+    leaking into `evidence_ref`, which would make a gate verdict depend
+    on which agent ran), not the absence of provenance metadata. With
+    that separation, a fully-stamped corpus with clean `evidence_ref`
+    and monotonic timestamps scores 100.
+    """
+    identity = {"agent": "claude-code", "provider": "anthropic", "model": "opus-4.1"}
+    # Strictly monotonic ts so replay_compatibility is 100 too — the
+    # shared `_full_event_corpus` interleaves subjects and scores 80.
+    corpus = [
+        ("g1", "guard.blocked", "a1", "blocked", "00", None,
+         {"policy_id": "scope", "ground_truth": "unsafe", "reason": "x"}),
+        ("w1", "write.observed", "d1", "written", "01", None, {}),
+        ("vv", "verify.passed", "d1", "passed", "02", "w1",
+         {"required_checks_passed": True, "retry_count": 0}),
+        ("s1", "step.started", "e1", "started", "03", None, {}),
+        ("sc", "step.completed", "e1", "completed", "04", "s1", {}),
+        ("ct1", "contract.test", "harness-contract", "passed", "05", None, {}),
+    ]
+    for event_id, event_type, subject, outcome, secs, parent, evidence in corpus:
+        payload = {
+            "event_id": event_id, "run_id": "run-1", "workflow_id": "wf-1",
+            "stage": "build", "event_type": event_type,
+            "subject_id": subject, "parent_id": parent,
+            "ts": f"2026-08-12T00:00:{secs}Z", "outcome": outcome,
+            "source": "test", "evidence_ref": evidence,
+        }
+        payload.update(identity)
+        append_event(tmp_path, payload)
+
+    stability = (
+        build_report(tmp_path)["components"]["measurement_integrity"]["submetrics"]["stability"]
+    )
+    subs = stability["submetrics"]
+    assert subs["agent_identity_coverage"]["value"] == 100.0, subs
+    assert subs["agent_provider_neutrality"]["value"] == 100.0, (
+        "neutrality must measure evidence_ref coupling, not the absence "
+        f"of identity fields; got {subs['agent_provider_neutrality']!r}"
+    )
+    assert subs["gate_portability"]["value"] == 100.0, subs
+    assert subs["replay_compatibility"]["value"] == 100.0, subs
+    assert stability["status"] != INSUFFICIENT_EVIDENCE, stability
+    assert isinstance(stability["score"], (int, float)), stability
+    assert stability["score"] == 100.0, stability
+
+
+def test_neutrality_drops_when_evidence_ref_couples_to_agent(tmp_path: Path) -> None:
+    """The neutrality submetric must still detect real harness coupling.
+
+    Guards against "fixing" the mutual-exclusion bug by making the
+    submetric vacuously 100 — an `evidence_ref` that names a model or
+    provider is exactly the coupling this metric exists to catch.
+    """
+    _event(tmp_path, event_id="s1", event_type="step.started", subject="e1",
+           outcome="started", ts="2026-08-12T00:00:00Z",
+           evidence={"model_used": "opus-4.1"},
+           agent="claude-code", provider="anthropic", model="opus-4.1")
+    stability = (
+        build_report(tmp_path)["components"]["measurement_integrity"]["submetrics"]["stability"]
+    )
+    assert stability["submetrics"]["agent_provider_neutrality"]["value"] == 0.0, stability
+    assert any("coupling" in f.lower() for f in stability["findings"]), stability
+
+
 def test_overall_score_remains_number_when_only_stability_missing(tmp_path: Path) -> None:
     """A missing stability submetric must NOT collapse the 5-component
     overall_score to None; the four shippable components still produce
