@@ -1102,6 +1102,16 @@ class SessionAggregate:
     # ``parse_errors`` is exposed on the final aggregate via a JSON-safe
     # plain dict (Counters don't json.dumps without a converter).
     parse_errors: Counter = None  # type: ignore[assignment]
+    # Per-turn prompt-cache telemetry (cache-hit-rate structural fix,
+    # F1 in docs/proposals/cache-hit-rate/structural-fix.yaml).
+    # ``turn_inputs[i]`` = non-cached input tokens billed at turn i.
+    # ``turn_cache_reads[i]`` = cached input tokens reused at turn i.
+    # Finalized into ``cache_decay: list[float]`` in ``_finalize_session``
+    # so the dashboard can show a per-turn hit-ratio curve and identify
+    # which surface (hook / system-reminder / skill / sub-agent) is
+    # bleeding the cache between turns.
+    turn_inputs: list = None  # type: ignore[assignment]
+    turn_cache_reads: list = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         # Mutable defaults must be constructed per-instance.
@@ -1112,6 +1122,8 @@ class SessionAggregate:
         self.branch_counts = Counter()
         self.worktree_counts = Counter()
         self.parse_errors = Counter()
+        self.turn_inputs = []
+        self.turn_cache_reads = []
 
 
 def _new_session_state(source: str) -> SessionAggregate:
@@ -1225,6 +1237,19 @@ def _handle_claude_record(rec: dict, st: SessionAggregate) -> None:
                                       counter=st.parse_errors,
                                       label="malformed_ephemeral_1h")
 
+        # Per-turn cache-telemetry append (F1 cache_decay fix). Both
+        # counters reset on every assistant record so the i-th list entry
+        # is *that turn's* usage — the dashboard draws cache_hit_ratio at
+        # each turn index. Iron Law 3 (volatile content stays in prompt
+        # tail) is what we're trying to surface here: a sudden drop in
+        # ``turn_cache_reads`` between adjacent turns is direct evidence
+        # of a prefix invalidation.
+        _turn_in = st.input_tokens  # already safely coerced above
+        _turn_cr = st.cache_read_tokens
+        if _turn_in or _turn_cr:
+            st.turn_inputs.append(_turn_in)
+            st.turn_cache_reads.append(_turn_cr)
+
         for blk in (msg.get("content") or []):
             if not isinstance(blk, dict):
                 continue
@@ -1296,7 +1321,17 @@ def _handle_codex_record(rec: dict, st: SessionAggregate) -> None:
                         reason = _safe_int(tot.get("reasoning_output_tokens"),
                                             counter=st.parse_errors,
                                             label="malformed_reasoning_output_tokens")
-                        st.input_tokens = max(in_raw - cached, 0)
+                        new_input = max(in_raw - cached, 0)
+                        # F1 cache_decay: codex emits cumulative totals,
+                        # so the per-turn delta is (new − previous). Skip
+                        # the first token_count event (no baseline).
+                        if st.input_tokens or st.cache_read_tokens or st.turn_inputs:
+                            delta_input = max(new_input - st.input_tokens, 0)
+                            delta_cr = max(cached - st.cache_read_tokens, 0)
+                            if delta_input or delta_cr:
+                                st.turn_inputs.append(delta_input)
+                                st.turn_cache_reads.append(delta_cr)
+                        st.input_tokens = new_input
                         st.cache_read_tokens = cached
                         st.output_tokens = out_raw + reason
                         st.cache_write_tokens = 0
@@ -1349,6 +1384,26 @@ def _resolve_worktree(st: SessionAggregate, path: Path) -> str:
     return worktree
 
 
+def _compute_cache_decay(turn_inputs: list, turn_cache_reads: list) -> list[float]:
+    """Per-turn cache-hit-ratio curve (F1 cache_decay fix).
+
+    Returns a list of floats, one per turn, where each value is
+    ``cr / (in + cr)`` for that turn. 0.0 when both are 0 (the turn
+    was a no-op; surface as ``0.0`` so the dashboard can still
+    index the turn without a div-by-zero). Length matches the
+    input lists; empty when the session had no tracked turns.
+
+    The dashboard renders this curve bucketed into session-length
+    bands ``[1-3, 4-10, 11-30, 30+]`` so the user can see whether
+    long sessions hold a stable prefix or drift toward 0% mid-stream.
+    """
+    out: list[float] = []
+    for inp, cr in zip(turn_inputs, turn_cache_reads):
+        total = inp + cr
+        out.append(cr / total if total else 0.0)
+    return out
+
+
 def _finalize_session(st: SessionAggregate, *, source: str, log_path: Path) -> dict | None:
     """Build the final aggregate_session dict from the accumulator.
 
@@ -1357,7 +1412,11 @@ def _finalize_session(st: SessionAggregate, *, source: str, log_path: Path) -> d
     ``{session_id, source, repo, branch, worktree, model, first_ts,
     last_ts, input_tokens, output_tokens, cache_write_tokens,
     cache_read_tokens, ephemeral_5m, ephemeral_1h, tool_counts,
-    read_files, user_texts, parse_errors, log_path}`` dict.
+    read_files, user_texts, parse_errors, log_path, cache_decay}`` dict.
+
+    ``cache_decay`` is the per-turn cache-hit-ratio curve (F1 cache_decay
+    fix). Empty list for sessions with no tracked turns; one float per
+    turn otherwise. Drives the "Cache hit ratio vs turn index" tile.
     """
     if st.session_id is None:
         return None
@@ -1388,6 +1447,9 @@ def _finalize_session(st: SessionAggregate, *, source: str, log_path: Path) -> d
         # caller (JSON-serializable plain dict, not a Counter).
         "parse_errors": dict(st.parse_errors),
         "log_path": str(log_path),
+        # F1 cache_decay fix: per-turn hit ratio. Empty when no turns
+        # were tracked; the dashboard skips bucketing in that case.
+        "cache_decay": _compute_cache_decay(st.turn_inputs, st.turn_cache_reads),
     }
 
 
@@ -2032,6 +2094,46 @@ def _render_cost_gate_banner(status: str, violations: list[dict]) -> str:
     )
 
 
+def _render_cache_decay_rows(cache_decay: dict) -> str:
+    """Render the F1 cache_decay bucket table rows.
+
+    One row per bucket; the curve is rendered as a sparkline-like bar
+    strip where each cell's width = ``median * 100`` so reviewers can
+    eyeball whether the curve stays high or trends down. Defensive
+    ``html.escape`` on every interpolated value.
+    """
+    if not cache_decay:
+        return '<tr><td colspan="3" class="muted">no cache-decay data this window</td></tr>'
+    bucket_order = ("1-3", "4-10", "11-30", "30+")
+    rows: list[str] = []
+    for label in bucket_order:
+        bucket = cache_decay.get(label)
+        if not bucket or not bucket.get("points"):
+            continue
+        # Render the curve as a horizontal strip: each turn's median is
+        # a div with width = median*100%. Total width is the curve
+        # length (number of turns), shown compact.
+        cells = "".join(
+            f'<span class="cd-cell" '
+            f'style="display:inline-block;width:6px;height:14px;'
+            f'background:rgba(10,132,255,{0.15 + 0.85 * p["median"]:.2f});'
+            f'margin-right:1px;vertical-align:bottom" '
+            f'title="turn {html.escape(str(p["turn"]))}: '
+            f'{p["median"] * 100:.1f}% (n={p["n"]})"></span>'
+            for p in bucket["points"]
+        )
+        rows.append(
+            f'<tr><td>{html.escape(label)}</td>'
+            f'<td style="text-align:right">{bucket["n_sessions"]}</td>'
+            f'<td><div class="cd-strip">{cells}</div>'
+            f'<span class="muted" style="font-size:11px;margin-left:6px">'
+            f'{len(bucket["points"])} turn(s) tracked</span></td></tr>'
+        )
+    if not rows:
+        return '<tr><td colspan="3" class="muted">no sessions with cache_decay in any bucket</td></tr>'
+    return "".join(rows)
+
+
 def _render_session_row(
     session: dict, score: dict, warns: list["Warning"],
 ) -> str:
@@ -2268,6 +2370,7 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
         vm["cost_by_model"], unknown_models_list,
     )
     ttl_middle_html = _render_cache_ttl_panel(vm["cache_ttl"])
+    cache_decay_rows = _render_cache_decay_rows(vm.get("cache_decay") or {})
     cost_gate_banner = _render_cost_gate_banner(gate_status, gate_violations)
 
     # Session table split — derived from scored/warnings_per_session
@@ -2326,6 +2429,7 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
         ttl_miss_pct=vm["cache_ttl"]["miss_pct"],
         ttl_middle_html=ttl_middle_html,
         ttl_caveat=html.escape(CACHE_TTL_CAVEAT),
+        cache_decay_rows=cache_decay_rows,
         active_session_rows=active_session_rows,
         inactive_session_rows=inactive_session_rows,
         transcript_index_rows=transcript_index_rows,
