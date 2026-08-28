@@ -558,12 +558,27 @@ def _parse_latest_llm_verdict(comments: list[dict]) -> tuple[str, str]:
     return (verdict, comment_id)
 
 
-def _gate_g3_llm_verdicts(ctx: PrVerifyContext) -> GateResult:
+def _gate_g3_llm_verdicts(
+    ctx: PrVerifyContext | None = None,
+    *,
+    pr_number: int = 0,
+    repo: str = "",
+    fetched_at: str = "",
+    comments: tuple | None = None,
+    pr_pushed_at: str = "",
+    pr_head_sha: str = "",
+) -> GateResult:
     """G3: every required LLM-judge job — review, security, and
     maintenance — has its most recent audit comment carrying
     `verdict=Approve`. The audit comment is the machine-recorded
     per-job verdict posted by the workflow's verdict-parser step
     (`<!-- dev-kit-verdict-audit --> run=… job=… status=… verdict=…`).
+
+    Accepts either the new `ctx: PrVerifyContext` first arg (preferred,
+    used by `verify_pr`) or the legacy 6-kwarg form (preserved for
+    the `TestG3CommentHeadShaProvenance` test class that landed in
+    PR #754). When `ctx is None`, the kwargs are folded into a fresh
+    PrVerifyContext so the body stays single-source-of-truth.
 
     `comments` is the pre-fetched comment tuple from `verify_pr`,
     which shares one `gh api .../comments` round-trip across G3 and G4.
@@ -586,6 +601,19 @@ def _gate_g3_llm_verdicts(ctx: PrVerifyContext) -> GateResult:
     any Approve audit is OLDER than `pr_pushed_at`, that audit is
     stale and G3 returns STALE.
     """
+    # Back-compat: legacy 6-kwarg call (TestG3CommentHeadShaProvenance
+    # landed in PR #754 before this gate was migrated to PrVerifyContext).
+    # When the caller passes `ctx is None` plus kwargs, fold the kwargs
+    # into a fresh context so the body stays single-source-of-truth.
+    if ctx is None:
+        ctx = PrVerifyContext(
+            pr_number=pr_number,
+            repo=repo,
+            fetched_at=fetched_at,
+            comments=comments,
+            pr_pushed_at=pr_pushed_at,
+            pr_head_sha=pr_head_sha,
+        )
     pr_number = ctx.pr_number
     repo = ctx.repo
     fetched_at = ctx.fetched_at or _now_iso()
