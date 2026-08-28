@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict
 
-from lib.behavior_scorers._git import git_output as _git_output
+from lib.behavior_scorers._git_helper import git_output as _git_output
 from lib.behavior_scorers.types import Context, DimensionScore
 
 # Conventional Commits: `<type>(optional-scope)!?: <subject>`

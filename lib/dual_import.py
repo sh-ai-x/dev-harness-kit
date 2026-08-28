@@ -1,4 +1,4 @@
-"""_dual_import.py — package-or-flat import shim.
+"""dual_import.py — package-or-flat import shim.
 
 The `lib/` package ships in two layouts:
   * source repo: `lib/__init__.py` makes `lib` a Python package, so

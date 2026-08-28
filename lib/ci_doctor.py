@@ -38,8 +38,8 @@ from pathlib import Path
 # Centralized dual-import shim (inspect 2026-08-27 dup-5). One helper
 # instead of N hand-copied try/except blocks across ci_setup / ci_doctor
 # / ci_update.
-from lib._dual_import import from_dual, from_dual_optional
-from lib._gh_cli import gh_available
+from lib.dual_import import from_dual, from_dual_optional
+from lib.gh_cli import gh_available
 
 (
     PROVIDER_SECRETS,

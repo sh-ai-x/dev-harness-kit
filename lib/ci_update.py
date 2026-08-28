@@ -33,9 +33,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # Dual-import shim (inspect 2026-08-27 dup-5): centralized in
-# `lib/_dual_import.py` so the same try/except dance is not hand-copied
+# `lib/dual_import.py` so the same try/except dance is not hand-copied
 # in 4 places.
-from lib._dual_import import from_dual
+from lib.dual_import import from_dual
 
 (
     EXPECTED_PATHS,

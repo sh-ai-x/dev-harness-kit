@@ -1,4 +1,4 @@
-"""_gh_cli.py — shared gh-CLI presence + auth probe.
+"""gh_cli.py — shared gh-CLI presence + auth probe.
 
 Five sites in ci_doctor.py + ci_setup.py used to repeat the same
 `shutil.which('gh') + subprocess.run([gh, 'auth', 'status'], timeout=...)`
