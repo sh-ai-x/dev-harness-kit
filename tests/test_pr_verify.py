@@ -970,6 +970,48 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
          "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
     ])
 
+    def test_legacy_positional_call_threads_repo_correctly(self):
+        """Regression for inspect 2026-08-27 M1 (PR #755 maintenance-judge
+        finding): _gate_g3_llm_verdicts(ctx=None, pr_number=0, repo="", ...)
+        puts `ctx` in position 0 and `pr_number` in position 1. A legacy
+        caller invoking the OLD positional shape —
+        `_gate_g3_llm_verdicts(584, "owner/repo", comments=..., ...)` —
+        binds 584 to `ctx` and the string "owner/repo" to the parameter
+        NAMED `pr_number`, not `repo`. The isinstance(ctx, PrVerifyContext)
+        fold must read the misbound `pr_number` slot (which holds the repo
+        string) rather than the `repo` slot (which stayed at its "" default)
+        or every legacy positional call silently builds a PrVerifyContext
+        with repo="" and every gh API call 404s in production. This test
+        asserts on the ACTUAL `_run_gh` call args, not just the return
+        value — the prior bug passed every existing test because those
+        tests mock `_run_gh` unconditionally regardless of its arguments.
+        """
+        calls = []
+
+        def fake_gh(args):
+            calls.append(args)
+            return self._COMMENTS_MATCHING
+
+        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
+            g = pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertTrue(g.passed, g.detail)
+        self.assertTrue(calls, "expected at least one _run_gh call")
+        joined = " ".join(str(c) for c in calls)
+        self.assertIn(
+            "sh-ai-x/dev-harness-kit", joined,
+            "repo was not threaded through the legacy positional shim; "
+            f"_run_gh was called with: {calls}",
+        )
+        self.assertNotIn(
+            "repos//issues", joined,
+            "repo bound to empty string — the exact M1 misbinding bug",
+        )
+
     def test_comment_head_sha_matches_pr_head_passes(self):
         """Audit `head_sha=` matches PR head — pass even when the run
         was dispatched against main (so `_run_head_sha()` would NOT
@@ -1247,6 +1289,87 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
             )
         self.assertFalse(g.passed)
         self.assertIn("STALE", g.detail)
+
+
+class TestG3LegacyArgBinding(unittest.TestCase):
+    """Regression for the `_gate_g3_llm_verdicts` back-compat shim.
+
+    The new signature puts `ctx` first, so a legacy POSITIONAL call
+    `_gate_g3_llm_verdicts(584, "owner/repo", ...)` binds the repo
+    string to the `pr_number` parameter slot while `repo` keeps its
+    `""` default. A shim that reads `repo` directly builds
+    `PrVerifyContext(pr_number=584, repo="")` and the resulting
+    `gh api repos//issues/584/comments` 404s in production. The
+    existing provenance tests never caught this because they mock
+    `_run_gh` without inspecting the requested path — these tests
+    assert the path itself.
+    """
+
+    _AUDITS = json.dumps([[
+        {"id": "audit-1", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success "
+                 "source=lib.maintenance_gate verdict=Approve head_sha=newsha"},
+        {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success "
+                 "source=lib.maintenance_gate verdict=Approve head_sha=newsha"},
+        {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success "
+                 "source=lib.maintenance_gate verdict=Approve head_sha=newsha"},
+    ]])
+
+    def _api_paths(self, gh_mock):
+        return [
+            call.args[0][1]
+            for call in gh_mock.call_args_list
+            if call.args
+            and isinstance(call.args[0], list)
+            and len(call.args[0]) >= 2
+            and call.args[0][0] == "api"
+        ]
+
+    def test_legacy_positional_binds_repo_not_empty(self):
+        with patch.object(pr_verify, "_run_gh", return_value=self._AUDITS) as gh_mock:
+            pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertEqual(
+            self._api_paths(gh_mock),
+            ["repos/sh-ai-x/dev-harness-kit/issues/584/comments"],
+            "legacy positional call must bind repo from the second positional",
+        )
+
+    def test_pure_kwarg_call_binds_repo(self):
+        with patch.object(pr_verify, "_run_gh", return_value=self._AUDITS) as gh_mock:
+            pr_verify._gate_g3_llm_verdicts(
+                pr_number=584,
+                repo="sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertEqual(
+            self._api_paths(gh_mock),
+            ["repos/sh-ai-x/dev-harness-kit/issues/584/comments"],
+            "pure-kwarg call must not be shifted by the leading ctx slot",
+        )
+
+    def test_positional_pr_number_with_repo_keyword(self):
+        with patch.object(pr_verify, "_run_gh", return_value=self._AUDITS) as gh_mock:
+            pr_verify._gate_g3_llm_verdicts(
+                584,
+                repo="sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertEqual(
+            self._api_paths(gh_mock),
+            ["repos/sh-ai-x/dev-harness-kit/issues/584/comments"],
+            "an explicit repo= keyword must win over the positional slot",
+        )
 
 
 class TestLatestPerJobAuditsParseExtras(unittest.TestCase):

@@ -609,13 +609,28 @@ def _gate_g3_llm_verdicts(
     # PrVerifyContext, treat the positionals as the legacy kwargs and
     # fold into a fresh context so the body stays single-source-of-truth.
     if not isinstance(ctx, PrVerifyContext):
-        # ctx is actually the legacy pr_number; the next positional is repo.
         pr_head_sha_arg = pr_head_sha
         pr_pushed_at_arg = pr_pushed_at
         comments_arg = comments
         fetched_at_arg = fetched_at
-        repo_arg = repo
-        pr_number_arg = ctx  # type: ignore[assignment]
+        if ctx is None:
+            # Pure-kwarg call: `pr_number=` / `repo=` already carry their
+            # own values; nothing was shifted by the leading `ctx` slot.
+            pr_number_arg = pr_number
+            repo_arg = repo
+        else:
+            # Legacy POSITIONAL call: `ctx` holds the legacy pr_number and
+            # the second positional landed in the `pr_number` slot — it is
+            # actually the repo. Reading `repo` here would yield its `""`
+            # default and build a context with the wrong repo (the gh API
+            # call would then 404 in production).
+            pr_number_arg = ctx  # type: ignore[assignment]
+            if repo:
+                repo_arg = repo  # explicit `repo=` keyword wins
+            elif isinstance(pr_number, str):
+                repo_arg = pr_number  # second positional == repo
+            else:
+                repo_arg = ""
         ctx = PrVerifyContext(
             pr_number=pr_number_arg,  # type: ignore[arg-type]
             repo=repo_arg,  # type: ignore[arg-type]

@@ -40,19 +40,20 @@ from typing import List, Tuple
 # Atomic write helper. Dual-import supports both shapes:
 #   * source repo: `lib/__init__.py` makes `lib` a package, so intra-package
 #     `from .atomic import` resolves.
-#   * consumer repo: `lib/install.sh` copies `ci_setup.py` + `atomic.py` to
-#     `<target>/lib/` without `__init__.py`, so the package form fails and
-#     we fall back to a top-level `from atomic import` (works when
-#     `<target>/` is on sys.path, which the consumer-side invocations
-#     guarantee).
+#   * flat layout: `ci_setup.py` is imported with `<target>/lib` itself on
+#     sys.path and no `__init__.py` in scope, so the package form fails and
+#     we fall back to a top-level `from atomic import`.
 #
 # ci_setup.py stays on the inline try/except (rather than the centralized
-# helper in `lib/dual_import.py`) because the consumer-install contract
-# is "ship only ci_setup.py + atomic.py + read_env_key.py" — see
-# `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`.
-# Adding `lib/dual_import.py` to the consumer bundle would change that
-# contract; the helper is reserved for in-package callers (ci_doctor,
-# ci_update). inspect 2026-08-27 dup-5.
+# helper in `lib/dual_import.py`) because the bare-import regression
+# fixture at `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`
+# stages a 3-file minimal bundle (`ci_setup.py` + `atomic.py` +
+# `read_env_key.py`) with no `lib/__init__.py` and no sibling modules.
+# `lib/install.sh:53-55` itself copies ALL `lib/*.py`, so the constraint
+# is the fixture's minimal bundle, not the installer. Importing
+# `lib/dual_import.py` here would break that fixture; the helper is
+# reserved for in-package callers (ci_doctor, ci_update).
+# inspect 2026-08-27 dup-5.
 try:
     from .atomic import atomic_write_json, read_json_or_default  # type: ignore
 except ImportError:
@@ -67,16 +68,21 @@ except ImportError:
     from read_env_key import read_env_key as _read_env_key_helper  # type: ignore
 
 # Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
-# lives at `lib/gh_cli.py`. ci_setup.py is shipped flat to consumer
-# installs (alongside `atomic.py` + `read_env_key.py` only) so it cannot
-# import from `lib.*`. `_read_ci_provider_via_gh()` keeps the inline
-# try/except dance below; the helper exists for in-package callers
-# (`ci_doctor.py`) that can import freely.
+# lives at `lib/gh_cli.py`. The in-package form is preferred; the inline
+# fallback below exists for the flat 3-file bundle staged by
+# `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`
+# (`ci_setup.py` + `atomic.py` + `read_env_key.py`, no `lib/__init__.py`,
+# no sibling modules), where neither `lib.gh_cli` nor a bare `gh_cli`
+# resolves. `lib/install.sh:53-55` copies ALL `lib/*.py`, so a real
+# consumer install DOES get `gh_cli.py` and takes the import branch.
+# DRIFT RISK: no test asserts the fallback body stays byte-equivalent to
+# `lib/gh_cli.py:gh_available`; keep the two in sync by hand, or add
+# `gh_cli.py` to the fixture bundle and delete the fallback outright.
 try:
     from lib.gh_cli import gh_available  # type: ignore
 except ImportError:
-    # Consumer-install flat layout: ship a local re-implementation so the
-    # call site stays a one-liner. Mirrors the helper shape exactly.
+    # Flat layout: ship a local re-implementation so the call site stays
+    # a one-liner. Mirrors `lib/gh_cli.py:gh_available` exactly.
     import shutil as _shutil  # type: ignore
     import subprocess as _subprocess  # type: ignore
 

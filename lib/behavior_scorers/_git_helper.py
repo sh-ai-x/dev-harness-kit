@@ -1,4 +1,4 @@
-"""_git.py — shared subprocess wrapper for behavior_scorers.
+"""_git_helper.py — shared subprocess wrapper for behavior_scorers.
 
 Both `process.py` (D2) and `safety.py` (D4) need to read git state from
 the worktree with the same guard semantics (FileNotFoundError + timeout
