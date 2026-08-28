@@ -205,14 +205,48 @@ merge_loghooks_into() {
           )
         ')"
 
-    # Byte-level idempotence: if the canonical form of the merge result
-    # equals the canonical form of the existing file, skip the write.
-    # Without this, every SessionStart re-rewrites the file with a
-    # (possibly) different entry order, dirtying the working tree and
-    # blocking `git pull`. Canonical (`jq -S .`) comparison is robust
-    # to key-order drift in either the existing file or the merge
-    # output — only semantically meaningful changes trigger a write.
+    # Idempotence: skip the write when the existing target already
+    # contains every source entry, in any order and with or without
+    # the sentinel. Without this, every SessionStart re-rewrites the
+    # file when the existing entry's sentinel state differs from what
+    # the merge produces — dirtying the working tree on every session
+    # and blocking `git pull`. The check is staged:
+    #
+    #   1. Semantic — does existing contain every source command (by
+    #      .hooks[0].command match within each event)? If yes, the
+    #      install is done. Robust to: existing entries with the sentinel
+    #      already attached (merge would re-add a "no-op" sentinel);
+    #      existing entries with additional non-managed sentinels
+    #      (preserved through the merge); pre-existing entry-order
+    #      drift from older install algorithms (preserved; a one-time
+    #      rewrite to normalize would dirty the tree even when no
+    #      install work is needed).
+    #   2. Canonical (`jq -S .`) — byte-stable equality. Catches the
+    #      case where existing matches merged exactly after key-order
+    #      normalization but failed the semantic check (impossible in
+    #      practice; kept as a belt-and-braces fallback).
+    #
+    # Why not just normalize (sort the hooks arrays in merged output)?
+    # Because the order in HEAD's committed .claude/settings.json is
+    # authoritative for projects that ship a baseline — rewriting to a
+    # sorted order would dirty a freshly-cloned checkout on its first
+    # SessionStart.
     if [[ -f "$target" ]]; then
+        local existing
+        existing="$(cat "$target" 2>/dev/null || true)"
+        if [[ -n "$existing" ]] && \
+            printf '%s' "$existing" | jq -e \
+                --slurpfile src "$src" --arg sentinel "$LOGHOOKS_SENTINEL" '
+                . as $e
+                | [$src[0].hooks // {} | to_entries[]] as $src_events
+                | all($src_events[]; . as $src_ev |
+                    ([$e.hooks[$src_ev.key] // [] | .[].hooks[0].command // ""]) as $have
+                    | ([$src_ev.value // [] | .[].hooks[0].command // ""]) as $need
+                    | ($need | length == 0) or ($need | all(. as $n | $have | index($n)))
+                  )
+                ' >/dev/null 2>&1; then
+            return 0
+        fi
         local existing_canonical merged_canonical
         existing_canonical="$(jq -S . "$target" 2>/dev/null || true)"
         merged_canonical="$(printf '%s' "$merged" | jq -S . 2>/dev/null || true)"
