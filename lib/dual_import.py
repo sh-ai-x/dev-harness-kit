@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from typing import Iterable, Optional, Tuple, Any
+from typing import Any, Iterable, Optional, Tuple
 
 
 def from_dual(module: str, names: Iterable[str]) -> Tuple[Any, ...]:
