@@ -600,18 +600,29 @@ def _gate_g3_llm_verdicts(
     any Approve audit is OLDER than `pr_pushed_at`, that audit is
     stale and G3 returns STALE.
     """
-    # Back-compat: legacy 6-kwarg call (TestG3CommentHeadShaProvenance
+    # Back-compat: legacy positional call (TestG3CommentHeadShaProvenance
     # landed in PR #754 before this gate was migrated to PrVerifyContext).
-    # When the caller passes `ctx is None` plus kwargs, fold the kwargs
-    # into a fresh context so the body stays single-source-of-truth.
-    if ctx is None:
+    # The legacy signature is:
+    #   _gate_g3_llm_verdicts(pr_number, repo, fetched_at="",
+    #                            comments=None, pr_pushed_at="", pr_head_sha="")
+    # The new signature puts `ctx` first; when the first arg is NOT a
+    # PrVerifyContext, treat the positionals as the legacy kwargs and
+    # fold into a fresh context so the body stays single-source-of-truth.
+    if not isinstance(ctx, PrVerifyContext):
+        # ctx is actually the legacy pr_number; the next positional is repo.
+        pr_head_sha_arg = pr_head_sha
+        pr_pushed_at_arg = pr_pushed_at
+        comments_arg = comments
+        fetched_at_arg = fetched_at
+        repo_arg = repo
+        pr_number_arg = ctx  # type: ignore[assignment]
         ctx = PrVerifyContext(
-            pr_number=pr_number,
-            repo=repo,
-            fetched_at=fetched_at,
-            comments=comments,
-            pr_pushed_at=pr_pushed_at,
-            pr_head_sha=pr_head_sha,
+            pr_number=pr_number_arg,  # type: ignore[arg-type]
+            repo=repo_arg,  # type: ignore[arg-type]
+            fetched_at=fetched_at_arg,  # type: ignore[arg-type]
+            comments=comments_arg,  # type: ignore[arg-type]
+            pr_pushed_at=pr_pushed_at_arg,  # type: ignore[arg-type]
+            pr_head_sha=pr_head_sha_arg,  # type: ignore[arg-type]
         )
     pr_number = ctx.pr_number
     repo = ctx.repo
