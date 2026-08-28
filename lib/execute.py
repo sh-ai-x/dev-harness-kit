@@ -706,10 +706,22 @@ def _step_post_collect(
         # 10.0 (ROT) while still entering overall_score at weight 0.25.
         # write_event_id is None only when the append failed; fall back
         # to the lifecycle anchor so the chain stays readable.
+        #
+        # Honest verify evidence: no independent pytest/lint/build runner
+        # actually executed here — the executor only knows the sub-agent
+        # exited 0. An earlier revision emitted `required_checks_passed=True,
+        # independent=True` from this exit_code==0 alone, which made
+        # first_pass_quality a fabricated 100% (Review Critical #2). The
+        # fields below are now truthful: the verify event is recorded so
+        # the causal chain stays complete, but the reducer sees it as
+        # self-reported with zero independent checks — first_pass_rate
+        # stays 0 against this evidence.
         _emit_effectiveness_event(
             root, phase, step_num, "verify.passed", "passed",
-            {"required_checks_passed": True, "retry_count": 0,
-             "independent": True, "via": "executor"},
+            {"required_checks_passed": False, "retry_count": 0,
+             "independent": False, "via": "executor",
+             "evidence_provenance": "self-reported",
+             "checks_run": []},
             write_event_id or ctx.get("started_event_id"),
         )
 

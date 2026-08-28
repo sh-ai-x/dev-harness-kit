@@ -990,11 +990,22 @@ class TestRunStepBody(unittest.TestCase):
                 "_first_pass.causally_linked holds",
             )
 
-    def test_first_pass_quality_scores_100_on_executor_path(self):
-        """End-to-end: the executor's own events must satisfy `_first_pass`.
+    def test_first_pass_quality_reflects_honest_verify_evidence(self):
+        """End-to-end: the executor's own events must drive ``_first_pass``
+        honestly. The executor records ``verify.passed`` for the causal
+        chain, but the event carries ``required_checks_passed=False`` and
+        ``independent=False`` because no real pytest/lint/build runner
+        executed — only the sub-agent's exit_code==0 is known. An earlier
+        revision emitted ``required_checks_passed=True, independent=True``
+        from that exit_code alone, fabricating a 100% first_pass_rate
+        (Review Critical #2).
 
-        Guards the PR's `first_pass_quality = 100.0` claim against the real
-        reducer rather than a hand-built fixture.
+        The reducer still counts ``first_verify_evidence`` (the fields are
+        present) and ``first_pass_no_hidden_retry`` (no heal/verify.failed
+        pre-dates the verify), so the honest score is:
+            0*.7 (first_pass_rate) + 1*.2 (first_verify_evidence)
+            + 1*.1 (no_hidden_retry) = 30.0
+        Anything higher would require an actual independent check runner.
         """
         import tempfile
 
@@ -1010,7 +1021,18 @@ class TestRunStepBody(unittest.TestCase):
                 push=False, exit_code=0, stdout="", stderr="",
             )
             component = _first_pass(read_events(root))
-            self.assertEqual(component["score"], 100.0, component)
+            self.assertEqual(component["score"], 30.0, component)
+            # First_pass_rate must reflect that no independent check ran.
+            self.assertEqual(
+                component["submetrics"]["first_pass_rate"]["value"], 0.0,
+                component["submetrics"],
+            )
+            # First_verify_evidence stays 100% because the evidence fields
+            # ARE populated (the event exists for the causal chain).
+            self.assertEqual(
+                component["submetrics"]["first_verify_evidence"]["value"], 100.0,
+                component["submetrics"],
+            )
 
 
 # --- issue #94: status-transition table ---------------------------------

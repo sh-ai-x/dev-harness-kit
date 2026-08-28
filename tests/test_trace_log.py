@@ -149,8 +149,10 @@ def test_load_handles_unknown_step_fields(tmp_path: Path) -> None:
 
 def test_default_identity_shape_is_dict_of_str() -> None:
     """_default_identity() returns the three string fields the stability
-    submetric reads. provider/model default to empty so callers can opt in
-    via DEV_KIT_PROVIDER / DEV_KIT_MODEL without changing the schema."""
+    submetric reads. Every field defaults to empty string so callers can
+    opt in via DEV_KIT_AGENT / DEV_KIT_PROVIDER / DEV_KIT_MODEL without
+    changing the schema. The empty-default prevents a non-Claude runner
+    from being silently mis-attributed to claude-code (A06-1)."""
     from lib.trace_log import _default_identity
 
     identity = _default_identity()
@@ -158,7 +160,10 @@ def test_default_identity_shape_is_dict_of_str() -> None:
     assert set(identity.keys()) == {"agent", "provider", "model"}
     for key, value in identity.items():
         assert isinstance(value, str), f"{key} must be a string, got {type(value)!r}"
-    assert identity["agent"], "agent must be non-empty (defaults to claude-code)"
+    assert identity["agent"] == "", (
+        "agent must default to empty (no auto-attribution to claude-code); "
+        "the stability reducer treats empty/missing as 'no identity recorded'"
+    )
 
 
 def test_default_identity_respects_env_overrides(monkeypatch) -> None:
@@ -174,7 +179,15 @@ def test_default_identity_respects_env_overrides(monkeypatch) -> None:
 
 
 def test_append_event_auto_stamps_identity(tmp_path: Path) -> None:
-    """append_event fills missing agent/provider/model from env defaults."""
+    """append_event fills missing agent/provider/model from env defaults.
+
+    With no env override, every field defaults to empty string — the
+    stability reducer treats empty as 'no identity recorded' so a
+    non-Claude runner is NOT silently mis-attributed to claude-code.
+    A previous revision asserted ``stored["agent"] == "claude-code"``;
+    that made the metric self-justifying on every non-Claude producer
+    (A06-1 / insecure-design).
+    """
     from lib.trace_log import append_event, read_events
 
     event = {
@@ -192,7 +205,7 @@ def test_append_event_auto_stamps_identity(tmp_path: Path) -> None:
     }
     append_event(tmp_path, event)
     [stored] = read_events(tmp_path)
-    assert stored["agent"] == "claude-code"
+    assert stored["agent"] == ""
     assert stored["provider"] == ""
     assert stored["model"] == ""
 

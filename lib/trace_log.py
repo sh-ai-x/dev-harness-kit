@@ -38,12 +38,15 @@ EVENT_RECORD_REQUIRED_FIELDS = EVENT_REQUIRED_FIELDS + ("schema_version",)
 def _default_identity() -> Dict[str, str]:
     """Auto-stamp producer identity for stability submetric (issue #663 SSOT).
 
-    Reads from env so the env-based default wins; if env is unset, falls
-    back to a best-effort platform-derived value. Empty string for fields
-    that have no signal — the reducer treats empty/missing as 'no identity
-    recorded' so the user can opt-in by setting DEV_KIT_* env vars.
+    Reads from env so the env-set value wins. When env is unset, every
+    field defaults to empty string — the stability reducer treats
+    empty/missing as 'no identity recorded', so a non-Claude runner
+    that does NOT set DEV_KIT_AGENT is NOT silently mis-attributed to
+    claude-code. A previous revision defaulted ``agent`` to the literal
+    ``"claude-code"``; that made the metric self-justifying on every
+    non-Claude runner (A06-1 / insecure-design regression).
     """
-    agent = os.environ.get("DEV_KIT_AGENT", "claude-code")
+    agent = os.environ.get("DEV_KIT_AGENT", "")
     provider = os.environ.get("DEV_KIT_PROVIDER", "")
     model = os.environ.get("DEV_KIT_MODEL", "")
     return {"agent": agent, "provider": provider, "model": model}
@@ -239,6 +242,10 @@ def _recent_event_ids(fd: int) -> set:
     the cost does not grow with log length. Malformed or truncated lines
     are skipped rather than raising — the dedupe guard is an
     optimisation, and a corrupt tail must not block a valid append.
+    RecursionError is caught alongside ValueError/AttributeError because
+    ``json.loads`` raises RecursionError on deeply nested adversarial
+    payloads; without that catch the lock-holder would die and the next
+    append would block on a stale fcntl lock (A10-4).
     """
     try:
         size = os.fstat(fd).st_size
@@ -261,7 +268,7 @@ def _recent_event_ids(fd: int) -> set:
             continue
         try:
             event_id = json.loads(line).get("event_id")
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RecursionError):
             continue
         if event_id:
             ids.add(event_id)
@@ -292,7 +299,15 @@ def append_event(root: Path, event: Mapping[str, Any]) -> Tuple[Path, str]:
     # Open in "a+" so the dedupe guard can read the tail under the same
     # exclusive lock that guards the append.
     with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            # Stale or uncontested flock on a network FS — best-effort
+            # telemetry must NOT block the caller (A10-2). The append
+            # below will still race against other writers, but that's
+            # acceptable for a trace log; the dedupe guard is a
+            # convenience, not a correctness guarantee.
+            pass
         try:
             # Dedupe-on-write guard: if a producer hands us the same
             # event_id twice, regenerate once before persisting.
@@ -302,7 +317,10 @@ def append_event(root: Path, event: Mapping[str, Any]) -> Tuple[Path, str]:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
             handle.flush()
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
     return path, record["event_id"]
 
 
