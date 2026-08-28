@@ -95,9 +95,9 @@ CI run populates the submetric without any per-producer wiring.
 
 | Signal | Producer | Notes |
 |---|---|---|
-| Identity fields | `lib.trace_log.append_event` | Auto-stamps `agent`/`provider`/`model` from `DEV_KIT_AGENT` / `DEV_KIT_PROVIDER` / `DEV_KIT_MODEL` (defaults `claude-code` / `""` / `""`). Uses `setdefault`, so an explicit value passed by the caller always wins. Set `DEV_KIT_AGENT=""` to opt out — the reducer reads an empty string as "no identity recorded". |
+| Identity fields | `lib.trace_log.append_event` | Auto-stamps `agent`/`provider`/`model` from `DEV_KIT_AGENT` / `DEV_KIT_PROVIDER` / `DEV_KIT_MODEL` (defaults `""` / `""` / `""` — empty defaults so the reducer treats unset as "no identity recorded" and a non-Claude runner is NOT silently mis-attributed to claude-code). Uses `setdefault`, so an explicit value passed by the caller always wins. |
 | `contract.test` | `tests/conftest.py` | `pytest_sessionfinish` appends one event per run. **CI-gated** (`CI=true`) so local `pytest` runs do not inflate a developer's trace log. The filename must stay `conftest.py` — pytest auto-registers hooks from no other name. |
-| `ground_truth` on guard events | `hooks/lib/payload-parse.sh::emit_guard_event` | Defaults to `unsafe` for `blocked`, `legitimate` for `allowed`, `pending` for the `ask` tier. Override with `DEV_KIT_GROUND_TRUTH` for golden / adversarial runs. `_prevention` scores only `guard.blocked` / `guard.allowed`, so the `ask` label is descriptive and does not enter the score. |
+| `ground_truth` on guard events | `hooks/lib/payload-parse.sh::emit_guard_event` | Defaults to `"unknown"` for every outcome (no claim about correctness — a trigger-mirroring default would make the prevention_quality reducer trivially score 100% precision/recall against the same hook that emits the event). The reducer skips `unknown` events, so the metric only scores guards the operator has explicitly classified via `DEV_KIT_GROUND_TRUTH`. Override values are validated against the `unsafe` / `legitimate` / `pending` / `unknown` allowlist; anything else is rejected. |
 
 ### Causal chaining in the executor
 
@@ -110,7 +110,12 @@ collapses `first_pass_quality` to `10.0` (`ROT`) *and* pulls it into
 `overall_score` at weight 0.25, where previously a `None` score dropped
 out of both numerator and divisor. Pinned by
 `test_verify_passed_is_parented_to_write_observed` and
-`test_first_pass_quality_scores_100_on_executor_path`.
+`test_first_pass_quality_reflects_honest_verify_evidence` (the executor
+emits `verify.passed` with `required_checks_passed=False, independent=False`
+plus `evidence_provenance="self-reported"` and `checks_run=[]` because
+no independent pytest/lint/build runner actually executes there — the
+event exists for the causal chain, but the score reflects honest
+self-reported evidence, not a fabricated 100%).
 
 `recovery_quality` needs a `heal.attempted` event between the
 `verify.failed` and the terminal `verify.passed`. The executor has no

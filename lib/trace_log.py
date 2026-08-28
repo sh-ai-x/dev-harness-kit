@@ -359,7 +359,15 @@ def _event_cli() -> int:
     args = parser.parse_args()
     evidence = json.loads(args.evidence_json)
     timestamp = args.ts or now_utc()
-    path = append_event(args.root, {
+    # `append_event` now returns ``(path, persisted_event_id)`` so
+    # callers that capture the id can parent follow-ups safely. The
+    # CLI's stdout contract is the file path (callers like
+    # `hooks/lib/payload-parse.sh` redirect stdout to /dev/null
+    # today, but a status-line / jq pipeline that parsed it would
+    # have silently received a tuple repr). Destructure explicitly
+    # so the CLI prints the same path string the prior contract
+    # promised.
+    path, _persisted_event_id = append_event(args.root, {
         "event_id": new_event_id(),
         "run_id": args.run_id,
         "workflow_id": args.workflow_id,
