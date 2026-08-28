@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "dev-kit",
   "displayName": "Dev Harness Kit",
-  "version": "0.3.339",
+  "version": "0.3.340",
   "description": "Enforcement-first dev harness: deterministic hooks, state-machine stages, TDD-gated builds, per-step sub-agent delegation, Eval-Repair loop",
   "author": {
     "name": "sanghee",
