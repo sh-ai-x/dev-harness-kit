@@ -560,7 +560,6 @@ def _parse_latest_llm_verdict(comments: list[dict]) -> tuple[str, str]:
 
 def _gate_g3_llm_verdicts(
     ctx: PrVerifyContext | None = None,
-    *,
     pr_number: int = 0,
     repo: str = "",
     fetched_at: str = "",
