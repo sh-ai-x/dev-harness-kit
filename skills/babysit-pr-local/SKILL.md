@@ -260,7 +260,7 @@ blocker list, exit 1. Never silently retry past the cap.
 | 4 (WAIT) | sleep 30s for CI | same sleep 30s for deterministic CI |
 | 4L (NEW) | n/a | `bin/babysit-pr-local.sh --pr N` → `bin/review-local.sh --pr N` |
 | 5 (FETCH LOGS) | for failing CI checks | identical (deterministic CI still runs) |
-| 7.5 (LOCAL VERIFY) | `--local-verify` opt-in, default OFF | always ON; default `pytest -q` |
+| 7.5 (LOCAL VERIFY) | n/a (no broad pre-push gate) | always ON; default `pytest -q` |
 | 11 (LOG) | `source=babysit-pr` | `source=babysit-pr-local mode=local review=<verdict>` |
 | 12 (SLEEP) | `gh pr checks --watch` / 20s | 20s only (no `--watch`) |
 

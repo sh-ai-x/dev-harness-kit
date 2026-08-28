@@ -167,34 +167,15 @@ def parse_babysit_args(argv: Sequence[str]) -> argparse.Namespace:
             "--operator-is-only-human is set; quoted into the PR comment."
         ),
     )
-    parser.add_argument(
-        "--local-verify",
-        action="store_true",
-        help=(
-            "Optional local-only mode (additive; default behavior unchanged). "
-            "After applying a fix in the skill's §Algorithm loop, run "
-            "--local-test-cmd (default: 'pytest -q') inside the worktree "
-            "BEFORE the commit + push. If the test command exits non-zero, "
-            "abort the iteration -- no git commit, no git push, no "
-            "GH-Actions run consumed. Lets operators gate iteration on "
-            "local test passage without burning GH-Actions minutes on a "
-            "known-failing commit. The §Algorithm step 8 'VERIFY LOCAL' "
-            "(re-run the specific failing check) is preserved alongside; "
-            "this flag adds a *broader* pre-commit check, not a replacement."
-        ),
-    )
+    # Hidden power-user override for the pre-push pytest gate. The gate
+    # itself is unconditional in /dev-kit:babysit-pr-local; this flag only
+    # names the command for non-pytest projects. Suppressed from --help so
+    # the operator-facing surface stays 0-arg.
     parser.add_argument(
         "--local-test-cmd",
         default="pytest -q",
         metavar="CMD",
-        help=(
-            "Shell command to run inside the worktree when "
-            "--local-verify is set. Defaults to 'pytest -q'. "
-            "The command's stdout+stderr MUST include a pytest-style "
-            "tail line ('<N> passed in <Ns>s' or '<N> failed in <Ns>s') "
-            "per MUST-L3; the MUST-L3 quoted-evidence contract is "
-            "enforced by the skill body, not by this helper."
-        ),
+        help=argparse.SUPPRESS,
     )
     # Hidden routing flag for /dev-kit:babysit-pr-local (skill-only no-flag
     # UX). Suppressed from --help so operators never see it; the
@@ -350,13 +331,14 @@ def format_ownership_confirmed_comment(operator: str, rationale: str, now_iso: s
 
 
 # ---------------------------------------------------------------------------
-# Local-verify enforcement (issue: --local-verify / --local-test-cmd were
-# parsed but consumed by nothing -- the advertised gate was prose-only).
+# Local-verify enforcement for the /dev-kit:babysit-pr-local pre-push
+# pytest gate.
 #
 # The pure helper below runs the operator's command, parses the
 # pytest-style tail line for MUST-L3 evidence, and returns a structured
-# verdict. The babysit-pr skill §Algorithm step 7.5 invokes it; the
-# iteration refuses to advance to commit/push unless passed=True.
+# verdict. The babysit-pr-local skill §Algorithm step 7.5 invokes it
+# unconditionally; the iteration refuses to advance to commit/push unless
+# passed=True.
 #
 # Threat model: operator-local. The operator already has shell access,
 # so `bash -c "$cmd"` is the documented execution mode. Shell-meta lint

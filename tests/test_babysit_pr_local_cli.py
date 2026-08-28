@@ -6,7 +6,7 @@ Coverage:
     T1: empty argv -> False
     T2: ["--local-mode"] -> True
     T3: ["--pr", "42"] -> False (other flags do not trigger)
-    T4: ["--local-verify", "--local-test-cmd", "make test"] -> False
+    T4: ["--local-test-cmd", "make test"] -> False
     T5: ["--local-mode", "--pr", "522"] -> True (orthogonal to --pr)
 
   `parse_babysit_args` integration with --local-mode (hidden flag):
@@ -48,14 +48,12 @@ class TestIsLocalMode(unittest.TestCase):
         """T3: --pr alone is the CI-driven babysit flow, not local mode."""
         self.assertFalse(bpc.is_local_mode(["--pr", "42"]))
 
-    def test_local_verify_alone_does_not_trigger(self) -> None:
-        """T4: --local-verify is the pytest-only gate on the existing
-        babysit-pr skill; it does NOT route to local mode. Operators
-        continue to use /dev-kit:babysit-pr --local-verify for the
-        CI-driven flow + pytest gate, vs /dev-kit:babysit-pr-local
-        for the full local judge + pytest gate path."""
+    def test_local_test_cmd_alone_does_not_trigger(self) -> None:
+        """T4: `--local-test-cmd` only names the pytest command; it does
+        NOT route to local mode. Only the explicit `--local-mode` flag
+        selects the /dev-kit:babysit-pr-local algorithm."""
         self.assertFalse(bpc.is_local_mode(
-            ["--local-verify", "--local-test-cmd", "make test"]
+            ["--local-test-cmd", "make test"]
         ))
 
     def test_local_mode_orthogonal_with_pr(self) -> None:
@@ -96,10 +94,12 @@ class TestLocalModeParserIntegration(unittest.TestCase):
                 bpc.parse_babysit_args(["--help"])
         rendered = buf.getvalue()
         self.assertNotIn("--local-mode", rendered)
+        # `--local-test-cmd` is likewise hidden: it is a power-user
+        # override for the local-mode skill, not an operator-facing flag.
+        self.assertNotIn("--local-test-cmd", rendered)
         # Sanity: documented flags still appear in --help (regression
         # guard against an over-aggressive SUPPRESS).
         self.assertIn("--operator-is-only-human", rendered)
-        self.assertIn("--local-verify", rendered)
 
     def test_local_mode_accepted_without_systemexit(self) -> None:
         """T8: --local-mode is registered (not unknown), so argparse

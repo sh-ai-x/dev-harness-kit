@@ -59,10 +59,10 @@ The wrapper's exit code drives the loop's TERMINATE check (exit 0
 | | `/dev-kit:babysit-pr` | `/dev-kit:babysit-pr-local` |
 |---|---|---|
 | Review verdict source | GH-Actions review workflow | Local `bin/review-local.sh` |
-| Pre-push pytest gate | off by default (`--local-verify`) | always on |
+| Pre-push pytest gate | none (step 8 re-runs the failing check only) | always on |
 | `gh pr checks --watch` | yes | no (replaced by `bin/review-local.sh --pr N`) |
 | `--auto-approve` | n/a | forbidden (refused with exit 2) |
-| Operator-visible flags | `--pr`, `--rationale`, `--operator-is-only-human`, `--local-verify`, `--local-test-cmd` | none (hidden flags only) |
+| Operator-visible flags | `--pr`, `--rationale`, `--operator-is-only-human` | none (hidden flags only) |
 | `--local-mode` | n/a | always implied by the skill |
 
 The two skills share `lib/babysit_pr_cli` helpers, the worktree-detect
