@@ -7,8 +7,8 @@ without consuming GH-Actions minutes. Two deliverables, both additive
 
 1. `bin/review-local.sh` — local equivalent of the
    review + maintenance workflow orchestration.
-2. `/dev-kit:babysit-pr --local-verify [--local-test-cmd "..."]` —
-   optional local-test gate inside the babysit iteration loop.
+2. `/dev-kit:babysit-pr-local` — 0-arg babysit loop driven by the local
+   judge, with an always-on pre-push test gate.
 
 ## When to use
 
@@ -155,34 +155,31 @@ not the "just use my session" case.
 
 ---
 
-## Local babysit: `--local-verify`
+## Local babysit: the pre-push test gate
 
 `/dev-kit:babysit-pr` already runs locally (the skill body lives in
-the current shell). What `--local-verify` adds is a **pre-commit
-local test gate** so iterations abort *before* `git push` when the
-local test suite fails — saving the GH-Actions run that would
-otherwise be consumed by a known-failing commit.
+the current shell), and its §Algorithm step 8 re-runs the *specific*
+failing check before every commit. What it deliberately does **not**
+offer is a broad pre-push run of the whole suite: that is the defining
+behavior of `/dev-kit:babysit-pr-local`, where it is always on.
 
-### Usage
+A `--local-verify` opt-in used to exist on `/dev-kit:babysit-pr`. It was
+removed — it gave two ways to ask for one behavior, and the operator had
+to remember which skill carried which half of the gate. If you want the
+broad gate, run the local-mode skill:
 
 ```bash
-# Default: run pytest -q before each iteration's push.
-# (Additive flag; default behavior is unchanged when --local-verify is absent.)
-/dev-kit:babysit-pr --local-verify
-
-# Project-specific test command. Stdout/stderr MUST include a
-# pytest-style tail line ('<N> passed in <Ns>s' or '<N> failed in <Ns>s')
-# per MUST-L3.
-/dev-kit:babysit-pr --local-verify --local-test-cmd "make test"
+# Runs pytest -q inside the worktree before every commit + push.
+/dev-kit:babysit-pr-local
 ```
 
-### What it does
+### What the gate does
 
-The skill's §Algorithm loop gains a new step 7.5 between
+`/dev-kit:babysit-pr-local`'s §Algorithm step 7.5 sits between
 APPLY FIX (step 7) and VERIFY LOCAL (step 8):
 
 ```
-7.5. LOCAL VERIFY (only when --local-verify set)
+7.5. LOCAL VERIFY (always on in local mode)
      - lib.babysit_pr_cli.run_local_verify(cmd=--local-test-cmd,
                                           cwd=<worktree>)
        executes the command via `bash -c "$cmd"` and returns a
@@ -192,20 +189,19 @@ APPLY FIX (step 7) and VERIFY LOCAL (step 8):
        BEFORE git add / commit / push (MUST-L3 enforcement).
 ```
 
-The existing step 8 (VERIFY LOCAL — re-run the specific failing check)
-is preserved. `--local-verify` adds a *broader* pre-commit check, not
-a replacement.
+Step 8 (re-run the specific failing check) is preserved in both skills;
+step 7.5 is the *broader* pre-commit check, not a replacement.
 
 ### Why this matters
 
-Without `--local-verify`, the babysit loop's typical flow is:
+Without the gate, the babysit loop's typical flow is:
 
 ```
 fix → git add → git commit → git push → wait for GH-Actions CI
 ```
 
 A known-failing local test consumes one GH-Actions run per iteration.
-With `--local-verify`:
+With the gate:
 
 ```
 fix → pytest -q (LOCAL) → fix re-iteration → ... → git add → git commit → git push
@@ -218,30 +214,32 @@ green PRs.
 
 ### Implementation
 
-- Parser: `lib/babysit_pr_cli.py::parse_babysit_args()` gains two
-  `--local-verify` + `--local-test-cmd` fields. `run_babysit_once()`
-  is unchanged (the helper stays pure).
-- Skill body: `skills/babysit-pr/SKILL.md` §Algorithm step 7.5
-  documents the new step. The Bash invocation lives in the
-  orchestrator script, not in `lib/`.
-- Tests: `tests/test_babysit_pr_cli.py::TestParseBabysitArgs` adds
-  T22-T24 (default-off, flag-on, override, coexists-with-other-flags).
+- Helper: `lib/babysit_pr_cli.py::run_local_verify()` runs the command
+  and parses the MUST-L3 tail line. `run_babysit_once()` is unchanged
+  (the helper stays pure).
+- Parser: `--local-test-cmd` is a hidden (`argparse.SUPPRESS`) override
+  for non-pytest projects; there is no `--local-verify` flag.
+- Skill body: `skills/babysit-pr-local/SKILL.md` §Algorithm step 7.5.
+  The Bash invocation lives in the orchestrator script, not in `lib/`.
+- Tests: `tests/test_babysit_pr_cli.py::TestParseBabysitArgs` pins that
+  `--local-verify` is rejected and `--local-test-cmd` still parses;
+  `TestRunLocalVerify` pins the gate itself.
 
 ### Caveats
 
-- **Local test suite must be sane**: `--local-verify` trusts the
-  local test result. If the local test suite is itself broken or
-  stale (e.g. missing fixture), the gate refuses to push. Operators
-  should run `pytest -q` once without `--local-verify` to confirm
-  the local baseline before relying on the flag.
+- **Local test suite must be sane**: the gate trusts the local test
+  result. If the local test suite is itself broken or stale (e.g.
+  missing fixture), the gate refuses to push. Operators should run
+  `pytest -q` once by hand to confirm the local baseline before
+  relying on the gate.
 - **MUST-L3 is enforced by the skill body, not by the helper**: if
   the test command exits 0 but its stdout lacks a pytest-style tail
   line, the skill refuses to flip to "ready to push". The operator
   must either pick a test command that emits the tail line or paste
   the evidence manually.
 - **No fallback to GH-Actions**: refusing to push means the iteration
-  aborts. The operator can re-run `/dev-kit:babysit-pr` without
-  `--local-verify` to fall back to the default push-and-wait-CI flow.
+  aborts. The operator can re-run `/dev-kit:babysit-pr` to fall back to
+  the default push-and-wait-CI flow.
 
 ---
 
@@ -271,13 +269,12 @@ iteration's "green" signal; the local judge's stdout line
 The user-facing UX contract — "operate only via skill, no options to
 remember" — drives the split:
 
-| | `/dev-kit:babysit-pr --local-verify` | `/dev-kit:babysit-pr-local` |
+| | `/dev-kit:babysit-pr` | `/dev-kit:babysit-pr-local` |
 |---|---|---|
-| `--local-verify` flag exposed | yes (operator types it) | no (always on) |
 | Review verdict source | GH-Actions CI | local `bin/review-local.sh` |
 | `gh pr checks --watch` | yes | no |
 | `--auto-approve` semantically possible | yes (the operator may pass it through babysit) | forbidden (refused with exit 2) |
-| Pre-push pytest gate | off by default | always on |
+| Broad pre-push test gate | no (step 8 re-runs the failing check only) | always on |
 
 The two skills are additive siblings — they share the lock-file
 protocol + `lib/babysit_pr_cli` helpers + worktree-detect plumbing,
@@ -338,7 +335,7 @@ tell which skill held the lock. The stale-lock TTL is the same
 - `bin/babysit-pr-local.sh` — local-mode babysit wrapper (executable; refuses `--auto-appearing`).
 - `commands/review-local.md` — slash command wrapper (one-shot local review).
 - `commands/babysit-pr-local.md` — slash command wrapper (local-mode babysit).
-- `skills/babysit-pr/SKILL.md` — babysit-pr skill (additive `--local-verify` flag, GH-Actions-driven).
+- `skills/babysit-pr/SKILL.md` — babysit-pr skill (GH-Actions-driven; no local-test flag).
 - `skills/babysit-pr-local/SKILL.md` — local-mode babysit skill (additive sibling; replaces `gh pr checks --watch` with `bin/review-local.sh`).
 - `skills/babysit-pr-local/recipes/canonical-wiring.md` — local-mode sub-agent prompt + parent preflight.
 - `lib/maintenance_gate.py` — verdict-extraction + combined-gate helper.

@@ -109,51 +109,42 @@ class TestParseBabysitArgs(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bpc.parse_babysit_args(["--no-such-flag"])
 
-    # --- T22-T24: --local-verify / --local-test-cmd (additive flags) ---------
-    # Issue: gate babysit-pr iterations on local test passage without
-    # burning GH-Actions minutes. parse_babysit_args() gains two new
-    # fields; run_babysit_once() is unchanged (the runtime logic lives
-    # in the SKILL.md algorithm body, not here).
-    def test_local_verify_default_off(self) -> None:
-        """T22: --local-verify absent -> local_verify=False (regression
-        guard; the additive flag must NOT change existing defaults).
-        """
+    # --- T22-T24: --local-verify removed; --local-test-cmd is hidden --------
+    # The opt-in `--local-verify` gate duplicated /dev-kit:babysit-pr-local,
+    # which runs the same pytest gate unconditionally. The flag is gone;
+    # `--local-test-cmd` survives as the hidden override used by the
+    # local-mode skill (and by run_local_verify's callers).
+    def test_local_verify_flag_is_rejected(self) -> None:
+        """T22: --local-verify is no longer a registered flag -- argparse
+        must treat it as unknown so a stale invocation fails loudly
+        instead of silently no-opping."""
+        with self.assertRaises(SystemExit):
+            bpc.parse_babysit_args(["--local-verify"])
+
+    def test_no_local_verify_namespace_field(self) -> None:
+        """T22b: the Namespace no longer carries `local_verify`; callers
+        that branched on it must be updated, not silently see False."""
         ns = bpc.parse_babysit_args([])
-        self.assertFalse(ns.local_verify)
+        self.assertFalse(hasattr(ns, "local_verify"))
         self.assertEqual(ns.local_test_cmd, "pytest -q")
 
-    def test_local_verify_sets_flag(self) -> None:
-        """T23: --local-verify -> local_verify=True.
-        """
-        ns = bpc.parse_babysit_args(["--local-verify"])
-        self.assertTrue(ns.local_verify)
-
     def test_local_test_cmd_override(self) -> None:
-        """T24: --local-test-cmd captures the override verbatim. The
-        skill body runs the command via subprocess; the helper only
-        stores it (pure-function contract preserved).
-        """
+        """T24: --local-test-cmd captures the override verbatim without
+        any companion flag. The skill body runs the command via
+        subprocess; the helper only stores it (pure-function contract)."""
         ns = bpc.parse_babysit_args([
-            "--local-verify",
             "--local-test-cmd", "pytest -x tests/",
         ])
-        self.assertTrue(ns.local_verify)
         self.assertEqual(ns.local_test_cmd, "pytest -x tests/")
 
-    def test_local_verify_compatible_with_other_flags(self) -> None:
-        """--local-verify coexists with --pr and --operator-is-only-human /
-        --rationale; nothing in the parser mutually excludes them. The
-        skill's runtime still applies the human-gate-priority contract
-        (--operator-is-only-human runs first), so the two flags are
-        orthogonal at the parser level.
-        """
+    def test_local_test_cmd_compatible_with_other_flags(self) -> None:
+        """--local-test-cmd coexists with --pr and --operator-is-only-human
+        / --rationale; nothing in the parser mutually excludes them."""
         ns = bpc.parse_babysit_args([
             "--pr", "42",
-            "--local-verify",
             "--local-test-cmd", "make test",
         ])
         self.assertEqual(ns.pr, 42)
-        self.assertTrue(ns.local_verify)
         self.assertEqual(ns.local_test_cmd, "make test")
 
 
