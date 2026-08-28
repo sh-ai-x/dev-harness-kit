@@ -148,8 +148,12 @@ def _emit_effectiveness_event(
         "evidence_ref": evidence_ref,
     }
     try:
-        append_event(root, event)
-        return event_id
+        _, persisted_id = append_event(root, event)
+        # Return the persisted id (which may differ from the local event_id
+        # if the dedupe-on-write guard swapped it under collision) so callers
+        # can safely use it as the parent_id of a follow-up event. See PR #753
+        # review finding #2.
+        return persisted_id
     except (OSError, ValueError):
         return None
 

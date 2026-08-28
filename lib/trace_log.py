@@ -24,7 +24,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
@@ -268,8 +268,15 @@ def _recent_event_ids(fd: int) -> set:
     return ids
 
 
-def append_event(root: Path, event: Mapping[str, Any]) -> Path:
-    """Append one validated workflow event without changing workflow outcome."""
+def append_event(root: Path, event: Mapping[str, Any]) -> Tuple[Path, str]:
+    """Append one validated workflow event without changing workflow outcome.
+
+    Returns ``(path, persisted_event_id)``. The persisted id may differ from
+    ``event["event_id"]`` when the dedupe-on-write guard detects a collision
+    and regenerates a fresh id — callers that capture the returned id and
+    parent subsequent events to it avoid the broken-link bug noted in the
+    PR #753 review (verdict: "Changes Requested", finding #2).
+    """
     import fcntl
 
     # Auto-stamp producer identity for the stability submetric (issue #663).
@@ -296,7 +303,7 @@ def append_event(root: Path, event: Mapping[str, Any]) -> Path:
             handle.flush()
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    return path
+    return path, record["event_id"]
 
 
 def read_events(root: Path) -> List[Dict[str, Any]]:
