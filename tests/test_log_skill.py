@@ -88,6 +88,20 @@ def _make_fake_loghooks(tmp: Path) -> Path:
     return src
 
 
+def _make_fake_target_git(tmp: Path, committed_save_log: str) -> Path:
+    """Git-init a target with tools/save_log.py committed at HEAD, so the
+    git-HEAD guard in log-setup.sh has something to compare against."""
+    tgt = _make_fake_target(tmp)
+    subprocess.run(["git", "init", "-q"], cwd=tgt, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tgt, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tgt, check=True)
+    (tgt / "tools").mkdir(exist_ok=True)
+    (tgt / "tools" / "save_log.py").write_text(committed_save_log)
+    subprocess.run(["git", "add", "-A"], cwd=tgt, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tgt, check=True)
+    return tgt
+
+
 def _make_fake_target(tmp: Path) -> Path:
     """Build a target project with a baseline user-authored hook."""
     tgt = tmp / "target"
@@ -191,6 +205,68 @@ class TestSetup(unittest.TestCase):
                      env_extra={"LOGHOOKS_DIR": str(self.src)})
             self.assertEqual(r.returncode, 0, f"setup failed: {r.stderr}")
         self.assertTrue((self.tgt / "tools" / "save_log.py").exists())
+
+
+class TestSetupPreservesGitHead(unittest.TestCase):
+    """log-setup.sh must never clobber a tools/save_log.py that already
+    matches the target project's own git HEAD, even when LOGHOOKS_DIR
+    has a different (older/stripped) version. Regression for the bug
+    where a worktree-creation hook silently rewrote a 377-line
+    tools/save_log.py down to ~21 lines because the idempotency check
+    only compared against the external LOGHOOKS_DIR source, never
+    against the target's own committed content."""
+
+    COMMITTED_SAVE_LOG = FAKE_SAVE_LOG_PY + "\n# rich, already-committed version\n"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="log-test-"))
+        self.src = _make_fake_loghooks(self.tmp)
+        self.tgt = _make_fake_target_git(self.tmp, self.COMMITTED_SAVE_LOG)
+        # Sanity: the fake loghooks source must differ from what's
+        # committed, otherwise the SHA-vs-source check alone would
+        # already pass and the test wouldn't exercise the new guard.
+        assert (self.src / "tools" / "save_log.py").read_text() != self.COMMITTED_SAVE_LOG
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_does_not_overwrite_when_matches_head(self):
+        r = _run("log-setup.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"setup failed: {r.stderr}")
+        self.assertEqual(
+            (self.tgt / "tools" / "save_log.py").read_text(),
+            self.COMMITTED_SAVE_LOG,
+            "tools/save_log.py must stay at its committed HEAD content, "
+            "not be overwritten by a diverged LOGHOOKS_DIR source",
+        )
+        self.assertIn("matches project git HEAD", r.stdout)
+
+    def test_force_still_overwrites_when_matches_head(self):
+        r = _run("log-setup.sh", "--target", str(self.tgt), "--force",
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"setup failed: {r.stderr}")
+        self.assertEqual(
+            (self.tgt / "tools" / "save_log.py").read_text(),
+            (self.src / "tools" / "save_log.py").read_text(),
+            "--force must still sync from LOGHOOKS_DIR even when the "
+            "target already matches its own git HEAD",
+        )
+
+    def test_non_git_target_falls_back_to_source_sha(self):
+        # Plain (non-git) target -- the new guard must be a no-op here,
+        # preserving the pre-existing SHA-vs-source install behavior.
+        # Separate subdir so it doesn't collide with self.tgt's "target/".
+        sub = Path(tempfile.mkdtemp(dir=str(self.tmp)))
+        plain_tgt = _make_fake_target(sub)
+        r = _run("log-setup.sh", "--target", str(plain_tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"setup failed: {r.stderr}")
+        self.assertEqual(
+            (plain_tgt / "tools" / "save_log.py").read_text(),
+            (self.src / "tools" / "save_log.py").read_text(),
+            "non-git target must install from LOGHOOKS_DIR as before",
+        )
 
 
 class TestOnOffRoundTrip(unittest.TestCase):
