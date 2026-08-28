@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import importlib
 import sys
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional, Tuple, Any
 
 
-def from_dual(module: str, names: Iterable[str]) -> Tuple:
+def from_dual(module: str, names: Iterable[str]) -> Tuple[Any, ...]:
     """Try `from lib.{module} import <names>` (package form) then fall back
     to `from {module} import <names>` (flat-file form).
 
@@ -44,7 +44,7 @@ def from_dual(module: str, names: Iterable[str]) -> Tuple:
     return tuple(getattr(mod, name) for name in names)
 
 
-def from_dual_optional(module: str, names: Iterable[str]) -> Tuple[Optional[object], ...]:
+def from_dual_optional(module: str, names: Iterable[str]) -> Tuple[Optional[Any], ...]:
     """Like `from_dual` but returns `None` per name if both attempts fail.
 
     Use for optional siblings (e.g. `ci_doctor` importing

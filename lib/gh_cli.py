@@ -44,30 +44,10 @@ def gh_available(*, timeout: int = 10) -> Tuple[Optional[str], str]:
     return gh, ""
 
 
-def run_gh(
-    gh: str,
-    *args: str,
-    timeout: int = 10,
-    cwd: Optional[str] = None,
-) -> Tuple[Optional["subprocess.CompletedProcess[str]"], str]:
-    """Run `gh <args>` with the standard guard.
-
-    Returns `(cp_or_None, degraded_msg)`. On success, `cp` is the
-    `CompletedProcess` and `degraded_msg` is empty. On any subprocess
-    failure, `cp` is `None` and `degraded_msg` describes the failure.
-    Callers that need parsed JSON should inspect `cp.stdout` themselves;
-    this helper intentionally returns the raw process so each site can
-    decide its own post-conditions.
-    """
-    try:
-        cp = subprocess.run(
-            [gh, *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            cwd=cwd,
-        )
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return None, f"gh {args[0] if args else '?'} error: {type(e).__name__}: {e}"
-    return cp, ""
+# inspect 2026-08-27 PR #755 reviewer feedback: YAGNI — `run_gh` was
+# declared with no in-tree caller (verified via Grep on lib/ + tests/).
+# Removed; the only present consumer was the abstract "each site can
+# decide its own post-conditions" docstring promise, which is exactly
+# the kind of speculative-API the OE-4 rubric flags. If a real caller
+# materializes, reintroduce as a 5-line wrapper around subprocess.run
+# with the (cp, degraded_msg) return shape.
