@@ -195,6 +195,26 @@ spawn deterministic (one worktree path, one branch, one lock file) and
 matches the `git-workflow` rule that every change-set lives in its own
 worktree from creation through merge.
 
+### Long-running telemetry retention
+
+Immediately after resolving or creating the PR-owning worktree, write the
+retention marker:
+
+```bash
+PYTHONPATH="$REPO_ROOT/lib${PYTHONPATH:+:$PYTHONPATH}" python3 -m babysit_pr_retention "$WORKTREE_PATH" \
+  --parent-pr "$PR_NUMBER" --current-pr "$PR_NUMBER" \
+  --branch "$BRANCH" --log-root "${AGENT_LOG_ROOT:-$WORKTREE_PATH/logs}"
+```
+
+The marker is the explicit exception to ordinary worktree cleanup. On
+`DONE`, closed, or abandoned PR state, update it with `--phase terminal` and
+leave both the worktree and branch in place. The PR lifecycle ending is not a
+telemetry lifecycle ending: logs remain available for `/dev-kit:token-analyzer`
+and future babysit analysis. Never run `git worktree remove`, `git branch -d`,
+or equivalent cleanup for a worktree whose marker has
+`owner: "babysit-pr"` and `retain_worktree: true`. Cleanup requires an explicit
+operator decision to remove the marker first.
+
 ---
 
 ## Algorithm
