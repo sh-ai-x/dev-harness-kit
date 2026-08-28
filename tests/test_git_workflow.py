@@ -345,6 +345,9 @@ class TestBranchNamingConvention(unittest.TestCase):
         shrink. New branches MUST follow the convention — see .claude/rules/git-workflow.md.
         """
         GRANDFATHERED = {
+            # The canonical protected branch; cannot be renamed or deleted
+            # via the guard, so it will always exist in any clone.
+            "main",
             "dev", "stage",
             "fix/0.1.3-gate-tolerance", "fix/orphan-bump-v0.3.2", "fix/orphan-bump-v0.3.3",
             # Pre-existing worktree branches parked in active worktrees this cleanup
