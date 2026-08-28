@@ -686,6 +686,7 @@ def _step_post_collect(
     feat_msg = f"feat({phase}): step {step_num}" + (f" — {step_name}" if step_name else "")
     wrote_files = _commit_step(wt, feat_msg)
     output_committed = _commit_step(wt, f"chore({phase}): step {step_num} output")
+    write_event_id = None
     if wrote_files or output_committed:
         write_event_id = _emit_effectiveness_event(
             root, phase, step_num, "write.observed", "written",
@@ -697,33 +698,42 @@ def _step_post_collect(
             },
             ctx.get("started_event_id"),
         )
-        # Verify chain on the success path. `_first_pass`
-        # (lib/harness_effectiveness.py) computes
-        # `causally_linked = first.parent_id == write.event_id`, so the
-        # verify MUST be parented to the write.observed event id — not to
-        # step.started. Parenting both to started_event_id makes
-        # causally_linked permanently False and collapses the score to
-        # 10.0 (ROT) while still entering overall_score at weight 0.25.
-        # write_event_id is None only when the append failed; fall back
-        # to the lifecycle anchor so the chain stays readable.
-        #
-        # Honest verify evidence: no independent pytest/lint/build runner
-        # actually executed here — the executor only knows the sub-agent
-        # exited 0. An earlier revision emitted `required_checks_passed=True,
-        # independent=True` from this exit_code==0 alone, which made
-        # first_pass_quality a fabricated 100% (Review Critical #2). The
-        # fields below are now truthful: the verify event is recorded so
-        # the causal chain stays complete, but the reducer sees it as
-        # self-reported with zero independent checks — first_pass_rate
-        # stays 0 against this evidence.
-        _emit_effectiveness_event(
-            root, phase, step_num, "verify.passed", "passed",
-            {"required_checks_passed": False, "retry_count": 0,
-             "independent": False, "via": "executor",
-             "evidence_provenance": "self-reported",
-             "checks_run": []},
-            write_event_id or ctx.get("started_event_id"),
-        )
+    # Verify chain on the success path. `_first_pass`
+    # (lib/harness_effectiveness.py) computes
+    # `causally_linked = first.parent_id == write.event_id`, so the
+    # verify MUST be parented to the write.observed event id — not to
+    # step.started. Parenting both to started_event_id makes
+    # causally_linked permanently False and collapses the score to
+    # 10.0 (ROT) while still entering overall_score at weight 0.25.
+    # write_event_id is None only when (a) no files were committed
+    # (a no-diff successful step) or (b) the append failed; fall
+    # back to the lifecycle anchor so the chain stays readable.
+    #
+    # Emit verify.passed on EVERY successful step, not only on
+    # write-bearing ones — `_first_pass` iterates only subjects that
+    # emitted write.observed, so without this hoist a no-diff
+    # success is silently dropped from the metric. no_diff is
+    # surfaced so downstream consumers can distinguish the case
+    # without re-deriving it.
+    #
+    # Honest verify evidence: no independent pytest/lint/build runner
+    # actually executed here — the executor only knows the sub-agent
+    # exited 0. An earlier revision emitted `required_checks_passed=True,
+    # independent=True` from this exit_code==0 alone, which made
+    # first_pass_quality a fabricated 100%. The fields below are
+    # truthful: the verify event is recorded so the causal chain
+    # stays complete, but the reducer sees it as self-reported with
+    # zero independent checks — first_pass_rate stays 0 against this
+    # evidence.
+    _emit_effectiveness_event(
+        root, phase, step_num, "verify.passed", "passed",
+        {"required_checks_passed": False, "retry_count": 0,
+         "independent": False, "via": "executor",
+         "evidence_provenance": "self-reported",
+         "checks_run": [],
+         "no_diff": not (wrote_files or output_committed)},
+        write_event_id or ctx.get("started_event_id"),
+    )
 
     if push:
         subprocess.run(

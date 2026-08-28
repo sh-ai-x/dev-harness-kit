@@ -1034,6 +1034,52 @@ class TestRunStepBody(unittest.TestCase):
                 component["submetrics"],
             )
 
+    def test_no_diff_step_still_emits_verify_passed(self):
+        """A successful step that staged no diff still emits ``verify.passed``.
+
+        Before the hoist the verify event lived inside the
+        ``if wrote_files or output_committed:`` block, so a no-diff success
+        emitted only ``step.started`` + ``step.completed``. ``_first_pass``
+        iterates only subjects with a ``write.observed`` event, so the
+        no-diff branch was silently excluded from the metric. The hoist
+        pins: verify.passed fires unconditionally on the success path,
+        parented to ``started_event_id`` when no write happened, and the
+        evidence_ref surfaces ``no_diff=True`` so downstream consumers
+        can distinguish.
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            # No file is written before _step_post_collect, so the
+            # worktree has nothing to commit (wrote_files=False).
+            ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            events = read_events(root)
+            verifies = [e for e in events if e["event_type"] == "verify.passed"]
+            writes = [e for e in events if e["event_type"] == "write.observed"]
+            self.assertEqual(len(verifies), 1, f"expected 1 verify.passed, got {len(verifies)}")
+            self.assertEqual(len(writes), 0, f"expected 0 write.observed, got {len(writes)}")
+            # No write happened, so verify.passed must parent to the
+            # lifecycle anchor (step.started), not to a write id.
+            started = [e for e in events if e["event_type"] == "step.started"][0]
+            self.assertEqual(
+                verifies[0]["parent_id"], started["event_id"],
+                "no-diff verify.passed must parent to step.started so "
+                "the lifecycle anchor stays readable",
+            )
+            # Evidence_ref must surface no_diff=True.
+            self.assertTrue(
+                verifies[0]["evidence_ref"].get("no_diff"),
+                "verify.passed evidence_ref must surface no_diff=True "
+                "when no files were committed",
+            )
+
 
 # --- issue #94: status-transition table ---------------------------------
 
