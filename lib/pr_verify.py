@@ -148,6 +148,31 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+@dataclass
+class PrVerifyContext:
+    """One bundle of the PR state every gate needs.
+
+    inspect 2026-08-27 smell-22: collapses the
+    `(pr_number, repo, fetched_at, comments, pr_pushed_at, pr_head_sha)`
+    data clump that was threaded through five gate signatures (G1, G2,
+    G3, G4, G5) as a varying subset of positional args. Adding a new
+    gate (G6) was previously a 5-place signature change; with this
+    dataclass the new field lands here once and the gate takes
+    `ctx: PrVerifyContext`.
+
+    All fields default to "" / None so the gate-level hermetic tests
+    (which call `_gate_gN_*` directly without going through `verify_pr`)
+    can pass a partial context.
+    """
+
+    pr_number: int = 0
+    repo: str = ""
+    fetched_at: str = ""
+    comments: tuple[dict, ...] | None = None
+    pr_pushed_at: str = ""
+    pr_head_sha: str = ""
+
+
 class GhError(RuntimeError):
     """Wraps subprocess failures (timeout, non-zero exit, missing CLI)
     so a verifier caller can distinguish a `gh` outage from a
@@ -263,16 +288,17 @@ def _fetch_paginated_comments(pr_number: int, repo: str, *, context: str) -> lis
     return flat
 
 
-def _gate_g1_pr_state(pr_number: int, repo: str, fetched_at: str = "") -> GateResult:
+def _gate_g1_pr_state(ctx: PrVerifyContext) -> GateResult:
     """G1: PR is OPEN (not closed, not merged, not draft).
 
-    `fetched_at` is the timestamp the caller wants stamped on the
+    `ctx.fetched_at` is the timestamp the caller wants stamped on the
     gate. When empty (the verify_pr path), we stamp the moment the
     gate's own fetch starts so the timestamp actually reflects the
     fetch time.
     """
-    if not fetched_at:
-        fetched_at = _now_iso()
+    pr_number = ctx.pr_number
+    repo = ctx.repo
+    fetched_at = ctx.fetched_at or _now_iso()
     try:
         raw = _run_gh([
             "pr", "view", str(pr_number),
@@ -306,7 +332,7 @@ def _gate_g1_pr_state(pr_number: int, repo: str, fetched_at: str = "") -> GateRe
     )
 
 
-def _gate_g2_ci_checks(pr_number: int, repo: str, fetched_at: str = "") -> GateResult:
+def _gate_g2_ci_checks(ctx: PrVerifyContext) -> GateResult:
     """G2: every CI check is in a terminal success state.
 
     "success" / "skipped" / "neutral" are terminal pass. "pending" /
@@ -314,8 +340,9 @@ def _gate_g2_ci_checks(pr_number: int, repo: str, fetched_at: str = "") -> GateR
     claim pass; we report pending explicitly. "failure" / "timed_out"
     / "cancelled" / "action_required" are terminal fail.
     """
-    if not fetched_at:
-        fetched_at = _now_iso()
+    pr_number = ctx.pr_number
+    repo = ctx.repo
+    fetched_at = ctx.fetched_at or _now_iso()
     try:
         raw = _run_gh([
             "pr", "checks", str(pr_number),
@@ -531,12 +558,7 @@ def _parse_latest_llm_verdict(comments: list[dict]) -> tuple[str, str]:
     return (verdict, comment_id)
 
 
-def _gate_g3_llm_verdicts(
-    pr_number: int, repo: str, fetched_at: str = "",
-    comments: tuple[dict, ...] | None = None,
-    pr_pushed_at: str = "",
-    pr_head_sha: str = "",
-) -> GateResult:
+def _gate_g3_llm_verdicts(ctx: PrVerifyContext) -> GateResult:
     """G3: every required LLM-judge job — review, security, and
     maintenance — has its most recent audit comment carrying
     `verdict=Approve`. The audit comment is the machine-recorded
@@ -564,8 +586,12 @@ def _gate_g3_llm_verdicts(
     any Approve audit is OLDER than `pr_pushed_at`, that audit is
     stale and G3 returns STALE.
     """
-    if not fetched_at:
-        fetched_at = _now_iso()
+    pr_number = ctx.pr_number
+    repo = ctx.repo
+    fetched_at = ctx.fetched_at or _now_iso()
+    comments = ctx.comments
+    pr_pushed_at = ctx.pr_pushed_at
+    pr_head_sha = ctx.pr_head_sha
     if comments is None:
         try:
             comments = tuple(
@@ -717,10 +743,7 @@ def _gate_g3_llm_verdicts(
     )
 
 
-def _gate_g4_audit_no_failure_paired_with_approve(
-    pr_number: int, repo: str, fetched_at: str = "",
-    comments: tuple[dict, ...] | None = None,
-) -> GateResult:
+def _gate_g4_audit_no_failure_paired_with_approve(ctx: PrVerifyContext) -> GateResult:
     """G4: no `<!-- dev-kit-verdict-audit -->` comment records a
     workflow-run with `status=failure` paired with `verdict=Approve`.
 
@@ -738,8 +761,10 @@ def _gate_g4_audit_no_failure_paired_with_approve(
     been fixed) become informational only. The semantic: "is the
     workflow currently producing this false-positive?"
     """
-    if not fetched_at:
-        fetched_at = _now_iso()
+    pr_number = ctx.pr_number
+    repo = ctx.repo
+    fetched_at = ctx.fetched_at or _now_iso()
+    comments = ctx.comments
     if comments is None:
         try:
             comments = tuple(
@@ -806,13 +831,14 @@ def _gate_g4_audit_no_failure_paired_with_approve(
     )
 
 
-def _gate_g5_merge_state(pr_number: int, repo: str, fetched_at: str = "") -> GateResult:
+def _gate_g5_merge_state(ctx: PrVerifyContext) -> GateResult:
     """G5: mergeStateStatus is CLEAN or BEHIND (not BLOCKED / DIRTY /
     UNKNOWN). BEHIND is a soft warning (the branch needs a rebase
     but can still merge). BLOCKED / DIRTY / UNKNOWN are hard fails.
     """
-    if not fetched_at:
-        fetched_at = _now_iso()
+    pr_number = ctx.pr_number
+    repo = ctx.repo
+    fetched_at = ctx.fetched_at or _now_iso()
     try:
         raw = _run_gh([
             "pr", "view", str(pr_number),
@@ -907,15 +933,25 @@ def verify_pr(pr_number: int, repo: str = "sh-ai-x/dev-harness-kit") -> PRVerify
         # guard is downgraded. The `pr_pushed_at=""` / `pr_head_sha=""`
         # values are observable in the G3 evidence below.
         pass
+    # inspect 2026-08-27 smell-22: collapse the (pr_number, repo,
+    # fetched_at, comments, pr_pushed_at, pr_head_sha) data clump into
+    # one PrVerifyContext dataclass so each gate takes a single arg
+    # and a future G6 only has to add a field to the dataclass instead
+    # of editing five signatures.
+    ctx = PrVerifyContext(
+        pr_number=pr_number,
+        repo=repo,
+        fetched_at="",  # each gate stamps its own fetched_at
+        comments=shared_comments,
+        pr_pushed_at=pr_pushed_at,
+        pr_head_sha=pr_head_sha,
+    )
     gates: list[GateResult] = [
-        _gate_g1_pr_state(pr_number, repo),
-        _gate_g2_ci_checks(pr_number, repo),
-        _gate_g3_llm_verdicts(
-            pr_number, repo, comments=shared_comments,
-            pr_pushed_at=pr_pushed_at, pr_head_sha=pr_head_sha,
-        ),
-        _gate_g4_audit_no_failure_paired_with_approve(pr_number, repo, comments=shared_comments),
-        _gate_g5_merge_state(pr_number, repo),
+        _gate_g1_pr_state(ctx),
+        _gate_g2_ci_checks(ctx),
+        _gate_g3_llm_verdicts(ctx),
+        _gate_g4_audit_no_failure_paired_with_approve(ctx),
+        _gate_g5_merge_state(ctx),
     ]
     # Overall report timestamp is the END of the verify run (not the
     # pre-fetch time) — that's when all five gates have reported.

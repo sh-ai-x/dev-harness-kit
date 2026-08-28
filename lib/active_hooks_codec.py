@@ -100,8 +100,23 @@ def load_matrix(project_root: Path) -> Dict:
 
     Read-only — does NOT call `atomic_write_json`. Callers needing to
     mutate should use `ensure_matrix` first.
+
+    inspect 2026-08-27 overeng-4: results are memoized per
+    `(project_root, mtime)` so `stage-gate.sh` (which calls
+    `is_hook_active` once per PreToolUse event) pays one disk read per
+    `mtime` change instead of one read per invocation. Cache is
+    invalidated when the file's `st_mtime` changes.
     """
     path = project_root / ".dev-kit" / ".active-hooks.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+    cache_key = (str(path.resolve()), mtime)
+    cached = _MATRIX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     default: Dict = {
         "schema_version": "1.0.0",
         "matrix": copy.deepcopy(DEFAULT_MATRIX),
@@ -111,7 +126,23 @@ def load_matrix(project_root: Path) -> Dict:
             "env_override": {},
         },
     }
-    return read_json_or_default(path, default)
+    data = read_json_or_default(path, default)
+    # Bound the cache so a long-running session doesn't accumulate stale
+    # entries; eviction on size limit is fine because each entry is small.
+    _MATRIX_CACHE[cache_key] = data
+    if len(_MATRIX_CACHE) > 32:
+        # Drop the oldest entry (first inserted). Python 3.7+ dicts
+        # preserve insertion order, so popitem(last=False) removes the
+        # oldest.
+        _MATRIX_CACHE.popitem(last=False)
+    return data
+
+
+# Per-(path, mtime) cache for `load_matrix`. A long-running session can
+# call `is_hook_active` thousands of times (PreToolUse); caching the
+# parsed JSON keyed on mtime keeps it cheap while staying correct when
+# the file is rewritten by the regen tool.
+_MATRIX_CACHE: Dict[tuple, Dict] = {}
 
 
 # Back-compat alias: read_matrix historically returned a fresh init on miss.

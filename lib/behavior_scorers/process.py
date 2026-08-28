@@ -15,10 +15,10 @@ with value=points and evidence per check.
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
+from lib.behavior_scorers._git import git_output as _git_output
 from lib.behavior_scorers.types import Context, DimensionScore
 
 # Conventional Commits: `<type>(optional-scope)!?: <subject>`
@@ -33,26 +33,6 @@ _BRANCH_RE = re.compile(
     r"^(feat|fix|refactor|docs|test|chore|perf|hotfix|prune|build|ci)/"
     r"[a-z0-9][a-z0-9_-]{1,39}$"
 )
-
-
-def _git_output(worktree: Path, *args: str) -> str:
-    """Run git and return stdout; '' on error.
-
-    All subprocess calls are guarded because the worktree may not be
-    a git repo (e.g. freshly cloned fixture). Errors fall through as
-    empty string so the check counts as failed, not crash.
-    """
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(worktree), *args],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return ""
-    return (proc.stdout or "").strip()
 
 
 def _conventional_commits_ratio(worktree: Path) -> float:

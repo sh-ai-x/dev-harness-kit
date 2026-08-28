@@ -87,3 +87,28 @@ class BehaviorReport:
 DETERMINISTIC_DIMS: Tuple[str, ...] = (
     "D1_outcome", "D2_process", "D3_efficiency", "D4_safety",
 )
+
+
+def empty_scorer(dim_id: str, reason: str, phase: int = 0):
+    """Build a placeholder `score(worktree, ctx) -> DimensionScore` for dims
+    whose Phase-1/Phase-2 wiring has not landed yet.
+
+    Centralizes the contract so D5/D6/D7 (and any future empty scorer) all
+    emit the same neutral `value=3` envelope. A refactor of
+    DimensionScore.evidence fans out to every empty scorer at once instead
+    of N edits.
+    """
+
+    def score(worktree, ctx: "Context") -> DimensionScore:
+        return DimensionScore(
+            dim=dim_id,
+            value=3,
+            evidence={
+                "status": "pending",
+                "phase": phase,
+                "reason": reason,
+            },
+        )
+
+    score.__name__ = f"score_{dim_id.lower()}"
+    return score

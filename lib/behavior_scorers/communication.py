@@ -23,7 +23,14 @@ from lib.behavior_scorers.types import Context, DimensionScore
 
 
 def score(worktree: Path, ctx: Context) -> DimensionScore:
-    """Return a neutral placeholder until Phase 1 wires the LLM judge."""
+    """Return a neutral placeholder until Phase 1 wires the LLM judge.
+
+    Built directly (not via `empty_scorer`) because D5 emits an extra
+    `context_no_llm` flag from `ctx.is_deterministic_only()` so CI-gate
+    runs can distinguish "judge unavailable" from "judge ran and scored
+    3". Once Phase 1 lands the LLM judge, replace this body with the
+    real scorer and delete the manual envelope.
+    """
     return DimensionScore(
         dim="D5_communication",
         value=3,
