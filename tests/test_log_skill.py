@@ -546,6 +546,71 @@ class TestOnOffRoundTrip(unittest.TestCase):
                                 "managed entries missing after order-"
                                 "preserving merge reruns")
 
+    def test_on_is_byte_stable_when_sentinel_missing_on_managed_entry(self):
+        """Regression: when a managed entry in the existing target is
+        missing the sentinel (e.g. because it predates the sentinel
+        convention, or because the file was hand-edited), the next
+        log-on must NOT rewrite the file. The merge would add the
+        sentinel to the matched entry, but the only semantic change
+        is the sentinel — the file already has every source command.
+
+        Without the semantic idempotence check, the canonical
+        comparison (`jq -S .`) sees the sentinel difference and writes
+        the merge result — dirtying the working tree on every
+        SessionStart that runs against an install with this pre-state
+        (the user's reported pain: git pull refused because the tree
+        was unstaged-dirty with .claude/settings.json + .codex/hooks.json
+        modified after every session).
+        """
+        # First install produces the canonical merged state.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"first on failed: {r.stderr}")
+
+        claude = self.tgt / ".claude" / "settings.json"
+        codex = self.tgt / ".codex" / "hooks.json"
+
+        # Strip the sentinel from the managed entries in both files
+        # (simulating a pre-existing state without sentinels, e.g. a
+        # hand-edit or a commit from before the convention existed).
+        for path in (claude, codex):
+            data = json.loads(path.read_text())
+            for event_entries in (data.get("hooks") or {}).values():
+                for entry in event_entries:
+                    if isinstance(entry, dict):
+                        entry.pop(SENTINEL, None)
+            path.write_text(json.dumps(data, indent=2, sort_keys=True))
+
+        h_claude = self._file_hash(claude)
+        h_codex = self._file_hash(codex)
+
+        # Run log-on again. With the semantic idempotence check, the
+        # merge sees existing already contains every source command
+        # (commands match the entries we kept) and skips the write.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"second on failed: {r.stderr}")
+        self.assertEqual(self._file_hash(claude), h_claude,
+                         "log-on rewrote .claude/settings.json when the "
+                         "only diff vs existing was the sentinel "
+                         "(regression: missing semantic idempotence "
+                         "check; SessionStart would dirty the working "
+                         "tree on every run)")
+        self.assertEqual(self._file_hash(codex), h_codex,
+                         "log-on rewrote .codex/hooks.json when the "
+                         "only diff vs existing was the sentinel")
+
+        # And a third run stays byte-stable too.
+        r = _run("log-on.sh", "--target", str(self.tgt),
+                 env_extra={"LOGHOOKS_DIR": str(self.src)})
+        self.assertEqual(r.returncode, 0, f"third on failed: {r.stderr}")
+        self.assertEqual(self._file_hash(claude), h_claude,
+                         "third log-on re-run drifted bytes after "
+                         "semantic idempotence fix")
+        self.assertEqual(self._file_hash(codex), h_codex,
+                         "third codex log-on re-run drifted bytes after "
+                         "semantic idempotence fix")
+
     def test_on_refuses_when_setup_missing(self):
         # fresh target, no setup
         fresh_tmp = Path(tempfile.mkdtemp(prefix="log-test-fresh-"))

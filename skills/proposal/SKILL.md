@@ -50,7 +50,7 @@ function `render()` takes optional `back_to_href=` and
 `back_to_label=` kwargs; the CLI driver wires them based on the
 filesystem sibling check.
 
-**Why a separate skill, not a flag on `/dev-kit:report` or `/dev-kit:plan`**: the
+**Why a separate skill, not a flag on `/dev-kit:plan`**: the
 user has to remember the flag and slash autocomplete does not surface flags.
 Proposals are a distinct artifact (pre-implementation plans) with a distinct
 lifecycle (designed → reviewed → accepted/rejected → implemented). The slash
@@ -274,8 +274,7 @@ is enforced by the `HtmlEscapeTests` class in `tests/test_proposal_skill.py`
 `test_less_than_greater_than_escaped`).
 
 **No `<script>` tag, no external assets, inline CSS only.** The output is
-safe to email, archive, or open from `file://`. Mirrors the `/dev-kit:report`
-invariant.
+safe to email, archive, or open from `file://`.
 
 ## Editing the proposal
 
@@ -289,9 +288,8 @@ The YAML is hand-edited, not generated. Re-run
   `render` + `__main__` CLI entry
 - `lib/render_report_html.py` -- sibling renderer (eval + inspect reports)
 - `bin/dev-kit-report.py` -- sibling CLI driver (kept as-is; this skill no
-  longer uses this pattern)
-- `skills/report/SKILL.md` -- sibling skill (still uses the
-  read-only-skill + bin CLI pattern; we deviated from it)
+  longer uses this pattern). The underlying `/dev-kit:report` slash was
+  removed but the lib + driver remain.
 - `skills/plan/SKILL.md` -- Gate 5/5 calls this skill to auto-render the
   design record
 

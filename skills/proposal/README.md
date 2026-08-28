@@ -56,7 +56,7 @@ absent, the renderer emits no new section wrappers (only an extended
 inline-CSS block). Existing proposals render identically. See
 `skills/proposal/SKILL.md` §Workflow for the full rule.
 
-## Why a separate skill (not a flag on `/dev-kit:report` or `/dev-kit:plan`)
+## Why a separate skill (not a flag on `/dev-kit:plan`)
 
 The user typed `/dev-kit:proposal` and got a single result. The flag-vs-slash
 choice is the architecture:
@@ -349,9 +349,8 @@ Editing the YAML is the maintainer's responsibility; the skill only renders.
 - `lib/render_proposal_html.py` — pure renderer + `__main__` CLI entry.
 - `lib/render_report_html.py` — sibling renderer (eval + inspect reports).
 - `bin/dev-kit-report.py` — sibling CLI driver pattern (kept as-is; this
-  skill deviated from it intentionally).
-- `skills/report/SKILL.md` — sibling skill (still uses the read-only-skill
-  + `bin/` pattern).
+  skill deviated from it intentionally). Underlying `/dev-kit:report` slash
+  was removed but the lib + driver remain.
 - `skills/llm-refresh/README.md` — closest sibling in skill README structure.
 - `tests/test_proposal_skill.py` — parse + render + escape + invariants.
 - `tests/test_render_report_html.py` — sibling renderer test contract.
