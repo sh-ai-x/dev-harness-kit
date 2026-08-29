@@ -1112,6 +1112,14 @@ class SessionAggregate:
     # bleeding the cache between turns.
     turn_inputs: list = None  # type: ignore[assignment]
     turn_cache_reads: list = None  # type: ignore[assignment]
+    # Codex baseline flag — the codex provider emits cumulative
+    # ``token_count`` snapshots that can DECREASE on a session resume or
+    # context-window guard re-init. We need an explicit first-event
+    # gate so the first ``token_count`` after a fresh session establishes
+    # the baseline instead of being silently dropped (otherwise the F1
+    # diagnostic produces a broken cache_decay curve on any Codex
+    # session that re-establishes its baseline mid-stream).
+    have_seen_codex_baseline: bool = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         # Mutable defaults must be constructed per-instance.
@@ -1124,6 +1132,7 @@ class SessionAggregate:
         self.parse_errors = Counter()
         self.turn_inputs = []
         self.turn_cache_reads = []
+        self.have_seen_codex_baseline = False
 
 
 def _new_session_state(source: str) -> SessionAggregate:
@@ -1323,9 +1332,22 @@ def _handle_codex_record(rec: dict, st: SessionAggregate) -> None:
                                             label="malformed_reasoning_output_tokens")
                         new_input = max(in_raw - cached, 0)
                         # F1 cache_decay: codex emits cumulative totals,
-                        # so the per-turn delta is (new − previous). Skip
-                        # the first token_count event (no baseline).
-                        if st.input_tokens or st.cache_read_tokens or st.turn_inputs:
+                        # so the per-turn delta is (new − previous).
+                        # Three branches:
+                        #   (a) first-ever token_count event — establish
+                        #       the baseline; no turn appended yet.
+                        #   (b) cumulative counter DECREASED (session
+                        #       resume / context-window guard re-init) —
+                        #       record the new absolute values as a turn
+                        #       so the cache_decay curve shows the
+                        #       re-establishment instead of going flat.
+                        #   (c) normal incremental case — append delta.
+                        if not st.have_seen_codex_baseline:
+                            st.have_seen_codex_baseline = True
+                        elif new_input < st.input_tokens or cached < st.cache_read_tokens:
+                            st.turn_inputs.append(new_input)
+                            st.turn_cache_reads.append(cached)
+                        else:
                             delta_input = max(new_input - st.input_tokens, 0)
                             delta_cr = max(cached - st.cache_read_tokens, 0)
                             if delta_input or delta_cr:

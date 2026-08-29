@@ -43,6 +43,16 @@ DIRTY_FM_DATE = textwrap.dedent("""\
     ---
     name: dirty-date-skill
     description: Has an ISO date that auto-regenerates.
+    reviewed-on: 2026-08-28
+    ---
+    Body.
+""")
+
+# Maintenance-stamped date — must NOT be flagged (allowlisted).
+DIRTY_FM_MAINTENANCE_DATE = textwrap.dedent("""\
+    ---
+    name: maintenance-date-skill
+    description: Uses a maintainer-stamped ISO date (last-reviewed).
     last-reviewed: 2026-08-28
     ---
     Body.
@@ -143,6 +153,25 @@ class TestSkillFrontmatterAudit(unittest.TestCase):
         )
         self.assertIn("dirty-date-skill", proc.stdout)
         self.assertNotIn("clean-skill", proc.stdout)
+
+    def test_maintenance_date_is_allowed(self):
+        """`last-reviewed:` (maintenance allowlist) is NOT flagged."""
+        fake_repo = self.tmpdir / "fake-repo"
+        (fake_repo / "scripts").mkdir(parents=True)
+        shutil.copy(AUDIT_SCRIPT, fake_repo / "scripts" / "audit_skill_frontmatter.py")
+        _make_skill(fake_repo / "skills", "clean-skill", CLEAN_FM)
+        _make_skill(fake_repo / "skills", "maintenance-date-skill", DIRTY_FM_MAINTENANCE_DATE)
+        proc = subprocess.run(
+            [sys.executable, str(fake_repo / "scripts" / "audit_skill_frontmatter.py")],
+            capture_output=True, text=True, cwd=str(fake_repo),
+        )
+        self.assertEqual(
+            proc.returncode, 0,
+            f"expected exit 0 (maintenance field allowlisted), got {proc.returncode}\n"
+            f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+        self.assertIn("deterministic frontmatter", proc.stdout)
+        self.assertNotIn("maintenance-date-skill", proc.stdout)
 
     def test_dirty_sha_and_build_are_flagged(self):
         """SHA + build-number patterns must each be flagged."""

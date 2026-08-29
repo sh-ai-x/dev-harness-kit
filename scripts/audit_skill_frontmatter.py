@@ -43,6 +43,20 @@ SKILLS_DIR = REPO_ROOT / "skills"
 # (a stable string the maintainer writes once) but flags ISO-style
 # dates that auto-regenerate, long hex hashes (≥7 chars, often git
 # SHAs that change with each commit), and ``build-NNN`` style numbers.
+#
+# Maintenance field allowlist — these frontmatter keys are explicitly
+# permitted to carry an ISO date or other timestamp-style value, because
+# the maintainer writes them by hand (not auto-generated) and they don't
+# bust the prompt cache on every commit. The list mirrors the
+# `last-reviewed`/`reviewed-at`/`committed-at` family called out in
+# docs/proposals/cache-hit-rate/structural-fix.yaml §Risks.
+MAINTENANCE_FIELDS: frozenset[str] = frozenset({
+    "last-reviewed",
+    "reviewed-at",
+    "reviewed",
+    "committed-at",
+})
+
 FORBIDDEN_PATTERNS: tuple[re.Pattern[str], ...] = (
     # ISO-style dates: YYYY-MM-DD (with optional T... suffix).
     re.compile(r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?\b"),
@@ -84,6 +98,13 @@ def audit_skill(path: Path) -> list[str]:
         # Skip comments — they're not part of the rendered metadata.
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
+            continue
+        # Skip maintenance fields — maintainer-stamped ISO dates that
+        # the proposal §Risks explicitly carves out (last-reviewed /
+        # reviewed-at / committed-at). These do not auto-regenerate on
+        # every commit, so they don't bust the prompt cache.
+        key = stripped.split(":", 1)[0].strip()
+        if key in MAINTENANCE_FIELDS:
             continue
         for pat in FORBIDDEN_PATTERNS:
             for m in pat.finditer(line):

@@ -444,14 +444,14 @@ sections:
         (G1) + 2 new (G2/G3)
       - `hooks/*.sh` — 18 hooks audited by A1
       - `skills/*/SKILL.md` — 39 skills audited by A2
-      - `~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-version-from-plugin-json.md`
+      - `feedback-version-from-plugin-json.md`
         — same discipline applied to A2's forbidden-field regex
-      - `~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-sub-agent-isolated-test.md`
+      - `feedback-sub-agent-isolated-test.md`
         — cold-determinism gate for F1
-      - `~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-thin-harness-discipline.md`
+      - `feedback-thin-harness-discipline.md`
         — cherry-pick budget for Phase 1/2 split
-      - `~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-tmux-long-running-safety.md`
+      - `feedback-tmux-long-running-safety.md`
         — pure-prose + scripts classification
-      - `~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-no-build-debug-handoff.md`
+      - `feedback-no-build-debug-handoff.md`
         — `token-analyzer` is `user-invocable: true`, so this proposal
         is the right surface (not `/dev-kit:build-debug`)

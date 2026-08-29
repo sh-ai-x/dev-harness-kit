@@ -59,8 +59,13 @@ while IFS= read -r -d '' hook; do
         a="$(gtimeout 5 bash "${hook}" </dev/null 2>/dev/null | sha256sum | awk '{print $1}')"
         b="$(gtimeout 5 bash "${hook}" </dev/null 2>/dev/null | sha256sum | awk '{print $1}')"
     else
-        a="$(bash -c "bash \"${hook}\" </dev/null 2>/dev/null & sleep 5; kill \$! 2>/dev/null; wait \$! 2>/dev/null" | sha256sum | awk '{print $1}')"
-        b="$(bash -c "bash \"${hook}\" </dev/null 2>/dev/null & sleep 5; kill \$! 2>/dev/null; wait \$! 2>/dev/null" | sha256sum | awk '{print $1}')"
+        # Portable fallback. The hook path is passed via argv
+        # (``bash -c '... _ "$hook"``) so a filename containing a `"` or
+        # `;` cannot break out of the wrapper; SIGKILL on the 5s
+        # deadline matches ``gtimeout`` and handles hooks that catch
+        # SIGTERM.
+        a="$(bash -c 'bash "$1" </dev/null 2>/dev/null & sleep 5; kill -9 $! 2>/dev/null; wait $! 2>/dev/null' _ "${hook}" | sha256sum | awk '{print $1}')"
+        b="$(bash -c 'bash "$1" </dev/null 2>/dev/null & sleep 5; kill -9 $! 2>/dev/null; wait $! 2>/dev/null' _ "${hook}" | sha256sum | awk '{print $1}')"
     fi
     checked=$((checked + 1))
     if [[ "${a}" != "${b}" ]]; then
