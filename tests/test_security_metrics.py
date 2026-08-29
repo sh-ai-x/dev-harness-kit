@@ -15,8 +15,12 @@ SPEC.loader.exec_module(MODULE)
 
 def test_scorecard_has_all_owasp_categories(tmp_path: Path) -> None:
     categories = MODULE.scan(tmp_path)
-    assert len(categories) == 10
-    assert [(item.code, item.name) for item in categories] == list(MODULE.NAMES.items())
+    # 10 OWASP A01–A10 categories plus LLM01 (Prompt Injection), kept
+    # as a separate row in the scorecard table (see NAMES / PROMPT_injection).
+    assert len(categories) == 11
+    codes = [item.code for item in categories]
+    assert codes[:10] == list(MODULE.NAMES.keys())
+    assert "LLM01" in codes
     assert all(0 <= item.score <= 100 for item in categories)
 
 
@@ -32,7 +36,9 @@ def test_scorecard_is_deterministic_for_same_content(tmp_path: Path) -> None:
 def test_render_contains_markdown_score_table(tmp_path: Path) -> None:
     report = MODULE.render(tmp_path, MODULE.scan(tmp_path))
     assert "Overall score:" in report
-    assert "| OWASP area | Score | Status | Evidence / deductions |" in report
+    # New header (5 columns) includes the `Code` column to surface
+    # the LLM01 (Prompt Injection) row alongside OWASP A01–A10.
+    assert "| Code | Area | Score | Status | Evidence / deductions |" in report
     assert report.count("/100") >= 11
     assert "/dev-kit:security" in report
 
