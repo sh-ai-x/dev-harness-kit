@@ -146,6 +146,13 @@ jobs:
         with:
           fetch-depth: 1
 
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install --quiet -r requirements.lock
+
       - name: Scan PR body + diff for prompt-injection patterns
         id: scan
         env:
