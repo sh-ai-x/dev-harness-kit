@@ -220,7 +220,8 @@
     return null;
   }
 
-  function startStream(prNumber) {
+  function startStream(prNumber, endpoint) {
+    endpoint = endpoint || "stream";
     if (currentSource) {
       try { currentSource.close(); } catch (_e) { /* ignore */ }
       currentSource = null;
@@ -229,9 +230,9 @@
     resetGates();
     setStatus("connecting…", "running");
     metaEl.textContent = "PR #" + prNumber + " · connecting…";
-    endpointEl.textContent = "/pr/" + prNumber + "/stream";
+    endpointEl.textContent = "/pr/" + prNumber + "/" + endpoint;
 
-    var url = "/pr/" + prNumber + "/stream";
+    var url = "/pr/" + prNumber + "/" + endpoint;
     if (typeof EventSource !== "undefined") {
       currentSource = new EventSource(url);
     } else {
@@ -260,12 +261,22 @@
           appendOutput(data.line, cls);
           break;
         }
+        case "iteration_done": {
+          // Tail mode only (babysit's auto-opened, read-only mirror):
+          // one babysit LOOP iteration's review-local.sh run just
+          // exited, but the babysit loop itself keeps going -- do NOT
+          // close the EventSource or flip to a terminal status, just
+          // note the iteration boundary and keep tailing.
+          appendOutput("[babysit] iteration finished rc=" + data.exit_code + " -- watching for the next one…", "muted");
+          setStatus("watching (iter done, rc=" + data.exit_code + ")", data.exit_code === 0 ? "done-ok" : "running");
+          break;
+        }
         case "done": {
           appendOutput("[stream] subprocess exited rc=" + data.exit_code + (data.reason ? " (" + data.reason + ")" : ""), "muted");
           var label = data.exit_code === 0 ? "Approve (rc=0)" : ("rc=" + data.exit_code);
           setStatus(label, data.exit_code === 0 ? "done-ok" : "done-err");
           stopBtn.disabled = true;
-          startBtn.disabled = false;
+          startBtn.disabled = window.__AUTOSTART__ === true ? true : false;
           try { currentSource.close(); } catch (_e) { /* ignore */ }
           currentSource = null;
           break;
@@ -354,7 +365,7 @@
       prInput.focus();
       return;
     }
-    startStream(v);
+    startStream(v, "stream");
   });
   stopBtn.addEventListener("click", stopStream);
   prInput.addEventListener("keydown", function (e) {
@@ -363,16 +374,24 @@
 
   // Pre-fill the input from the server-injected window.__PR_NUMBER__
   // (set on /pr/<N> pages) so the operator sees which PR they were
-  // looking at, but DO NOT auto-start the stream. The HTML is a
-  // passive viewer — streaming only kicks off when the operator
-  // clicks Start (or when an external trigger like
-  // bin/babysit-pr-local.sh opens the page after launching
-  // `bin/review-local.sh --pr N` separately). Auto-start on a plain
-  // GET would be surprising (a static page that suddenly spawns a
-  // bash + three `claude -p` subprocesses) and unsafe (a stale tab
-  // left open could leak API quota).
+  // looking at.
   if (typeof window.__PR_NUMBER__ === "number" && window.__PR_NUMBER__ > 0) {
     prInput.value = String(window.__PR_NUMBER__);
+  }
+
+  // window.__AUTOSTART__ is injected only on `/pr/<N>?autostart=1` --
+  // the URL bin/babysit-pr-local.sh opens automatically. It connects
+  // to /pr/<N>/tail (read-only mirror of babysit's OWN run, see
+  // bin/review-local-server.py's _tail_babysit_log) instead of
+  // /pr/<N>/stream, so the tab never spawns a second, duplicate
+  // verdict pipeline run. A manual visit to /pr/<N> (no query string)
+  // stays the passive viewer described above: streaming only starts
+  // when the operator clicks Start, which uses /stream (the real,
+  // spawning endpoint).
+  if (window.__AUTOSTART__ === true && typeof window.__PR_NUMBER__ === "number" && window.__PR_NUMBER__ > 0) {
+    startBtn.disabled = true;
+    startBtn.title = "Auto-watching babysit-pr-local's run (read-only mirror). Manual Start is disabled here to avoid spawning a duplicate verdict pipeline.";
+    startStream(window.__PR_NUMBER__, "tail");
   }
 })();
 </script>
