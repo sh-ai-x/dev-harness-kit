@@ -29,8 +29,9 @@
 #
 # Exit codes (preserved for any caller that still checks):
 #   0 — no-op success
-#   1 — local is ahead of trunk (impossible under merge queue; kept
-#       only so legacy callers don't see a new exit code)
+#   1 — local != target (drift; rebase onto $SOURCE_REF). The merge
+#       queue will do this automatically; this exit code surfaces
+#       drift to operators during the local check window.
 #   2 — invalid arguments or missing dependencies
 #   3 — git or jq failure during sync
 #   4 — target version malformed (not MAJOR.MINOR.PATCH)

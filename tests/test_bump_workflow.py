@@ -55,6 +55,12 @@ import yaml
 WORKFLOW_PATH = (
     Path(__file__).parent.parent / ".github" / "workflows" / "version-bump.yml"
 )
+MERGE_QUEUE_READY_PATH = (
+    Path(__file__).parent.parent
+    / ".github"
+    / "workflows"
+    / "merge-queue-ready-check.yml"
+)
 PRE_PUSH_PATH = Path(__file__).parent.parent / ".githooks" / "pre-push"
 
 
@@ -64,6 +70,25 @@ def _yaml_text() -> str:
 
 def _yaml_doc() -> dict:
     return yaml.safe_load(_yaml_text())
+
+
+def _mq_yaml_text() -> str:
+    return MERGE_QUEUE_READY_PATH.read_text(encoding="utf-8")
+
+
+def _mq_yaml_doc() -> dict:
+    return yaml.safe_load(_mq_yaml_text())
+
+
+def _mq_scope_job(doc: dict) -> dict:
+    """Return the scope job dict from the merge-queue-ready-check workflow.
+
+    Assumes a `scope` job exists; callers must check or wrap in their
+    own assertion. Kept as a pure function so it can be reused across
+    test methods without re-walking the YAML.
+    """
+    jobs = doc["jobs"]
+    return jobs["scope"]
 
 
 def _resolve_steps(doc: dict) -> list[dict]:
@@ -293,6 +318,15 @@ class TestBumpWorkflow(unittest.TestCase):
         Negative contract: still MUST NOT push to `HEAD:main`. The
         queue owns the merge into main; the bump push targets the
         queue's tracking ref only.
+
+        Push refspec: MUST be `HEAD:${HEAD_REF}`, NOT
+        `${HEAD_SHA}:${HEAD_REF}`. HEAD_SHA is the static pre-bump
+        SHA captured from the webhook payload; pushing it would
+        deliver the OLD commit (which is already at HEAD_REF) and
+        exit 0 as an up-to-date no-op — defeating the entire bump.
+        Only the local working HEAD carries the new bump commit, so
+        the refspec must name HEAD on the left side. (Bug introduced
+        by `9a58d2d`; regression-test pinning added in iter-7 review.)
         """
         doc = _yaml_doc()
         commit_step = _find_step(doc, "commit") or _find_step(doc, "push version")
@@ -319,16 +353,30 @@ class TestBumpWorkflow(unittest.TestCase):
             "invalidation silently breaks on every merge.",
         )
         self.assertIn(
-            "${HEAD_SHA}:${HEAD_REF}", run,
-            "the bump push MUST use the explicit src:dst form "
-            "`${HEAD_SHA}:${HEAD_REF}` (force-update the merge_group "
-            "head ref with the new bump commit). Pinning the exact "
+            "HEAD:${HEAD_REF}", run,
+            "the bump push MUST use `HEAD:${HEAD_REF}` (local "
+            "working HEAD carries the new bump commit) -- NOT "
+            "`${HEAD_SHA}:${HEAD_REF}` (the static pre-bump SHA from "
+            "the webhook payload, which would be an up-to-date "
+            "no-op and silently drop the bump). Pinning the exact "
             "shape catches both 'git push' (no args, defaults to "
             "upstream which is main under the runner checkout) and "
             "'git push origin HEAD' (no :ref, updates the local "
             "branch's upstream which under merge_group is a no-op "
             "because the queue's tracking ref is HEAD_REF, not the "
             "feature branch).",
+        )
+        # NEGATIVE: the previous bug shape (push the captured pre-bump
+        # SHA) silently exits 0 with "Everything up-to-date" and
+        # drops the bump. Lock it out so it cannot regress.
+        self.assertNotIn(
+            "${HEAD_SHA}:${HEAD_REF}", run,
+            "the bump push MUST NOT use `${HEAD_SHA}:${HEAD_REF}` "
+            "-- HEAD_SHA is the pre-bump SHA from the webhook "
+            "payload, so pushing it delivers the OLD commit and is "
+            "an up-to-date no-op that exits 0 without delivering "
+            "the bump. Use `HEAD:${HEAD_REF}` to push the new "
+            "bump commit.",
         )
         # And the push MUST target the merge_group head_ref, NOT main.
         # The OLD contract was `git push origin HEAD:main` after
@@ -430,6 +478,128 @@ class TestBumpWorkflowOmissions(unittest.TestCase):
                          "workflow must NOT do cherry-pick recovery; the "
                          "freshness check on PR + trunk-bump on merge close "
                          "the race")
+
+
+class TestMergeQueueReadyCheckScopeBase(unittest.TestCase):
+    """Pin the merge-queue-ready-check `scope` job BASE contract.
+
+    The scope job computes `git diff --name-only BASE HEAD` to detect
+    a PR that mixes production-code edits with bypass-file edits. On
+    a `merge_group` event the BASE must be the SHA the queue captured
+    when it formed the group (`github.event.merge_group.base_sha`),
+    not `origin/main` -- which can advance underneath a running
+    workflow when another PR in the same merge-group batch is merged
+    first. A wrong BASE produces a false-positive scope block.
+
+    History: this contract was silently broken for 7 review passes
+    (the bug returned "Approved" by accident because the resulting
+    diff was empty against a stale main). Pinned here so a future
+    maintainer cannot regress it.
+    """
+
+    def test_scope_job_reads_merge_group_base_sha_via_env(self):
+        """The scope job MUST read BASE from
+        `github.event.merge_group.base_sha` exposed via a job-level
+        `env:` block. This is the only BASE value stable across the
+        lifetime of a queue run."""
+        doc = _mq_yaml_doc()
+        self.assertIn("scope", doc["jobs"],
+                      "merge-queue-ready-check.yml must define a scope job")
+        scope = _mq_scope_job(doc)
+        env = scope.get("env", {})
+        self.assertIn(
+            "MERGE_GROUP_BASE_SHA", env,
+            "scope job MUST expose MERGE_GROUP_BASE_SHA via job-level env "
+            "(the only way to expand ${{ github.event.merge_group.base_sha }} "
+            "into a `run:` block); the step then sets BASE from this env var."
+        )
+        self.assertIn(
+            "merge_group.base_sha", env["MERGE_GROUP_BASE_SHA"],
+            "MERGE_GROUP_BASE_SHA must resolve to github.event.merge_group.base_sha "
+            "(the queue-captured base SHA, stable across the queue run lifetime)"
+        )
+
+    def test_scope_step_uses_merge_group_base_sha_not_origin_main(self):
+        """The scope step must source BASE from $MERGE_GROUP_BASE_SHA,
+        not from `git rev-parse origin/main` or any rev-list fallback."""
+        doc = _mq_yaml_doc()
+        scope = _mq_scope_job(doc)
+        # Find the step that computes the diff (the "Reject changes outside
+        # the documented paths" step).
+        steps = scope.get("steps", [])
+        scope_step = next(
+            (s for s in steps if "Reject" in s.get("name", "")
+             or "scope" in s.get("name", "").lower()
+             or "diff" in s.get("name", "").lower()),
+            None,
+        )
+        self.assertIsNotNone(
+            scope_step,
+            "expected a 'Reject changes outside the documented paths' step "
+            "in the scope job"
+        )
+        run = scope_step.get("run", "")
+        # POSITIVE: must read BASE from the env var.
+        self.assertIn(
+            "MERGE_GROUP_BASE_SHA", run,
+            "scope step MUST read BASE from $MERGE_GROUP_BASE_SHA "
+            "(the queue-captured base SHA). Pinning the env-var indirection "
+            "catches a regression to `git rev-parse origin/main`."
+        )
+        self.assertIn(
+            "${MERGE_GROUP_BASE_SHA:?", run,
+            "scope step MUST require MERGE_GROUP_BASE_SHA to be set "
+            "(:? syntax) so a missing/empty base_sha fails the job loudly "
+            "instead of falling through to a stale or empty diff"
+        )
+
+    def test_scope_step_must_not_reference_origin_main_or_rev_list(self):
+        """Negative contract: lock out the previous bug shape. The old
+        code did `git rev-parse origin/main~0 || git rev-list --max-parents=0
+        HEAD | tail -1`, both of which produce a STALE or WRONG base on
+        a merge_group event (origin/main advances underneath running
+        workflows; the rev-list fallback is dead because merge_group
+        always forms against an existing main)."""
+        text = _mq_yaml_text()
+        self.assertNotIn(
+            "origin/main~0", text,
+            "scope job MUST NOT use `origin/main~0` as BASE on a merge_group "
+            "event -- origin/main may advance underneath running workflows "
+            "(another PR in the same merge-group batch merged first), producing "
+            "a false-positive scope block."
+        )
+        self.assertNotIn(
+            "git rev-parse origin/main", text,
+            "scope job MUST NOT use `git rev-parse origin/main` as BASE on a "
+            "merge_group event -- same race window as origin/main~0."
+        )
+        self.assertNotIn(
+            "git rev-list --max-parents=0", text,
+            "scope job MUST NOT use a `git rev-list --max-parents=0` "
+            "fallback -- on a merge_group event the queue always forms "
+            "against an existing main, so the fallback is dead code AND "
+            "silently picks the WRONG base if the env-var path is ever "
+            "broken."
+        )
+
+    def test_workflow_runs_only_on_merge_group(self):
+        """merge-queue-ready-check.yml exists to gate the GitHub Merge
+        Queue; it MUST trigger ONLY on `merge_group`. Other triggers
+        would burn Action minutes on PR events that are not in the
+        queue."""
+        doc = _mq_yaml_doc()
+        on = doc.get("on") if not isinstance(doc.get(True), dict) else doc[True]
+        if on is None and True in doc:
+            on = doc[True]
+        self.assertIsNotNone(on, "workflow must declare an `on:` trigger")
+        # `merge_group` is the only key the workflow should declare.
+        keys = list(on.keys()) if isinstance(on, dict) else [on]
+        self.assertEqual(
+            keys, ["merge_group"],
+            "merge-queue-ready-check.yml must trigger ONLY on merge_group "
+            f"(got: {keys}); other triggers burn Action minutes on events "
+            "the queue does not own."
+        )
 
 
 class TestPrePushRefactor(unittest.TestCase):
@@ -632,7 +802,7 @@ class TestVersionFreshnessCheck(unittest.TestCase):
                       "freshness step must print the OK line on equal versions")
 
 
-class TestPrePushAutoSync(unittest.TestCase):
+class TestPrePushNoAutoSync(unittest.TestCase):
     """The pre-push hook is now a NOTICE-only drift detector (no
     auto-sync, no commit). The GitHub Merge Queue owns the version
     sync at merge time, so the per-PR conflict this class's
