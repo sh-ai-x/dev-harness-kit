@@ -3646,13 +3646,20 @@ class TestCacheDecay(unittest.TestCase):
         """G2: aggregate_session emits ``cache_decay`` as a list[float]
         with one entry per tracked assistant turn. Each value ∈ [0, 1].
 
-        Claude Code's wire format reports cumulative ``input_tokens`` /
-        ``cache_read_input_tokens`` per record, so the i-th entry is the
-        cumulative ratio at that turn (i.e. how effective the cache has
-        been up to turn i, not the per-turn delta). That cumulative
-        number is exactly what makes the curve informative for F1 —
-        a 100-turn session at 99% cumulative hit has a stable prefix;
-        a 100-turn session at 30% cumulative hit has a drifting prefix."""
+        The cache_decay list holds PER-TURN DELTAS (the i-th entry is
+        ``cache_read / (cache_read + input)`` for that turn alone), not
+        session-cumulative ratios. The Claude JSONL handler derives the
+        delta from the cumulative ``st.input_tokens`` counter via
+        ``prev_turn_input``; the Codex handler computes deltas from
+        successive ``token_count`` events. Both branches emit the same
+        unit of measure so the dashboard's bucket aggregator doesn't
+        compare across incommensurable quantities.
+
+        Per-turn ratios from the fixture:
+          turn 1: 0     / 200          = 0.0
+          turn 2: 600   / (200 + 600)  = 0.75
+          turn 3: 700   / (200 + 700)  ≈ 0.7778
+        """
         from token_efficiency_analyzer import aggregate_session
         result = aggregate_session(
             self.tmpdir / "logs" / "claude-code" / "cache-decay-fixture.jsonl"
@@ -3668,14 +3675,42 @@ class TestCacheDecay(unittest.TestCase):
                                   f"G2: each cache_decay entry must be float, got {type(v)}")
             self.assertGreaterEqual(v, 0.0)
             self.assertLessEqual(v, 1.0)
-        # Cumulative ratios from the fixture (input accumulates per
-        # record; cache_read accumulates per record):
-        #   turn 1: 0     / 200          = 0.0
-        #   turn 2: 600   / (400 + 600)  = 0.6
-        #   turn 3: 1300  / (600 + 1300) ≈ 0.6842
+        # Per-turn ratios from the fixture (delta against prev_turn_*).
         self.assertAlmostEqual(cd[0], 0.0, places=4)
-        self.assertAlmostEqual(cd[1], 0.6, places=4)
-        self.assertAlmostEqual(cd[2], 1300 / 1900, places=4)
+        self.assertAlmostEqual(cd[1], 600 / 800, places=4)
+        self.assertAlmostEqual(cd[2], 700 / 900, places=4)
+
+    def test_claude_emits_per_turn_deltas_not_cumulative(self):
+        """Regression (PR #761 review feedback, M1): the Claude handler
+        used to emit session-CUMULATIVE ratios into the per-turn
+        ``cache_decay`` list (every entry monotonically growing toward
+        1.0 because cumulative input + cache_read keep climbing). The
+        Codex branch already emits per-turn deltas, so the dashboard's
+        bucket aggregator was comparing incommensurable quantities
+        across sources. Pin that Claude now produces the SAME shape as
+        Codex — per-turn deltas — by checking the SPECIFIC numerical
+        value that distinguishes the two shapes.
+
+        With the fixture:
+          turn 1: input=200, cache_read=0
+          turn 2: input=200, cache_read=600
+          turn 3: input=200, cache_read=700
+        Cumulative ratios would be:
+          turn 2: 600 / (400 + 600) = 0.6
+        Per-turn deltas give:
+          turn 2: 600 / (200 + 600) = 0.75
+        The test pins 0.75 (delta), not 0.6 (cumulative) — the old
+        code would have emitted 0.6 here, which is the regression.
+        """
+        from token_efficiency_analyzer import aggregate_session
+        result = aggregate_session(
+            self.tmpdir / "logs" / "claude-code" / "cache-decay-fixture.jsonl"
+        )
+        cd = result["cache_decay"]
+        # Pin the per-turn delta, not the cumulative ratio.
+        self.assertAlmostEqual(cd[1], 0.75, places=4,
+                               msg="Claude cache_decay[1] must be per-turn "
+                                   "delta (0.75), not session-cumulative (0.6)")
 
     def test_g3_dashboard_html_contains_cache_decay_tile(self):
         """G3: rendered dashboard carries the new tile + the active bucket

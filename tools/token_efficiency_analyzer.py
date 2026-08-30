@@ -1106,12 +1106,28 @@ class SessionAggregate:
     # F1 in docs/proposals/cache-hit-rate/structural-fix.yaml).
     # ``turn_inputs[i]`` = non-cached input tokens billed at turn i.
     # ``turn_cache_reads[i]`` = cached input tokens reused at turn i.
-    # Finalized into ``cache_decay: list[float]`` in ``_finalize_session``
-    # so the dashboard can show a per-turn hit-ratio curve and identify
-    # which surface (hook / system-reminder / skill / sub-agent) is
-    # bleeding the cache between turns.
+    # BOTH LISTS HOLD PER-TURN DELTAS — NOT cumulative totals. The Claude
+    # JSONL handler emits per-turn values directly (one ``assistant``
+    # record per turn, with `usage.input_tokens` for that turn only),
+    # but ``st.input_tokens`` and ``st.cache_read_tokens`` accumulate
+    # across turns for the lifetime aggregate. We snapshot the prior
+    # cumulative counters at the end of each assistant record and emit
+    # the delta so the i-th list entry is "that turn's" usage — the
+    # Codex path does the same shape from the ``token_count`` deltas
+    # it computes inside ``_handle_codex_record``. Iron Law 3 (volatile
+    # content stays in prompt tail) is what we're trying to surface
+    # here: a sudden drop in ``turn_cache_reads`` between adjacent
+    # turns is direct evidence of a prefix invalidation.
     turn_inputs: list = None  # type: ignore[assignment]
     turn_cache_reads: list = None  # type: ignore[assignment]
+    # Last-seen cumulative counters — used by the Claude handler to
+    # derive per-turn deltas before appending to ``turn_inputs`` /
+    # ``turn_cache_reads``. Without these, the Claude branch emits
+    # session-cumulative values into a per-turn list, which produces
+    # a meaningless monotonic cache_decay curve when the dashboard
+    # buckets it against the (correctly per-turn) Codex branch.
+    prev_turn_input: int = 0
+    prev_turn_cache_read: int = 0
     # Codex baseline flag — the codex provider emits cumulative
     # ``token_count`` snapshots that can DECREASE on a session resume or
     # context-window guard re-init. We need an explicit first-event
@@ -1246,18 +1262,25 @@ def _handle_claude_record(rec: dict, st: SessionAggregate) -> None:
                                       counter=st.parse_errors,
                                       label="malformed_ephemeral_1h")
 
-        # Per-turn cache-telemetry append (F1 cache_decay fix). Both
-        # counters reset on every assistant record so the i-th list entry
-        # is *that turn's* usage — the dashboard draws cache_hit_ratio at
-        # each turn index. Iron Law 3 (volatile content stays in prompt
-        # tail) is what we're trying to surface here: a sudden drop in
+        # Per-turn cache-telemetry append (F1 cache_decay fix).
+        # Claude's wire format emits per-turn ``usage.input_tokens`` and
+        # ``usage.cache_read_input_tokens`` values that we ACCUMULATE
+        # into ``st.input_tokens`` / ``st.cache_read_tokens`` for the
+        # lifetime totals. For the per-turn ``cache_decay`` curve we
+        # need the *delta* against the previous turn — emit (current
+        # cumulative) - (prev_turn_*). On the first assistant record
+        # both deltas equal the lifetime counters (no previous baseline
+        # exists). Iron Law 3 (volatile content stays in prompt tail) is
+        # what we're trying to surface here: a sudden drop in
         # ``turn_cache_reads`` between adjacent turns is direct evidence
         # of a prefix invalidation.
-        _turn_in = st.input_tokens  # already safely coerced above
-        _turn_cr = st.cache_read_tokens
-        if _turn_in or _turn_cr:
-            st.turn_inputs.append(_turn_in)
-            st.turn_cache_reads.append(_turn_cr)
+        _delta_in = max(st.input_tokens - st.prev_turn_input, 0)
+        _delta_cr = max(st.cache_read_tokens - st.prev_turn_cache_read, 0)
+        if _delta_in or _delta_cr:
+            st.turn_inputs.append(_delta_in)
+            st.turn_cache_reads.append(_delta_cr)
+        st.prev_turn_input = st.input_tokens
+        st.prev_turn_cache_read = st.cache_read_tokens
 
         for blk in (msg.get("content") or []):
             if not isinstance(blk, dict):
