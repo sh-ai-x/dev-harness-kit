@@ -79,6 +79,21 @@ class TestTraceSessionEndHookEvent(unittest.TestCase):
             event = _last_event(root)
             self.assertEqual(event["evidence_ref"]["hook_event"], "SessionEnd")
 
+    def test_hook_event_accepts_camel_case_payload_field(self):
+        """Some runtimes may send `hookEventName` instead of
+        `hook_event_name` — the session_id read two lines above already
+        falls back `.session_id // .sessionId`; the hook_event read must
+        mirror that same snake/camel fallback instead of silently
+        collapsing to `"unknown"`.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            payload = {"session_id": "sess-camel-1", "cwd": str(root), "hookEventName": "Stop"}
+            proc = _run_hook(payload)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            event = _last_event(root)
+            self.assertEqual(event["evidence_ref"]["hook_event"], "Stop")
+
     def test_agent_env_is_stamped_on_persisted_event(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -88,6 +88,37 @@ def _agent_command(worktree: Path, prompt: str) -> list[str]:
             "--add-dir", str(worktree), prompt,
         ]
     raise ValueError(f"unsupported DEV_KIT_BUILD_AGENT={agent!r}; use claude or codex")
+
+
+# Map from DEV_KIT_BUILD_AGENT's runner names to trace-log identity
+# stamps. Deliberately NOT the same allowlist-or-raise contract as
+# _agent_command: identity stamping runs at event-emission time (e.g.
+# step.started, fired from _step_pre_spawn before the sub-agent
+# subprocess is ever built), which is earlier than _agent_command's
+# ValueError would fire. An unrecognized runner must stamp "" (unset),
+# never the raw value verbatim — trace_log.py::_default_identity
+# documents this exact anti-pattern as the prior A06-1 regression
+# (a previous revision defaulted `agent` to a fixed literal, silently
+# mis-attributing every non-matching runner).
+_RUNNER_IDENTITY = {"claude": "claude-code", "codex": "codex"}
+
+
+def _runner_identity() -> str:
+    """Return the trace-log identity stamp for the configured build runner.
+
+    Reads DEV_KIT_AGENT first (an explicit override, e.g. set by a
+    wrapping hook, always wins) and falls back to deriving it from
+    DEV_KIT_BUILD_AGENT (the same env var _agent_command reads to pick
+    the runner). Returns "" for anything outside the known runner set —
+    "unset", not a guess.
+    """
+    explicit = os.environ.get("DEV_KIT_AGENT")
+    if explicit:
+        return explicit
+    build_agent = os.environ.get("DEV_KIT_BUILD_AGENT", "claude").strip().lower()
+    return _RUNNER_IDENTITY.get(build_agent, "")
+
+
 # Step lifecycle. Order roughly matches the typical progression; entries are
 # enforced by update_step_status() and indexed/queried by tests/CLI.
 VALID_STATUSES = (
@@ -133,17 +164,7 @@ def _emit_effectiveness_event(
     subject_id = f"{phase}:step:{step_num}"
     ts = now_utc()
     event_id = new_event_id()
-    # Stamp the same runner identity `_agent_command` used to execute this
-    # step ("claude" or "codex"), normalized to the "claude-code"/"codex"
-    # convention the hooks.json producers use — the stability submetric
-    # (issue #663) needs at least one identity field on the event to
-    # count it as attributed. DEV_KIT_AGENT (if a caller already set it,
-    # e.g. via a wrapping hook) wins; DEV_KIT_BUILD_AGENT is the fallback
-    # since it's the field execute.py already reads to pick the runner.
-    build_agent = os.environ.get("DEV_KIT_BUILD_AGENT", "claude").strip().lower()
-    agent = os.environ.get(
-        "DEV_KIT_AGENT", "claude-code" if build_agent == "claude" else build_agent
-    )
+    agent = _runner_identity()
     event = {
         "schema_version": 1,
         "event_id": event_id,

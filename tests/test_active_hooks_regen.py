@@ -140,6 +140,35 @@ class TestActiveHooksRegeneration(unittest.TestCase):
                 self.assertIsInstance(entry["when"], str)
                 self.assertIsInstance(entry["fail_closed"], bool)
 
+    def test_dev_kit_agent_prefixed_command_normalizes_to_bare_path(self):
+        """A `DEV_KIT_AGENT=<value> bash ${...}/hooks/<name>.sh` command must
+        normalize to the bare `hooks/<name>.sh` path, not carry the env
+        prefix into `.active-hooks.json`.
+
+        `_normalize_path` chains `_ENV_PREFIX_RE.sub` then
+        `_LEADING_BASH_RE.sub`, where the latter is anchored (`^bash\\s+`).
+        With a `DEV_KIT_AGENT=...` prefix, the string still starts with
+        `DEV_KIT_AGENT=` after the env-root strip, so the anchored bash
+        strip silently no-ops and the corrupted string
+        (`DEV_KIT_AGENT=claude-code bash hooks/tdd-guard.sh`) lands in the
+        `path` field. `_derive_name`'s `rsplit("/")` masks the corruption
+        for `name`, so only `path` shows it — this test pins `path`
+        exactly, not just its type.
+        """
+        result = _run_regen(self.root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads((self.root / ".dev-kit" / ".active-hooks.json").read_text())
+        found = False
+        for entries in data["events"].values():
+            for entry in entries:
+                if entry["name"] == "tdd-guard":
+                    found = True
+                    self.assertEqual(
+                        entry["path"], "hooks/tdd-guard.sh",
+                        f"path must not carry the DEV_KIT_AGENT= prefix: {entry}",
+                    )
+        self.assertTrue(found, "tdd-guard entry not found in regenerated matrix")
+
     def test_rerun_produces_byte_identical_excluding_timestamp(self):
         """Re-running MUST produce byte-identical output modulo generated_at.
 

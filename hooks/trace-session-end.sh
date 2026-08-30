@@ -32,7 +32,7 @@ SESSION_ID=$(printf '%s' "${INPUT:-}" | jq -r '.session_id // .sessionId // empt
 # sessions reach a terminal event) need to know which path fired —
 # an earlier revision hardcoded "SessionEnd" in evidence_ref regardless
 # of trigger, making that diagnosis impossible.
-HOOK_EVENT_NAME=$(printf '%s' "${INPUT:-}" | jq -r '.hook_event_name // "unknown"' 2>/dev/null || echo unknown)
+HOOK_EVENT_NAME=$(printf '%s' "${INPUT:-}" | jq -r '.hook_event_name // .hookEventName // "unknown"' 2>/dev/null || echo unknown)
 
 # Resolve the worktree root. The payload's `cwd` is the source of truth
 # (matches the cwd that produced step.started in session-start-check.sh,

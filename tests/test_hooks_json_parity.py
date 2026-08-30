@@ -295,6 +295,44 @@ class TestHooksJsonParity(unittest.TestCase):
             "bash ${PLUGIN_ROOT}/hooks/foo.sh",
         )
 
+    def test_dev_kit_agent_prefix_names_the_correct_runtime(self):
+        """Every `DEV_KIT_AGENT=` prefixed command in `hooks/hooks.json`
+        must say `claude-code`, and every one in
+        `.codex-plugin/hooks/hooks.json` must say `codex`.
+
+        `_normalize_command` strips the prefix entirely before comparing
+        triples, so a mis-copied value (e.g. Codex's manifest
+        accidentally carrying `DEV_KIT_AGENT=claude-code`) would NOT be
+        caught by `test_triple_sets_match` — the normalized triple sets
+        would still be equal. This test reads the RAW commands (before
+        normalization) so a mis-copy fails loudly here instead of
+        silently mis-attributing every Codex-side trace event.
+        """
+
+        def _raw_commands(manifest: dict) -> list[str]:
+            commands: list[str] = []
+            for groups in manifest.get("hooks", {}).values():
+                for group in groups or []:
+                    for hook in group.get("hooks", []):
+                        if hook.get("type") == "command":
+                            commands.append(hook["command"])
+            return commands
+
+        cc_prefixed = [c for c in _raw_commands(self.cc_manifest) if c.startswith("DEV_KIT_AGENT=")]
+        codex_prefixed = [c for c in _raw_commands(self.codex_manifest) if c.startswith("DEV_KIT_AGENT=")]
+        self.assertTrue(cc_prefixed, "expected at least one DEV_KIT_AGENT= command in hooks/hooks.json")
+        self.assertTrue(codex_prefixed, "expected at least one DEV_KIT_AGENT= command in .codex-plugin/hooks/hooks.json")
+        for cmd in cc_prefixed:
+            self.assertTrue(
+                cmd.startswith("DEV_KIT_AGENT=claude-code "),
+                f"hooks/hooks.json command must stamp claude-code: {cmd}",
+            )
+        for cmd in codex_prefixed:
+            self.assertTrue(
+                cmd.startswith("DEV_KIT_AGENT=codex "),
+                f".codex-plugin/hooks/hooks.json command must stamp codex: {cmd}",
+            )
+
     def test_normalize_command_strips_dev_kit_agent_prefix(self):
         """A leading `DEV_KIT_AGENT=<value> ` command prefix is an
         intentional, expected divergence between the two manifests (each

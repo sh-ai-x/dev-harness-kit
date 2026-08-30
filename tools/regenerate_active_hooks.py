@@ -68,6 +68,14 @@ SCHEMA_VERSION = "1.0.0"
 # substitutes the env var at runtime; we only care about the script path.
 _ENV_PREFIX_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/")
 
+# A leading `DEV_KIT_AGENT=<value> ` command prefix (stamps producer
+# identity for the harness-effectiveness stability submetric, issue
+# #663) precedes the `bash` token. `_LEADING_BASH_RE` below is anchored
+# (`^bash\s+`), so without stripping this prefix first the bash-strip
+# silently no-ops and the corrupted string (env assignment + `bash` +
+# path) lands in the regenerated matrix's `path` field.
+_DEV_KIT_AGENT_PREFIX_RE = re.compile(r"^DEV_KIT_AGENT=\S+ ")
+
 
 def _utc_now_iso() -> str:
     """ISO-8601 UTC timestamp with explicit +00:00 offset.
@@ -86,7 +94,8 @@ def _utc_now_iso() -> str:
 _LEADING_BASH_RE = re.compile(r"^bash\s+")
 
 def _normalize_path(raw: str) -> str:
-    """Strip `${CLAUDE_PLUGIN_ROOT}/` env prefix and a leading `bash ` token.
+    """Strip a `DEV_KIT_AGENT=` prefix, `${CLAUDE_PLUGIN_ROOT}/` env
+    prefix, and a leading `bash ` token, in that order.
 
     Examples:
         `bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-guard.sh`
@@ -95,8 +104,11 @@ def _normalize_path(raw: str) -> str:
             -> `hooks/worktree-guard.sh`
         `hooks/sub-agent-handoff.sh`
             -> `hooks/sub-agent-handoff.sh` (no-op)
+        `DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-guard.sh`
+            -> `hooks/tdd-guard.sh`
     """
     s = raw.strip()
+    s = _DEV_KIT_AGENT_PREFIX_RE.sub("", s)
     s = _ENV_PREFIX_RE.sub("", s)
     s = _LEADING_BASH_RE.sub("", s)
     return s
