@@ -200,6 +200,42 @@ class TestReviewLocalServer(unittest.TestCase):
         self.assertIn("window.__AUTOSTART__ = true;", body)
         self.assertIn("window.__PR_NUMBER__ = 725;", body)
 
+    def test_autostart_keeps_start_disabled_on_tail_onerror(self) -> None:
+        """M1 regression: when ?autostart=1 is set, the page's `onerror`
+        recovery paths (both `sawAnyOutput` and the 5s stuck branch) must
+        NOT re-enable the Start button. Re-enabling would let a tail
+        disconnect route the operator back to /stream, which re-spawns
+        review-local.sh — the exact footgun the autostart path is built
+        to prevent. The Start button must mirror the autostart flag in
+        BOTH the initial click handler and the onerror branches.
+        """
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725?autostart=1", timeout=3) as r:
+            body = r.read().decode("utf-8")
+        # Locate the two onerror branches that previously set
+        # `startBtn.disabled = false;` unconditionally.
+        import re
+        saw_branch = re.search(
+            r"if \(sawAnyOutput\) \{.*?startBtn\.disabled = ([^;]+);",
+            body,
+            re.DOTALL,
+        )
+        stuck_branch = re.search(
+            r"Date\.now\(\) - stuckSince > 5000.*?startBtn\.disabled = ([^;]+);",
+            body,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(saw_branch, "sawAnyOutput onerror branch not found")
+        self.assertIsNotNone(stuck_branch, "5s stuck branch not found")
+        for branch in (saw_branch, stuck_branch):
+            rhs = branch.group(1).strip()
+            # The RHS must reference __AUTOSTART__, not be a bare `false`.
+            self.assertIn(
+                "__AUTOSTART__",
+                rhs,
+                f"Start button is unconditionally re-enabled: `{rhs}`. "
+                "M1: must mirror the autostart flag.",
+            )
+
     def test_pr_page_without_autostart_query_omits_flag(self) -> None:
         """A manual visit to `/pr/<N>` (no query string) stays the
         passive viewer -- no autostart flag, streaming only starts on

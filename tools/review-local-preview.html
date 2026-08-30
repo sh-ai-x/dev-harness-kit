@@ -313,7 +313,12 @@
         try { currentSource.close(); } catch (_e) { /* ignore */ }
         currentSource = null;
         stopBtn.disabled = true;
-        startBtn.disabled = false;
+        // M1 fix: mirror the autostart check into the onerror branch.
+        // The whole point of ?autostart=1 is to prevent a duplicate
+        // /stream → review-local.sh invocation; re-enabling Start on
+        // any tail disconnect would re-introduce the very footgun the
+        // autostart path is built to prevent.
+        startBtn.disabled = window.__AUTOSTART__ === true;
         return;
       }
       // No stdout yet -- might be stuck connecting. Detect a 5s+
@@ -340,7 +345,9 @@
           try { currentSource.close(); } catch (_e) { /* ignore */ }
           currentSource = null;
           stopBtn.disabled = true;
-          startBtn.disabled = false;
+          // M1 fix: same autostart-aware disable as the sawAnyOutput
+          // branch above. See comment there.
+          startBtn.disabled = window.__AUTOSTART__ === true;
         }
       }, 500);
     };
