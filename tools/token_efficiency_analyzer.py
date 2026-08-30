@@ -1357,8 +1357,15 @@ def _handle_codex_record(rec: dict, st: SessionAggregate) -> None:
                         # F1 cache_decay: codex emits cumulative totals,
                         # so the per-turn delta is (new − previous).
                         # Three branches:
-                        #   (a) first-ever token_count event — establish
-                        #       the baseline; no turn appended yet.
+                        #   (a) first-ever token_count event — the first
+                        #       event IS turn 1 (cumulative totals start
+                        #       from zero), so we record its absolute
+                        #       value as turn 1 instead of dropping it.
+                        #       This keeps Codex cache_decay[0] aligned
+                        #       with Claude cache_decay[0] under the
+                        #       index-aligned bucketing in
+                        #       _bucket_cache_decay (review feedback
+                        #       finding #2).
                         #   (b) cumulative counter DECREASED (session
                         #       resume / context-window guard re-init) —
                         #       record the new absolute values as a turn
@@ -1367,6 +1374,12 @@ def _handle_codex_record(rec: dict, st: SessionAggregate) -> None:
                         #   (c) normal incremental case — append delta.
                         if not st.have_seen_codex_baseline:
                             st.have_seen_codex_baseline = True
+                            # First token_count IS turn 1: append the
+                            # absolute values so cache_decay[0] is
+                            # "turn 1's usage" rather than dropping it.
+                            if new_input or cached:
+                                st.turn_inputs.append(new_input)
+                                st.turn_cache_reads.append(cached)
                         elif new_input < st.input_tokens or cached < st.cache_read_tokens:
                             st.turn_inputs.append(new_input)
                             st.turn_cache_reads.append(cached)

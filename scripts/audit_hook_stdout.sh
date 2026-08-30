@@ -74,9 +74,17 @@ while IFS= read -r -d '' hook; do
 done < <(find "${HOOKS_DIR}" -maxdepth 1 -name '*.sh' -print0 | sort -z)
 
 if [[ "${emit_json}" == true ]]; then
-    bad_json="$(printf '"%s",' "${bad_hooks[@]:-}" | sed 's/,$//')"
-    if [[ -z "${bad_json}" ]]; then
+    # Build the JSON array manually because "${bad_hooks[@]:-}" on an
+    # empty array expands to ONE empty-string argument, which printf
+    # would render as the 2-char string `""` (after the `""` format).
+    # That silently inverts a CI signal: a clean run emitted
+    # `{"checked":N,"bad":[""]}` instead of `{"checked":N,"bad":[]}`,
+    # so a downstream JSON consumer would never see an empty array.
+    # Build with explicit join instead.
+    if [[ ${#bad_hooks[@]} -eq 0 ]]; then
         bad_json=""
+    else
+        bad_json="$(printf '"%s",' "${bad_hooks[@]}" | sed 's/,$//')"
     fi
     printf '{"checked":%d,"bad":[%s]}\n' "${checked}" "${bad_json}"
     # Mirror the non-JSON exit contract: 1 when any hook is bad, 0 when clean.
