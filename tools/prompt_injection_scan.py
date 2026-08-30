@@ -283,6 +283,13 @@ def _decode_base64_blobs(text: str) -> str:
         # Right-pad to a multiple of 4 so b64decode is happy.
         padded = body + "=" * ((4 - len(body) % 4) % 4)
         try:
+            # validate=False is intentional: smuggled base64 payloads
+            # intentionally use non-canonical alphabet chars /
+            # incorrect padding to bypass strict decoders. We accept
+            # any 4-aligned base64-like text and surface the decoded
+            # form for the regex layer to scan. Do NOT tighten to
+            # validate=True -- that would silently let smuggled
+            # payloads through the decode path entirely.
             decoded = base64.b64decode(padded, validate=False).decode("utf-8", "replace")
             out.append(f"<decoded base64 len={len(decoded)}> {decoded[:120]}")
         except Exception:
