@@ -3747,6 +3747,138 @@ class TestCacheDecay(unittest.TestCase):
                          [0.0, 0.0, 0.5])
 
 
+class TestCacheDecaySvg(unittest.TestCase):
+    """SVG renderer + JSON-mode parity (this PR's polish layer).
+
+    The renderer must:
+      * emit a valid SVG with viewBox, path, and circle elements
+      * be robust to malformed numeric inputs (no path-string injection)
+      * be robust to empty / 1-point inputs
+      * escape any interpolated string in the <title> element
+    """
+
+    def test_svg_basic_three_point_curve(self):
+        """Three-point curve produces path + band + 2 circle markers."""
+        from token_efficiency_analyzer import _render_cache_decay_svg
+        points = [
+            {"turn": 1, "median": 0.0, "p25": 0.0, "p75": 0.0, "n": 5},
+            {"turn": 2, "median": 0.5, "p25": 0.4, "p75": 0.6, "n": 5},
+            {"turn": 3, "median": 0.9, "p25": 0.85, "p75": 0.95, "n": 5},
+        ]
+        svg = _render_cache_decay_svg(points)
+        self.assertIn("<svg", svg)
+        self.assertIn("viewBox=", svg)
+        self.assertIn("<path", svg)  # band
+        # Two path elements (band + median polyline).
+        self.assertEqual(svg.count("<path"), 2)
+        # Two circle markers (first + last turn).
+        self.assertEqual(svg.count("<circle"), 2)
+        # <title> carries the human-readable summary.
+        self.assertIn("<title>", svg)
+        self.assertIn("turn 1 → turn 3", svg)
+
+    def test_svg_empty_returns_empty_string(self):
+        """Empty points list → no SVG (the parent row is skipped)."""
+        from token_efficiency_analyzer import _render_cache_decay_svg
+        self.assertEqual(_render_cache_decay_svg([]), "")
+
+    def test_svg_one_point_does_not_crash(self):
+        """A single-point curve (one turn session) still renders — the
+        renderer must NOT divide by zero when n-1 == 0."""
+        from token_efficiency_analyzer import _render_cache_decay_svg
+        points = [{"turn": 1, "median": 0.5, "p25": 0.5, "p75": 0.5, "n": 1}]
+        svg = _render_cache_decay_svg(points)
+        self.assertIn("<svg", svg)
+        self.assertIn("<circle", svg)
+
+    def test_svg_bounds_out_of_range_ratios(self):
+        """Defensive float coercion — a ratio of 1.5 or -0.1 must
+        clamp to [0, 1] rather than produce negative Y coordinates
+        outside the viewBox."""
+        from token_efficiency_analyzer import _render_cache_decay_svg
+        points = [
+            {"turn": 1, "median": 1.5, "p25": -0.1, "p75": 0.5, "n": 1},
+        ]
+        # Must not raise. Must produce SVG.
+        svg = _render_cache_decay_svg(points)
+        self.assertIn("<svg", svg)
+
+    def test_svg_escapes_html_in_title(self):
+        """``<title>`` carries interpolated values; HTML escape on every
+        string value prevents injection if a future point carries a
+        string field. Defensive — no current point has a string field
+        but the contract holds either way."""
+        from token_efficiency_analyzer import _render_cache_decay_svg
+        points = [
+            {"turn": 1, "median": 0.5, "p25": 0.5, "p75": 0.5,
+             "n": "<script>alert(1)</script>"},
+        ]
+        svg = _render_cache_decay_svg(points)
+        self.assertNotIn("<script>", svg)
+        self.assertIn("&lt;script&gt;", svg)
+
+
+class TestJsonSinkCacheDecay(unittest.TestCase):
+    """JSON-mode parity: ``--json`` output exposes ``cache_decay`` so CI
+    / external consumers can gate on hit-rate decay without parsing
+    HTML. The shape mirrors the HTML tile's per-bucket aggregation.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="cache-decay-json-test-"))
+        target = self.tmpdir / "logs" / "claude-code"
+        target.mkdir(parents=True)
+        session_id = "json-cache-decay-session"
+        # Use the same cwd basename as the G2 fixture ("cache-decay-fixture")
+        # so the repo filter matches what the test passes via --repo.
+        lines = [
+            _make_user_record(session_id, "hi", ts="2026-07-09T10:00:00.000Z"),
+            _make_assistant_record(
+                session_id, model="claude-haiku-4-5",
+                input_tokens=200, cache_read=0, ts="2026-07-09T10:00:01.000Z",
+            ),
+            _make_user_record(session_id, "more", ts="2026-07-09T10:00:02.000Z"),
+            _make_assistant_record(
+                session_id, model="claude-haiku-4-5",
+                input_tokens=200, cache_read=600, ts="2026-07-09T10:00:03.000Z",
+            ),
+        ]
+        (target / "json-cache-decay-fixture.jsonl").write_text("\n".join(lines) + "\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_json_output_includes_cache_decay_aggregation(self):
+        """``--json`` emits a ``cache_decay`` key with the per-bucket
+        aggregation. Each bucket carries ``n_sessions`` and ``points``."""
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main([
+                "--repo", "cache-decay-fixture",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--json",
+            ])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertIn("cache_decay", report,
+                      "JSON sink must include cache_decay key for CI parity")
+        cd = report["cache_decay"]
+        # Four buckets always present.
+        self.assertEqual(set(cd.keys()), {"1-3", "4-10", "11-30", "30+"})
+        # The 2-turn fixture lands in the 1-3 bucket.
+        self.assertEqual(cd["1-3"]["n_sessions"], 1)
+        self.assertGreater(len(cd["1-3"]["points"]), 0)
+        for p in cd["1-3"]["points"]:
+            self.assertIn("turn", p)
+            self.assertIn("median", p)
+            self.assertIn("p25", p)
+            self.assertIn("p75", p)
+            self.assertIn("n", p)
+
+
 def _make_user_record(session_id: str, text: str, *, ts: str) -> str:
     """Tiny helper for the G2 fixture — one claude-code user record."""
     return (

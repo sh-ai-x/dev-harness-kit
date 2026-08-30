@@ -1,0 +1,154 @@
+name: cache-decay-audit
+
+# Deterministic CI gate for the F1 cache_decay surface.
+#
+# Runs two read-only audits against the PR's working tree:
+#   1. ``scripts/audit_hook_stdout.sh`` (G4) — every hooks/*.sh must
+#      produce byte-identical stdout between two invocations on
+#      identical stdin. Volatile content (timestamps, PIDs, ephemeral
+#      ids) silently busts the prompt cache on every Claude Code turn
+#      — see rules/session-hygiene.md Iron Law 3.
+#   2. ``scripts/audit_skill_frontmatter.py`` (G5) — every
+#      skills/*/SKILL.md frontmatter must be free of non-deterministic
+#      fields (ISO dates, long hex SHAs, build-NNN). Maintenance-
+#      stamped fields like ``last-reviewed:`` are allowlisted.
+#
+# Both audits were introduced in PR #761 (cache_decay diagnostic).
+# This workflow turns them into a deterministic gate so future
+# contributors can't regress the prompt-cache stability surface
+# without the CI catching it.
+#
+# Why a separate workflow, not folded into maintenance.yml:
+#   - This gate is deterministic (bash + python, no LLM judge) and
+#     runs in <30s vs maintenance.yml's 15-min judge budget.
+#   - It blocks at the "hard rule" tier (CI RED) vs the maintenance
+#     gate's "verdict + docs-updated" soft tier.
+#   - Failure messages point directly at the offending file (no
+#     LLM verdict extraction overhead).
+#
+# Verdict contract:
+#   - All audits pass → exit 0 (gate green)
+#   - One or more audits fail → exit 1 (gate red)
+#
+# Bypass for emergencies: there is no `--no-verify` equivalent.
+# Fix the flagged file in a follow-up commit; the maintainer cannot
+# bypass branch protection.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# No concurrency limit; this workflow is fast (<30s) and runs only on
+# deterministic audits. Concurrency control would only delay feedback.
+
+jobs:
+  hook_stdout_determinism:
+    name: G4 — hook stdout determinism
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11b390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Run hook stdout determinism audit
+        run: |
+          set -uo pipefail
+          # The audit is fast on a clean tree but a single misbehaving
+          # hook with a tight `while true` could hang; the audit's
+          # built-in 5s timeout per invocation keeps total runtime
+          # bounded by `hooks_count * 10s` (currently 27 hooks ≈ 5min
+          # upper bound, but real run <30s on every clean pass).
+          if bash scripts/audit_hook_stdout.sh; then
+            echo "::notice::hook stdout determinism: PASS"
+          else
+            echo "::error::hook stdout determinism: FAIL"
+            echo "::error::Run 'bash scripts/audit_hook_stdout.sh' locally for the offending hook list."
+            exit 1
+          fi
+
+  skill_frontmatter_audit:
+    name: G5 — skill frontmatter audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11b390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        with:
+          python-version: "3.13"
+
+      - name: Run skill frontmatter determinism audit
+        run: |
+          set -uo pipefail
+          if python3 scripts/audit_skill_frontmatter.py; then
+            echo "::notice::skill frontmatter: PASS"
+          else
+            echo "::error::skill frontmatter: FAIL"
+            echo "::error::Run 'python3 scripts/audit_skill_frontmatter.py' locally for the offending skill list."
+            exit 1
+          fi
+
+  aggregate_report:
+    name: cache-decay-audit summary
+    runs-on: ubuntu-latest
+    needs: [hook_stdout_determinism, skill_frontmatter_audit]
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Summarize gate state
+        run: |
+          echo "hook_stdout_determinism: ${{ needs.hook_stdout_determinism.result }}"
+          echo "skill_frontmatter_audit: ${{ needs.skill_frontmatter_audit.result }}"
+
+      # Post a single consolidated comment on the PR (idempotent: uses
+      # the same marker each run so re-posts overwrite, not duplicate).
+      # For push-to-main events `pull-requests: write` is a no-op since
+      # there's no PR context.
+      - name: Post PR comment (push-to-main events skip this)
+        if: github.event_name == 'pull_request' && (needs.hook_stdout_determinism.result == 'failure' || needs.skill_frontmatter_audit.result == 'failure')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          # Stable marker so successive runs overwrite the same comment
+          # instead of stacking. Same pattern as post-verdict-audit.
+          marker="<!-- cache-decay-audit -->"
+          body="$(cat <<EOF
+          ${marker}
+          ## cache-decay-audit — F1 cache_decay fix surface
+
+          - **G4 — hook stdout determinism**: ${{ needs.hook_stdout_determinism.result }}
+          - **G5 — skill frontmatter audit**: ${{ needs.skill_frontmatter_audit.result }}
+
+          Run \`bash scripts/audit_hook_stdout.sh\` and \`python3 scripts/audit_skill_frontmatter.py\`
+          locally to see which surface is bleeding the prompt cache. See
+          [docs/proposals/cache-hit-rate/structural-fix.yaml](docs/proposals/cache-hit-rate/structural-fix.yaml)
+          for the full rationale.
+          EOF
+          )"
+          existing="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --paginate --slurp \
+            | jq -r "[.[] | .[] | select(.body | test(\"${marker}\"))] | .[0].id // \"\"")"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -f body="$body" >/dev/null
+          fi

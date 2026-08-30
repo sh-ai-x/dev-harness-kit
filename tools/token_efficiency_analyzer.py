@@ -2152,13 +2152,77 @@ def _render_cost_gate_banner(status: str, violations: list[dict]) -> str:
     )
 
 
+def _render_cache_decay_svg(points: list[dict], *, width: int = 220, height: int = 56) -> str:
+    """Render an SVG line chart for one bucket's cache_decay points.
+
+    Three series stacked: p25 (bottom band), p75 (top band), median
+    (the headline line). Y-axis = cache_hit_ratio ∈ [0, 1]. X-axis =
+    turn index (1..N). Defensive — every numeric is bounded before
+    serialization so a malformed point can't crash the renderer or
+    inject a bogus path attribute.
+
+    Layout:
+      - viewBox 0 0 width height (responsive — the SVG scales to its
+        container)
+      - left/bottom padding 0 (the y-axis is implied by the [0%, 100%]
+        title strip below; no labels clutter the small tile)
+      - median polyline in the accent color
+      - p25/p75 band filled with 12% opacity accent
+    """
+    if not points:
+        return ""
+    n = len(points)
+    # X step in viewBox units; clamp so even a 1-point curve looks right.
+    x_step = max(1, (width - 4) // max(1, n - 1))
+    y_max = float(height - 4)
+    def to_xy(p: dict, which: str) -> tuple[float, float]:
+        # `which` ∈ {"median", "p25", "p75"}. Defensive float coercion
+        # so a non-numeric value from a future analyzer change can't
+        # poison the path.
+        ratio = float(p.get(which, 0.0) or 0.0)
+        ratio = max(0.0, min(1.0, ratio))
+        x = 2 + (int(p["turn"]) - 1) * x_step
+        y = 2 + (1.0 - ratio) * y_max
+        return (x, y)
+
+    med_pts = [to_xy(p, "median") for p in points]
+    p25_pts = [to_xy(p, "p25") for p in points]
+    p75_pts = [to_xy(p, "p75") for p in points]
+    band_path = (
+        "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in p75_pts)
+        + " L " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(p25_pts))
+        + " Z"
+    )
+    med_path = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in med_pts)
+    # First/last point markers so a single-point curve still shows
+    # *where* on the X-axis the value lives.
+    last = med_pts[-1]
+    first = med_pts[0]
+    return (
+        f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+        f'role="img" aria-label="cache hit ratio per turn index, '
+        f'p25/p75 band with median line">'
+        f'<path d="{band_path}" fill="rgba(10,132,255,0.12)" stroke="none"/>'
+        f'<path d="{med_path}" fill="none" stroke="var(--accent)" '
+        f'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'<circle cx="{first[0]:.1f}" cy="{first[1]:.1f}" r="2" '
+        f'fill="var(--accent)"/>'
+        f'<circle cx="{last[0]:.1f}" cy="{last[1]:.1f}" r="2" '
+        f'fill="var(--accent)"/>'
+        f'<title>turn 1 → turn {html.escape(str(points[-1]["turn"]))}, '
+        f'final median {points[-1]["median"] * 100:.1f}% '
+        f'(n={html.escape(str(points[-1]["n"]))})</title>'
+        f'</svg>'
+    )
+
+
 def _render_cache_decay_rows(cache_decay: dict) -> str:
     """Render the F1 cache_decay bucket table rows.
 
-    One row per bucket; the curve is rendered as a sparkline-like bar
-    strip where each cell's width = ``median * 100`` so reviewers can
-    eyeball whether the curve stays high or trends down. Defensive
-    ``html.escape`` on every interpolated value.
+    One row per bucket; the curve is rendered as an SVG line chart
+    (p25/p75 band + median polyline) so reviewers can see whether
+    the curve stays high or trends down at a glance. Defensive
+    ``html.escape`` on every interpolated string value.
     """
     if not cache_decay:
         return '<tr><td colspan="3" class="muted">no cache-decay data this window</td></tr>'
@@ -2168,24 +2232,16 @@ def _render_cache_decay_rows(cache_decay: dict) -> str:
         bucket = cache_decay.get(label)
         if not bucket or not bucket.get("points"):
             continue
-        # Render the curve as a horizontal strip: each turn's median is
-        # a div with width = median*100%. Total width is the curve
-        # length (number of turns), shown compact.
-        cells = "".join(
-            f'<span class="cd-cell" '
-            f'style="display:inline-block;width:6px;height:14px;'
-            f'background:rgba(10,132,255,{0.15 + 0.85 * p["median"]:.2f});'
-            f'margin-right:1px;vertical-align:bottom" '
-            f'title="turn {html.escape(str(p["turn"]))}: '
-            f'{p["median"] * 100:.1f}% (n={p["n"]})"></span>'
-            for p in bucket["points"]
-        )
+        svg = _render_cache_decay_svg(bucket["points"])
+        final = bucket["points"][-1]
         rows.append(
             f'<tr><td>{html.escape(label)}</td>'
             f'<td style="text-align:right">{bucket["n_sessions"]}</td>'
-            f'<td><div class="cd-strip">{cells}</div>'
-            f'<span class="muted" style="font-size:11px;margin-left:6px">'
-            f'{len(bucket["points"])} turn(s) tracked</span></td></tr>'
+            f'<td>{svg}'
+            f'<span class="muted" style="font-size:11px;margin-left:8px">'
+            f'turn 1→{html.escape(str(final["turn"]))} · final '
+            f'{final["median"] * 100:.1f}% · {len(bucket["points"])} '
+            f'point(s)</span></td></tr>'
         )
     if not rows:
         return '<tr><td colspan="3" class="muted">no sessions with cache_decay in any bucket</td></tr>'
@@ -2939,6 +2995,12 @@ def _emit_json(snap: AnalysisSnapshot) -> int:
         "warnings": vm["warnings"],
         "unknown_models": vm["unknown_models"],
         "worktrees": vm["cost_by_worktree_rows"],
+        # F1 cache_decay fix — emit the per-bucket aggregation in JSON
+        # too so CI / external consumers can gate on hit-rate decay
+        # without parsing HTML. The shape mirrors the HTML tile:
+        # ``{label: {n_sessions: int, points: [{turn, median, p25,
+        # p75, n}, ...]}}``.
+        "cache_decay": vm.get("cache_decay", {}),
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
     if snap.gate_status == "bad":
