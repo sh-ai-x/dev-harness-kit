@@ -164,6 +164,21 @@ The gate tolerates missing verdicts in BOTH `pull_request` and `workflow_dispatc
 
 For the very first PR that ADDS `.github/workflows/review.yml`, the action still cannot validate the new workflow file against `main` (workflow-validation gate). Merge that bootstrap PR first; subsequent PRs flow through normally.
 
+### Why is a required check stuck on `Expected — Waiting for status to be reported`?
+
+The ruleset's required status check matches by **exact context string**, and the context string is the job's `name:` in the workflow. Renaming a gate job without updating the ruleset leaves the required context permanently unreported: the PR shows a green check under the new name *and* a pending `Expected` row under the old one, and `mergeStateStatus` stays `BLOCKED`. A misleading `mergeable: MERGEABLE` shows up alongside it — that field only reports merge conflicts, not ruleset satisfaction.
+
+Diagnose by comparing the two lists:
+
+```bash
+gh api repos/:owner/:repo/rulesets                 # find the active ruleset id
+gh api repos/:owner/:repo/rulesets/<id> \
+  --jq '.rules[] | select(.type=="required_status_checks")'
+gh pr checks <pr>                                  # names actually reported
+```
+
+Fix by making the job `name:` match the required context (preferred — no ruleset edit, applies to every open PR on rebase) or by updating the ruleset context to the new name. Because these job names are part of the repo's public API, treat renaming `severity gate (review + security)` or `maintenance gate (verdict + docs-updated)` as a breaking change.
+
 ### Why does the skill complain `DEV_KIT_GITHUB_TOKEN is required for consumer-install`?
 
 That secret is only needed when `sh-ai-x/dev-harness-kit` (the upstream source) is private. If your fork / mirror is public, set `DEV_KIT_GITHUB_TOKEN` to any non-empty placeholder token (e.g. `gh token`) — the install step will short-circuit to a public clone via `git clone https://github.com/...`.
