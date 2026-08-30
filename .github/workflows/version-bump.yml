@@ -65,6 +65,9 @@ on:
 
 permissions:
   contents: write
+  # Required for `gh pr view <head_sha> --json title` (no pull_request
+  # context on merge_group events; title lookup goes through the API).
+  pull-requests: read
 
 concurrency:
   group: version-bump-${{ github.event.merge_group.head_sha }}
@@ -150,15 +153,22 @@ jobs:
         if: steps.idempotency.outputs.skip != 'true'
         env:
           NEXT: ${{ steps.next.outputs.version }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           git add .claude-plugin/plugin.json .codex-plugin/plugin.json
           git commit -m "chore(release): bump dev-kit to v${NEXT}"
-          # No `git push` here -- under merge_group, the queue owns
-          # the merge to main. The bump lives in the merge_group head
-          # and gets merged along with the PR in one squash/merge
-          # commit. The pre-push hook on the runner side doesn't
-          # fire because we don't push at all.
+          # Push the bump commit back to the merge_group head ref so
+          # the queue picks it up. Without this push the bump is
+          # local-only and the queue squashes/merges the un-bumped
+          # head_sha into main. The queue owns the merge into main;
+          # this push only updates the temp merge_group ref the queue
+          # is tracking. Using `secrets.DEV_KIT_GITHUB_TOKEN` (the
+          # admin PAT, configured for the checkout step) so the push
+          # bypasses the ruleset branch protection -- the merge_group
+          # ref is a queue-internal ref, not main.
+          git push origin "${HEAD_SHA}:${HEAD_REF}"
 
       - name: Emit annotated tag
         env:

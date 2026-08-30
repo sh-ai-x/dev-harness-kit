@@ -194,15 +194,33 @@ class TestBumpWorkflow(unittest.TestCase):
                          "tag step must NOT be gated on the idempotency skip "
                          "output -- tagging runs even on a bump-PR merge")
 
-    def test_04_permissions_declares_contents_write(self):
+    def test_04_permissions_declares_contents_write_and_pull_requests_read(self):
+        """Post-merge-queue contract: the workflow needs
+        - `contents: write` (push the bump commit to the merge_group
+          ref + push the tag)
+        - `pull-requests: read` (the idempotency step calls `gh pr view
+          <head_sha> --json title` because merge_group events have no
+          pull_request context; default `GITHUB_TOKEN` has zero
+          scope and would 403 the call).
+
+        The OLD contract only had `contents: write` because the
+        idempotency step pulled the title from
+        `github.event.pull_request.title` (pull_request:closed
+        trigger). The merge_group trigger loses that context.
+        """
         doc = _yaml_doc()
         perms = doc.get("permissions", {})
-        self.assertEqual(perms.get("contents"), "write",
-                         "workflow needs contents: write to push the bump commit "
-                         "and the tag")
-        self.assertNotIn("pull-requests", perms,
-                         "pull-requests: write is unnecessary -- the workflow "
-                         "does not create or merge PRs")
+        self.assertEqual(
+            perms.get("contents"), "write",
+            "workflow needs contents: write to push the bump commit "
+            "to the merge_group ref and to push the tag",
+        )
+        self.assertEqual(
+            perms.get("pull-requests"), "read",
+            "workflow needs pull-requests: read for the `gh pr view "
+            "<head_sha> --json title` idempotency step (merge_group "
+            "events have no pull_request context).",
+        )
 
     def test_05_concurrency_group_set(self):
         doc = _yaml_doc()
@@ -261,12 +279,21 @@ class TestBumpWorkflow(unittest.TestCase):
         self.assertIn(".codex-plugin/plugin.json", run,
                       "bump step must touch .codex-plugin/plugin.json")
 
-    def test_09_workflow_commits_the_bump(self):
+    def test_09_workflow_commits_and_pushes_to_merge_group_ref(self):
         """The workflow must `git commit` the bump with a chore(release)
-        message. Under merge_group, the commit lives on top of the
-        queued PR's HEAD (the queue merges the result into main in
-        one squash/merge commit) -- there is NO `git push origin
-        HEAD:main` step, because the queue owns the merge."""
+        message AND `git push` the bump back to the merge_group head
+        ref so the queue picks it up before squashing/merging into main.
+
+        Under merge_group, the bump lives locally after `git commit` —
+        without a follow-up push to the merge_group ref, the queue
+        merges the un-bumped head_sha into main and the version cache
+        invalidation silently breaks on every merge. (Critical bug
+        discovered during the iter-3 self-review pass.)
+
+        Negative contract: still MUST NOT push to `HEAD:main`. The
+        queue owns the merge into main; the bump push targets the
+        queue's tracking ref only.
+        """
         doc = _yaml_doc()
         commit_step = _find_step(doc, "commit") or _find_step(doc, "push version")
         self.assertIsNotNone(commit_step, "expected a 'Commit ... bump' step")
@@ -276,6 +303,34 @@ class TestBumpWorkflow(unittest.TestCase):
         self.assertIn("chore(release)", run,
                       "commit message must use chore(release): prefix so "
                       "changelog generators pick it up")
+        # POSITIVE: the commit MUST be pushed back to the merge_group
+        # ref. The earlier "no push at all" version of this workflow
+        # silently broke cache invalidation because the queue
+        # squashed/merged an un-bumped head_sha. Pin the push AND its
+        # shape: it must target the merge_group head_ref, not main,
+        # using the explicit <src>:<dst> form so a future maintainer
+        # who thinks "let me just `git push`" can't accidentally push
+        # to main.
+        self.assertIn(
+            "git push", run,
+            "commit step MUST push the bump back to the merge_group "
+            "ref so the queue picks it up before squashing/merging; "
+            "without this push the bump is local-only and cache "
+            "invalidation silently breaks on every merge.",
+        )
+        self.assertIn(
+            "${HEAD_SHA}:${HEAD_REF}", run,
+            "the bump push MUST use the explicit src:dst form "
+            "`${HEAD_SHA}:${HEAD_REF}` (force-update the merge_group "
+            "head ref with the new bump commit). Pinning the exact "
+            "shape catches both 'git push' (no args, defaults to "
+            "upstream which is main under the runner checkout) and "
+            "'git push origin HEAD' (no :ref, updates the local "
+            "branch's upstream which under merge_group is a no-op "
+            "because the queue's tracking ref is HEAD_REF, not the "
+            "feature branch).",
+        )
+        # And the push MUST target the merge_group head_ref, NOT main.
         # The OLD contract was `git push origin HEAD:main` after
         # commit. Under merge_group that push is WRONG -- the queue
         # already owns the merge to main. Pin the negative.
