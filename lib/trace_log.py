@@ -19,11 +19,12 @@ additive; never repurpose existing field names.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
@@ -32,6 +33,23 @@ EVENT_REQUIRED_FIELDS = (
     "subject_id", "parent_id", "ts", "outcome", "source", "evidence_ref",
 )
 EVENT_RECORD_REQUIRED_FIELDS = EVENT_REQUIRED_FIELDS + ("schema_version",)
+
+
+def _default_identity() -> Dict[str, str]:
+    """Auto-stamp producer identity for stability submetric (issue #663 SSOT).
+
+    Reads from env so the env-set value wins. When env is unset, every
+    field defaults to empty string — the stability reducer treats
+    empty/missing as 'no identity recorded', so a non-Claude runner
+    that does NOT set DEV_KIT_AGENT is NOT silently mis-attributed to
+    claude-code. A previous revision defaulted ``agent`` to the literal
+    ``"claude-code"``; that made the metric self-justifying on every
+    non-Claude runner (A06-1 / insecure-design regression).
+    """
+    agent = os.environ.get("DEV_KIT_AGENT", "")
+    provider = os.environ.get("DEV_KIT_PROVIDER", "")
+    model = os.environ.get("DEV_KIT_MODEL", "")
+    return {"agent": agent, "provider": provider, "model": model}
 
 
 @dataclass(frozen=True)
@@ -205,21 +223,105 @@ def validate_event(event: Mapping[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def append_event(root: Path, event: Mapping[str, Any]) -> Path:
-    """Append one validated workflow event without changing workflow outcome."""
+# Dedupe scan window: how many trailing lines the append-time guard
+# inspects for a colliding event_id, and the byte budget used to reach
+# them. Reading only the tail keeps the hot path independent of total
+# log length (a full readlines() is O(N) per append, i.e. O(N^2) over a
+# trajectory). _DEDUPE_SCAN_BYTES is a generous per-line allowance; if
+# the tail happens to hold more than _DEDUPE_SCAN_LINES lines within
+# that budget we simply keep the last _DEDUPE_SCAN_LINES of them.
+_DEDUPE_SCAN_LINES = 64
+_DEDUPE_SCAN_BYTES = _DEDUPE_SCAN_LINES * 4096
+
+
+def _recent_event_ids(fd: int) -> set:
+    """Return event_ids from the last ``_DEDUPE_SCAN_LINES`` log lines.
+
+    Reads only the tail of the file via ``os.pread`` so the caller's
+    text-stream position (positioned for append) is never disturbed and
+    the cost does not grow with log length. Malformed or truncated lines
+    are skipped rather than raising — the dedupe guard is an
+    optimisation, and a corrupt tail must not block a valid append.
+    RecursionError is caught alongside ValueError/AttributeError because
+    ``json.loads`` raises RecursionError on deeply nested adversarial
+    payloads; without that catch the lock-holder would die and the next
+    append would block on a stale fcntl lock (A10-4).
+    """
+    try:
+        size = os.fstat(fd).st_size
+    except OSError:
+        return set()
+    if size <= 0:
+        return set()
+    offset = max(0, size - _DEDUPE_SCAN_BYTES)
+    try:
+        blob = os.pread(fd, size - offset, offset)
+    except OSError:
+        return set()
+    lines = blob.decode("utf-8", errors="replace").splitlines()
+    if offset > 0 and lines:
+        # The first line is very likely truncated mid-record — drop it.
+        lines = lines[1:]
+    ids = set()
+    for line in lines[-_DEDUPE_SCAN_LINES:]:
+        if not line.strip():
+            continue
+        try:
+            event_id = json.loads(line).get("event_id")
+        except (ValueError, AttributeError, RecursionError):
+            continue
+        if event_id:
+            ids.add(event_id)
+    return ids
+
+
+def append_event(root: Path, event: Mapping[str, Any]) -> Tuple[Path, str]:
+    """Append one validated workflow event without changing workflow outcome.
+
+    Returns ``(path, persisted_event_id)``. The persisted id may differ from
+    ``event["event_id"]`` when the dedupe-on-write guard detects a collision
+    and regenerates a fresh id — callers that capture the returned id and
+    parent subsequent events to it avoid the broken-link bug noted in the
+    PR #753 review (verdict: "Changes Requested", finding #2).
+    """
     import fcntl
 
-    record = validate_event(event)
+    # Auto-stamp producer identity for the stability submetric (issue #663).
+    # Only fill fields the caller did not provide — explicit values win so
+    # tests / producers can override per-event. Empty string is the
+    # documented "no identity recorded" signal.
+    stamped = dict(event)
+    for key, value in _default_identity().items():
+        stamped.setdefault(key, value)
+    record = validate_event(stamped)
     path = _event_path(Path(root))
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    # Open in "a+" so the dedupe guard can read the tail under the same
+    # exclusive lock that guards the append.
+    with path.open("a+", encoding="utf-8") as handle:
         try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            # Stale or uncontested flock on a network FS — best-effort
+            # telemetry must NOT block the caller (A10-2). The append
+            # below will still race against other writers, but that's
+            # acceptable for a trace log; the dedupe guard is a
+            # convenience, not a correctness guarantee.
+            pass
+        try:
+            # Dedupe-on-write guard: if a producer hands us the same
+            # event_id twice, regenerate once before persisting.
+            recent_ids = _recent_event_ids(handle.fileno())
+            if record["event_id"] in recent_ids:
+                record["event_id"] = new_event_id()
             handle.write(json.dumps(record, sort_keys=True) + "\n")
             handle.flush()
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    return path
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    return path, record["event_id"]
 
 
 def read_events(root: Path) -> List[Dict[str, Any]]:
@@ -257,7 +359,15 @@ def _event_cli() -> int:
     args = parser.parse_args()
     evidence = json.loads(args.evidence_json)
     timestamp = args.ts or now_utc()
-    path = append_event(args.root, {
+    # `append_event` now returns ``(path, persisted_event_id)`` so
+    # callers that capture the id can parent follow-ups safely. The
+    # CLI's stdout contract is the file path (callers like
+    # `hooks/lib/payload-parse.sh` redirect stdout to /dev/null
+    # today, but a status-line / jq pipeline that parsed it would
+    # have silently received a tuple repr). Destructure explicitly
+    # so the CLI prints the same path string the prior contract
+    # promised.
+    path, _persisted_event_id = append_event(args.root, {
         "event_id": new_event_id(),
         "run_id": args.run_id,
         "workflow_id": args.workflow_id,
