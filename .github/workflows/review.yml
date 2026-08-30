@@ -784,7 +784,7 @@ jobs:
           head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   gate:
-    name: severity gate (review + security + injection_scan)
+    name: severity gate (review + security)
     runs-on: ubuntu-latest
     needs: [scope, injection_scan, review, security]
     # Skip on bump-PRs: `review` and `security` are skipped via their own
