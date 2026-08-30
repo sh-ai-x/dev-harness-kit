@@ -60,7 +60,12 @@ jobs:
   hook_stdout_determinism:
     name: G4 — hook stdout determinism
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    # Real run on a clean tree is <30s (27 hooks × 2 invocations ×
+    # 0.5s per clean run). Worst case with the 2s per-hook timeout
+    # the audit script enforces is 27 × 2 × 2 = 108s; we leave 5min
+    # of headroom so a future bump in hook count doesn't push us
+    # back into the timeout.
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -71,12 +76,8 @@ jobs:
       - name: Run hook stdout determinism audit
         run: |
           set -uo pipefail
-          # The audit is fast on a clean tree but a single misbehaving
-          # hook with a tight `while true` could hang; the audit's
-          # built-in 5s timeout per invocation keeps total runtime
-          # bounded by `hooks_count * 10s` (currently 27 hooks ≈ 4.5min
-          # upper bound at the 5s-per-call timeout, but real run <30s
-          # on every clean pass — well under the 2-minute job timeout).
+          # The audit's built-in 2s per-invocation timeout keeps a
+          # single misbehaving hook from blowing the budget.
           if bash scripts/audit_hook_stdout.sh; then
             echo "::notice::hook stdout determinism: PASS"
           else
@@ -88,7 +89,7 @@ jobs:
   skill_frontmatter_audit:
     name: G5 — skill frontmatter audit
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
