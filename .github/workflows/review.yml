@@ -176,13 +176,23 @@ jobs:
           #   exit 0 + JSON verdict=Approve        → safe
           #   exit 1 + JSON verdict=Changes*       → suspicious, not blocking
           #   exit 2 + JSON verdict=Blocked        → hostile, fail the gate
+          # IMPORTANT: do NOT append a fallback `|| echo` here. The scanner
+          # exits non-zero on Changes*/Blocked (exit 1/2) but still emits
+          # valid JSON on stdout; appending a second JSON object would
+          # corrupt $RAW and break `json.load()` downstream (extra-data
+          # JSONDecodeError). Use `|| true` so the pipe always exits 0
+          # and the JSON parser falls through to its default verdict.
           RAW="$(printf '%s\n\n%s' "$PR_BODY" "$PR_DIFF" \
-            | python3 tools/prompt_injection_scan.py --json --decode || echo '{"verdict":"Changes Requested"}')"
+            | python3 tools/prompt_injection_scan.py --json --decode 2>/dev/null || true)"
           echo "scan_json<<EOF"
           printf '%s\n' "$RAW"
           echo "EOF"
 
-          VERDICT="$(printf '%s' "$RAW" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict","Changes Requested"))')"
+          VERDICT="$(printf '%s' "$RAW" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("verdict","Changes Requested"))
+except Exception:
+    print("Changes Requested")')"
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
           echo "raw_exit=$?" >> "$GITHUB_OUTPUT"
 
