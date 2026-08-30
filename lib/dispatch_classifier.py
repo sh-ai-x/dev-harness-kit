@@ -173,24 +173,43 @@ def _has_overlap(steps: list[dict]) -> bool:
     `None` return (unsupported shape) fails closed — when we cannot
     normalize, we cannot prove isolation, so the gate defaults to
     sequential.
+
+    inspect 2026-08-27 overeng-3: pre-normalize each step's `writes`
+    once (O(N)) instead of recomputing inside the inner (i,j) loop
+    (O(N^2)). For a 50-step phase this is ~50 normalizations vs the
+    old ~2500.
     """
     n = len(steps)
-    for i in range(n):
-        writes_i = _normalize_writes(steps[i].get("writes"))
-        if writes_i is None:
-            # Unsupported shape or declared non-list — cannot prove
-            # isolation, fail closed.
-            if steps[i].get("writes") is not None:
-                return True
+    # Single pass to normalize every step's writes once. None means
+    # the step had a `writes:` field in an unsupported shape; the
+    # boolean second tuple element records whether `writes` was
+    # explicitly present (None with no key is "absent", which is OK).
+    normalized: list[tuple[frozenset | None, bool]] = []
+    for step in steps:
+        raw = step.get("writes")
+        if raw is None:
+            normalized.append((None, False))
             continue
+        ws = _normalize_writes(raw)
+        if ws is None:
+            normalized.append((None, True))
+            continue
+        normalized.append((ws, True))
+
+    for i in range(n):
+        writes_i, present_i = normalized[i]
+        if not present_i:
+            continue
+        if writes_i is None:
+            return True
         if not writes_i:
             continue
         for j in range(i + 1, n):
-            writes_j = _normalize_writes(steps[j].get("writes"))
-            if writes_j is None:
-                if steps[j].get("writes") is not None:
-                    return True
+            writes_j, present_j = normalized[j]
+            if not present_j:
                 continue
+            if writes_j is None:
+                return True
             if not writes_j:
                 continue
             if writes_i & writes_j:

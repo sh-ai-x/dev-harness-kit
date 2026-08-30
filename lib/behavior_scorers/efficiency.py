@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 from typing import Dict, Optional
 
+from lib.behavior_scorers import trajectory
 from lib.behavior_scorers.types import Context, DimensionScore
 
 DEFAULT_BASENAME = "agent-behavior-baseline.json"
@@ -113,31 +114,17 @@ def compute_metrics(trace_path: Path) -> Dict[str, int]:
 
 def score(worktree: Path, ctx: Context) -> DimensionScore:
     """Score D3 by comparing the latest trace against the baseline."""
-    transcripts = worktree / "eval" / "transcripts"
-    if not transcripts.is_dir():
+    # Reuse the trace-resolution helper from `trajectory.py` so D3 and
+    # D7 cannot drift on the eval/transcripts layout (inspect 2026-08-27
+    # dup-4). When the helper returns None we collapse to the same
+    # neutral `value=3` envelope D7 emits for "no trace available".
+    latest = trajectory._latest_trace_path(worktree)
+    if latest is None:
         return DimensionScore(
             dim="D3_efficiency",
             value=3,
-            evidence={"reason": "no transcripts dir", "baseline_set": False},
+            evidence={"reason": "no trace available", "baseline_set": False},
         )
-
-    # Find the case_id directory with the most recent trace.
-    case_dirs = [p for p in transcripts.iterdir() if p.is_dir()]
-    if not case_dirs:
-        return DimensionScore(
-            dim="D3_efficiency",
-            value=3,
-            evidence={"reason": "no transcripts", "baseline_set": False},
-        )
-    latest_dir = max(case_dirs, key=lambda d: d.stat().st_mtime)
-    traces = sorted(latest_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
-    if not traces:
-        return DimensionScore(
-            dim="D3_efficiency",
-            value=3,
-            evidence={"reason": "no trace files", "baseline_set": False},
-        )
-    latest = traces[-1]
 
     current = compute_metrics(latest)
     baseline_path = _baseline_path(worktree, ctx)

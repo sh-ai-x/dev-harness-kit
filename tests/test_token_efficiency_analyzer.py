@@ -3597,3 +3597,182 @@ class TestMalformedTokenUsageSkipped(unittest.TestCase):
         # Default value is a Counter (dict-shaped) so it survives json.dumps.
         agg.parse_errors["malformed_input_tokens"] += 1
         self.assertEqual(agg.parse_errors["malformed_input_tokens"], 1)
+
+
+class TestCacheDecay(unittest.TestCase):
+    """F1 cache_decay fix — proposal §Validation gates G2 + G3.
+
+    G2: every session with ≥2 tracked turns has a ``cache_decay`` list
+        whose length matches the number of recorded turns, and each
+        element is a float in [0.0, 1.0].
+
+    G3: the dashboard HTML contains the new "Cache hit ratio vs turn
+        index" tile plus the four bucket labels ``[1-3, 4-10, 11-30, 30+]``
+        when at least one session has tracked turns.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="cache-decay-test-"))
+        target = self.tmpdir / "logs" / "claude-code"
+        target.mkdir(parents=True)
+        # Hand-craft a 3-turn session: turn 1 cold (no cache_read),
+        # turn 2 warm (cache_read > 0), turn 3 warmer still.
+        # Cache-hit ratios: 0/200 = 0.0, 600/800 = 0.75, 700/900 ≈ 0.78.
+        session_id = "cache-decay-test-session"
+        lines = [
+            _make_user_record(session_id, "hi", ts="2026-07-09T10:00:00.000Z"),
+            _make_assistant_record(
+                session_id, model="claude-haiku-4-5",
+                input_tokens=200, cache_read=0, ts="2026-07-09T10:00:01.000Z",
+            ),
+            _make_user_record(session_id, "go on", ts="2026-07-09T10:00:02.000Z"),
+            _make_assistant_record(
+                session_id, model="claude-haiku-4-5",
+                input_tokens=200, cache_read=600, ts="2026-07-09T10:00:03.000Z",
+            ),
+            _make_user_record(session_id, "more", ts="2026-07-09T10:00:04.000Z"),
+            _make_assistant_record(
+                session_id, model="claude-haiku-4-5",
+                input_tokens=200, cache_read=700, ts="2026-07-09T10:00:05.000Z",
+            ),
+        ]
+        (target / "cache-decay-fixture.jsonl").write_text("\n".join(lines) + "\n")
+        self.out_html = self.tmpdir / "dashboard.html"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_g2_cache_decay_field_present_and_correct_shape(self):
+        """G2: aggregate_session emits ``cache_decay`` as a list[float]
+        with one entry per tracked assistant turn. Each value ∈ [0, 1].
+
+        The cache_decay list holds PER-TURN DELTAS (the i-th entry is
+        ``cache_read / (cache_read + input)`` for that turn alone), not
+        session-cumulative ratios. The Claude JSONL handler derives the
+        delta from the cumulative ``st.input_tokens`` counter via
+        ``prev_turn_input``; the Codex handler computes deltas from
+        successive ``token_count`` events. Both branches emit the same
+        unit of measure so the dashboard's bucket aggregator doesn't
+        compare across incommensurable quantities.
+
+        Per-turn ratios from the fixture:
+          turn 1: 0     / 200          = 0.0
+          turn 2: 600   / (200 + 600)  = 0.75
+          turn 3: 700   / (200 + 700)  ≈ 0.7778
+        """
+        from token_efficiency_analyzer import aggregate_session
+        result = aggregate_session(
+            self.tmpdir / "logs" / "claude-code" / "cache-decay-fixture.jsonl"
+        )
+        self.assertIsNotNone(result, "aggregate_session returned None")
+        self.assertIn("cache_decay", result,
+                      "G2: aggregate_session must emit cache_decay")
+        cd = result["cache_decay"]
+        self.assertEqual(len(cd), 3,
+                         f"G2: expected 3 entries (one per assistant turn), got {len(cd)}")
+        for v in cd:
+            self.assertIsInstance(v, float,
+                                  f"G2: each cache_decay entry must be float, got {type(v)}")
+            self.assertGreaterEqual(v, 0.0)
+            self.assertLessEqual(v, 1.0)
+        # Per-turn ratios from the fixture (delta against prev_turn_*).
+        self.assertAlmostEqual(cd[0], 0.0, places=4)
+        self.assertAlmostEqual(cd[1], 600 / 800, places=4)
+        self.assertAlmostEqual(cd[2], 700 / 900, places=4)
+
+    def test_claude_emits_per_turn_deltas_not_cumulative(self):
+        """Regression (PR #761 review feedback, M1): the Claude handler
+        used to emit session-CUMULATIVE ratios into the per-turn
+        ``cache_decay`` list (every entry monotonically growing toward
+        1.0 because cumulative input + cache_read keep climbing). The
+        Codex branch already emits per-turn deltas, so the dashboard's
+        bucket aggregator was comparing incommensurable quantities
+        across sources. Pin that Claude now produces the SAME shape as
+        Codex — per-turn deltas — by checking the SPECIFIC numerical
+        value that distinguishes the two shapes.
+
+        With the fixture:
+          turn 1: input=200, cache_read=0
+          turn 2: input=200, cache_read=600
+          turn 3: input=200, cache_read=700
+        Cumulative ratios would be:
+          turn 2: 600 / (400 + 600) = 0.6
+        Per-turn deltas give:
+          turn 2: 600 / (200 + 600) = 0.75
+        The test pins 0.75 (delta), not 0.6 (cumulative) — the old
+        code would have emitted 0.6 here, which is the regression.
+        """
+        from token_efficiency_analyzer import aggregate_session
+        result = aggregate_session(
+            self.tmpdir / "logs" / "claude-code" / "cache-decay-fixture.jsonl"
+        )
+        cd = result["cache_decay"]
+        # Pin the per-turn delta, not the cumulative ratio.
+        self.assertAlmostEqual(cd[1], 0.75, places=4,
+                               msg="Claude cache_decay[1] must be per-turn "
+                                   "delta (0.75), not session-cumulative (0.6)")
+
+    def test_g3_dashboard_html_contains_cache_decay_tile(self):
+        """G3: rendered dashboard carries the new tile + the active bucket
+        label. Empty buckets are skipped by the renderer (the spec says
+        a bucket with zero sessions is not a row), so we only assert
+        against ``1-3`` — the bucket the 3-turn fixture lands in.
+        """
+        rc = main([
+            "--repo", "cache-decay-fixture",
+            "--days", "3650",
+            "--logs-dir", str(self.tmpdir / "logs"),
+            "--out", str(self.out_html),
+        ])
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.out_html.exists())
+        text = self.out_html.read_text()
+        self.assertIn("Cache hit ratio vs turn index", text,
+                      "G3: dashboard missing new section title")
+        # The 3-turn fixture lands in the 1-3 bucket; assert the
+        # active bucket shows up in the table.
+        self.assertIn(">1-3<", text,
+                      "G3: dashboard missing active bucket label '1-3'")
+        # And the section header carries the F1 tag for traceability.
+        self.assertIn("F1 cache_decay", text,
+                      "G3: dashboard section title should reference the F1 fix")
+
+    def test_g2_compute_cache_decay_zero_division_safe(self):
+        """G2 corner case: a turn with 0 input + 0 cache_read must
+        produce 0.0 (not raise ZeroDivisionError)."""
+        from token_efficiency_analyzer import _compute_cache_decay
+        self.assertEqual(_compute_cache_decay([0, 0], [0, 0]), [0.0, 0.0])
+        self.assertEqual(_compute_cache_decay([], []), [])
+        self.assertEqual(_compute_cache_decay([100, 0, 50], [0, 0, 50]),
+                         [0.0, 0.0, 0.5])
+
+
+def _make_user_record(session_id: str, text: str, *, ts: str) -> str:
+    """Tiny helper for the G2 fixture — one claude-code user record."""
+    return (
+        f'{{"timestamp":"{ts}","message":{{"role":"user","content":"{text}"}},'
+        f'"type":"user","sessionId":"{session_id}","cwd":"/tmp/cache-decay-fixture",'
+        f'"gitBranch":"main","userType":"external","version":"test"}}'
+    )
+
+
+def _make_assistant_record(
+    session_id: str, *, model: str,
+    input_tokens: int, cache_read: int, ts: str,
+) -> str:
+    """Tiny helper for the G2 fixture — one claude-code assistant record
+    with the cache_read / input_tokens pair the test cares about.
+    """
+    return (
+        f'{{"timestamp":"{ts}",'
+        f'"message":{{"id":"m","type":"message","role":"assistant",'
+        f'"content":[{{"type":"text","text":"ok"}}],"model":"{model}",'
+        f'"stop_reason":"end_turn",'
+        f'"usage":{{"input_tokens":{input_tokens},'
+        f'"cache_creation_input_tokens":0,'
+        f'"cache_read_input_tokens":{cache_read},'
+        f'"output_tokens":10}}}},'
+        f'"type":"assistant","sessionId":"{session_id}",'
+        f'"cwd":"/tmp/cache-decay-fixture","gitBranch":"main",'
+        f'"userType":"external","version":"test"}}'
+    )

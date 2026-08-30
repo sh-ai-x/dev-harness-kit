@@ -62,6 +62,67 @@ Each dimension is rendered as its own key under `submetrics.stability.submetrics
 | `gate_portability` | Fraction of distinct `event_type`s with at least one neutral event (gate fires without needing identity). | per-event-type neutrality |
 | `contract_test_pass_rate` | Fraction of `contract.test` events with `outcome=passed`. | `contract.test` events |
 
+### Identity and neutrality are independent
+
+`agent_identity_coverage` and `agent_provider_neutrality` measure two
+different properties and must both be satisfiable at once:
+
+- **Identity coverage** is *provenance*: do we know which agent, provider
+  and model produced this event? More is better — it is what makes a
+  cross-agent comparison possible at all.
+- **Neutrality** is *portability*: does the event's `evidence_ref` name a
+  specific agent/provider/model, such that a gate verdict computed from
+  it would change under an agent swap? Less coupling is better.
+
+A fully-stamped corpus whose `evidence_ref` payloads carry no
+agent/provider/model keys therefore scores 100 on **both**.
+
+> **Regression guard.** `_stability()` previously counted an event as
+> neutral only when it had *no* identity fields *and* no coupling keys.
+> That made the two dimensions mutually exclusive, and because stability
+> coverage is `min()` over all five dimensions the score was unreachable
+> in both directions: stamping identity drove neutrality (and, through
+> `event_type_neutral`, `gate_portability`) to 0%, while omitting it drove
+> identity coverage to 0%. Neutrality is now computed from `evidence_ref`
+> coupling alone, matching the table above. Pinned by
+> `test_stability_scores_when_identity_is_present` and
+> `test_neutrality_drops_when_evidence_ref_couples_to_agent`.
+
+## Producing the evidence automatically
+
+The three signals below are emitted by the harness itself, so a normal
+CI run populates the submetric without any per-producer wiring.
+
+| Signal | Producer | Notes |
+|---|---|---|
+| Identity fields | `lib.trace_log.append_event` | Auto-stamps `agent`/`provider`/`model` from `DEV_KIT_AGENT` / `DEV_KIT_PROVIDER` / `DEV_KIT_MODEL` (defaults `""` / `""` / `""` — empty defaults so the reducer treats unset as "no identity recorded" and a non-Claude runner is NOT silently mis-attributed to claude-code). Uses `setdefault`, so an explicit value passed by the caller always wins. |
+| `contract.test` | `tests/conftest.py` | `pytest_sessionfinish` appends one event per run. **CI-gated** (`CI=true`) so local `pytest` runs do not inflate a developer's trace log. The filename must stay `conftest.py` — pytest auto-registers hooks from no other name. |
+| `ground_truth` on guard events | `hooks/lib/payload-parse.sh::emit_guard_event` | Defaults to `"unknown"` for every outcome (no claim about correctness — a trigger-mirroring default would make the prevention_quality reducer trivially score 100% precision/recall against the same hook that emits the event). The reducer skips `unknown` events, so the metric only scores guards the operator has explicitly classified via `DEV_KIT_GROUND_TRUTH`. Override values are validated against the `unsafe` / `legitimate` / `pending` / `unknown` allowlist; anything else is rejected. |
+
+### Causal chaining in the executor
+
+`_first_pass` pairs a write with its first verification via
+`first.parent_id == write.event_id`. `lib/execute.py::_step_post_collect`
+therefore parents `verify.passed` to the `write.observed` event id it
+just captured — **not** to `step.started`. Parenting both to the
+lifecycle anchor leaves `causally_linked` permanently `False`, which
+collapses `first_pass_quality` to `10.0` (`ROT`) *and* pulls it into
+`overall_score` at weight 0.25, where previously a `None` score dropped
+out of both numerator and divisor. Pinned by
+`test_verify_passed_is_parented_to_write_observed` and
+`test_first_pass_quality_reflects_honest_verify_evidence` (the executor
+emits `verify.passed` with `required_checks_passed=False, independent=False`
+plus `evidence_provenance="self-reported"` and `checks_run=[]` because
+no independent pytest/lint/build runner actually executes there — the
+event exists for the causal chain, but the score reflects honest
+self-reported evidence, not a fabricated 100%).
+
+`recovery_quality` needs a `heal.attempted` event between the
+`verify.failed` and the terminal `verify.passed`. The executor has no
+retry path today, so it emits no `heal.attempted` and
+`recovery_quality` remains `INSUFFICIENT_EVIDENCE` on the executor
+trajectory. Wiring that signal is deferred to the self-fix loop.
+
 ## Missing evidence → `INSUFFICIENT_EVIDENCE`, never `0.0`
 
 A submetric that lacks enough evidence renders as:

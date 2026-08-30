@@ -79,6 +79,31 @@ at index 0 (the order some commits landed with) is left untouched when
 the source would have appended them at the end; `git pull` no longer
 re-creates a stale diff every session.
 
+### git-HEAD guard for `setup` (issue #760)
+
+`setup` decides whether to overwrite `tools/save_log.py` by comparing
+the target file's SHA against **two** sources, in order:
+
+1. The target project's own `git show HEAD:tools/save_log.py` (if the
+   target is a git repo). If the on-disk file already matches HEAD, the
+   overwrite is skipped regardless of what `$LOGHOOKS_DIR` ships.
+2. Otherwise, the `$LOGHOOKS_DIR` SHA — the historical pre-#760 behavior.
+
+This protects committed, project-owned copies of `save_log.py` from
+being silently clobbered by a stale external copy the moment the two
+sources diverge. The fix is the same bug class as #708 / PR #751 — both
+fixed `.claude/settings.json` + `.codex/hooks.json` merge paths in
+`lib.sh` but left `log-setup.sh`'s file-copy path unguarded.
+
+`--force` still bypasses all guards. A non-git target (e.g. a fresh
+`--global` install into `$HOME/.claude/`) falls back to the pre-#760
+SHA-vs-`$LOGHOOKS_DIR` behavior since there is no HEAD to compare
+against.
+
+The new test surface lives in `tests/test_log_skill.py::TestSetupPreservesGitHead`
+(3 tests: does-not-overwrite-when-matches-head, force-still-overwrites,
+non-git-target-falls-back).
+
 ## Usage
 
 ```bash

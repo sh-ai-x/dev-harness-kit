@@ -1,0 +1,457 @@
+title: "Cache hit rate — structural fix"
+status: draft
+date: 2026-08-28
+tags: [token-efficiency, prompt-cache, hooks, session-hygiene, enforcement]
+sections:
+  - title: Executive summary
+    body: |
+      dev-harness-kit's `tools/token_efficiency_analyzer.py` (last 30d, 2,581 sessions)
+      reports 96.1% aggregate cache hit — but the *distribution* hides a structural
+      problem: 1,952 of 2,469 sessions (79%) are 1-3 calls long and average **20.0%**
+      cache hit, while 331 long-running sessions (30+ calls) average 96.1%. The
+      520 warnings include **129 CACHE_HIT_LOW** (cache hit <50%) and **72
+      REPEATED_USER_MSG** (user-message echo, direct evidence of prefix drift).
+
+      `rules/session-hygiene.md` already encodes Iron Laws 1, 3, 6 that
+      explain *why* this happens — but those rules have no automated
+      enforcement beyond the analyzer's warnings. The proposal closes the
+      loop with 4 ordered fixes that surface prefix drift **per surface**
+      (hook / system-reminder / skill / sub-agent / model switch) and let
+      the existing warning codes drive a fix-it pass.
+
+      **Net verdict**: ship **F1 + A1 + A2** (diagnostic + hook audit +
+      skill frontmatter audit) as Phase 1. Defer D / E / G to Phase 2
+      gated on Phase 1 hit-rate movement. Net token delta: **+~280
+      lines** (analyzer extension + audit patches + tests). Stale cost
+      surface (`stale_cost_usd=$2,067.00 / $2,383.96 = 86.7%`) suggests
+      a parallel `stale-worktree-cleanup` carve-out is also worth its
+      own proposal — out of scope here.
+
+  - title: Problem statement
+    body: |
+      ### What the data shows
+
+      ```
+      bucket           n_sess    in (M)   cache_read (M)   hit%
+      1-3 (short)       1,952      7.2       1.8           20.0%
+      4-10                112      3.7       4.9           57.2%
+      11-30                75     10.9      51.1           82.4%
+      30+                 331  1,251.6  31,073.4           96.1%
+      ```
+
+      Long sessions hit 96% because Anthropic's prompt cache amortizes
+      across many turns. Short sessions do *not* hit because they exit
+      before turn 2 — the cache_write from turn 1 is wasted, and turn 1's
+      `input_tokens` (non-cached) is the whole session.
+
+      ### Why short sessions exist
+
+      The repo has structural patterns that *cause* short sessions:
+
+      - **`/clear` reflex** — users reach for `/clear` when context grows,
+        resetting the cached prefix instead of `/compact`-ing.
+      - **Single-shot `/dev-kit:*` invocations** — many slash commands
+        (`docs-maintenance`, `token-analyzer`, `inspect`) finish in
+        1-3 turns; each is a cold start.
+      - **Worktree churn** — every worktree switch can be a fresh
+        session with no carry-over prefix (cwd + recent commits change).
+
+      ### Why *long* sessions still drop below 96%
+
+      The 129 `CACHE_HIT_LOW` warnings in long sessions are caused by
+      **prefix drift** within an otherwise-cacheable session:
+
+      - **Hook stdout** — every dev-kit hook (`worktree-guard`,
+        `log-on-session-start`, `tdd-guard`, `notification-collapse`,
+        `secret-scan`, `loop-detect`, …) emits content that becomes part
+        of the prompt prefix. If even one byte of that output changes
+        between turns, the entire cache namespace is invalidated. The
+        72 `REPEATED_USER_MSG` warnings are direct evidence of this —
+        hook stdout echoing content already in context.
+      - **System-reminder re-injection** — `<system-reminder>` blocks
+        (`total_tokens`, `currentDate`, `gitStatus`) are re-emitted by
+        Claude Code on every turn; they sit at the top of the prefix
+        and are *intended* to be volatile, so the cache re-validation
+        cost is paid every turn regardless of whether anything actually
+        changed.
+      - **Skill frontmatter non-determinism** — if a skill's
+        `SKILL.md` frontmatter includes a build-time hash, a
+        generated slug, or a timestamp, the cache namespace is unique
+        per build (no reuse across sessions even with identical content).
+      - **Sub-agent context inheritance** — agents spawned via the
+        `Agent` tool inherit the parent's full prompt, including all
+        the parent's volatile prefix. The sub-agent then has *no*
+        chance of cache hit on its own prompt because its prefix is
+        parent-specific.
+      - **Mid-session model switch** — Anthropic maintains separate
+        cache namespaces per model. Switching Sonnet→Opus (or vice
+        versa) mid-session forces a cold start. `MODEL_OVERSPEC` warns
+        about 3 such cases.
+
+  - title: Options considered
+    body: |
+      Three options ranked by diagnostic-leverage / risk / token delta:
+
+      | Option | Surface covered | Risk | Token delta | Verdict |
+      |---|---|---|---|---|
+      | **A** — Fix the data plane (diagnostic + audits) | hook / skill / frontmatter | Low | +280 lines | **ADOPT** |
+      | B — Sub-agent isolation + cache_control markers | sub-agent / skill | Medium | +480 lines | **DEFER → Phase 2** |
+      | C — Document-only proposal (no code change) | none | None | +0 lines | **REJECT** (proposal-only defeats the goal) |
+
+      **Option A selection rationale**:
+
+      - **F1 (cache_decay diagnostic)** is the prerequisite for every
+        other fix. Without it, we cannot tell whether a 96% hit-rate
+        session is hitting on every turn (stable prefix) or only on
+        turn 2 then dropping to 50% (drifting prefix). The existing
+        analyzer already emits `cache_hit_ratio` per session but not
+        the per-turn curve.
+      - **A1 (hook stdout audit)** is the highest-leverage single fix.
+        The repo has 18 hooks under `hooks/*.sh`; many of them emit
+        deterministic state but the analysis couldn't be done without
+        `F1` to confirm which hooks are actually bleeding the prefix.
+      - **A2 (skill frontmatter audit)** has the same prerequisite.
+        Once `F1` shows *where* the prefix is breaking, A2 is a 1-day
+        pass over the 39 skills with a deterministic-content check.
+
+      Options B/C are deferred: B is high-impact but requires testing
+      the cache_control boundary semantics on Anthropic's API (not
+      just dev-kit's surface); C is pure documentation, which doesn't
+      move the metric.
+
+  - title: Recommended approach — 4 ordered fixes
+    body: |
+      ### F1 — Cache decay diagnostic in `tools/token_efficiency_analyzer.py`
+
+      Add a new per-session field `cache_decay: list[float]` —
+      `cache_hit_ratio` per turn index (1..N). Bucket sessions by length
+      into the 4 buckets already used in the HTML output. Emit a new
+      HTML tile "Cache hit ratio vs turn index" that overlays all
+      sessions in the window (median, p25, p75 lines per bucket).
+
+      Pseudocode:
+
+      ```python
+      # in tools/token_efficiency_analyzer.py
+      def cache_decay(per_turn_cache_read, per_turn_input):
+          out = []
+          for cr, inp in zip(per_turn_cache_read, per_turn_input):
+              total = cr + inp
+              out.append(cr / total if total else 0.0)
+          return out
+      ```
+
+      Output extension (in the existing `Sessions` table):
+
+      ```
+      | session_id | model | calls | cache_hit | decay_50 | decay_90 |
+      | 8e6fbf81   | ...   | 16    | 0.0%      | 0%       | 0%       |  ← cold start, never reuses
+      | f8970414   | ...   | 47    | 30.0%     | 25%      | 5%       |  ← prefix drifting
+      | a86723fe   | ...   | 312   | 96.7%     | 96%      | 95%      |  ← healthy
+      ```
+
+      ### A1 — Hook stdout audit + volatile-field strip
+
+      For each of the 18 hooks under `hooks/*.sh` that fires per-turn,
+      audit stdout for volatile content (timestamps, PIDs, ephemeral
+      session IDs, randomized build slugs). Replace volatile output
+      with stable strings OR route the volatile data through the *tool
+      result body* (where it is still seen by the model) instead of the
+      *hook stdout* (where it sits in the prefix).
+
+      Target hooks (preliminary list, refine after F1 ships):
+
+      - `hooks/worktree-guard.sh` (PreToolUse, 159 LOC) — emits
+        routing context on every Edit/Write; check for ephemeral paths
+      - `hooks/log-on-session-start.sh` (SessionStart, 131 LOC) — fires
+        once but its output should be byte-stable across runs
+      - `hooks/notification-collapse.sh` (PostToolUse, 83 LOC) — emits
+        per-turn deduplication state
+      - `hooks/loop-detect.sh` (PostToolUse, 76 LOC) — emits per-turn
+        fingerprint counts
+
+      Acceptance: hook stdout bytes are identical between two
+      sequential invocations against the same repository state.
+
+      ### A2 — Skill frontmatter determinism audit
+
+      For each of the 39 skills under `skills/*/SKILL.md`, audit
+      frontmatter for non-deterministic fields. The `version-from-
+      plugin-json` feedback already establishes the discipline for
+      version strings; extend it to "no timestamps, no build hashes,
+      no auto-generated slugs."
+
+      Audit script (small, ship with the analyzer):
+
+      ```python
+      # scripts/audit_skill_frontmatter.py
+      FORBIDDEN = re.compile(r'(\d{4}-\d{2}-\d{2}|\b[0-9a-f]{7,}\b|build[-_]?\d)')
+      for path in glob('skills/*/SKILL.md'):
+          fm = read_frontmatter(path)
+          hits = FORBIDDEN.findall(fm)
+          if hits: print(f'{path}: {hits}')
+      ```
+
+      ### D / E / G — Deferred to Phase 2 (gated on Phase 1 metric)
+
+      - **D — Sub-agent prompt isolation**: when the orchestrator spawns
+        an `Agent`, pass only the task. Sub-agent pays `cache_write`
+        once for its clean prefix. Defer: requires agreement on which
+        parent context fields are "volatile vs stable."
+      - **E — `cache_control: { ttl: "1h" }` markers** in dev-kit's own
+        skill loader. Defer: needs Anthropic API testing for behavior
+        when a sub-agent under cache_control-1h re-asks after TTL.
+      - **G — One-model-per-session lock**. Defer: the existing
+        `MODEL_OVERSPEC` warning (3 sessions) is small enough that a
+        docs reminder is probably cheaper than a hook.
+
+  - title: State machine (single-pass, analyzer-first)
+    body: |
+      ```
+      [1/4] DIAGNOSE  (F1)
+        도구: tools/token_efficiency_analyzer.py --json
+        산출: per-turn cache_hit_ratio curve per session
+        결정: which surface (hook/skill/reminder/sub-agent) is bleeding?
+        ↓
+      [2/4] AUDIT HOOKS  (A1)
+        입력: F1 output's per-session "bleed at turn N" markers
+        도구: scripts/audit_hook_stdout.sh (deterministic check)
+        산출: per-hook diff (turn 1 vs turn 2 stdout bytes)
+        결정: which hooks to patch + which volatile fields to move
+        ↓
+      [3/4] AUDIT SKILLS  (A2)
+        입력: skill SKILL.md paths
+        도구: scripts/audit_skill_frontmatter.py
+        산출: per-skill forbidden-field list
+        결정: which frontmatter fields to remove or rewrite
+        ↓
+      [4/4] MEASURE  (re-run analyzer)
+        입력: same time window (--days 30)
+        도구: token_efficiency_analyzer.py --json
+        기대: aggregate 96.1% → ≥97%, CACHE_HIT_LOW count 129 → ≤100,
+              REPEATED_USER_MSG count 72 → ≤50
+        미달 시: Phase 2 (D/E/G) 진행 결정
+      ```
+
+      **No persistent state**. Same analyzer JSONL inputs, re-emitted
+      dashboard. No new files in `~/.claude/`.
+
+  - title: Validation gates (existing + new)
+    body: |
+      | Gate | Mechanism | Pass criterion |
+      |---|---|---|
+      | **G1** analyzer doesn't regress | existing `tests/test_token_efficiency_analyzer.py` (13 cases) | all 13 pass |
+      | **G2** `cache_decay` field emitted | new test | every session with ≥2 turns has a `cache_decay` list of length == call count |
+      | **G3** HTML tile renders | new test (regex on output) | dashboard contains "Cache hit ratio vs turn index" header + 4 bucket bands |
+      | **G4** hook stdout determinism | new test: invoke each hook twice on identical repo state | `diff` of stdout bytes == empty |
+      | **G5** skill frontmatter clean | new test: run `audit_skill_frontmatter.py` | zero `FORBIDDEN` hits across all 39 skills |
+      | **G6** L6 governance | existing `tests/test_skill_governance.py` | pass (no new skills added; A2 is a one-off audit) |
+      | **G7** analyzer hit-rate movement | manual: re-run `--days 30 --json` after merge | aggregate hit ≥ 97% OR CACHE_HIT_LOW count drops ≥20% (whichever is smaller) |
+
+      G7 is the Phase 1 → Phase 2 gate.
+
+  - title: Companion files (Phase 1)
+    body: |
+      | Path | Role | Lines | Verdict |
+      |---|---|---:|---|
+      | `tools/token_efficiency_analyzer.py` | add `cache_decay` field + tile | +120 | ADOPT |
+      | `tests/test_token_efficiency_analyzer.py` | add G2/G3 cases | +60 | ADOPT |
+      | `scripts/audit_hook_stdout.sh` | hook-stdout determinism check | +30 | ADOPT |
+      | `scripts/audit_skill_frontmatter.py` | frontmatter audit | +40 | ADOPT |
+      | `tests/test_hook_stdout_determinism.py` | G4 regression | +30 | ADOPT |
+      | `tests/test_skill_frontmatter_audit.py` | G5 regression | +20 | ADOPT |
+      | `hooks/*.sh` patches | strip volatile fields | -10 (net) | ADOPT after audit |
+      | `skills/*/SKILL.md` patches | remove forbidden fields | -5 (net) | ADOPT after audit |
+      | **Phase 1 total** | | **+295** | |
+
+      Phase 1 token delta: **+295 lines net** (audits + tests + analyzer
+      extension, partially offset by hook/skill cleanup).
+
+  - title: Thin-harness memo
+    body: |
+      ### Item-by-item verdict
+
+      - **`cache_decay` field + tile (F1)**: ADOPT — diagnostic is the
+        prerequisite for every other fix; same shape as existing
+        per-session fields; net-zero risk when guarded by G2/G3.
+      - **Hook stdout audit (A1)**: ADOPT — `rules/session-hygiene.md`
+        Iron Law 3 ("Volatile content stays in the prompt tail, never
+        the prefix") already names the failure mode; A1 turns it into
+        a testable contract.
+      - **Skill frontmatter audit (A2)**: ADOPT — mirrors the
+        `version-from-plugin-json` discipline. Existing test
+        coverage (G6) makes regression cheap.
+      - **Sub-agent isolation (D)**: DEFER → Phase 2 — needs empirical
+        answer to "which parent context fields are stable enough to
+        carry into a sub-agent." F1's per-turn data is the input.
+      - **`cache_control` markers (E)**: DEFER → Phase 2 — API
+        semantics with TTL+handoff need Anthropic spec confirmation
+        beyond the SKILL.md description.
+      - **One-model-per-session lock (G)**: DEFER → docs-maintenance
+        PR (separate). Only 3 `MODEL_OVERSPEC` hits in 30d — not
+        worth a hook.
+
+      ### Cherry-pick budget
+
+      Q3 2026 (2026-07-01 ~ 2026-08-28) third-party cherry-picks: 0.
+      Phase 1 is dev-kit-internal — no third-party table impact.
+      `feedback-thin-harness-discipline.md` budget unaffected.
+
+      ### Phase 1 → Phase 2 gate
+
+      If after Phase 1 lands the analyzer shows aggregate hit ≥97% OR
+      `CACHE_HIT_LOW` count drops ≥20%, Phase 2 is unnecessary. If not,
+      the same `cache_decay` data tells us whether D (sub-agent) or E
+      (`cache_control`) is the next lever.
+
+  - title: Tmux + long-running safety classification
+    body: |
+      Per `feedback-tmux-long-running-safety.md` 5-category check:
+
+      - **New hook?** NO (audits live in `scripts/`, not `hooks/`)
+      - **Sub-agent dispatch?** NO (`allowed-tools` unchanged)
+      - **Persistent loop?** NO
+      - **MCP server?** NO
+      - **Network listener?** NO
+
+      → **Pure-prose + audit-script change**, tmux-safe by definition.
+      PR description must include "tmux + long-running classification:
+      pure-prose + scripts."
+
+  - title: Risks
+    body: |
+      | Risk | Source | Mitigation |
+      |---|---|---|
+      | **`cache_decay` changes dashboard layout, breaks screenshots** | existing dashboard consumers | gate behind `--show-decay` flag (off by default for 1 PR, then on) |
+      | **Hook audit flags stable-but-looks-volatile content** (e.g., embedded git SHA that's actually deterministic) | A1 false positive | per-hook manual review before auto-patch; `audit_hook_stdout.sh` outputs JSON for triage, doesn't auto-edit |
+      | **Skill frontmatter cleanup removes load-bearing timestamps** (e.g., last-reviewed field) | A2 false positive | `FORBIDDEN` regex excludes `last-reviewed:` fields explicitly; manual review of audit output |
+      | **G7 doesn't move (cache hit is already structurally 96%)** | ceiling effect | Phase 2 decision deferred until real measurement; this proposal's primary value is the *observability*, not the percentage gain |
+      | **`stale_cost_usd` = 86.7% of total** — fix targets miss the biggest lever | dashboard | separate `docs/proposals/stale-worktree-cleanup/` is the right scope; flag in `Next steps` |
+      | **Hidden cache bypass via Codex-side prompt builder** | Codex runtime | `token-analyzer` already covers both `claude-code/` and `codex/` log dirs; if Codex bypasses cache, the analyzer sees it |
+
+  - title: Verification plan
+    body: |
+      ### Cold determinism gate (`feedback-sub-agent-isolated-test.md`)
+
+      1. Spawn context-free Agent sub — pass only the analyzer path
+      2. Run `--days 30 --json` twice on the same inputs
+      3. Diff the two JSONs byte-for-byte
+      4. PASS criterion: empty diff
+      5. Validator subprocess must return real numbers, not silent rc=1
+
+      ### Analyzer regression
+
+      - Existing 13 cases in `tests/test_token_efficiency_analyzer.py`
+        continue to pass (G1)
+      - New G2/G3 cases pass on first run after F1 lands
+
+      ### Hook stdout determinism (G4)
+
+      ```
+      $ for h in hooks/*.sh; do
+          before=$(bash "$h" < /dev/null 2>&1 | sha256sum)
+          after=$(bash "$h" < /dev/null 2>&1 | sha256sum)
+          [ "$before" = "$after" ] || echo "$h DRIFT"
+        done
+      ```
+
+      Empty output = pass.
+
+      ### Skill frontmatter audit (G5)
+
+      ```
+      $ python3 scripts/audit_skill_frontmatter.py
+      $ echo $?
+      0
+      ```
+
+      ### Hit-rate movement (G7)
+
+      - Capture pre-merge: `python3 tools/token_efficiency_analyzer.py --repo dev-harness-kit --days 30 --json > /tmp/before.json`
+      - Capture post-merge (same day-of-window): `... > /tmp/after.json`
+      - PASS: aggregate hit ≥ 97% OR `CACHE_HIT_LOW` count drops ≥20%
+
+      ### PR checklist
+
+      - [ ] `pytest tests/test_token_efficiency_analyzer.py -v` G1+G2+G3 pass
+      - [ ] `bash scripts/audit_hook_stdout.sh` returns 0 (G4)
+      - [ ] `python3 scripts/audit_skill_frontmatter.py` returns 0 (G5)
+      - [ ] `pytest tests/test_skill_governance.py -v` G6 pass
+      - [ ] Cold sub-agent byte-identical re-run (determinism)
+      - [ ] `pytest tests/test_hook_stdout_determinism.py tests/test_skill_frontmatter_audit.py -v` pass
+      - [ ] PR description includes "tmux + long-running classification: pure-prose + scripts"
+
+  - title: Distribution plan
+    body: |
+      ### Files added (Phase 1)
+
+      ```
+      scripts/audit_hook_stdout.sh                     # new
+      scripts/audit_skill_frontmatter.py               # new
+      tests/test_hook_stdout_determinism.py            # new
+      tests/test_skill_frontmatter_audit.py            # new
+      ```
+
+      ### Files modified (Phase 1)
+
+      ```
+      tools/token_efficiency_analyzer.py               # +120 (cache_decay + tile)
+      tests/test_token_efficiency_analyzer.py          # +60 (G2/G3 cases)
+      hooks/*.sh                                       # -10 net (volatile-field strip)
+      skills/*/SKILL.md                                # -5 net (forbidden-field strip)
+      ```
+
+      ### Version bump
+
+      `.claude-plugin/plugin.json` will bump patch on main merge via
+      `.github/workflows/version-bump.yml`. Manual bump via
+      `/dev-kit:bump patch` if explicit.
+
+      ### Worktree
+
+      - Name: `feat/cache-hit-rate-fix`
+      - Base: `origin/main`
+      - Branch cut: this proposal's worktree
+        (`.worktrees/cache-hit-rate-proposal`) → rename on PR open
+        to `feat/cache-hit-rate-fix` after Phase 1 ships
+
+  - title: Next steps (after this proposal is approved)
+    body: |
+      1. **Approval gate**: render this YAML to HTML via `/dev-kit:proposal`
+         → user reviews `./docs/proposals/cache-hit-rate/structural-fix.html`
+      2. **Linear sync**: `/dev-kit:linear` registers the umbrella issue
+         (cache-hit-rate-structural-fix) + 3 sub-issues (F1, A1, A2)
+      3. **Plan**: `/dev-kit:plan` produces phase-by-phase PRD
+         (F1 → A1 → A2 → measure)
+      4. **Build**: `/dev-kit:build` ships the 4 file-adds + 4 file-mods
+         + 4 new tests, all gated by G1–G6
+      5. **Measure**: post-merge `--days 30 --json` re-run, compare to
+         pre-merge snapshot, decide Phase 2 (D/E) by G7 outcome
+      6. **Out of scope (separate proposal)**: `stale_cost_usd = 86.7%`
+         is the dominant cost-lever — file `docs/proposals/stale-worktree-cleanup/`
+         next, not bundled here
+
+  - title: References (dev-harness-kit SSOT only)
+    body: |
+      No external URLs. All rationale anchored to dev-kit's own SSOT:
+
+      - `rules/session-hygiene.md` — Iron Laws 1/3/5/6 already encode
+        the failure modes F1/A1/A2/G measure and fix
+      - `tools/token_efficiency_analyzer.py` — analyzer source
+      - `tools/token_efficiency_analyzer.py:render_dashboard` — dashboard
+        rendering target for the new tile
+      - `tests/test_token_efficiency_analyzer.py` — 13 existing cases
+        (G1) + 2 new (G2/G3)
+      - `hooks/*.sh` — 18 hooks audited by A1
+      - `skills/*/SKILL.md` — 39 skills audited by A2
+      - `feedback-version-from-plugin-json.md`
+        — same discipline applied to A2's forbidden-field regex
+      - `feedback-sub-agent-isolated-test.md`
+        — cold-determinism gate for F1
+      - `feedback-thin-harness-discipline.md`
+        — cherry-pick budget for Phase 1/2 split
+      - `feedback-tmux-long-running-safety.md`
+        — pure-prose + scripts classification
+      - `feedback-no-build-debug-handoff.md`
+        — `token-analyzer` is `user-invocable: true`, so this proposal
+        is the right surface (not `/dev-kit:build-debug`)

@@ -148,8 +148,12 @@ def _emit_effectiveness_event(
         "evidence_ref": evidence_ref,
     }
     try:
-        append_event(root, event)
-        return event_id
+        _, persisted_id = append_event(root, event)
+        # Return the persisted id (which may differ from the local event_id
+        # if the dedupe-on-write guard swapped it under collision) so callers
+        # can safely use it as the parent_id of a follow-up event. See PR #753
+        # review finding #2.
+        return persisted_id
     except (OSError, ValueError):
         return None
 
@@ -649,6 +653,15 @@ def _step_post_collect(
             {"reason": blocked_reason, "output": f"phases/{phase}/step{step_num}-output.json"},
             ctx.get("started_event_id"),
         )
+        # Verify chain: a blocked step is a verification failure (issue
+        # #663 evidence shape). parent_id points at step.started so the
+        # reducer can pair the blocked run with its preceding intent.
+        _emit_effectiveness_event(
+            root, phase, step_num, "verify.failed", "blocked",
+            {"required_checks_passed": False, "retry_count": 0,
+             "independent": False, "reason": blocked_reason, "via": "executor"},
+            ctx.get("started_event_id"),
+        )
         return 2
     if exit_code != 0:
         update_step_status(root, phase, step_num, status="error", error_message=f"claude exited {exit_code}")
@@ -657,14 +670,25 @@ def _step_post_collect(
             {"exit_code": exit_code, "output": f"phases/{phase}/step{step_num}-output.json"},
             ctx.get("started_event_id"),
         )
+        # Verify chain: a non-zero exit is a verification failure. parent
+        # ties back to step.started so the reducer joins lifecycle +
+        # verify into one causal chain.
+        _emit_effectiveness_event(
+            root, phase, step_num, "verify.failed", "failed",
+            {"required_checks_passed": False, "retry_count": 0,
+             "independent": False, "reason": "exit_code",
+             "exit_code": exit_code, "via": "executor"},
+            ctx.get("started_event_id"),
+        )
         return exit_code
 
     # Issue #221 RC2: --allow-empty is GONE. add-A + conditional commit.
     feat_msg = f"feat({phase}): step {step_num}" + (f" — {step_name}" if step_name else "")
     wrote_files = _commit_step(wt, feat_msg)
     output_committed = _commit_step(wt, f"chore({phase}): step {step_num} output")
+    write_event_id = None
     if wrote_files or output_committed:
-        _emit_effectiveness_event(
+        write_event_id = _emit_effectiveness_event(
             root, phase, step_num, "write.observed", "written",
             {
                 "exit_code": exit_code,
@@ -674,6 +698,42 @@ def _step_post_collect(
             },
             ctx.get("started_event_id"),
         )
+    # Verify chain on the success path. `_first_pass`
+    # (lib/harness_effectiveness.py) computes
+    # `causally_linked = first.parent_id == write.event_id`, so the
+    # verify MUST be parented to the write.observed event id — not to
+    # step.started. Parenting both to started_event_id makes
+    # causally_linked permanently False and collapses the score to
+    # 10.0 (ROT) while still entering overall_score at weight 0.25.
+    # write_event_id is None only when (a) no files were committed
+    # (a no-diff successful step) or (b) the append failed; fall
+    # back to the lifecycle anchor so the chain stays readable.
+    #
+    # Emit verify.passed on EVERY successful step, not only on
+    # write-bearing ones — `_first_pass` iterates only subjects that
+    # emitted write.observed, so without this hoist a no-diff
+    # success is silently dropped from the metric. no_diff is
+    # surfaced so downstream consumers can distinguish the case
+    # without re-deriving it.
+    #
+    # Honest verify evidence: no independent pytest/lint/build runner
+    # actually executed here — the executor only knows the sub-agent
+    # exited 0. An earlier revision emitted `required_checks_passed=True,
+    # independent=True` from this exit_code==0 alone, which made
+    # first_pass_quality a fabricated 100%. The fields below are
+    # truthful: the verify event is recorded so the causal chain
+    # stays complete, but the reducer sees it as self-reported with
+    # zero independent checks — first_pass_rate stays 0 against this
+    # evidence.
+    _emit_effectiveness_event(
+        root, phase, step_num, "verify.passed", "passed",
+        {"required_checks_passed": False, "retry_count": 0,
+         "independent": False, "via": "executor",
+         "evidence_provenance": "self-reported",
+         "checks_run": [],
+         "no_diff": not (wrote_files or output_committed)},
+        write_event_id or ctx.get("started_event_id"),
+    )
 
     if push:
         subprocess.run(

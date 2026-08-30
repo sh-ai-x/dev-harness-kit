@@ -39,15 +39,27 @@ open http://127.0.0.1:8765           # → 302 → /pr/<your-branch-PR>
 open http://127.0.0.1:8765/pr/725
 ```
 
-The page is **passive** — opening it does NOT auto-start the stream.
-The PR number input is pre-filled from `window.__PR_NUMBER__` (server
-injects on `/pr/<N>`) so the operator sees which PR they're looking
-at, but the actual review/security/maintenance judges only run when
-the operator clicks **Start** (or when an external trigger like
-`bin/babysit-pr-local.sh` opens the page after launching
-`bin/review-local.sh --pr N` separately). This avoids the
-"GET-surprise-spawns-bash+claude" footgun and the stale-tab quota
-leak that an auto-start would invite.
+The page is **passive** on a manual visit — opening `/pr/<N>` does NOT
+auto-start the stream. The PR number input is pre-filled from
+`window.__PR_NUMBER__` (server injects on `/pr/<N>`) so the operator
+sees which PR they're looking at, but the actual review/security/
+maintenance judges only run when the operator clicks **Start**. This
+avoids the "GET-surprise-spawns-bash+claude" footgun and the stale-tab
+quota leak that an auto-start would invite on `/stream`.
+
+`bin/babysit-pr-local.sh` is the one exception, and it does NOT use
+`/stream` for this: on every iteration it ensures this server is
+running, tees its own `bin/review-local.sh` run into
+`.dev-kit/babysit-pr-local-live.log`, and (once per PR per hour)
+opens `/pr/<N>?autostart=1` in the operator's browser. That URL
+injects `window.__AUTOSTART__ = true`, which makes the page connect
+to `/pr/<N>/tail` on load instead of waiting for a Start click.
+`/tail` is read-only — it mirrors the log babysit is already writing
+and never spawns `bin/review-local.sh` itself — so the auto-opened
+tab shows babysit's actual run live, without triggering a second,
+duplicate verdict pipeline (and a second round of `claude -p` spend)
+alongside the one babysit already started. Opt out with
+`BABYSIT_NO_VIEWER=1` (or it's skipped automatically under `$CI`).
 
 The page is single static HTML (`tools/review-local-preview.html`),
 no JS framework, no build step. Opening it on a phone (same network)
@@ -61,6 +73,7 @@ need an SSH tunnel for that (`ssh -L 8765:127.0.0.1:8765 …`).
 | `GET`  | `/` | 302 → `/pr/<current-branch-PR>` (resolved via `gh`) |
 | `GET`  | `/pr/<N>` | Serves `tools/review-local-preview.html` (no PR lookup; the page does it client-side) |
 | `GET`  | `/pr/<N>/stream` | SSE: stdout of `bin/review-local.sh --pr N` line-by-line as JSON `data:` frames; EventSource auto-reconnects on transient drops; closing the tab kills the subprocess (SIGTERM → reaps) |
+| `GET`  | `/pr/<N>/tail` | SSE: read-only poll of `.dev-kit/babysit-pr-local-live.log`; NEVER spawns `bin/review-local.sh`. A `##BABYSIT-DONE exit_code=N##` sentinel line is converted to an `iteration_done` frame (not forwarded as raw stdout) and the poll keeps running — this is what `?autostart=1` connects to |
 | `GET`  | `/healthz` | JSON: `{status: ok, active_streams: N}` for liveness probes |
 | any    | anything else | 404 |
 

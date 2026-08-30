@@ -320,7 +320,22 @@ def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             coupling_ids.append(event_id)
         event_type = event.get("event_type", "")
         event_type_counts[event_type] += 1
-        if not has_identity and not has_coupling:
+        # Neutrality measures harness *coupling* only: whether a gate's
+        # evidence names a specific agent/provider/model and would
+        # therefore replay differently under a swap. It is deliberately
+        # independent of `has_identity`.
+        #
+        # The previous `not has_identity and not has_coupling` predicate
+        # made neutrality and agent_identity_coverage mutually
+        # exclusive, and because stability coverage is min() over the
+        # five submetrics the score was unreachable in BOTH directions:
+        # stamping identity drove neutrality (and gate_portability, which
+        # derives from event_type_neutral) to 0%, while omitting identity
+        # drove agent_identity_coverage to 0%. Provenance ("who produced
+        # this event") and portability ("does the verdict depend on who
+        # produced it") are different properties and must be scored
+        # separately.
+        if not has_coupling:
             neutral_ids.append(event_id)
             neutral_event_ids_by_type[event_type].append(event_id)
             event_type_neutral[event_type] += 1

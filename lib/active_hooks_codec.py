@@ -100,8 +100,23 @@ def load_matrix(project_root: Path) -> Dict:
 
     Read-only — does NOT call `atomic_write_json`. Callers needing to
     mutate should use `ensure_matrix` first.
+
+    inspect 2026-08-27 overeng-4: results are memoized per
+    `(project_root, mtime)` so `stage-gate.sh` (which calls
+    `is_hook_active` once per PreToolUse event) pays one disk read per
+    `mtime` change instead of one read per invocation. Cache is
+    invalidated when the file's `st_mtime` changes.
     """
     path = project_root / ".dev-kit" / ".active-hooks.json"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+    cache_key = (str(path.resolve()), mtime)
+    cached = _MATRIX_CACHE.get(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+
     default: Dict = {
         "schema_version": "1.0.0",
         "matrix": copy.deepcopy(DEFAULT_MATRIX),
@@ -111,7 +126,35 @@ def load_matrix(project_root: Path) -> Dict:
             "env_override": {},
         },
     }
-    return read_json_or_default(path, default)
+    data = read_json_or_default(path, default)
+    # inspect 2026-08-27 PR #755 reviewer feedback: cache returns a
+    # shared mutable dict. Without a deepcopy on the way out, a caller
+    # that mutates the returned dict (e.g. `set_stage`) silently mutates
+    # the cache entry for every subsequent `is_hook_active` call on the
+    # same (path, mtime) — wrong, and hard to debug. The contract is
+    # "read-only"; enforce it on the boundary by returning a copy.
+    _MATRIX_CACHE[cache_key] = data
+    if len(_MATRIX_CACHE) > _MATRIX_CACHE_MAX_ENTRIES:
+        # Drop the oldest entry (first inserted). Python 3.7+ dicts
+        # preserve insertion order, so popitem(last=False) removes the
+        # oldest.
+        _MATRIX_CACHE.popitem(last=False)
+    return copy.deepcopy(data)
+
+
+# Per-(path, mtime) cache for `load_matrix`. A long-running session can
+# call `is_hook_active` thousands of times (PreToolUse); caching the
+# parsed JSON keyed on mtime keeps it cheap while staying correct when
+# the file is rewritten by the regen tool.
+_MATRIX_CACHE: Dict[tuple, Dict] = {}
+
+# Bounded cache: evict oldest entry when size exceeds this. 32 covers a
+# full session's worth of (project_root, mtime) permutations in the
+# usual case (one matrix per worktree + regen-driven mtime bumps).
+# FIFO eviction is acceptable because the key includes mtime, so a
+# stale entry cannot shadow a fresh one — the new mtime produces a
+# different cache key.
+_MATRIX_CACHE_MAX_ENTRIES = 32
 
 
 # Back-compat alias: read_matrix historically returned a fresh init on miss.

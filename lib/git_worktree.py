@@ -116,7 +116,10 @@ def _branch_exists(repo_root: Path, branch: str,
 
     Used by `cut_worktree` to decide whether a failed
     `git worktree add -b` had a pre-existing branch that must NOT be
-    cleaned up by the caller.
+    cleaned up by the caller. Inspect 2026-08-27 overarch-2: the
+    public alias `branch_exists` is the entry point external callers
+    (e.g. `lib.acp_dispatch`) should use; this underscore form is kept
+    as a back-compat alias for the in-package call site at line 223.
     """
     completed = git_runner(
         ["git", "-C", str(repo_root), "rev-parse", "--verify",
@@ -124,6 +127,11 @@ def _branch_exists(repo_root: Path, branch: str,
         capture_output=True, text=True,
     )
     return completed.returncode == 0
+
+
+# inspect 2026-08-27 overarch-2: public alias so callers outside
+# `lib/` do not reach into the underscore-prefixed private symbol.
+branch_exists = _branch_exists
 
 
 def _remove_worktree_dir(repo_root: Path, worktree_path: Path,
@@ -245,6 +253,7 @@ def cut_worktree(
 __all__ = [
     "CutWorktreeResult",
     "WORKTREE_ROOT_NAME",
+    "branch_exists",
     "cut_worktree",
     "git_common_dir",
     "list_worktree_dirs",

@@ -39,6 +39,7 @@ from atomic import atomic_write_json, now_iso  # noqa: E402
 from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
     RUBRIC_REGISTRY,  # noqa: F401  -- re-exported; tests reference eval_runner.RUBRIC_REGISTRY
     CaseResult,
+    _coerce_score,
     exception_rot,
     mock_drift_warning,
     mock_skipped,
@@ -109,22 +110,6 @@ def no_fixtures_result(dim: str) -> CaseResult:
         raw=f"NO_FIXTURES: eval/cases/{dim}/ has zero case files",
         verdict="NO_FIXTURES", score=0.0,
     )
-
-
-def _coerce_score(raw: object) -> Optional[float]:
-    """Coerce a raw axis-score value to a float, or None on failure.
-
-    Shared between `_judge_case` (per-dim scores from the LLM) and
-    `run_golden_diff` (golden baseline scores from JSON). Returns None
-    for non-numeric inputs so the caller can skip the axis entirely
-    instead of silently treating bad data as 0.0.
-    """
-    if raw is None:
-        return None
-    try:
-        return float(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
 
 
 # ---------- discovery ----------
