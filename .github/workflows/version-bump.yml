@@ -154,21 +154,25 @@ jobs:
         env:
           NEXT: ${{ steps.next.outputs.version }}
           HEAD_REF: ${{ github.event.merge_group.head_ref }}
-          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           git add .claude-plugin/plugin.json .codex-plugin/plugin.json
           git commit -m "chore(release): bump dev-kit to v${NEXT}"
-          # Push the bump commit back to the merge_group head ref so
-          # the queue picks it up. Without this push the bump is
-          # local-only and the queue squashes/merges the un-bumped
-          # head_sha into main. The queue owns the merge into main;
-          # this push only updates the temp merge_group ref the queue
-          # is tracking. Using `secrets.DEV_KIT_GITHUB_TOKEN` (the
-          # admin PAT, configured for the checkout step) so the push
-          # bypasses the ruleset branch protection -- the merge_group
-          # ref is a queue-internal ref, not main.
-          git push origin "${HEAD_SHA}:${HEAD_REF}"
+          # Push the bump commit (the current local HEAD) back to the
+          # merge_group head_ref so the queue picks it up. Without this
+          # push the bump is local-only and the queue squashes/merges
+          # the un-bumped head_sha into main. The refspec MUST be
+          # `HEAD:<ref>` (not `${HEAD_SHA}:<ref>`): HEAD_SHA is the
+          # static pre-bump SHA captured from the webhook payload, so
+          # pushing it would deliver the old commit and exit 0 as an
+          # up-to-date no-op -- defeating the entire bump. The queue
+          # owns the merge into main; this push only updates the temp
+          # merge_group ref the queue is tracking. Using
+          # `secrets.DEV_KIT_GITHUB_TOKEN` (the admin PAT, configured
+          # for the checkout step) so the push bypasses the ruleset
+          # branch protection -- the merge_group ref is a queue-
+          # internal ref, not main.
+          git push origin "HEAD:${HEAD_REF}"
 
       - name: Emit annotated tag
         env:

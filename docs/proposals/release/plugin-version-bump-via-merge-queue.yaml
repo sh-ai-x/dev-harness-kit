@@ -208,10 +208,10 @@ PR #N open, branched from main at v0.3.K
   would be needed without the queue)
 - [merge_group webhook event](https://docs.github.com/en/webhooks/webhook-events-and-payloads#merge_group) —
   official webhook payload spec
-- [docs/reverts/2026-08-02-revert-eval-prs.md line 23](file:///Users/sanghee/dev/dev-harness-kit/docs/reverts/2026-08-02-revert-eval-prs.md) —
+- [docs/reverts/2026-08-02-revert-eval-prs.md line 23](../../../reverts/2026-08-02-revert-eval-prs.md) —
   internal: maintainer already flagged version-bump workflow as a
   workaround
-- [docs/skills/bump.md](file:///Users/sanghee/dev/dev-harness-kit/docs/skills/bump.md) —
+- [docs/skills/bump.md](../../../skills/bump.md) —
   internal: skill exists only because the workflow is racy
-- [`.github/workflows/version-bump.yml`](file:///Users/sanghee/dev/dev-harness-kit/.github/workflows/version-bump.yml) —
+- [`.github/workflows/version-bump.yml`](../../../.github/workflows/version-bump.yml) —
   current implementation being migrated

@@ -73,6 +73,16 @@ jobs:
   scope:
     name: scope (production-code diff sanity)
     runs-on: ubuntu-latest
+    # Read the merge-group base SHA from the webhook payload. This is
+    # the SHA the queue captured when it formed the group, so the
+    # diff stays stable for the lifetime of the queue run -- origin/main
+    # can advance underneath us (another PR in the same merge-group
+    # batch merged first) and would otherwise produce a false-positive
+    # scope block. Passed to the step via env because GitHub Actions
+    # does not expand ${{ }} expressions inside `run:` blocks except
+    # through env / secrets indirection. Pinned by tests/test_bump_workflow.py.
+    env:
+      MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -86,7 +96,7 @@ jobs:
         # don't have.
         run: |
           set -euo pipefail
-          BASE="$(git rev-parse origin/main~0 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)"
+          BASE="${MERGE_GROUP_BASE_SHA:?merge_group.base_sha is required (queue must supply it)}"
           DIFF_PATHS="$(git diff --name-only "$BASE" HEAD || true)"
           if [[ -z "$DIFF_PATHS" ]]; then
             echo "::notice::no diff against base (initial merge); skipping scope check"
