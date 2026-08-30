@@ -66,6 +66,13 @@ _COMMON_PREFIX = "${PLUGIN_ROOT}"
 # `bash ...` command. Captures the path the shell will execute.
 _SHELL_PATH_RE = re.compile(r"(?:\$\{[A-Z_]+\})?/?hooks/[A-Za-z0-9_.\-]+\.sh")
 
+# A leading `DEV_KIT_AGENT=<value> ` command prefix is an intentional,
+# expected divergence between the two manifests — each runtime stamps
+# its own identity so the harness-effectiveness stability submetric
+# (issue #663) can see which agent emitted an event. Strip it before
+# comparing triples, same as the plugin-root token substitution below.
+_DEV_KIT_AGENT_RE = re.compile(r"^DEV_KIT_AGENT=\S+ ")
+
 
 def _load_manifest(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
@@ -74,6 +81,7 @@ def _load_manifest(path: Path) -> dict:
 
 def _normalize_command(cmd: str) -> str:
     """Collapse plugin-root tokens so CC and Codex paths align."""
+    cmd = _DEV_KIT_AGENT_RE.sub("", cmd)
     return _CC_ROOT_RE.sub(_COMMON_PREFIX, cmd)
 
 
@@ -284,6 +292,27 @@ class TestHooksJsonParity(unittest.TestCase):
         # Already on Codex form — no-op.
         self.assertEqual(
             _normalize_command("bash ${PLUGIN_ROOT}/hooks/foo.sh"),
+            "bash ${PLUGIN_ROOT}/hooks/foo.sh",
+        )
+
+    def test_normalize_command_strips_dev_kit_agent_prefix(self):
+        """A leading `DEV_KIT_AGENT=<value> ` command prefix is an
+        intentional, expected divergence between the two manifests (each
+        runtime stamps its own identity for the harness-effectiveness
+        stability submetric, issue #663) — normalization must strip it so
+        CC's `DEV_KIT_AGENT=claude-code ...` and Codex's
+        `DEV_KIT_AGENT=codex ...` converge to the same triple.
+        """
+        self.assertEqual(
+            _normalize_command(
+                "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/foo.sh"
+            ),
+            "bash ${PLUGIN_ROOT}/hooks/foo.sh",
+        )
+        self.assertEqual(
+            _normalize_command(
+                "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/foo.sh"
+            ),
             "bash ${PLUGIN_ROOT}/hooks/foo.sh",
         )
 

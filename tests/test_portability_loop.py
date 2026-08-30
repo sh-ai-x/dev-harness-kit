@@ -45,6 +45,37 @@ class TestPortabilityCheck(unittest.TestCase):
             self.assertFalse(report["portable"])
             self.assertTrue(any("hook parity" in item for item in report["findings"]))
 
+    def test_dev_kit_agent_prefix_does_not_break_parity(self):
+        """A per-runtime `DEV_KIT_AGENT=<value> ` command prefix (added so
+        the harness-effectiveness stability submetric can see which agent
+        emitted an event) is an intentional, expected divergence between
+        the Claude and Codex hooks.json — the portability check must not
+        flag it as drift.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "hooks").mkdir()
+            (root / ".codex-plugin" / "hooks").mkdir(parents=True)
+            manifest = {"name": "dev-kit", "version": "1"}
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest))
+            (root / ".codex-plugin" / "plugin.json").write_text(json.dumps(manifest))
+            claude = {"hooks": {"Stop": [{"hooks": [{
+                "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/trace-session-end.sh"
+            }]}]}}
+            codex = {"hooks": {"Stop": [{"hooks": [{
+                "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/trace-session-end.sh"
+            }]}]}}
+            (root / "hooks" / "hooks.json").write_text(json.dumps(claude))
+            (root / ".codex-plugin" / "hooks" / "hooks.json").write_text(json.dumps(codex))
+            proc = subprocess.run(
+                [sys.executable, str(PORTABILITY), "--json", "--project-root", str(root)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertTrue(report["portable"], report["findings"])
+
 
 class TestLoopEngine(unittest.TestCase):
     def _fixture(self, features: list[dict], test_body: str = "") -> Path:

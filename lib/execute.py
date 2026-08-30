@@ -133,6 +133,17 @@ def _emit_effectiveness_event(
     subject_id = f"{phase}:step:{step_num}"
     ts = now_utc()
     event_id = new_event_id()
+    # Stamp the same runner identity `_agent_command` used to execute this
+    # step ("claude" or "codex"), normalized to the "claude-code"/"codex"
+    # convention the hooks.json producers use — the stability submetric
+    # (issue #663) needs at least one identity field on the event to
+    # count it as attributed. DEV_KIT_AGENT (if a caller already set it,
+    # e.g. via a wrapping hook) wins; DEV_KIT_BUILD_AGENT is the fallback
+    # since it's the field execute.py already reads to pick the runner.
+    build_agent = os.environ.get("DEV_KIT_BUILD_AGENT", "claude").strip().lower()
+    agent = os.environ.get(
+        "DEV_KIT_AGENT", "claude-code" if build_agent == "claude" else build_agent
+    )
     event = {
         "schema_version": 1,
         "event_id": event_id,
@@ -145,6 +156,7 @@ def _emit_effectiveness_event(
         "ts": ts,
         "outcome": outcome,
         "source": "lib.execute",
+        "agent": agent,
         "evidence_ref": evidence_ref,
     }
     try:
