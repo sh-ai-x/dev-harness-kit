@@ -39,27 +39,33 @@ open http://127.0.0.1:8765           # → 302 → /pr/<your-branch-PR>
 open http://127.0.0.1:8765/pr/725
 ```
 
-The page is **passive** on a manual visit — opening `/pr/<N>` does NOT
-auto-start the stream. The PR number input is pre-filled from
-`window.__PR_NUMBER__` (server injects on `/pr/<N>`) so the operator
-sees which PR they're looking at, but the actual review/security/
-maintenance judges only run when the operator clicks **Start**. This
-avoids the "GET-surprise-spawns-bash+claude" footgun and the stale-tab
-quota leak that an auto-start would invite on `/stream`.
+The page is a **pure read-only mirror** of `bin/babysit-pr-local.sh`'s
+own run. There is intentionally **no Start / Stop button** and no
+PR-number input — the HTML only follows `/pr/<N>/tail` (the server's
+read-only SSE route mirroring `.dev-kit/babysit-pr-local-live.log`).
+Clicking a Start button would spawn a duplicate `bin/review-local.sh`
+pipeline (and a second round of `claude -p` API spend) alongside the
+babysit session already running; the new design eliminates that
+footgun by removing the button. The PR number is server-injected via
+`window.__PR_NUMBER__`, so the operator never has to type one.
 
-`bin/babysit-pr-local.sh` is the one exception, and it does NOT use
-`/stream` for this: on every iteration it ensures this server is
-running, tees its own `bin/review-local.sh` run into
+`bin/babysit-pr-local.sh` ensures this server is running on every
+iteration, tees its own `bin/review-local.sh` run into
 `.dev-kit/babysit-pr-local-live.log`, and (once per PR per hour)
 opens `/pr/<N>?autostart=1` in the operator's browser. That URL
 injects `window.__AUTOSTART__ = true`, which makes the page connect
-to `/pr/<N>/tail` on load instead of waiting for a Start click.
-`/tail` is read-only — it mirrors the log babysit is already writing
-and never spawns `bin/review-local.sh` itself — so the auto-opened
-tab shows babysit's actual run live, without triggering a second,
-duplicate verdict pipeline (and a second round of `claude -p` spend)
-alongside the one babysit already started. Opt out with
-`BABYSIT_NO_VIEWER=1` (or it's skipped automatically under `$CI`).
+to `/pr/<N>/tail` on load. `/tail` is read-only — it mirrors the log
+babysit is already writing and never spawns `bin/review-local.sh`
+itself — so the auto-opened tab shows babysit's actual run live,
+without triggering a second, duplicate verdict pipeline alongside the
+one babysit already started. Opt out with `BABYSIT_NO_VIEWER=1` (or
+it's skipped automatically under `$CI`).
+
+If an operator needs to run a one-shot local review without
+babysit-pr-local, use `bin/review-local.sh --pr N` from a terminal.
+The HTML viewer is no longer a substitute for that — the trade-off
+is intentional: removing the manual control surface eliminates the
+duplicate-spawn footgun the babysit auto-open was designed to avoid.
 
 The page is single static HTML (`tools/review-local-preview.html`),
 no JS framework, no build step. Opening it on a phone (same network)
@@ -71,11 +77,24 @@ need an SSH tunnel for that (`ssh -L 8765:127.0.0.1:8765 …`).
 | Method | Path | Behavior |
 |--------|------|----------|
 | `GET`  | `/` | 302 → `/pr/<current-branch-PR>` (resolved via `gh`) |
-| `GET`  | `/pr/<N>` | Serves `tools/review-local-preview.html` (no PR lookup; the page does it client-side) |
-| `GET`  | `/pr/<N>/stream` | SSE: stdout of `bin/review-local.sh --pr N` line-by-line as JSON `data:` frames; EventSource auto-reconnects on transient drops; closing the tab kills the subprocess (SIGTERM → reaps) |
-| `GET`  | `/pr/<N>/tail` | SSE: read-only poll of `.dev-kit/babysit-pr-local-live.log`; NEVER spawns `bin/review-local.sh`. A `##BABYSIT-DONE exit_code=N##` sentinel line is converted to an `iteration_done` frame (not forwarded as raw stdout) and the poll keeps running — this is what `?autostart=1` connects to |
+| `GET`  | `/pr/<N>` | Serves `tools/review-local-preview.html` with `window.__PR_NUMBER__ = N` injected. The page is a passive mirror of `/pr/<N>/tail` (never `/stream`) — it has no Start/Stop buttons and no PR-number input that could route to `/stream`. |
+| `GET`  | `/pr/<N>/stream` | SSE: stdout of `bin/review-local.sh --pr N` line-by-line as JSON `data:` frames. Reserved for power users / future manual-trigger flows. **Not used by the HTML viewer** (the page never connects here) and not used by `bin/babysit-pr-local.sh` either — the auto-opened babysit tab connects to `/tail`. Direct CLI: `curl -N http://127.0.0.1:8765/pr/<N>/stream`. |
+| `GET`  | `/pr/<N>/tail` | SSE: read-only poll of `.dev-kit/babysit-pr-local-live.log`; NEVER spawns `bin/review-local.sh`. A `##BABYSIT-DONE exit_code=N##` sentinel line is converted to an `iteration_done` frame (not forwarded as raw stdout) and the poll keeps running — this is what the HTML viewer (auto-opened or manually visited) connects to. |
 | `GET`  | `/healthz` | JSON: `{status: ok, active_streams: N}` for liveness probes |
 | any    | anything else | 404 |
+
+## Screenshot
+
+`tools/review-local-preview.html` rendered against a sample run of
+`bin/babysit-pr-local.sh --pr 725`:
+
+![babysit-pr-local mirror](tools/review-local-preview.png)
+
+The screenshot shows the three gate dots (review / security /
+maintenance) and the live stdout below. The header banner makes the
+"read-only" contract explicit; there is intentionally no Start / Stop
+button visible. To regenerate after HTML changes, run
+`tools/render_review_local_screenshot.py` (a Playwright capture script).
 
 ## Safety properties
 
