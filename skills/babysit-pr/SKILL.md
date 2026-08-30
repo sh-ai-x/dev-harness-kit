@@ -76,6 +76,14 @@ re-verify that candidate with fresh `gh pr view` data before acting. Pass
 | `--local-verify`           | **Optional additive flag** (default behavior unchanged when absent). After §Algorithm step 7 (APPLY FIX) and **before** step 9 (COMMIT + PUSH), run `--local-test-cmd` (default `pytest -q`) inside the worktree. If the test command exits non-zero, abort the iteration **before** `git add` / `git commit` / `git push` — no commit, no push, no GH-Actions run consumed. The §Algorithm step 8 (VERIFY LOCAL — re-run the specific failing check) is preserved alongside; this flag adds a *broader* pre-commit check, not a replacement. Use when GH-Actions minutes are tight and the operator wants to gate iteration on local test passage without burning CI on a known-failing commit. |
 | `--local-test-cmd "<cmd>"` | Shell command for `--local-verify` to run inside the worktree. Defaults to `pytest -q`. The command's stdout+stderr MUST include a pytest-style tail line (`<N> passed in <Ns>s` or `<N> failed in <Ns>s`) per MUST-L3; if the quoted line is missing, the iteration refuses to flip to "ready to push". |
 
+### Session gate mode (workflow-fast-mode-lean)
+
+When `python3 -m lib.harness_mode_state get babysit_pr` returns `manual`
+(set via `/dev-kit:harness-mode fast` or `custom`), run `gh pr checks` once,
+print the result, and exit — do not enter the poll/auto-fix loop. This is a
+session-scoped opt-out for local iteration; it does not change the default
+(`full` — the normal poll-and-fix loop below) and never affects CI.
+
 Target precedence is: `--pr N` → an explicitly identified `CONVERSATION_PR` →
 the current branch's PR → main-checkout candidate resolution. A conversation
 handoff is valid only when the number was explicitly stated or returned by the
