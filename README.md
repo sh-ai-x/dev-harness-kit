@@ -628,11 +628,17 @@ claude plugin install dev-kit
 # (live source instead: claude --plugin-dir /path/to/dev-harness-kit)
 
 # 3. One-shot setup: CLAUDE.md + AGENTS.md + hook config + CI templates
-/dev-kit:bootstrap (with ci-setup prompt)
+#    (also offers to set operator-global git defaults like
+#     rebase.autoStash=true -- see bin/setup-git-defaults.sh)
+/dev-kit:bootstrap (with ci-setup prompt + git-defaults prompt)
 
 # 4. First commit + push
 git add -A && git commit -m "chore: bootstrap dev-kit"
 git push -u origin main
+
+# 4a. (Optional, idempotent) Re-apply git defaults later
+bin/setup-git-defaults.sh --check   # see what is missing
+bin/setup-git-defaults.sh           # re-apply
 ```
 
 **Use `--force` on the very first install** (`/dev-kit:ci-setup --force`, which

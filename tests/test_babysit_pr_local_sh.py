@@ -1,9 +1,11 @@
 """test_babysit_pr_local_sh.py — shell-level tests for bin/babysit-pr-local.sh.
 
 The wrapper is a thin single-call orchestrator: validate args, refuse
-any --auto-approve, then `exec bin/review-local.sh --pr $1`. Tests
-pin the structural contract and the exit-code propagation by stubbing
-the downstream script in a tmpdir.
+any --auto-approve, run `bin/review-local.sh --pr $1` (mirrored into
+`.dev-kit/babysit-pr-local-live.log` for the HTML viewer's read-only
+`/tail` route), then propagate the downstream exit code. Tests pin the
+structural contract and the exit-code propagation by installing a fake
+downstream script in a tmpdir.
 
 Coverage:
   - script_exists / script_is_executable / bash -n syntax check.
@@ -12,6 +14,19 @@ Coverage:
   - --auto-appearing anywhere in argv -> exit 2 (refused, NEVER forwarded).
   - exit code from bin/review-local.sh propagates 1:1 (0 / 1).
   - bin/review-local.sh receives --pr N verbatim (no auto-approve leak).
+  - the live log is created/truncated per run and ends with the
+    ##BABYSIT-DONE exit_code=N## sentinel the HTML viewer's tail route
+    watches for.
+  - the viewer auto-launch block is a graceful no-op when
+    bin/review-local-server.py is absent (as in this tmpdir).
+
+Every test in TestWrapperDelegation sets BABYSIT_NO_VIEWER=1 by
+default so the suite never depends on -- or interferes with -- a real
+review-local-server.py that might already be running on the developer's
+machine (which would otherwise pop an actual browser tab mid-test-run).
+The one exception, test_viewer_wiring_is_graceful_noop_without_server_script,
+explicitly leaves the viewer wiring enabled to prove it degrades safely
+on its own when the server script is missing.
 """
 from __future__ import annotations
 
@@ -19,6 +34,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -134,6 +150,13 @@ class TestWrapperDelegation(unittest.TestCase):
     def _run_wrapper(self, *args: str, stub_exit: int = 0) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["BABYSIT_STUB_EXIT"] = str(stub_exit)
+        # Disable the viewer auto-launch block by default: it's
+        # exercised on its own in test_viewer_wiring_is_graceful_noop_
+        # without_server_script. Without this, a real
+        # review-local-server.py already running on the developer's
+        # machine (default port 8765) could make these tests actually
+        # pop a browser tab.
+        env.setdefault("BABYSIT_NO_VIEWER", "1")
         # Truncate the call log between runs.
         if self.call_log.exists():
             self.call_log.unlink()
@@ -179,6 +202,79 @@ class TestWrapperDelegation(unittest.TestCase):
         log_text = self.call_log.read_text(encoding="utf-8")
         self.assertNotIn("--auto-approve", log_text)
         self.assertNotIn("STUB_LEAKED_AUTO_APPROVE", log_text)
+
+    def _live_log_path(self) -> Path:
+        return self.bindir.parent / ".dev-kit" / "babysit-pr-local-live.log"
+
+    def test_live_log_created_with_stdout_and_done_sentinel(self) -> None:
+        """The live log must be created, mirror the downstream script's
+        stdout via `tee`, and end with a `##BABYSIT-DONE
+        exit_code=N##` sentinel -- the marker
+        bin/review-local-server.py's `/pr/<N>/tail` route watches for
+        to emit `iteration_done` instead of forwarding it as raw
+        stdout.
+        """
+        r = self._run_wrapper("123", stub_exit=0)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        live_log = self._live_log_path()
+        self.assertTrue(live_log.exists(), f"live log missing: {live_log}")
+        log_text = live_log.read_text(encoding="utf-8")
+        self.assertTrue(
+            log_text.rstrip().endswith("##BABYSIT-DONE exit_code=0##"),
+            f"live log must end with the done sentinel; got tail: {log_text[-200:]!r}",
+        )
+
+    def test_live_log_sentinel_reflects_nonzero_exit(self) -> None:
+        r = self._run_wrapper("456", stub_exit=1)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        log_text = self._live_log_path().read_text(encoding="utf-8")
+        self.assertTrue(log_text.rstrip().endswith("##BABYSIT-DONE exit_code=1##"))
+
+    def test_live_log_truncated_between_iterations(self) -> None:
+        """The babysit LOOP calls this wrapper once per iteration
+        (SKILL.md step 4L); the live log must reflect only the CURRENT
+        iteration, not accumulate stale content from a prior run.
+        """
+        self._run_wrapper("123", stub_exit=0)
+        first_run_bytes = self._live_log_path().stat().st_size
+        self._run_wrapper("123", stub_exit=0)
+        second_run_bytes = self._live_log_path().stat().st_size
+        self.assertEqual(
+            first_run_bytes, second_run_bytes,
+            "live log grew across iterations -- it must be truncated at the start of each run",
+        )
+
+    def test_viewer_wiring_is_graceful_noop_without_server_script(self) -> None:
+        """bin/review-local-server.py does not exist in this tmpdir
+        (only the wrapper + a fake review-local.sh are installed). The
+        viewer auto-launch block must still degrade fast and never
+        block or corrupt the verdict pipeline's exit code.
+        """
+        env = os.environ.copy()
+        env["BABYSIT_STUB_EXIT"] = "0"
+        env["BABYSIT_VIEWER_PORT"] = "18765"
+        if self.call_log.exists():
+            self.call_log.unlink()
+        start = time.monotonic()
+        r = subprocess.run(
+            ["bash", str(self.wrapper), "123"],
+            cwd=self.bindir,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=15,
+        )
+        elapsed = time.monotonic() - start
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertLess(
+            elapsed, 10,
+            f"viewer wiring must degrade fast when the server script is absent; took {elapsed:.1f}s",
+        )
+        viewer_marker = self.bindir.parent / ".dev-kit" / "babysit-pr-local-viewer-opened.123"
+        self.assertFalse(
+            viewer_marker.exists(),
+            "no browser tab should be recorded as opened when the server never came up",
+        )
 
 
 if __name__ == "__main__":

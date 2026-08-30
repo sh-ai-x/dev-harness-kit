@@ -190,6 +190,109 @@ class TestReviewLocalServer(unittest.TestCase):
             # The injected PR-number script must appear in <body>.
             self.assertIn("window.__PR_NUMBER__ = 725;", body)
 
+    def test_pr_page_autostart_query_injects_flag(self) -> None:
+        """`?autostart=1` (the URL bin/babysit-pr-local.sh opens) must
+        inject `window.__AUTOSTART__ = true;` so the page's JS connects
+        to the read-only `/tail` route on load without a click.
+        """
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725?autostart=1", timeout=3) as r:
+            body = r.read().decode("utf-8")
+        self.assertIn("window.__AUTOSTART__ = true;", body)
+        self.assertIn("window.__PR_NUMBER__ = 725;", body)
+
+    def test_autostart_keeps_start_disabled_on_tail_onerror(self) -> None:
+        """M1 regression: when ?autostart=1 is set, the page's `onerror`
+        recovery paths (both `sawAnyOutput` and the 5s stuck branch) must
+        NOT re-enable the Start button. Re-enabling would let a tail
+        disconnect route the operator back to /stream, which re-spawns
+        review-local.sh — the exact footgun the autostart path is built
+        to prevent. The Start button must mirror the autostart flag in
+        BOTH the initial click handler and the onerror branches.
+        """
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725?autostart=1", timeout=3) as r:
+            body = r.read().decode("utf-8")
+        # Locate the two onerror branches that previously set
+        # `startBtn.disabled = false;` unconditionally.
+        import re
+        saw_branch = re.search(
+            r"if \(sawAnyOutput\) \{.*?startBtn\.disabled = ([^;]+);",
+            body,
+            re.DOTALL,
+        )
+        stuck_branch = re.search(
+            r"Date\.now\(\) - stuckSince > 5000.*?startBtn\.disabled = ([^;]+);",
+            body,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(saw_branch, "sawAnyOutput onerror branch not found")
+        self.assertIsNotNone(stuck_branch, "5s stuck branch not found")
+        for branch in (saw_branch, stuck_branch):
+            rhs = branch.group(1).strip()
+            # The RHS must reference __AUTOSTART__, not be a bare `false`.
+            self.assertIn(
+                "__AUTOSTART__",
+                rhs,
+                f"Start button is unconditionally re-enabled: `{rhs}`. "
+                "M1: must mirror the autostart flag.",
+            )
+
+    def test_pr_page_without_autostart_query_omits_flag(self) -> None:
+        """A manual visit to `/pr/<N>` (no query string) stays the
+        passive viewer -- no autostart flag, streaming only starts on
+        a Start click.
+        """
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725", timeout=3) as r:
+            body = r.read().decode("utf-8")
+        # The JS always REFERENCES window.__AUTOSTART__ (it's a static
+        # conditional in the page's script); what must be absent is the
+        # server-injected ASSIGNMENT that flips it true.
+        self.assertNotIn("window.__AUTOSTART__ = true;", body)
+
+    def test_tail_route_streams_existing_log_and_never_spawns_review_local(self) -> None:
+        """`/pr/<N>/tail` must follow `.dev-kit/babysit-pr-local-live.log`
+        read-only and NEVER spawn `bin/review-local.sh` -- that's what
+        lets babysit-pr-local's auto-opened browser tab mirror an
+        in-flight run without triggering a second, duplicate verdict
+        pipeline (and a second round of API spend).
+
+        We pre-populate the log with two marker lines plus a
+        `##BABYSIT-DONE exit_code=0##` sentinel (the line
+        bin/babysit-pr-local.sh appends after each iteration), then
+        assert: the two lines arrive verbatim as `stdout` frames, the
+        sentinel is converted to a single `iteration_done` frame (not
+        forwarded as raw stdout), and -- the hermeticity check -- the
+        fake review-local.sh's `STUB_INVOKED` marker never appears,
+        proving review-local.sh was never invoked.
+        """
+        log_path = self._fake_root / ".dev-kit" / "babysit-pr-local-live.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            "TAIL_MARKER_LINE_1\nTAIL_MARKER_LINE_2\n##BABYSIT-DONE exit_code=0##\n",
+            encoding="utf-8",
+        )
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/pr/999/tail",
+            headers={"Accept": "text/event-stream"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)  # type: ignore[assignment]
+        try:
+            # ready + 2 stdout + 1 iteration_done = 4 frames.
+            frames = _read_sse_frames(resp, max_frames=4, timeout=8)
+        finally:
+            with contextlib.suppress(Exception):
+                resp.close()
+        events = [f.get("event") for f in frames]
+        self.assertEqual(events[0], "ready", f"first frame should be ready, got {frames[:2]!r}")
+        stdout_lines = [f.get("line") for f in frames if f.get("event") == "stdout"]
+        self.assertEqual(stdout_lines, ["TAIL_MARKER_LINE_1", "TAIL_MARKER_LINE_2"])
+        iter_frames = [f for f in frames if f.get("event") == "iteration_done"]
+        self.assertEqual(len(iter_frames), 1, f"expected exactly one iteration_done frame, got {frames!r}")
+        self.assertEqual(iter_frames[0].get("exit_code"), 0)
+        self.assertNotIn(
+            "STUB_INVOKED", stdout_lines,
+            "tail route must never spawn bin/review-local.sh (hermeticity broken)",
+        )
+
     def test_stream_emits_ready_stdout_done(self) -> None:
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/pr/725/stream",

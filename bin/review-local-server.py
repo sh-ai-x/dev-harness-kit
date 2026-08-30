@@ -19,6 +19,14 @@ exposes:
                       streamed line-by-line as SSE `data:` frames. The client
                       EventSource handler appends each frame to the per-gate
                       <pre> region in the HTML.
+  GET /pr/<N>/tail
+                   -> Server-Sent Events: read-only tail of
+                      `.dev-kit/babysit-pr-local-live.log` via `tail -F`.
+                      NEVER spawns `bin/review-local.sh` itself -- this is
+                      what `bin/babysit-pr-local.sh` opens automatically
+                      (`?autostart=1` on `/pr/<N>`) so the operator's
+                      browser mirrors an in-flight babysit iteration
+                      without triggering a second, duplicate verdict run.
 
 Why stdlib (not Flask):
 
@@ -148,6 +156,25 @@ _stream_start_monotonic: float = 0.0
 # a stream slot forever (review finding m1 on PR #731).
 PROC_TIMEOUT_SECONDS = 600
 
+# `.dev-kit/babysit-pr-local-live.log` -- bin/babysit-pr-local.sh tees its
+# own review-local.sh run into this file. `/pr/<N>/tail` follows it
+# read-only; it is what lets the auto-opened browser mirror an in-flight
+# babysit iteration without spawning a second, duplicate verdict run.
+LIVE_LOG_PATH = PROJECT_ROOT / ".dev-kit" / "babysit-pr-local-live.log"
+
+# The tail route has no LLM judge running under it -- `tail -F` is
+# near-free. Bound only by an abandoned browser tab that never
+# disconnects, not by a hung `claude -p` (that's PROC_TIMEOUT_SECONDS,
+# which governs /stream instead). Generous enough to span a whole
+# multi-iteration babysit session.
+TAIL_TIMEOUT_SECONDS = 6 * 60 * 60
+
+# Sentinel line bin/babysit-pr-local.sh appends to LIVE_LOG_PATH after
+# each iteration's review-local.sh run exits. Recognized here and
+# converted to an `iteration_done` SSE frame instead of being forwarded
+# as a raw `stdout` line.
+_BABYSIT_DONE_RE = re.compile(r"^##BABYSIT-DONE exit_code=(-?\d+)##$")
+
 
 def _register_proc(proc: subprocess.Popen) -> None:
     with _active_procs_lock:
@@ -269,30 +296,44 @@ class _Handler(BaseHTTPRequestHandler):
             # No PR resolvable; serve the HTML with the empty-state form.
             self._serve_preview_html()
             return
-        pr_match = re.fullmatch(r"/pr/(\d+)(?:/stream)?", path)
+        pr_match = re.fullmatch(r"/pr/(\d+)(?:/(stream|tail))?", path)
         if not pr_match:
-            self.send_error(404, "not found; try /, /pr/<N>, /pr/<N>/stream, /healthz")
+            self.send_error(404, "not found; try /, /pr/<N>, /pr/<N>/stream, /pr/<N>/tail, /healthz")
             return
         pr_number = int(pr_match.group(1))
-        if path.endswith("/stream"):
+        mode = pr_match.group(2)
+        if mode == "stream":
             self._stream_review_local(pr_number)
             return
-        # Render the HTML; the page's JS opens an EventSource to /stream.
-        self._serve_preview_html(pr_number=pr_number)
+        if mode == "tail":
+            self._tail_babysit_log(pr_number)
+            return
+        # Render the HTML; the page's JS opens an EventSource to
+        # /stream (manual Start) or /tail (?autostart=1, read-only mirror).
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        autostart = query.get("autostart", ["0"])[0] == "1"
+        self._serve_preview_html(pr_number=pr_number, autostart=autostart)
 
     # ------------------------------------------------------------------
     # Static HTML.
     # ------------------------------------------------------------------
-    def _serve_preview_html(self, pr_number: int | None = None) -> None:
+    def _serve_preview_html(self, pr_number: int | None = None, autostart: bool = False) -> None:
         if not PREVIEW_HTML.exists():
             self.send_error(500, f"preview HTML missing: {PREVIEW_HTML}")
             return
         body = PREVIEW_HTML.read_bytes()
-        # Inject the PR number into the page so the JS knows the default
-        # stream target before the EventSource opens. A small <script>
-        # tag at the top of <body> avoids a round-trip to /pr/<N>/detect.
+        # Inject the PR number (and, for the auto-opened babysit tab, an
+        # autostart flag) into the page so the JS knows the stream target
+        # -- and whether to connect on its own -- before the EventSource
+        # opens. A small <script> tag at the top of <body> avoids a
+        # round-trip to /pr/<N>/detect.
+        injects = []
         if pr_number is not None:
-            inject = f'<script>window.__PR_NUMBER__ = {pr_number};</script>'.encode()
+            injects.append(f"window.__PR_NUMBER__ = {pr_number};")
+        if autostart:
+            injects.append("window.__AUTOSTART__ = true;")
+        if injects:
+            inject = ("<script>" + " ".join(injects) + "</script>").encode()
             body = body.replace(b"<body>", b"<body>" + inject, 1)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -505,6 +546,135 @@ class _Handler(BaseHTTPRequestHandler):
                 _unregister_proc(proc)
             except NameError:
                 pass
+            _decrement_active_streams()
+
+    # ------------------------------------------------------------------
+    # Read-only log tail (never spawns review-local.sh).
+    # ------------------------------------------------------------------
+    def _tail_babysit_log(self, pr_number: int) -> None:
+        """Read-only mirror of `.dev-kit/babysit-pr-local-live.log`.
+
+        Unlike `_stream_review_local`, this route NEVER spawns
+        `bin/review-local.sh` -- it polls the log file that
+        `bin/babysit-pr-local.sh` already tees its own run into. This
+        is what lets the auto-opened browser tab (`?autostart=1`)
+        mirror an in-flight babysit iteration in real time without
+        triggering a second, duplicate verdict pipeline run (and a
+        second round of `claude -p` API spend) alongside the one
+        babysit already started.
+
+        Implementation note: an earlier draft spawned `tail -F` as a
+        subprocess (mirroring `_stream_review_local`'s pattern). That
+        stalled after the first line in manual testing on macOS --
+        BSD `tail` fully-buffers stdout when it isn't a tty, so a
+        small file's remaining bytes sat in `tail`'s own libc buffer
+        indefinitely (nothing forced a flush while `-F` keeps running
+        forever). Polling the file directly in this thread sidesteps
+        that: no subprocess, no stdio buffering to fight, and file
+        truncation (bin/babysit-pr-local.sh truncates the log at the
+        start of every iteration) is trivial to detect via `st_size`.
+
+        `bin/babysit-pr-local.sh` appends a `##BABYSIT-DONE
+        exit_code=N##` sentinel line after each iteration's
+        `review-local.sh` run exits. This handler recognizes that
+        line, converts it to an `iteration_done` SSE frame (NOT the
+        terminal `done` frame -- the babysit loop may run many more
+        iterations), and keeps polling so the same tab stays live
+        across the whole session.
+        """
+        if not _increment_active_streams():
+            self._send_json(503, {"error": f"at capacity ({MAX_CONCURRENT_STREAMS} streams)"})
+            return
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            self._write_sse({"event": "ready", "pr": pr_number, "mode": "tail"})
+
+            # A manual visit ahead of the first babysit iteration (or
+            # a fresh checkout) should not 500 -- touch the file into
+            # existence instead. bin/babysit-pr-local.sh normally
+            # creates it first anyway.
+            LIVE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LIVE_LOG_PATH.touch(exist_ok=True)
+
+            import selectors
+            sel = selectors.DefaultSelector()
+            has_conn = True
+            try:
+                sel.register(self.connection, selectors.EVENT_READ)
+            except (OSError, ValueError, AttributeError):
+                # Some test harnesses don't set self.connection.
+                has_conn = False
+
+            start_monotonic = time.monotonic()
+            client_gone = False
+            timed_out = False
+            pos = 0
+            buf = ""
+            while True:
+                elapsed = time.monotonic() - start_monotonic
+                if elapsed > TAIL_TIMEOUT_SECONDS:
+                    timed_out = True
+                    break
+                if has_conn:
+                    # Short poll interval so new log lines show up
+                    # promptly; also the mechanism for noticing a
+                    # tab-close / navigation (readable + empty recv).
+                    for key, _mask in sel.select(timeout=0.4):
+                        if key.fileobj is self.connection:
+                            try:
+                                data = self.connection.recv(1)
+                            except (BlockingIOError, OSError):
+                                continue
+                            if not data:
+                                client_gone = True
+                else:
+                    time.sleep(0.4)
+                if client_gone:
+                    break
+
+                try:
+                    size = LIVE_LOG_PATH.stat().st_size
+                except OSError:
+                    continue
+                if size < pos:
+                    # A new babysit iteration truncated the log --
+                    # restart from the top of the fresh content.
+                    pos = 0
+                    buf = ""
+                if size <= pos:
+                    continue
+                with LIVE_LOG_PATH.open("r", encoding="utf-8", errors="replace") as f:
+                    f.seek(pos)
+                    buf += f.read()
+                    pos = f.tell()
+                while "\n" in buf:
+                    text, buf = buf.split("\n", 1)
+                    m = _BABYSIT_DONE_RE.match(text)
+                    try:
+                        if m:
+                            self._write_sse({"event": "iteration_done", "exit_code": int(m.group(1))})
+                        else:
+                            self._write_sse({"event": "stdout", "line": text})
+                    except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+                        client_gone = True
+                        break
+                if client_gone:
+                    break
+
+            if timed_out:
+                try:
+                    self._write_sse({"event": "done", "exit_code": -9, "reason": "tail-timeout"})
+                except (BrokenPipeError, ConnectionResetError, ValueError, OSError):
+                    pass
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
             _decrement_active_streams()
 
     # ------------------------------------------------------------------

@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,37 +35,37 @@ from pathlib import Path
 #   * Test harness / consumer invocation (this module loaded as a top-level
 #     module via importlib.util.spec_from_file_location, with `lib/` on
 #     sys.path): the absolute `from ci_setup import` resolves directly.
-try:
-    from .ci_setup import (  # type: ignore  # noqa: E402
-        PROVIDER_SECRETS,
-        check_provider_consistency,
-        detect_owner_repo,
-        gh_secret_set_command,
-        read_env_key,
-        read_provider,
-        required_secrets_for_provider,
-    )
-except ImportError:
-    from ci_setup import (  # type: ignore  # noqa: E402
-        PROVIDER_SECRETS,
-        check_provider_consistency,
-        detect_owner_repo,
-        gh_secret_set_command,
-        read_env_key,
-        read_provider,
-        required_secrets_for_provider,
-    )
+# Centralized dual-import shim (inspect 2026-08-27 dup-5). One helper
+# instead of N hand-copied try/except blocks across ci_setup / ci_doctor
+# / ci_update.
+from lib.dual_import import from_dual, from_dual_optional
+from lib.gh_cli import gh_available
 
-try:
-    from .ci_update import diff_ci_install  # type: ignore  # noqa: E402
-except ImportError:
-    try:
-        from ci_update import diff_ci_install  # type: ignore  # noqa: E402
-    except ImportError:
-        # ci_update may not be installed in the source-repo checkout
-        # (the plugin is its own dev environment; tests still run). The
-        # check returns SKIP in that case so ci-doctor stays usable.
-        diff_ci_install = None  # type: ignore
+(
+    PROVIDER_SECRETS,
+    check_provider_consistency,
+    detect_owner_repo,
+    gh_secret_set_command,
+    read_env_key,
+    read_provider,
+    required_secrets_for_provider,
+) = from_dual(
+    "ci_setup",
+    [
+        "PROVIDER_SECRETS",
+        "check_provider_consistency",
+        "detect_owner_repo",
+        "gh_secret_set_command",
+        "read_env_key",
+        "read_provider",
+        "required_secrets_for_provider",
+    ],
+)
+
+# ci_update may not be installed in the source-repo checkout (the plugin
+# is its own dev environment; tests still run). The check returns SKIP
+# in that case so ci-doctor stays usable.
+(diff_ci_install,) = from_dual_optional("ci_update", ["diff_ci_install"])
 
 
 @dataclass
@@ -525,18 +524,9 @@ def _list_repo_secrets(repo: str) -> tuple[set[str], str]:
     rather than a FAIL (the user might just not be running this locally
     with gh auth).
     """
-    gh = shutil.which("gh")
+    gh, degraded = gh_available(timeout=10)
     if not gh:
-        return set(), "gh not on PATH"
-    try:
-        cp = subprocess.run(
-            [gh, "auth", "status"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if cp.returncode != 0:
-            return set(), "gh not authenticated"
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return set(), f"gh auth error: {e}"
+        return set(), degraded or "gh not on PATH"
     try:
         cp = subprocess.run(
             [gh, "secret", "list", "--repo", repo, "--json", "name"],
@@ -752,18 +742,12 @@ def _check_secrets(target: Path, provider: str | None,
 
 
 def _check_gh_auth() -> Check:
-    gh = shutil.which("gh")
+    gh, degraded = gh_available(timeout=5)
     if not gh:
-        return Check("gh CLI", "SKIP", "gh not on PATH")
-    try:
-        cp = subprocess.run(
-            [gh, "auth", "status"], capture_output=True, text=True, timeout=5,
-        )
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return Check("gh auth", "FAIL", f"gh auth error: {e}")
+        return Check("gh CLI", "SKIP", degraded or "gh not on PATH")
     return Check(
-        "gh auth", "PASS" if cp.returncode == 0 else "FAIL",
-        (cp.stderr or "").strip() if cp.returncode != 0 else "",
+        "gh auth", "PASS",
+        "" if not degraded else degraded,
     )
 
 
@@ -1042,9 +1026,9 @@ def _fetch_required_status_checks(repo: str) -> tuple[set[str], str]:
     newer GitHub responses. On either-or-both failure, returns an empty
     set and a degraded message so the caller can SKIP rather than FAIL.
     """
-    gh = shutil.which("gh")
+    gh, degraded = gh_available(timeout=10)
     if not gh:
-        return set(), "gh not on PATH"
+        return set(), degraded or "gh not on PATH"
 
     def _run(jq_expr: str) -> tuple[set[str], bool]:
         try:
@@ -1174,9 +1158,9 @@ def _fetch_open_pr_state(target: Path) -> tuple[dict, str]:
     PR open for the current branch, JSON parse failed, or detached
     HEAD). Caller emits a single SKIP row in that case.
     """
-    gh = shutil.which("gh")
+    gh, degraded = gh_available(timeout=10)
     if not gh:
-        return {}, "gh not on PATH"
+        return {}, degraded or "gh not on PATH"
     # Detect current branch via `git rev-parse --abbrev-ref HEAD`.
     try:
         cp = subprocess.run(

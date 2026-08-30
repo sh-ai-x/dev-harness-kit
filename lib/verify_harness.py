@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analysis_core.runner import _mask_secrets  # noqa: E402 — reuse the repo's one secret-redaction pass
+from analysis_core import (
+    mask_secrets as _mask_secrets,  # noqa: E402 — reuse the repo's one secret-redaction pass (promoted from private in inspect 2026-08-27 overarch-1)
+)
 from repair_coordinator import failure_signature  # noqa: E402
 
 _VERIFICATION_HEADING_RE = re.compile(

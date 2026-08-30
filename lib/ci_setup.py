@@ -40,11 +40,20 @@ from typing import List, Tuple
 # Atomic write helper. Dual-import supports both shapes:
 #   * source repo: `lib/__init__.py` makes `lib` a package, so intra-package
 #     `from .atomic import` resolves.
-#   * consumer repo: `lib/install.sh` copies `ci_setup.py` + `atomic.py` to
-#     `<target>/lib/` without `__init__.py`, so the package form fails and
-#     we fall back to a top-level `from atomic import` (works when
-#     `<target>/` is on sys.path, which the consumer-side invocations
-#     guarantee).
+#   * flat layout: `ci_setup.py` is imported with `<target>/lib` itself on
+#     sys.path and no `__init__.py` in scope, so the package form fails and
+#     we fall back to a top-level `from atomic import`.
+#
+# ci_setup.py stays on the inline try/except (rather than the centralized
+# helper in `lib/dual_import.py`) because the bare-import regression
+# fixture at `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`
+# stages a 3-file minimal bundle (`ci_setup.py` + `atomic.py` +
+# `read_env_key.py`) with no `lib/__init__.py` and no sibling modules.
+# `lib/install.sh:53-55` itself copies ALL `lib/*.py`, so the constraint
+# is the fixture's minimal bundle, not the installer. Importing
+# `lib/dual_import.py` here would break that fixture; the helper is
+# reserved for in-package callers (ci_doctor, ci_update).
+# inspect 2026-08-27 dup-5.
 try:
     from .atomic import atomic_write_json, read_json_or_default  # type: ignore
 except ImportError:
@@ -57,6 +66,40 @@ try:
     from .read_env_key import read_env_key as _read_env_key_helper  # type: ignore
 except ImportError:
     from read_env_key import read_env_key as _read_env_key_helper  # type: ignore
+
+# Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
+# lives at `lib/gh_cli.py`. The in-package form is preferred; the inline
+# fallback below exists for the flat 3-file bundle staged by
+# `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`
+# (`ci_setup.py` + `atomic.py` + `read_env_key.py`, no `lib/__init__.py`,
+# no sibling modules), where neither `lib.gh_cli` nor a bare `gh_cli`
+# resolves. `lib/install.sh:53-55` copies ALL `lib/*.py`, so a real
+# consumer install DOES get `gh_cli.py` and takes the import branch.
+# DRIFT RISK: no test asserts the fallback body stays byte-equivalent to
+# `lib/gh_cli.py:gh_available`; keep the two in sync by hand, or add
+# `gh_cli.py` to the fixture bundle and delete the fallback outright.
+try:
+    from lib.gh_cli import gh_available  # type: ignore
+except ImportError:
+    # Flat layout: ship a local re-implementation so the call site stays
+    # a one-liner. Mirrors `lib/gh_cli.py:gh_available` exactly.
+    import shutil as _shutil  # type: ignore
+    import subprocess as _subprocess  # type: ignore
+
+    def gh_available(*, timeout: int = 10):  # type: ignore
+        gh = _shutil.which("gh")
+        if not gh:
+            return None, "gh not on PATH"
+        try:
+            cp = _subprocess.run(
+                [gh, "auth", "status"],
+                capture_output=True, text=True, timeout=timeout, check=False,
+            )
+        except (_subprocess.SubprocessError, _subprocess.TimeoutExpired, OSError) as e:
+            return None, f"gh auth error: {type(e).__name__}"
+        if cp.returncode != 0:
+            return None, "gh not authenticated"
+        return gh, ""
 
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -448,18 +491,9 @@ def _read_ci_provider_via_gh() -> tuple[str, str]:
     are caught and surfaced as degraded messages using the exception
     *type* name only (the full repr can include fragments of argv).
     """
-    gh = shutil.which("gh")
+    gh, degraded = gh_available(timeout=10)
     if not gh:
-        return "", "gh not on PATH"
-    try:
-        auth_cp = subprocess.run(
-            [gh, "auth", "status"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return "", f"gh auth error: {type(e).__name__}"
-    if auth_cp.returncode != 0:
-        return "", "gh not authenticated"
+        return "", degraded or "gh not on PATH"
     try:
         cp = subprocess.run(
             [gh, "variable", "get", "CI_REVIEW_PROVIDER"],
