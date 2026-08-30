@@ -188,11 +188,7 @@ jobs:
           printf '%s\n' "$RAW"
           echo "EOF"
 
-          VERDICT="$(printf '%s' "$RAW" | python3 -c 'import json,sys
-try:
-    print(json.load(sys.stdin).get("verdict","Changes Requested"))
-except Exception:
-    print("Changes Requested")')"
+          VERDICT="$(printf '%s' "$RAW" | python3 -c 'import json,sys; d=sys.stdin.read(); print(json.loads(d).get("verdict","Changes Requested") if d else "Changes Requested")')"
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
           echo "raw_exit=$?" >> "$GITHUB_OUTPUT"
 
