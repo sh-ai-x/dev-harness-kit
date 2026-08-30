@@ -156,25 +156,17 @@ Letter grade bands: `A: ≥90`, `B: ≥80`, `C: ≥70`, `D: ≥60`, `F: <60`.
 Rendered as a colored badge next to the numeric score in the Overview
 tile and every per-session row.
 
-## Pricing model (USD per 1M tokens, per-tier)
+## Pricing (SSOT — not duplicated here)
 
-| Tier | in | out | cache_write_5m | cache_write_1h | cache_read |
-|---|---:|---:|---:|---:|---:|
-| opus        | 15.0000 | 75.0000 | 18.7500 | 30.0000 | 1.5000 |
-| sonnet      |  3.0000 | 15.0000 |  3.7500 |  6.0000 | 0.3000 |
-| haiku       |  0.8000 |  4.0000 |  1.0000 |  1.6000 | 0.0800 |
-| gpt-5-codex |  1.2500 | 10.0000 |  1.2500 |  1.2500 | 0.6250 |
-| gpt-5       |  1.2500 | 10.0000 |  1.2500 |  1.2500 | 0.6250 |
-| gpt-4.1     |  2.5000 | 10.0000 |  2.5000 |  2.5000 | 1.2500 |
-| gpt-4o      |  2.5000 | 10.0000 |  2.5000 |  2.5000 | 1.2500 |
-| o3          | 10.0000 | 40.0000 | 10.0000 | 10.0000 | 5.0000 |
-| o4-mini     |  1.1000 |  4.4000 |  1.1000 |  1.1000 | 0.5500 |
+Pricing is sourced from `lib/llm_pricing.py` + `docs/llm-info/*.json` (the
+single source of truth). Run `/dev-kit:llm-refresh` to sync from each
+vendor's official page. Override any tier with
+`--pricing-override <path>.json`. Unknown model ids fall back to sonnet
+pricing AND print a stderr WARN line.
 
-Anthropic 5m TTL write = 1.25x base input; 1h TTL write = 2.0x base
-input. OpenAI has a single cached-input discount (~50% of base input)
-and no TTL split, so both cache-write columns equal base input. Override
-any tier with `--pricing-override <path>.json`. Unknown model ids fall
-back to sonnet pricing AND print a stderr WARN line.
+**Do not edit this skill body to update pricing** — the table that used
+to live here drifted out of sync with the SSOT. It is intentionally
+absent; refer to `docs/llm-info/sources.json` for the live table.
 
 ## Warning triggers (6 anti-patterns) with reclaim-axis attribution
 

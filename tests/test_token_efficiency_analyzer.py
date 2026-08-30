@@ -395,9 +395,11 @@ class TestParseIso(unittest.TestCase):
 
 class TestEvaluateWarnings(unittest.TestCase):
     def test_cache_hit_low_fires(self):
+        # total_input must exceed the 50K token floor the warning enforces;
+        # scale up both legs to keep the hit ratio ~9% (90K / 1_010K).
         s = _make_session(
             session_id="sid-cache-low",
-            input_tokens=10_000, cache_read_tokens=1_000,  # hit = 1/11 ~= 0.091
+            input_tokens=1_000_000, cache_read_tokens=100_000,  # hit ~= 9%
             model="claude-sonnet-5",
         )
         sc = score_session(s)
@@ -2650,9 +2652,10 @@ class TestRoiActionsSpecificity(unittest.TestCase):
     fixes: "정확하게 해야할 일을 정확하게 집어주지 않는다")."""
 
     def test_roi_item_names_session_and_evidence(self):
+        # total_input must exceed the 50K CACHE_HIT_LOW token floor.
         s = _make_session(
             session_id="roi-target-sid",
-            input_tokens=10_000, cache_read_tokens=1_000,  # low cache hit -> CACHE_HIT_LOW
+            input_tokens=1_000_000, cache_read_tokens=100_000,  # ~9% hit -> CACHE_HIT_LOW
             model="claude-sonnet-5",
         )
         sc = score_session(s)

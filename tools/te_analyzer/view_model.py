@@ -254,7 +254,7 @@ HTML_TEMPLATE = """<!doctype html>
     <div class="panel metric"><div class="label">Active Sessions</div><div class="value">{active_count}</div><div class="delta">{inactive_count} inactive · {repos_named} distinct repo labels</div></div>
     <div class="panel metric"><div class="label">Total Cost</div><div class="value">${total_cost:.2f}</div><div class="delta">{total_tokens:,} tokens processed</div></div>
     <div class="panel metric"><div class="label">Avg Score</div><div class="value">{avg_score:.1f}<span class="muted" style="font-size:14px">/100</span><span class="grade grade-{avg_grade}">{avg_grade}</span></div><div class="delta">cache {avg_cache:.0f} · density {avg_density:.0f} · redundancy {avg_redundancy:.0f} · economy {avg_economy:.0f}</div></div>
-    <div class="panel metric"><div class="label">Cache Hit Ratio</div><div class="value">{avg_cache_hit:.0%}</div><div class="delta">cache_read / total_input</div></div>
+    <div class="panel metric"><div class="label">Cache Hit Ratio</div><div class="value">{avg_cache_hit:.0%}</div><div class="delta">cache_read / total_input (token-weighted) · unweighted {avg_cache_hit_unweighted:.0%}</div></div>
     <div class="panel metric"><div class="label">Stale Cost</div><div class="value">${stale_cost:.2f}</div><div class="delta">{stale_pct:.0%} of total · merged-or-gone worktrees</div></div>
   </div>
 
@@ -837,7 +837,14 @@ def build_view_model(
     avg_density = mean(sc["density"] for _, sc in scored) if scored else 0.0
     avg_redundancy = mean(sc["redundancy"] for _, sc in scored) if scored else 0.0
     avg_economy = mean(sc["economy"] for _, sc in scored) if scored else 0.0
-    avg_cache_hit = mean(sc["cache_hit_ratio"] for _, sc in scored) if scored else 0.0
+    # Token-weighted: total cache_read / total (input + cache_read). An unweighted
+    # mean over sessions lets many tiny short-session misses drown out the
+    # 99.6% of spend that lives in long sessions with healthy cache hits.
+    _total_input_billable = sum(s["input_tokens"] + s["cache_read_tokens"] for s, _ in scored)
+    _total_cache_read = sum(s["cache_read_tokens"] for s, _ in scored)
+    avg_cache_hit = (_total_cache_read / _total_input_billable) if _total_input_billable else 0.0
+    # Kept as a diagnostic so we can still see the unweighted mean next to the headline.
+    avg_cache_hit_unweighted = mean(sc["cache_hit_ratio"] for _, sc in scored) if scored else 0.0
     avg_grade = _grade_for(avg_score)
 
     # ---- cost_by_repo ----
@@ -1003,6 +1010,7 @@ def build_view_model(
             "avg_score": avg_score,
             "avg_grade": avg_grade,
             "avg_cache_hit": avg_cache_hit,
+            "avg_cache_hit_unweighted": avg_cache_hit_unweighted,
             "avg_cache": avg_cache,
             "avg_density": avg_density,
             "avg_redundancy": avg_redundancy,
