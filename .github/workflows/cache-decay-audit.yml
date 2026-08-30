@@ -118,10 +118,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [hook_stdout_determinism, skill_frontmatter_audit]
     # Run on every outcome (success / failure / cancelled) so the
-    # terminal guard at the bottom always evaluates. ``always()`` is
-    # also required so the comment post step runs after a failed
-    # upstream and updates the comment with the *current* result —
-    # never leaves a stale "failure" comment on a now-green PR.
+    # terminal guard at the bottom always evaluates.
     if: always()
     permissions:
       contents: read
@@ -132,19 +129,14 @@ jobs:
           echo "hook_stdout_determinism: ${{ needs.hook_stdout_determinism.result }}"
           echo "skill_frontmatter_audit: ${{ needs.skill_frontmatter_audit.result }}"
 
-      - name: Terminal guard (exit 1 when any audit failed)
-        if: needs.hook_stdout_determinism.result != 'success' || needs.skill_frontmatter_audit.result != 'success'
-        run: |
-          echo "::error::cache-decay-audit gate RED — see the per-audit job logs above."
-          exit 1
-
-      # Post a single consolidated comment on the PR (idempotent: uses
-      # the same marker each run so re-posts overwrite, not duplicate).
-      # Posts on every outcome so a previously-red PR comment flips to
-      # green when the gate recovers. For push-to-main events
-      # `pull-requests: write` is a no-op since there's no PR context.
+      # Post the consolidated PR comment FIRST so it runs even when
+      # the terminal guard below fails. ``always()`` makes this step
+      # run on every outcome; the ``github.event_name == 'pull_request'``
+      # half skips it for push-to-main events where there's no PR
+      # context. Skips fork-PR events entirely (read-only GITHUB_TOKEN
+      # would 403 the POST and turn this job red for an unrelated reason).
       - name: Post PR comment (idempotent re-post on every outcome)
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -176,3 +168,12 @@ jobs:
             gh api -X POST "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
               -f body="$body" >/dev/null
           fi
+
+      # Terminal guard MUST be the last step — when it ``exit 1``s the
+      # comment above already ran (it has ``always()``), so the PR has
+      # both the human-visible comment AND the branch-protection signal.
+      - name: Terminal guard (exit 1 when any audit failed)
+        if: needs.hook_stdout_determinism.result != 'success' || needs.skill_frontmatter_audit.result != 'success'
+        run: |
+          echo "::error::cache-decay-audit gate RED — see the per-audit job logs above."
+          exit 1

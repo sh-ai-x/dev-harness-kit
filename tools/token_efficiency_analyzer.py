@@ -2152,6 +2152,54 @@ def _render_cost_gate_banner(status: str, violations: list[dict]) -> str:
     )
 
 
+def _safe_float(v, default: float = 0.0) -> float:
+    """Coerce a value to ``float``; fall back to ``default`` on
+    ``TypeError`` / ``ValueError`` so a future schema change that
+    ships a string field (``\"NaN\"``, ``\"n/a\"``) or a ``None``
+    cannot crash the dashboard render.
+
+    Also rejects NaN (``float('NaN')`` parses successfully but
+    produces garbage on arithmetic like ``nan * 100 = nan`` and
+    breaks SVG path serialization), and infinity, both of which the
+    SVG renderer would otherwise turn into off-viewBox coordinates.
+
+    Used by both ``_render_cache_decay_svg`` and
+    ``_render_cache_decay_rows`` — hoisted to module scope so the
+    docstring contract ("every numeric is bounded before
+    serialization") holds across the whole cache_decay surface, not
+    just the SVG path.
+
+    Note: there is also an older ``_safe_int`` at module scope that
+    takes ``counter``/``label`` kwargs for the parse_errors tracker.
+    This helper is deliberately NAMED ``_safe_float`` so the two
+    coexist — the parse_errors-tracker variant on ``int`` is still
+    needed by the walker.
+    """
+    try:
+        result = float(v)
+    except (TypeError, ValueError):
+        return default
+    # ``math.isfinite`` rejects both NaN and ±inf in one branch.
+    import math as _math
+    if not _math.isfinite(result):
+        return default
+    return result
+
+
+def _safe_int_render(v, default: int = 0) -> int:
+    """Coerce a value to ``int`` for the dashboard renderer; fall
+    back to ``default`` on ``TypeError`` / ``ValueError``.
+
+    Distinct name (``_safe_int_render``) from the walker-side
+    ``_safe_int`` (which takes ``counter``/``label`` kwargs for the
+    parse_errors counter) so the two coexist without shadowing.
+    """
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _render_cache_decay_svg(points: list[dict], *, width: int = 220, height: int = 56) -> str:
     """Render an SVG line chart for one bucket's cache_decay points.
 
@@ -2181,19 +2229,6 @@ def _render_cache_decay_svg(points: list[dict], *, width: int = 220, height: int
     if not points:
         return ""
 
-    def _safe_float(v, default: float = 0.0) -> float:
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return default
-        return f
-
-    def _safe_int(v, default: int = 0) -> int:
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return default
-
     n = len(points)
     # X step in viewBox units; clamp so even a 1-point curve looks right.
     x_step = max(1, (width - 4) // max(1, n - 1))
@@ -2202,7 +2237,7 @@ def _render_cache_decay_svg(points: list[dict], *, width: int = 220, height: int
     # values stay inside the viewBox. The first / last turn strings
     # used in the <title> still come from the source data so the
     # summary reports the real index range.
-    first_turn = _safe_int(points[0].get("turn"), 1)
+    first_turn = _safe_int_render(points[0].get("turn"), 1)
     def to_xy(p: dict, which: str, i: int) -> tuple[float, float]:
         # `which` ∈ {"median", "p25", "p75"}. ``_safe_float`` clamps
         # out-of-range values via the subsequent min/max; non-numeric
@@ -2223,8 +2258,8 @@ def _render_cache_decay_svg(points: list[dict], *, width: int = 220, height: int
     med_path = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in med_pts)
     last = med_pts[-1]
     first = med_pts[0]
-    last_turn = _safe_int(points[-1].get("turn"), first_turn)
-    last_n = _safe_int(points[-1].get("n"), 0)
+    last_turn = _safe_int_render(points[-1].get("turn"), first_turn)
+    last_n = _safe_int_render(points[-1].get("n"), 0)
     last_median_pct = _safe_float(points[-1].get("median"), 0.0) * 100
     return (
         f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
@@ -2250,7 +2285,9 @@ def _render_cache_decay_rows(cache_decay: dict) -> str:
     One row per bucket; the curve is rendered as an SVG line chart
     (p25/p75 band + median polyline) so reviewers can see whether
     the curve stays high or trends down at a glance. Defensive
-    ``html.escape`` on every interpolated string value.
+    coercion + ``html.escape`` on every interpolated value so a
+    schema-drift producer (e.g. a future ``turn: None`` or
+    ``median: \"NaN\"``) cannot crash the dashboard render.
     """
     if not cache_decay:
         return '<tr><td colspan="3" class="muted">no cache-decay data this window</td></tr>'
@@ -2260,15 +2297,19 @@ def _render_cache_decay_rows(cache_decay: dict) -> str:
         bucket = cache_decay.get(label)
         if not bucket or not bucket.get("points"):
             continue
-        svg = _render_cache_decay_svg(bucket["points"])
-        final = bucket["points"][-1]
+        points = bucket["points"]
+        svg = _render_cache_decay_svg(points)
+        first_turn = _safe_int_render(points[0].get("turn"), 1) if points else 1
+        last = points[-1]
+        last_turn = _safe_int_render(last.get("turn"), first_turn)
+        last_median_pct = _safe_float(last.get("median"), 0.0) * 100
         rows.append(
             f'<tr><td>{html.escape(label)}</td>'
-            f'<td style="text-align:right">{bucket["n_sessions"]}</td>'
+            f'<td style="text-align:right">{html.escape(str(bucket.get("n_sessions", 0)))}</td>'
             f'<td>{svg}'
             f'<span class="muted" style="font-size:11px;margin-left:8px">'
-            f'turn 1→{html.escape(str(final["turn"]))} · final '
-            f'{final["median"] * 100:.1f}% · {len(bucket["points"])} '
+            f'turn {html.escape(str(first_turn))}→{html.escape(str(last_turn))} · '
+            f'final {last_median_pct:.1f}% · {len(points)} '
             f'point(s)</span></td></tr>'
         )
     if not rows:

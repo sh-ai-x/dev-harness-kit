@@ -3850,6 +3850,51 @@ class TestCacheDecaySvg(unittest.TestCase):
         self.assertIn("turn 5 → turn 7", svg)
         self.assertNotIn("turn 1 → turn 7", svg)
 
+    def test_render_cache_decay_rows_caption_uses_first_turn(self):
+        """Regression for round-3 LLM-judge finding on PR #765 —
+        the HTML caption beside the SVG also hardcoded
+        ``turn 1→``. The caption must mirror the SVG's first-turn
+        rule so the table row reads consistently."""
+        from token_efficiency_analyzer import _render_cache_decay_rows
+        cache_decay = {
+            "1-3": {
+                "n_sessions": 1,
+                "points": [
+                    {"turn": 5, "median": 0.5, "p25": 0.4, "p75": 0.6, "n": 1},
+                    {"turn": 6, "median": 0.7, "p25": 0.6, "p75": 0.8, "n": 1},
+                    {"turn": 7, "median": 0.9, "p25": 0.85, "p75": 0.95, "n": 1},
+                ],
+            },
+            "4-10": {"n_sessions": 0, "points": []},
+            "11-30": {"n_sessions": 0, "points": []},
+            "30+": {"n_sessions": 0, "points": []},
+        }
+        rows = _render_cache_decay_rows(cache_decay)
+        self.assertIn("turn 5→7", rows)
+        self.assertNotIn("turn 1→", rows)
+
+    def test_render_cache_decay_rows_handles_missing_keys(self):
+        """Defensive: if the producer (view_model.py) ever stops
+        setting a key, the renderer must NOT crash — the whole
+        dashboard render would otherwise fail."""
+        from token_efficiency_analyzer import _render_cache_decay_rows
+        # n_sessions is missing; median is non-numeric
+        cache_decay = {
+            "1-3": {
+                "points": [
+                    {"turn": 1, "median": "NaN", "p25": 0.5, "p75": 0.5, "n": 1},
+                ],
+            },
+            "4-10": {"points": []},
+            "11-30": {"points": []},
+            "30+": {"points": []},
+        }
+        # Must not raise.
+        rows = _render_cache_decay_rows(cache_decay)
+        self.assertIn("1-3", rows)
+        self.assertIn("0", rows)  # missing n_sessions → "0" via _safe_int fallback
+        self.assertIn("0.0%", rows)  # non-numeric median → 0.0%
+
     def test_svg_band_uses_var_accent_with_opacity(self):
         """CC-4: the band fill must be ``var(--accent)`` with opacity
         rather than a hardcoded ``rgba(10,132,255,0.12)`` so dark /

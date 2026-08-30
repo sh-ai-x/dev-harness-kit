@@ -60,11 +60,15 @@ The PR-comment step requires the repo's default `GITHUB_TOKEN` to have
 under *Settings → Actions → General → Workflow permissions →
 "Allow GitHub Actions to create and approve pull request comments"*.
 
-When the permission is read-only, the `gh api POST` 403s. The other
-two jobs (G4 + G5) still run and produce a deterministic verdict;
-only the comment post is skipped. The workflow's `aggregate_report`
-terminal guard does **not** depend on the comment step, so the branch
-gate still fires — only the human-visible comment is missing.
+When the permission is read-only, the `gh api POST` 403s. To prevent
+the 403 from turning `aggregate_report` red for an unrelated reason,
+the comment step carries an explicit fork-PR guard
+(`github.event.pull_request.head.repo.fork != true`): fork PRs skip
+the comment entirely, run the upstream audits (G4 + G5), and surface
+a verdict via branch protection — the human-visible comment is the
+only thing that's missing. The workflow's `aggregate_report` terminal
+guard does **not** depend on the comment step, so the branch gate
+still fires on every PR, fork or not.
 
 ## Why this is a separate workflow
 
@@ -74,7 +78,7 @@ subject to rate limits). The cache-decay audits are deterministic —
 bash + python — and run in <30s. Folding them into `maintenance.yml`
 would either:
 
-1. **Inflate cost** — every cache_decayaudit run burns 15 min of GH-Actions
+1. **Inflate cost** — every cache-decay-audit run burns 15 min of GH-Actions
    minutes that could be a sub-second bash invocation.
 2. **Defeat the hard-rule tier** — `maintenance.yml` is the "verdict
    + docs-updated" soft tier (it can land on Changes Requested for
