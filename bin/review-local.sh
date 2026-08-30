@@ -953,7 +953,7 @@ if [ "$RUN_INJECTION_SCAN" = "1" ]; then
   else
     PR_BODY_LOCAL="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""' 2>/dev/null || echo "")"
     PR_DIFF_LOCAL="$(gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null || true)"
-    SCAN_RAW="$(printf '%s\n\n%s' "$PR_BODY_LOCAL" "$PR_DIFF_LOCAL" | python3 tools/prompt_injection_scan.py --json 2>/dev/null || echo '{"verdict":"Approve"}')"
+    SCAN_RAW="$(printf '%s\n\n%s' "$PR_BODY_LOCAL" "$PR_DIFF_LOCAL" | python3 tools/prompt_injection_scan.py --json --decode 2>/dev/null || echo '{"verdict":"Approve"}')"
     INJECTION_V="$(printf '%s' "$SCAN_RAW" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict","Approve"))')"
     log "injection_scan verdict: $INJECTION_V"
     if [ "$INJECTION_V" = "Blocked" ]; then
