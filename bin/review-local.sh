@@ -939,8 +939,17 @@ The summary MUST begin with a single line exactly of the form:
 #
 # Runs BEFORE the LLM judges would have, so a hostile PR with Critical
 # markers fails fast (saves the ~3-5 min LLM judge minutes). Same
-# `tools/prompt_injection_scan.py` engine used in GH-Actions; verdict
-# contract:
+# `tools/prompt_injection_scan.py` engine used in GH-Actions.
+#
+# PARITY CONTRACT: this invocation must use the same flags as
+# `.github/workflows/review.yml` line ~193 (the CI gate). The current
+# flags are `--json --decode`; `--decode` in particular is required --
+# without it, smuggled base64 payloads that the scanner detects at
+# critical severity under `--decode` are reported at medium
+# severity (Changes Requested), letting a hostile fork PR pass the
+# local mirror while CI would gate it. If you change the scanner's
+# CLI surface, update BOTH this invocation AND the workflow in the
+# same PR, and pin the parity in tests. Verdict contract:
 #   exit 0 + verdict=Approve        → continue
 #   exit 1 + verdict=Changes*       → soft fail (rank 1, non-blocking)
 #   exit 2 + verdict=Blocked        → hard fail (rank 2, gate fails)
