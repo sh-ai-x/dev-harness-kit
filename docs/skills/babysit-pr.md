@@ -26,6 +26,16 @@ The babysitter must run inside the worktree owning the PR's branch, since `workt
 
 A sub-agent is then spawned via the `Agent` tool (`subagent_type: "general-purpose"`) with the resolved worktree path as its inherited cwd, carrying a condensed copy of the Algorithm, termination conditions, lock-file path, and Iron Laws L1-L5.
 
+### Post-PR telemetry retention
+
+`babysit-pr` writes `.dev-kit/babysit-retention.json` in the PR-owning
+worktree as soon as it starts. This is an explicit long-running exception to
+the ordinary worktree cleanup rule: when the PR is merged, closed, or
+abandoned, the marker is moved to `phase: "terminal"`, but the worktree,
+branch, JSONL logs, and metadata remain. This keeps post-PR analysis possible.
+Only an operator may remove the marker and then perform cleanup. Ordinary
+non-babysit worktrees keep their existing lifecycle.
+
 ### Lock file protocol
 
 On start: `mkdir -p .dev-kit`; if `.dev-kit/babysit.lock` exists, check staleness via `lib/babysit_pr_reliability.py:is_stale_lock()` — stale means either the lock's mtime exceeds the TTL (default 1800s / 30 min) or the recorded `pid=` no longer exists. A stale lock is removed and the run proceeds; a live lock refuses with "already running" and exits 1. Otherwise the skill writes `<ISO-8601> pid=$$ branch=<branch>` to the lock and traps removal on exit. The lock lives at `<worktree_path>/.dev-kit/babysit.lock` — inside the resolved worktree, not the main checkout, so parent and sub-agent share the same lock path.

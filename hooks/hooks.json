@@ -203,6 +203,21 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/sub-agent-handoff.sh",
             "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/injection-content-guard.sh",
+            "fail_closed": false
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/injection-content-guard.sh",
+            "fail_closed": false
           }
         ]
       }

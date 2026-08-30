@@ -120,8 +120,8 @@ Sections (rendered by `tools/token_efficiency_analyzer.py:render_dashboard`):
   plus a `State` column (`live` / `merged` / `gone` / `main`) for every
   worktree dir on disk under `.worktrees/*/`. `live` = still in
   `git worktree list` and has unique commits vs `origin/main`. `merged`
-  = still listed but the branch tip is an ancestor of `origin/main` (safe
-  to delete). `gone` = dir exists on disk but is no longer in
+  = still listed but the branch tip is an ancestor of `origin/main` (a
+  retention/cleanup review candidate only). `gone` = dir exists on disk but is no longer in
   `git worktree list` (worktree was `git worktree remove`'d, dir survived).
   An amber `stale` chip prefixes any Sessions row whose worktree is
   `merged` or `gone`. Use `--worktree <name>` to focus on a single one.

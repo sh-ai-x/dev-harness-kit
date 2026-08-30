@@ -14,19 +14,15 @@ When Phase 2 lands, this scorer will:
 """
 from __future__ import annotations
 
-from pathlib import Path
+from lib.behavior_scorers.types import empty_scorer
 
-from lib.behavior_scorers.types import Context, DimensionScore
-
-
-def score(worktree: Path, ctx: Context) -> DimensionScore:
-    """Return a neutral placeholder until Phase 2 wires scenarios."""
-    return DimensionScore(
-        dim="D6_robustness",
-        value=3,
-        evidence={
-            "status": "pending",
-            "phase": 0,
-            "reason": "scenario fixtures deferred to Phase 2",
-        },
-    )
+# Re-exported under the package's `score(worktree, ctx)` protocol so
+# `__init__.SCORER_REGISTRY["D6_robustness"]` resolves without a per-module
+# score() wrapper. inspect 2026-08-27 dup-3: collapse D5/D6/D7 empty
+# envelopes into one helper so a refactor of DimensionScore fans out
+# from a single edit (in `types.empty_scorer`).
+score = empty_scorer(
+    dim_id="D6_robustness",
+    reason="scenario fixtures deferred to Phase 2",
+    phase=0,
+)

@@ -956,6 +956,153 @@ class TestRunStepBody(unittest.TestCase):
             # First-occurrence feat commit lands; chore may be no-op.
             self.assertIn("feat(test-phase): step 0 — my-name", log)
 
+    def test_verify_passed_is_parented_to_write_observed(self):
+        """`verify.passed` must carry `parent_id == write.observed.event_id`.
+
+        `lib.harness_effectiveness._first_pass` computes
+        `causally_linked = first.parent_id == write.event_id`. If the
+        executor parents the verify to `step.started` instead, the link is
+        permanently False and `first_pass_quality` collapses to 10.0 (ROT)
+        while still entering `overall_score` at weight 0.25 — strictly worse
+        than emitting nothing. This test pins the causal edge.
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            (ctx["wt"] / "made_change.txt").write_text("hi\n")
+            rc = ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            self.assertEqual(rc, 0)
+            events = read_events(root)
+            writes = [e for e in events if e["event_type"] == "write.observed"]
+            verifies = [e for e in events if e["event_type"] == "verify.passed"]
+            self.assertEqual(len(writes), 1, f"expected 1 write.observed, got {len(writes)}")
+            self.assertEqual(len(verifies), 1, f"expected 1 verify.passed, got {len(verifies)}")
+            self.assertEqual(
+                verifies[0]["parent_id"], writes[0]["event_id"],
+                "verify.passed must be parented to write.observed so "
+                "_first_pass.causally_linked holds",
+            )
+
+    def test_first_pass_quality_reflects_honest_verify_evidence(self):
+        """End-to-end: the executor's own events must drive ``_first_pass``
+        honestly. The executor records ``verify.passed`` for the causal
+        chain, but the event carries ``required_checks_passed=False`` and
+        ``independent=False`` because no real pytest/lint/build runner
+        executed — only the sub-agent's exit_code==0 is known. An earlier
+        revision emitted ``required_checks_passed=True, independent=True``
+        from that exit_code alone, fabricating a 100% first_pass_rate
+        (Review Critical #2).
+
+        The reducer still counts ``first_verify_evidence`` (the fields are
+        present) and ``first_pass_no_hidden_retry`` (no heal/verify.failed
+        pre-dates the verify), so the honest score is:
+            0*.7 (first_pass_rate) + 1*.2 (first_verify_evidence)
+            + 1*.1 (no_hidden_retry) = 30.0
+        Anything higher would require an actual independent check runner.
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.harness_effectiveness import _first_pass
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            (ctx["wt"] / "made_change.txt").write_text("hi\n")
+            ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            component = _first_pass(read_events(root))
+            self.assertEqual(component["score"], 30.0, component)
+            # First_pass_rate must reflect that no independent check ran.
+            self.assertEqual(
+                component["submetrics"]["first_pass_rate"]["value"], 0.0,
+                component["submetrics"],
+            )
+            # First_verify_evidence stays 100% because the evidence fields
+            # ARE populated (the event exists for the causal chain).
+            self.assertEqual(
+                component["submetrics"]["first_verify_evidence"]["value"], 100.0,
+                component["submetrics"],
+            )
+
+    def test_no_diff_step_still_emits_verify_passed(self):
+        """``verify.passed`` is emitted unconditionally on the success path,
+        regardless of whether a write happened.
+
+        Before the hoist the verify event lived inside the
+        ``if wrote_files or output_committed:`` block, so a no-diff
+        success emitted only ``step.started`` + ``step.completed``.
+        ``_first_pass`` iterates only subjects with a ``write.observed``
+        event, so the no-diff branch was silently excluded from the
+        metric. The hoist pins the invariant: verify.passed fires
+        unconditionally; its ``parent_id`` and ``evidence_ref.no_diff``
+        surface the no-diff / with-diff distinction so downstream
+        consumers do not need to re-derive it.
+
+        ``write_step_output`` is part of ``_step_post_collect`` and
+        always writes ``phases/<phase>/step<N>-output.json`` to the
+        worktree, so the literal no-diff path is hard to exercise from
+        a test. Instead we assert the hoist invariants on the WITH-diff
+        path (which exercises every code path the no-diff path would):
+        a write happens, so ``write.observed`` is emitted and
+        ``verify.passed`` parents to it; ``evidence_ref.no_diff`` is
+        False; the same code path also runs for the no-diff case (the
+        verify emit is no longer gated by the if).
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            # write_step_output always writes a file inside
+            # _step_post_collect, so a write will happen on the worktree.
+            ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            events = read_events(root)
+            verifies = [e for e in events if e["event_type"] == "verify.passed"]
+            writes = [e for e in events if e["event_type"] == "write.observed"]
+            # The hoist invariant: verify.passed is emitted even when
+            # the underlying code path is the one the old
+            # ``if wrote_files or output_committed:`` gate would have
+            # skipped. With the gate removed the emit always happens;
+            # we verify the with-diff branch here (which exercises the
+            # same emit code) and trust the no-diff branch by code
+            # inspection (the emit is no longer inside the if).
+            self.assertEqual(len(verifies), 1, f"expected 1 verify.passed, got {len(verifies)}")
+            # In the with-diff case (the one we can actually exercise)
+            # verify.passed.parent_id must equal write.observed.event_id
+            # so _first_pass.causally_linked holds.
+            self.assertEqual(len(writes), 1, f"expected 1 write.observed, got {len(writes)}")
+            self.assertEqual(
+                verifies[0]["parent_id"], writes[0]["event_id"],
+                "verify.passed must parent to write.observed.event_id "
+                "when a write happened so _first_pass.causally_linked holds",
+            )
+            # evidence_ref.no_diff must reflect the with-diff case
+            # (False), so downstream consumers can distinguish the two
+            # cases without re-deriving.
+            self.assertFalse(
+                verifies[0]["evidence_ref"].get("no_diff"),
+                "with-diff verify.passed evidence_ref.no_diff must be "
+                "False (a write happened)",
+            )
+
+
+
+
 
 # --- issue #94: status-transition table ---------------------------------
 

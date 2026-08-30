@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cache hit rate — structural fix</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Cache hit rate — structural fix</h1>
+<p class="meta">2026-08-28 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">token-efficiency</span><span class="tag tag-info">prompt-cache</span><span class="tag tag-info">hooks</span><span class="tag tag-info">session-hygiene</span><span class="tag tag-info">enforcement</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Executive summary</a></li><li><a href="#sec-1">Problem statement</a></li><li><a href="#sec-2">Options considered</a></li><li><a href="#sec-3">Recommended approach — 4 ordered fixes</a></li><li><a href="#sec-4">State machine (single-pass, analyzer-first)</a></li><li><a href="#sec-5">Validation gates (existing + new)</a></li><li><a href="#sec-6">Companion files (Phase 1)</a></li><li><a href="#sec-7">Thin-harness memo</a></li><li><a href="#sec-8">Tmux + long-running safety classification</a></li><li><a href="#sec-9">Risks</a></li><li><a href="#sec-10">Verification plan</a></li><li><a href="#sec-11">Distribution plan</a></li><li><a href="#sec-12">Next steps (after this proposal is approved)</a></li><li><a href="#sec-13">References (dev-harness-kit SSOT only)</a></li></ol></div>
+<h2 id="sec-0">Executive summary</h2>
+<p>dev-harness-kit's <code>tools/token_efficiency_analyzer.py</code> (last 30d, 2,581 sessions) reports 96.1% aggregate cache hit — but the <em>distribution</em> hides a structural problem: 1,952 of 2,469 sessions (79%) are 1-3 calls long and average <strong>20.0%</strong> cache hit, while 331 long-running sessions (30+ calls) average 96.1%. The 520 warnings include <strong>129 CACHE_HIT_LOW</strong> (cache hit &lt;50%) and <strong>72 REPEATED_USER_MSG</strong> (user-message echo, direct evidence of prefix drift).</p>
+<p><code>rules/session-hygiene.md</code> already encodes Iron Laws 1, 3, 6 that explain <em>why</em> this happens — but those rules have no automated enforcement beyond the analyzer's warnings. The proposal closes the loop with 4 ordered fixes that surface prefix drift <strong>per surface</strong> (hook / system-reminder / skill / sub-agent / model switch) and let the existing warning codes drive a fix-it pass.</p>
+<p><strong>Net verdict</strong>: ship <strong>F1 + A1 + A2</strong> (diagnostic + hook audit + skill frontmatter audit) as Phase 1. Defer D / E / G to Phase 2 gated on Phase 1 hit-rate movement. Net token delta: <strong>+~280 lines</strong> (analyzer extension + audit patches + tests). Stale cost surface (<code>stale_cost_usd=$2,067.00 / $2,383.96 = 86.7%</code>) suggests a parallel <code>stale-worktree-cleanup</code> carve-out is also worth its own proposal — out of scope here.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Problem statement</h2>
+<h3>What the data shows</h3>
+<pre><code>bucket           n_sess    in (M)   cache_read (M)   hit%
+1-3 (short)       1,952      7.2       1.8           20.0%
+4-10                112      3.7       4.9           57.2%
+11-30                75     10.9      51.1           82.4%
+30+                 331  1,251.6  31,073.4           96.1%</code></pre>
+<p>Long sessions hit 96% because Anthropic's prompt cache amortizes across many turns. Short sessions do <em>not</em> hit because they exit before turn 2 — the cache_write from turn 1 is wasted, and turn 1's <code>input_tokens</code> (non-cached) is the whole session.</p>
+<h3>Why short sessions exist</h3>
+<p>The repo has structural patterns that <em>cause</em> short sessions:</p>
+<ul><li><strong>`/clear` reflex</strong> — users reach for <code>/clear</code> when context grows, resetting the cached prefix instead of <code>/compact</code>-ing.</li><li>*<em>Single-shot `/dev-kit:</em><code> invocations** — many slash commands (</code>docs-maintenance<code>, </code>token-analyzer<code>, </code>inspect`) finish in 1-3 turns; each is a cold start.</li><li><strong>Worktree churn</strong> — every worktree switch can be a fresh session with no carry-over prefix (cwd + recent commits change).</li></ul>
+<h3>Why <em>long</em> sessions still drop below 96%</h3>
+<p>The 129 <code>CACHE_HIT_LOW</code> warnings in long sessions are caused by <strong>prefix drift</strong> within an otherwise-cacheable session:</p>
+<ul><li><strong>Hook stdout</strong> — every dev-kit hook (<code>worktree-guard</code>, <code>log-on-session-start</code>, <code>tdd-guard</code>, <code>notification-collapse</code>, <code>secret-scan</code>, <code>loop-detect</code>, …) emits content that becomes part of the prompt prefix. If even one byte of that output changes between turns, the entire cache namespace is invalidated. The 72 <code>REPEATED_USER_MSG</code> warnings are direct evidence of this — hook stdout echoing content already in context.</li><li><strong>System-reminder re-injection</strong> — <code>&lt;system-reminder&gt;</code> blocks (<code>total_tokens</code>, <code>currentDate</code>, <code>gitStatus</code>) are re-emitted by Claude Code on every turn; they sit at the top of the prefix and are <em>intended</em> to be volatile, so the cache re-validation cost is paid every turn regardless of whether anything actually changed.</li><li><strong>Skill frontmatter non-determinism</strong> — if a skill's <code>SKILL.md</code> frontmatter includes a build-time hash, a generated slug, or a timestamp, the cache namespace is unique per build (no reuse across sessions even with identical content).</li><li><strong>Sub-agent context inheritance</strong> — agents spawned via the <code>Agent</code> tool inherit the parent's full prompt, including all the parent's volatile prefix. The sub-agent then has <em>no</em> chance of cache hit on its own prompt because its prefix is parent-specific.</li><li><strong>Mid-session model switch</strong> — Anthropic maintains separate cache namespaces per model. Switching Sonnet→Opus (or vice versa) mid-session forces a cold start. <code>MODEL_OVERSPEC</code> warns about 3 such cases.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-2">Options considered</h2>
+<p>Three options ranked by diagnostic-leverage / risk / token delta:</p>
+<table><thead><tr><th>Option</th><th>Surface covered</th><th>Risk</th><th>Token delta</th><th>Verdict</th></tr></thead><tbody><tr><td><strong>A</strong> — Fix the data plane (diagnostic + audits)</td><td>hook / skill / frontmatter</td><td>Low</td><td>+280 lines</td><td><strong>ADOPT</strong></td></tr><tr><td>B — Sub-agent isolation + cache_control markers</td><td>sub-agent / skill</td><td>Medium</td><td>+480 lines</td><td><strong>DEFER → Phase 2</strong></td></tr><tr><td>C — Document-only proposal (no code change)</td><td>none</td><td>None</td><td>+0 lines</td><td><strong>REJECT</strong> (proposal-only defeats the goal)</td></tr></tbody></table>
+<p><strong>Option A selection rationale</strong>:</p>
+<ul><li><strong>F1 (cache_decay diagnostic)</strong> is the prerequisite for every other fix. Without it, we cannot tell whether a 96% hit-rate session is hitting on every turn (stable prefix) or only on turn 2 then dropping to 50% (drifting prefix). The existing analyzer already emits <code>cache_hit_ratio</code> per session but not the per-turn curve.</li><li><strong>A1 (hook stdout audit)</strong> is the highest-leverage single fix. The repo has 18 hooks under <code>hooks/*.sh</code>; many of them emit deterministic state but the analysis couldn't be done without <code>F1</code> to confirm which hooks are actually bleeding the prefix.</li><li><strong>A2 (skill frontmatter audit)</strong> has the same prerequisite. Once <code>F1</code> shows <em>where</em> the prefix is breaking, A2 is a 1-day pass over the 39 skills with a deterministic-content check.</li></ul>
+<p>Options B/C are deferred: B is high-impact but requires testing the cache_control boundary semantics on Anthropic's API (not just dev-kit's surface); C is pure documentation, which doesn't move the metric.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Recommended approach — 4 ordered fixes</h2>
+<h3>F1 — Cache decay diagnostic in <code>tools/token_efficiency_analyzer.py</code></h3>
+<p>Add a new per-session field <code>cache_decay: list[float]</code> — <code>cache_hit_ratio</code> per turn index (1..N). Bucket sessions by length into the 4 buckets already used in the HTML output. Emit a new HTML tile "Cache hit ratio vs turn index" that overlays all sessions in the window (median, p25, p75 lines per bucket).</p>
+<p>Pseudocode:</p>
+<pre><code class="language-python"># in tools/token_efficiency_analyzer.py
+def cache_decay(per_turn_cache_read, per_turn_input):
+    out = []
+    for cr, inp in zip(per_turn_cache_read, per_turn_input):
+        total = cr + inp
+        out.append(cr / total if total else 0.0)
+    return out</code></pre>
+<p>Output extension (in the existing <code>Sessions</code> table):</p>
+<pre><code>| session_id | model | calls | cache_hit | decay_50 | decay_90 |
+| 8e6fbf81   | ...   | 16    | 0.0%      | 0%       | 0%       |  ← cold start, never reuses
+| f8970414   | ...   | 47    | 30.0%     | 25%      | 5%       |  ← prefix drifting
+| a86723fe   | ...   | 312   | 96.7%     | 96%      | 95%      |  ← healthy</code></pre>
+<h3>A1 — Hook stdout audit + volatile-field strip</h3>
+<p>For each of the 18 hooks under <code>hooks/*.sh</code> that fires per-turn, audit stdout for volatile content (timestamps, PIDs, ephemeral session IDs, randomized build slugs). Replace volatile output with stable strings OR route the volatile data through the <em>tool result body</em> (where it is still seen by the model) instead of the <em>hook stdout</em> (where it sits in the prefix).</p>
+<p>Target hooks (preliminary list, refine after F1 ships):</p>
+<ul><li><code>hooks/worktree-guard.sh</code> (PreToolUse, 159 LOC) — emits routing context on every Edit/Write; check for ephemeral paths</li><li><code>hooks/log-on-session-start.sh</code> (SessionStart, 131 LOC) — fires once but its output should be byte-stable across runs</li><li><code>hooks/notification-collapse.sh</code> (PostToolUse, 83 LOC) — emits per-turn deduplication state</li><li><code>hooks/loop-detect.sh</code> (PostToolUse, 76 LOC) — emits per-turn fingerprint counts</li></ul>
+<p>Acceptance: hook stdout bytes are identical between two sequential invocations against the same repository state.</p>
+<h3>A2 — Skill frontmatter determinism audit</h3>
+<p>For each of the 39 skills under <code>skills/*/SKILL.md</code>, audit frontmatter for non-deterministic fields. The <code>version-from- plugin-json</code> feedback already establishes the discipline for version strings; extend it to "no timestamps, no build hashes, no auto-generated slugs."</p>
+<p>Audit script (small, ship with the analyzer):</p>
+<pre><code class="language-python"># scripts/audit_skill_frontmatter.py
+FORBIDDEN = re.compile(r&#x27;(\d{4}-\d{2}-\d{2}|\b[0-9a-f]{7,}\b|build[-_]?\d)&#x27;)
+for path in glob(&#x27;skills/*/SKILL.md&#x27;):
+    fm = read_frontmatter(path)
+    hits = FORBIDDEN.findall(fm)
+    if hits: print(f&#x27;{path}: {hits}&#x27;)</code></pre>
+<h3>D / E / G — Deferred to Phase 2 (gated on Phase 1 metric)</h3>
+<ul><li><strong>D — Sub-agent prompt isolation</strong>: when the orchestrator spawns an <code>Agent</code>, pass only the task. Sub-agent pays <code>cache_write</code> once for its clean prefix. Defer: requires agreement on which parent context fields are "volatile vs stable."</li><li><strong>E — `cache_control: { ttl: "1h" }` markers</strong> in dev-kit's own skill loader. Defer: needs Anthropic API testing for behavior when a sub-agent under cache_control-1h re-asks after TTL.</li><li><strong>G — One-model-per-session lock</strong>. Defer: the existing <code>MODEL_OVERSPEC</code> warning (3 sessions) is small enough that a docs reminder is probably cheaper than a hook.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-4">State machine (single-pass, analyzer-first)</h2>
+<pre><code>[1/4] DIAGNOSE  (F1)
+  도구: tools/token_efficiency_analyzer.py --json
+  산출: per-turn cache_hit_ratio curve per session
+  결정: which surface (hook/skill/reminder/sub-agent) is bleeding?
+  ↓
+[2/4] AUDIT HOOKS  (A1)
+  입력: F1 output&#x27;s per-session &quot;bleed at turn N&quot; markers
+  도구: scripts/audit_hook_stdout.sh (deterministic check)
+  산출: per-hook diff (turn 1 vs turn 2 stdout bytes)
+  결정: which hooks to patch + which volatile fields to move
+  ↓
+[3/4] AUDIT SKILLS  (A2)
+  입력: skill SKILL.md paths
+  도구: scripts/audit_skill_frontmatter.py
+  산출: per-skill forbidden-field list
+  결정: which frontmatter fields to remove or rewrite
+  ↓
+[4/4] MEASURE  (re-run analyzer)
+  입력: same time window (--days 30)
+  도구: token_efficiency_analyzer.py --json
+  기대: aggregate 96.1% → ≥97%, CACHE_HIT_LOW count 129 → ≤100,
+        REPEATED_USER_MSG count 72 → ≤50
+  미달 시: Phase 2 (D/E/G) 진행 결정</code></pre>
+<p><strong>No persistent state</strong>. Same analyzer JSONL inputs, re-emitted dashboard. No new files in <code>~/.claude/</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Validation gates (existing + new)</h2>
+<table><thead><tr><th>Gate</th><th>Mechanism</th><th>Pass criterion</th></tr></thead><tbody><tr><td><strong>G1</strong> analyzer doesn't regress</td><td>existing <code>tests/test_token_efficiency_analyzer.py</code> (13 cases)</td><td>all 13 pass</td></tr><tr><td><strong>G2</strong> <code>cache_decay</code> field emitted</td><td>new test</td><td>every session with ≥2 turns has a <code>cache_decay</code> list of length == call count</td></tr><tr><td><strong>G3</strong> HTML tile renders</td><td>new test (regex on output)</td><td>dashboard contains "Cache hit ratio vs turn index" header + 4 bucket bands</td></tr><tr><td><strong>G4</strong> hook stdout determinism</td><td>new test: invoke each hook twice on identical repo state</td><td><code>diff</code> of stdout bytes == empty</td></tr><tr><td><strong>G5</strong> skill frontmatter clean</td><td>new test: run <code>audit_skill_frontmatter.py</code></td><td>zero <code>FORBIDDEN</code> hits across all 39 skills</td></tr><tr><td><strong>G6</strong> L6 governance</td><td>existing <code>tests/test_skill_governance.py</code></td><td>pass (no new skills added; A2 is a one-off audit)</td></tr><tr><td><strong>G7</strong> analyzer hit-rate movement</td><td>manual: re-run <code>--days 30 --json</code> after merge</td><td>aggregate hit ≥ 97% OR CACHE_HIT_LOW count drops ≥20% (whichever is smaller)</td></tr></tbody></table>
+<p>G7 is the Phase 1 → Phase 2 gate.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Companion files (Phase 1)</h2>
+<table><thead><tr><th>Path</th><th>Role</th><th>Lines</th><th>Verdict</th></tr></thead><tbody><tr><td><code>tools/token_efficiency_analyzer.py</code></td><td>add <code>cache_decay</code> field + tile</td><td>+120</td><td>ADOPT</td></tr><tr><td><code>tests/test_token_efficiency_analyzer.py</code></td><td>add G2/G3 cases</td><td>+60</td><td>ADOPT</td></tr><tr><td><code>scripts/audit_hook_stdout.sh</code></td><td>hook-stdout determinism check</td><td>+30</td><td>ADOPT</td></tr><tr><td><code>scripts/audit_skill_frontmatter.py</code></td><td>frontmatter audit</td><td>+40</td><td>ADOPT</td></tr><tr><td><code>tests/test_hook_stdout_determinism.py</code></td><td>G4 regression</td><td>+30</td><td>ADOPT</td></tr><tr><td><code>tests/test_skill_frontmatter_audit.py</code></td><td>G5 regression</td><td>+20</td><td>ADOPT</td></tr><tr><td><code>hooks/*.sh</code> patches</td><td>strip volatile fields</td><td>-10 (net)</td><td>ADOPT after audit</td></tr><tr><td><code>skills/*/SKILL.md</code> patches</td><td>remove forbidden fields</td><td>-5 (net)</td><td>ADOPT after audit</td></tr><tr><td><strong>Phase 1 total</strong></td><td></td><td><strong>+295</strong></td><td></td></tr></tbody></table>
+<p>Phase 1 token delta: <strong>+295 lines net</strong> (audits + tests + analyzer extension, partially offset by hook/skill cleanup).</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">Thin-harness memo</h2>
+<h3>Item-by-item verdict</h3>
+<ul><li><strong>`cache_decay` field + tile (F1)</strong>: ADOPT — diagnostic is the prerequisite for every other fix; same shape as existing per-session fields; net-zero risk when guarded by G2/G3.</li><li><strong>Hook stdout audit (A1)</strong>: ADOPT — <code>rules/session-hygiene.md</code> Iron Law 3 ("Volatile content stays in the prompt tail, never the prefix") already names the failure mode; A1 turns it into a testable contract.</li><li><strong>Skill frontmatter audit (A2)</strong>: ADOPT — mirrors the <code>version-from-plugin-json</code> discipline. Existing test coverage (G6) makes regression cheap.</li><li><strong>Sub-agent isolation (D)</strong>: DEFER → Phase 2 — needs empirical answer to "which parent context fields are stable enough to carry into a sub-agent." F1's per-turn data is the input.</li><li><strong>`cache_control` markers (E)</strong>: DEFER → Phase 2 — API semantics with TTL+handoff need Anthropic spec confirmation beyond the SKILL.md description.</li><li><strong>One-model-per-session lock (G)</strong>: DEFER → docs-maintenance PR (separate). Only 3 <code>MODEL_OVERSPEC</code> hits in 30d — not worth a hook.</li></ul>
+<h3>Cherry-pick budget</h3>
+<p>Q3 2026 (2026-07-01 ~ 2026-08-28) third-party cherry-picks: 0. Phase 1 is dev-kit-internal — no third-party table impact. <code>feedback-thin-harness-discipline.md</code> budget unaffected.</p>
+<h3>Phase 1 → Phase 2 gate</h3>
+<p>If after Phase 1 lands the analyzer shows aggregate hit ≥97% OR <code>CACHE_HIT_LOW</code> count drops ≥20%, Phase 2 is unnecessary. If not, the same <code>cache_decay</code> data tells us whether D (sub-agent) or E (<code>cache_control</code>) is the next lever.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">Tmux + long-running safety classification</h2>
+<p>Per <code>feedback-tmux-long-running-safety.md</code> 5-category check:</p>
+<ul><li><strong>New hook?</strong> NO (audits live in <code>scripts/</code>, not <code>hooks/</code>)</li><li><strong>Sub-agent dispatch?</strong> NO (<code>allowed-tools</code> unchanged)</li><li><strong>Persistent loop?</strong> NO</li><li><strong>MCP server?</strong> NO</li><li><strong>Network listener?</strong> NO</li></ul>
+<p>→ <strong>Pure-prose + audit-script change</strong>, tmux-safe by definition. PR description must include "tmux + long-running classification: pure-prose + scripts."</p>
+<hr class="section-divider">
+
+<h2 id="sec-9">Risks</h2>
+<table><thead><tr><th>Risk</th><th>Source</th><th>Mitigation</th></tr></thead><tbody><tr><td><strong>`cache_decay` changes dashboard layout, breaks screenshots</strong></td><td>existing dashboard consumers</td><td>gate behind <code>--show-decay</code> flag (off by default for 1 PR, then on)</td></tr><tr><td><strong>Hook audit flags stable-but-looks-volatile content</strong> (e.g., embedded git SHA that's actually deterministic)</td><td>A1 false positive</td><td>per-hook manual review before auto-patch; <code>audit_hook_stdout.sh</code> outputs JSON for triage, doesn't auto-edit</td></tr><tr><td><strong>Skill frontmatter cleanup removes load-bearing timestamps</strong> (e.g., last-reviewed field)</td><td>A2 false positive</td><td><code>FORBIDDEN</code> regex excludes <code>last-reviewed:</code> fields explicitly; manual review of audit output</td></tr><tr><td><strong>G7 doesn't move (cache hit is already structurally 96%)</strong></td><td>ceiling effect</td><td>Phase 2 decision deferred until real measurement; this proposal's primary value is the <em>observability</em>, not the percentage gain</td></tr><tr><td><strong>`stale_cost_usd` = 86.7% of total</strong> — fix targets miss the biggest lever</td><td>dashboard</td><td>separate <code>docs/proposals/stale-worktree-cleanup/</code> is the right scope; flag in <code>Next steps</code></td></tr><tr><td><strong>Hidden cache bypass via Codex-side prompt builder</strong></td><td>Codex runtime</td><td><code>token-analyzer</code> already covers both <code>claude-code/</code> and <code>codex/</code> log dirs; if Codex bypasses cache, the analyzer sees it</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-10">Verification plan</h2>
+<h3>Cold determinism gate (<code>feedback-sub-agent-isolated-test.md</code>)</h3>
+<ol><li>Spawn context-free Agent sub — pass only the analyzer path</li><li>Run <code>--days 30 --json</code> twice on the same inputs</li><li>Diff the two JSONs byte-for-byte</li><li>PASS criterion: empty diff</li><li>Validator subprocess must return real numbers, not silent rc=1</li></ol>
+<h3>Analyzer regression</h3>
+<ul><li>Existing 13 cases in <code>tests/test_token_efficiency_analyzer.py</code> continue to pass (G1)</li><li>New G2/G3 cases pass on first run after F1 lands</li></ul>
+<h3>Hook stdout determinism (G4)</h3>
+<pre><code>$ for h in hooks/*.sh; do
+    before=$(bash &quot;$h&quot; &lt; /dev/null 2&gt;&amp;1 | sha256sum)
+    after=$(bash &quot;$h&quot; &lt; /dev/null 2&gt;&amp;1 | sha256sum)
+    [ &quot;$before&quot; = &quot;$after&quot; ] || echo &quot;$h DRIFT&quot;
+  done</code></pre>
+<p>Empty output = pass.</p>
+<h3>Skill frontmatter audit (G5)</h3>
+<pre><code>$ python3 scripts/audit_skill_frontmatter.py
+$ echo $?
+0</code></pre>
+<h3>Hit-rate movement (G7)</h3>
+<ul><li>Capture pre-merge: <code>python3 tools/token_efficiency_analyzer.py --repo dev-harness-kit --days 30 --json &gt; /tmp/before.json</code></li><li>Capture post-merge (same day-of-window): <code>... &gt; /tmp/after.json</code></li><li>PASS: aggregate hit ≥ 97% OR <code>CACHE_HIT_LOW</code> count drops ≥20%</li></ul>
+<h3>PR checklist</h3>
+<ul><li>[ ] <code>pytest tests/test_token_efficiency_analyzer.py -v</code> G1+G2+G3 pass</li><li>[ ] <code>bash scripts/audit_hook_stdout.sh</code> returns 0 (G4)</li><li>[ ] <code>python3 scripts/audit_skill_frontmatter.py</code> returns 0 (G5)</li><li>[ ] <code>pytest tests/test_skill_governance.py -v</code> G6 pass</li><li>[ ] Cold sub-agent byte-identical re-run (determinism)</li><li>[ ] <code>pytest tests/test_hook_stdout_determinism.py tests/test_skill_frontmatter_audit.py -v</code> pass</li><li>[ ] PR description includes "tmux + long-running classification: pure-prose + scripts"</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-11">Distribution plan</h2>
+<h3>Files added (Phase 1)</h3>
+<pre><code>scripts/audit_hook_stdout.sh                     # new
+scripts/audit_skill_frontmatter.py               # new
+tests/test_hook_stdout_determinism.py            # new
+tests/test_skill_frontmatter_audit.py            # new</code></pre>
+<h3>Files modified (Phase 1)</h3>
+<pre><code>tools/token_efficiency_analyzer.py               # +120 (cache_decay + tile)
+tests/test_token_efficiency_analyzer.py          # +60 (G2/G3 cases)
+hooks/*.sh                                       # -10 net (volatile-field strip)
+skills/*/SKILL.md                                # -5 net (forbidden-field strip)</code></pre>
+<h3>Version bump</h3>
+<p><code>.claude-plugin/plugin.json</code> will bump patch on main merge via <code>.github/workflows/version-bump.yml</code>. Manual bump via <code>/dev-kit:bump patch</code> if explicit.</p>
+<h3>Worktree</h3>
+<ul><li>Name: <code>feat/cache-hit-rate-fix</code></li><li>Base: <code>origin/main</code></li><li>Branch cut: this proposal's worktree (<code>.worktrees/cache-hit-rate-proposal</code>) → rename on PR open to <code>feat/cache-hit-rate-fix</code> after Phase 1 ships</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-12">Next steps (after this proposal is approved)</h2>
+<ol><li><strong>Approval gate</strong>: render this YAML to HTML via <code>/dev-kit:proposal</code> → user reviews <code>./docs/proposals/cache-hit-rate/structural-fix.html</code></li><li><strong>Linear sync</strong>: <code>/dev-kit:linear</code> registers the umbrella issue (cache-hit-rate-structural-fix) + 3 sub-issues (F1, A1, A2)</li><li><strong>Plan</strong>: <code>/dev-kit:plan</code> produces phase-by-phase PRD (F1 → A1 → A2 → measure)</li><li><strong>Build</strong>: <code>/dev-kit:build</code> ships the 4 file-adds + 4 file-mods + 4 new tests, all gated by G1–G6</li><li><strong>Measure</strong>: post-merge <code>--days 30 --json</code> re-run, compare to pre-merge snapshot, decide Phase 2 (D/E) by G7 outcome</li><li><strong>Out of scope (separate proposal)</strong>: <code>stale_cost_usd = 86.7%</code> is the dominant cost-lever — file <code>docs/proposals/stale-worktree-cleanup/</code> next, not bundled here</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-13">References (dev-harness-kit SSOT only)</h2>
+<p>No external URLs. All rationale anchored to dev-kit's own SSOT:</p>
+<ul><li><code>rules/session-hygiene.md</code> — Iron Laws 1/3/5/6 already encode the failure modes F1/A1/A2/G measure and fix</li><li><code>tools/token_efficiency_analyzer.py</code> — analyzer source</li><li><code>tools/token_efficiency_analyzer.py:render_dashboard</code> — dashboard rendering target for the new tile</li><li><code>tests/test_token_efficiency_analyzer.py</code> — 13 existing cases (G1) + 2 new (G2/G3)</li><li><code>hooks/*.sh</code> — 18 hooks audited by A1</li><li><code>skills/*/SKILL.md</code> — 39 skills audited by A2</li><li><code>~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-version-from-plugin-json.md</code> — same discipline applied to A2's forbidden-field regex</li><li><code>~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-sub-agent-isolated-test.md</code> — cold-determinism gate for F1</li><li><code>~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-thin-harness-discipline.md</code> — cherry-pick budget for Phase 1/2 split</li><li><code>~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-tmux-long-running-safety.md</code> — pure-prose + scripts classification</li><li><code>~/.claude/projects/-Users-sanghee-dev-dev-harness-kit/memory/feedback-no-build-debug-handoff.md</code> — <code>token-analyzer</code> is <code>user-invocable: true</code>, so this proposal is the right surface (not <code>/dev-kit:build-debug</code>)</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-28 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

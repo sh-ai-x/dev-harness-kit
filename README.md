@@ -484,7 +484,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:babysit-pr`](docs/skills/babysit-pr.md) | Watches your open PR, fixes failing checks, pushes, and repeats until CI is green and review approves. Add `--local-verify` to gate iterations on a local test pass before pushing (saves GH-Actions minutes). |
+| [`/dev-kit:babysit-pr`](docs/skills/babysit-pr.md) | Watches your open PR, fixes failing checks, pushes, and repeats until CI is green and review approves. For a local test pass before every push (saves GH-Actions minutes), use `/dev-kit:babysit-pr-local`. |
 | [`/dev-kit:babysit-pr-local`](docs/skills/babysit-pr-local.md) | Same algorithm, but the LLM-judge verdict loop runs locally via `bin/review-local.sh` instead of GH-Actions. Use when GH-Actions minutes are exhausted and you want a faster feedback loop. |
 | [`/dev-kit:pr-verify`](docs/skills/pr-verify.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI" / "LLM-judge still running" false positive before any "ready to merge" claim. |
 | [`/dev-kit:bump`](docs/skills/bump.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
@@ -628,11 +628,17 @@ claude plugin install dev-kit
 # (live source instead: claude --plugin-dir /path/to/dev-harness-kit)
 
 # 3. One-shot setup: CLAUDE.md + AGENTS.md + hook config + CI templates
-/dev-kit:bootstrap (with ci-setup prompt)
+#    (also offers to set operator-global git defaults like
+#     rebase.autoStash=true -- see bin/setup-git-defaults.sh)
+/dev-kit:bootstrap (with ci-setup prompt + git-defaults prompt)
 
 # 4. First commit + push
 git add -A && git commit -m "chore: bootstrap dev-kit"
 git push -u origin main
+
+# 4a. (Optional, idempotent) Re-apply git defaults later
+bin/setup-git-defaults.sh --check   # see what is missing
+bin/setup-git-defaults.sh           # re-apply
 ```
 
 **Use `--force` on the very first install** (`/dev-kit:ci-setup --force`, which

@@ -395,7 +395,7 @@ class ACPDispatcher:
         cut_worktree`` (issue #310) — same semantics, one place to
         evolve them.
         """
-        from git_worktree import _branch_exists as _gw_branch_exists  # local: avoid module-load churn
+        from git_worktree import branch_exists as _gw_branch_exists  # local: avoid module-load churn
         return _gw_branch_exists(self.repo_root, branch)
 
     def _cut_worktree(self, branch: str, worktree_path: Path) -> None:

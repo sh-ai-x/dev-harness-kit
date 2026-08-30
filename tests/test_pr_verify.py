@@ -85,7 +85,8 @@ class TestGatesHermetic(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "state": "OPEN", "isDraft": False, "mergeStateStatus": "CLEAN",
         })):
-            g = pr_verify._gate_g1_pr_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g1_pr_state(ctx)
         self.assertTrue(g.passed)
         self.assertIn("OPEN", g.detail)
 
@@ -93,14 +94,16 @@ class TestGatesHermetic(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "state": "OPEN", "isDraft": True, "mergeStateStatus": "CLEAN",
         })):
-            g = pr_verify._gate_g1_pr_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g1_pr_state(ctx)
         self.assertFalse(g.passed)
 
     def test_g1_closed_pr_fails(self):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "state": "CLOSED", "isDraft": False, "mergeStateStatus": "CLEAN",
         })):
-            g = pr_verify._gate_g1_pr_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g1_pr_state(ctx)
         self.assertFalse(g.passed)
 
     def test_g2_all_pass(self):
@@ -110,7 +113,8 @@ class TestGatesHermetic(unittest.TestCase):
             {"name": "branch-policy", "state": "COMPLETED", "conclusion": "skipped", "bucket": "skipping"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(checks)):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertTrue(g.passed)
 
     def test_g2_pending_does_not_claim_pass(self):
@@ -120,7 +124,8 @@ class TestGatesHermetic(unittest.TestCase):
             {"name": "review", "state": "IN_PROGRESS", "conclusion": None, "bucket": "pending"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(checks)):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("PENDING", g.detail)
 
@@ -130,7 +135,8 @@ class TestGatesHermetic(unittest.TestCase):
             {"name": "review", "state": "COMPLETED", "conclusion": "failure", "bucket": "fail"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(checks)):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("FAILED", g.detail)
 
@@ -149,7 +155,8 @@ class TestGatesHermetic(unittest.TestCase):
              "created_at": "2026-01-02T00:00:00Z"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertTrue(g.passed)
 
     def test_g3_latest_changes_requested_fails(self):
@@ -160,7 +167,8 @@ class TestGatesHermetic(unittest.TestCase):
             {"user": "claude[bot]", "body": "**Verdict:** Changes Requested", "updated_at": "2026-01-02T00:00:00Z", "id": "2"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
 
     def test_g3_missing_verdict_fails(self):
@@ -170,7 +178,8 @@ class TestGatesHermetic(unittest.TestCase):
         and the babysit claimed 'all green' anyway."""
         comments = []
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("MISSING", g.detail)
 
@@ -181,7 +190,8 @@ class TestGatesHermetic(unittest.TestCase):
              "created_at": "2026-01-01T00:00:00Z"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g4_audit_no_failure_paired_with_approve(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g4_audit_no_failure_paired_with_approve(ctx)
         self.assertTrue(g.passed)
 
     def test_g4_failure_paired_with_approve_fails(self):
@@ -196,7 +206,8 @@ class TestGatesHermetic(unittest.TestCase):
              "created_at": "2026-01-01T00:00:00Z"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g4_audit_no_failure_paired_with_approve(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g4_audit_no_failure_paired_with_approve(ctx)
         self.assertFalse(g.passed)
         bad = g.evidence["bad_pairs"][0]
         self.assertEqual(bad["status"], "failure")
@@ -212,7 +223,8 @@ class TestGatesHermetic(unittest.TestCase):
              "created_at": "2026-01-01T00:00:00Z"},
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g4_audit_no_failure_paired_with_approve(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g4_audit_no_failure_paired_with_approve(ctx)
         self.assertTrue(g.passed)  # untrusted audit ignored, no bad pairs
         self.assertEqual(g.evidence["untrusted_audits_ignored"], 1)
 
@@ -220,7 +232,8 @@ class TestGatesHermetic(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE",
         })):
-            g = pr_verify._gate_g5_merge_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g5_merge_state(ctx)
         self.assertTrue(g.passed)
 
     def test_g5_behind_soft_passes_with_warning(self):
@@ -229,14 +242,16 @@ class TestGatesHermetic(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "mergeStateStatus": "BEHIND", "mergeable": "MERGEABLE",
         })):
-            g = pr_verify._gate_g5_merge_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g5_merge_state(ctx)
         self.assertTrue(g.passed)
 
     def test_g5_blocked_fails(self):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "mergeStateStatus": "BLOCKED", "mergeable": "CONFLICTING",
         })):
-            g = pr_verify._gate_g5_merge_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g5_merge_state(ctx)
         self.assertFalse(g.passed)
 
     def test_g5_unstable_fails(self):
@@ -246,7 +261,8 @@ class TestGatesHermetic(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps({
             "mergeStateStatus": "UNSTABLE", "mergeable": "MERGEABLE",
         })):
-            g = pr_verify._gate_g5_merge_state(584, "sh-ai-x/dev-harness-kit", "2026-08-06T00:00:00Z")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", fetched_at="2026-08-06T00:00:00Z")
+            g = pr_verify._gate_g5_merge_state(ctx)
         self.assertFalse(g.passed)
 
 
@@ -452,7 +468,8 @@ class TestM6UnknownBucketFailsG2(unittest.TestCase):
             {"name": "lint", "state": "COMPLETED", "conclusion": "success", "bucket": "pass"},
             {"name": "weird", "state": "COMPLETED", "conclusion": "success", "bucket": "unknown"},
         ])):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("UNEXPECTED bucket", g.detail)
 
@@ -462,7 +479,8 @@ class TestM6UnknownBucketFailsG2(unittest.TestCase):
             {"name": "lint", "state": "COMPLETED", "bucket": "pass"},
             {"name": "build", "state": "COMPLETED", "bucket": "cancelled"},
         ])):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("UNEXPECTED bucket", g.detail)
 
@@ -472,7 +490,8 @@ class TestM6UnknownBucketFailsG2(unittest.TestCase):
             {"name": "lint", "state": "COMPLETED", "bucket": "pass"},
             {"name": "build", "state": "COMPLETED", "bucket": "timed_out"},
         ])):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("UNEXPECTED bucket", g.detail)
 
@@ -482,7 +501,8 @@ class TestM6UnknownBucketFailsG2(unittest.TestCase):
             {"name": "lint", "state": "COMPLETED", "bucket": "pass"},
             {"name": "deploy", "state": "COMPLETED", "bucket": "action_required"},
         ])):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("UNEXPECTED bucket", g.detail)
 
@@ -492,7 +512,8 @@ class TestM6UnknownBucketFailsG2(unittest.TestCase):
             {"name": "lint", "state": "COMPLETED", "bucket": "pass"},
             {"name": "deploy", "state": "SKIPPED", "bucket": "skipping"},
         ])):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertTrue(g.passed)
 
 
@@ -519,11 +540,9 @@ class TestM2StaleVerdictGuard(unittest.TestCase):
              "body": "<!-- dev-kit-verdict-audit --> run=1 job=maintenance status=success verdict=Approve",
              "created_at": "2026-01-01T00:00:00Z"},
         ])):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,  # forces the _run_gh fallback path
-                pr_pushed_at="2026-01-02T00:00:00Z",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("STALE", g.detail)
 
@@ -542,11 +561,9 @@ class TestM2StaleVerdictGuard(unittest.TestCase):
              "body": "<!-- dev-kit-verdict-audit --> run=1 job=maintenance status=success verdict=Approve",
              "created_at": "2026-01-03T00:00:00Z"},
         ])):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertTrue(g.passed)
 
     def test_one_job_stale_others_fresh_fails(self):
@@ -569,11 +586,9 @@ class TestM2StaleVerdictGuard(unittest.TestCase):
              "body": "<!-- dev-kit-verdict-audit --> run=1 job=maintenance status=success verdict=Approve",
              "created_at": "2026-01-03T00:00:00Z"},
         ])):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("STALE", g.detail)
         self.assertIn("review", g.detail)
@@ -592,7 +607,8 @@ class TestCC8EdgeCaseFailures(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", side_effect=GhError(
             "gh pr timed out after 30s", exit_code=None,
         )):
-            g = pr_verify._gate_g1_pr_state(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g1_pr_state(ctx)
         self.assertFalse(g.passed)
         self.assertIn("gh error", g.detail)
 
@@ -601,7 +617,8 @@ class TestCC8EdgeCaseFailures(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", side_effect=GhError(
             "gh CLI not found on PATH", exit_code=None,
         )):
-            g = pr_verify._gate_g2_ci_checks(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g2_ci_checks(ctx)
         self.assertFalse(g.passed)
         self.assertIn("gh error", g.detail)
 
@@ -610,7 +627,8 @@ class TestCC8EdgeCaseFailures(unittest.TestCase):
         with patch.object(pr_verify, "_run_gh", side_effect=GhError(
             "gh returned malformed JSON: Unexpected token at line 1 col 5",
         )):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("gh error", g.detail)
 
@@ -682,7 +700,8 @@ class TestM3PerJudgeVerdict(unittest.TestCase):
             self._make_audit("maintenance", "Approve"),
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertTrue(g.passed)
 
     def test_review_changes_requested_fails(self):
@@ -694,7 +713,8 @@ class TestM3PerJudgeVerdict(unittest.TestCase):
             self._make_audit("maintenance", "Approve"),
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("non-Approve", g.detail)
 
@@ -707,7 +727,8 @@ class TestM3PerJudgeVerdict(unittest.TestCase):
             # maintenance audit absent
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("MISSING", g.detail)
 
@@ -720,7 +741,8 @@ class TestM3PerJudgeVerdict(unittest.TestCase):
             self._make_audit("maintenance", "Approve"),
         ]
         with patch.object(pr_verify, "_run_gh", return_value=json.dumps(comments)):
-            g = pr_verify._gate_g3_llm_verdicts(584, "sh-ai-x/dev-harness-kit")
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit")
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
 
 
@@ -856,12 +878,9 @@ class TestG3HeadShaProvenance(unittest.TestCase):
                 return json.dumps({"headSha": "newsha"})
             return self._COMMENTS
         with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-                pr_head_sha="newsha",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z", pr_head_sha="newsha")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertTrue(g.passed)
 
     def test_old_head_run_posts_after_new_push_fails(self):
@@ -875,12 +894,9 @@ class TestG3HeadShaProvenance(unittest.TestCase):
                 return json.dumps({"headSha": "oldsha"})
             return self._COMMENTS
         with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-                pr_head_sha="newsha",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z", pr_head_sha="newsha")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed, "stale-head run must not count as current-head approval")
         self.assertIn("STALE", g.detail)
 
@@ -892,12 +908,9 @@ class TestG3HeadShaProvenance(unittest.TestCase):
                 raise pr_verify.GhError("gh run view failed: rate limited")
             return self._COMMENTS
         with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-                pr_head_sha="newsha",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z", pr_head_sha="newsha")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
 
     def test_shared_run_id_dedupes_fetch(self):
@@ -911,12 +924,9 @@ class TestG3HeadShaProvenance(unittest.TestCase):
                 return json.dumps({"headSha": "newsha"})
             return self._COMMENTS
         with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-                pr_head_sha="newsha",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z", pr_head_sha="newsha")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertTrue(g.passed)
         self.assertEqual(call_count["n"], 1)
 
@@ -933,12 +943,9 @@ class TestG3HeadShaProvenance(unittest.TestCase):
              "body": "<!-- dev-kit-verdict-audit --> run=1 job=maintenance status=success verdict=Approve"},
         ])
         with patch.object(pr_verify, "_run_gh", return_value=stale_comments):
-            g = pr_verify._gate_g3_llm_verdicts(
-                584, "sh-ai-x/dev-harness-kit",
-                comments=None,
-                pr_pushed_at="2026-01-02T00:00:00Z",
-                pr_head_sha="",
-            )
+            ctx = pr_verify.PrVerifyContext(pr_number=584, repo="sh-ai-x/dev-harness-kit", comments=None, pr_pushed_at="2026-01-02T00:00:00Z", pr_head_sha="")
+
+            g = pr_verify._gate_g3_llm_verdicts(ctx)
         self.assertFalse(g.passed)
         self.assertIn("STALE", g.detail)
 
@@ -962,6 +969,48 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
         {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
          "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success verdict=Approve source=lib.maintenance_gate head_sha=newsha"},
     ])
+
+    def test_legacy_positional_call_threads_repo_correctly(self):
+        """Regression for inspect 2026-08-27 M1 (PR #755 maintenance-judge
+        finding): _gate_g3_llm_verdicts(ctx=None, pr_number=0, repo="", ...)
+        puts `ctx` in position 0 and `pr_number` in position 1. A legacy
+        caller invoking the OLD positional shape —
+        `_gate_g3_llm_verdicts(584, "owner/repo", comments=..., ...)` —
+        binds 584 to `ctx` and the string "owner/repo" to the parameter
+        NAMED `pr_number`, not `repo`. The isinstance(ctx, PrVerifyContext)
+        fold must read the misbound `pr_number` slot (which holds the repo
+        string) rather than the `repo` slot (which stayed at its "" default)
+        or every legacy positional call silently builds a PrVerifyContext
+        with repo="" and every gh API call 404s in production. This test
+        asserts on the ACTUAL `_run_gh` call args, not just the return
+        value — the prior bug passed every existing test because those
+        tests mock `_run_gh` unconditionally regardless of its arguments.
+        """
+        calls = []
+
+        def fake_gh(args):
+            calls.append(args)
+            return self._COMMENTS_MATCHING
+
+        with patch.object(pr_verify, "_run_gh", side_effect=fake_gh):
+            g = pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertTrue(g.passed, g.detail)
+        self.assertTrue(calls, "expected at least one _run_gh call")
+        joined = " ".join(str(c) for c in calls)
+        self.assertIn(
+            "sh-ai-x/dev-harness-kit", joined,
+            "repo was not threaded through the legacy positional shim; "
+            f"_run_gh was called with: {calls}",
+        )
+        self.assertNotIn(
+            "repos//issues", joined,
+            "repo bound to empty string — the exact M1 misbinding bug",
+        )
 
     def test_comment_head_sha_matches_pr_head_passes(self):
         """Audit `head_sha=` matches PR head — pass even when the run
@@ -1240,6 +1289,87 @@ class TestG3CommentHeadShaProvenance(unittest.TestCase):
             )
         self.assertFalse(g.passed)
         self.assertIn("STALE", g.detail)
+
+
+class TestG3LegacyArgBinding(unittest.TestCase):
+    """Regression for the `_gate_g3_llm_verdicts` back-compat shim.
+
+    The new signature puts `ctx` first, so a legacy POSITIONAL call
+    `_gate_g3_llm_verdicts(584, "owner/repo", ...)` binds the repo
+    string to the `pr_number` parameter slot while `repo` keeps its
+    `""` default. A shim that reads `repo` directly builds
+    `PrVerifyContext(pr_number=584, repo="")` and the resulting
+    `gh api repos//issues/584/comments` 404s in production. The
+    existing provenance tests never caught this because they mock
+    `_run_gh` without inspecting the requested path — these tests
+    assert the path itself.
+    """
+
+    _AUDITS = json.dumps([[
+        {"id": "audit-1", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=review status=success "
+                 "source=lib.maintenance_gate verdict=Approve head_sha=newsha"},
+        {"id": "audit-2", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=security status=success "
+                 "source=lib.maintenance_gate verdict=Approve head_sha=newsha"},
+        {"id": "audit-3", "user": "github-actions", "created_at": "2026-01-03T00:00:00Z",
+         "body": "<!-- dev-kit-verdict-audit --> run=42 job=maintenance status=success "
+                 "source=lib.maintenance_gate verdict=Approve head_sha=newsha"},
+    ]])
+
+    def _api_paths(self, gh_mock):
+        return [
+            call.args[0][1]
+            for call in gh_mock.call_args_list
+            if call.args
+            and isinstance(call.args[0], list)
+            and len(call.args[0]) >= 2
+            and call.args[0][0] == "api"
+        ]
+
+    def test_legacy_positional_binds_repo_not_empty(self):
+        with patch.object(pr_verify, "_run_gh", return_value=self._AUDITS) as gh_mock:
+            pr_verify._gate_g3_llm_verdicts(
+                584, "sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertEqual(
+            self._api_paths(gh_mock),
+            ["repos/sh-ai-x/dev-harness-kit/issues/584/comments"],
+            "legacy positional call must bind repo from the second positional",
+        )
+
+    def test_pure_kwarg_call_binds_repo(self):
+        with patch.object(pr_verify, "_run_gh", return_value=self._AUDITS) as gh_mock:
+            pr_verify._gate_g3_llm_verdicts(
+                pr_number=584,
+                repo="sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertEqual(
+            self._api_paths(gh_mock),
+            ["repos/sh-ai-x/dev-harness-kit/issues/584/comments"],
+            "pure-kwarg call must not be shifted by the leading ctx slot",
+        )
+
+    def test_positional_pr_number_with_repo_keyword(self):
+        with patch.object(pr_verify, "_run_gh", return_value=self._AUDITS) as gh_mock:
+            pr_verify._gate_g3_llm_verdicts(
+                584,
+                repo="sh-ai-x/dev-harness-kit",
+                comments=None,
+                pr_pushed_at="2026-01-02T00:00:00Z",
+                pr_head_sha="newsha",
+            )
+        self.assertEqual(
+            self._api_paths(gh_mock),
+            ["repos/sh-ai-x/dev-harness-kit/issues/584/comments"],
+            "an explicit repo= keyword must win over the positional slot",
+        )
 
 
 class TestLatestPerJobAuditsParseExtras(unittest.TestCase):

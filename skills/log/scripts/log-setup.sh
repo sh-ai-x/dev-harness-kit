@@ -116,8 +116,26 @@ if [[ -f "$DST_PY" ]]; then
 fi
 SRC_SHA="$(sha256_cmd < "$SRC_PY" | awk '{print $1}')"
 
+# Guard against clobbering a target file that already matches its own
+# project's git HEAD. LOGHOOKS_DIR is an independently-versioned source
+# repo that can drift behind/ahead of what a project has already
+# committed to tools/save_log.py. Comparing only against LOGHOOKS_DIR's
+# SHA meant a fresh worktree's already-correct, git-tracked copy could
+# be silently overwritten the moment the two diverged. --force bypasses
+# this guard explicitly (same as it bypasses the source-SHA check).
+HEAD_SHA=""
+if [[ "$GLOBAL" -ne 1 && "$FORCE" -eq 0 && -f "$DST_PY" ]]; then
+    if [[ "$(git -C "$TARGET_DIR" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+        REL_PY="${DST_PY#"$TARGET_DIR"/}"
+        HEAD_SHA="$(git -C "$TARGET_DIR" show "HEAD:$REL_PY" 2>/dev/null \
+                     | sha256_cmd | awk '{print $1}' || true)"
+    fi
+fi
+
 if [[ -n "$LOCAL_SHA" && "$LOCAL_SHA" == "$SRC_SHA" && "$FORCE" -eq 0 ]]; then
     echo "OK: $DST_PY already up to date (sha matches)"
+elif [[ -n "$LOCAL_SHA" && -n "$HEAD_SHA" && "$LOCAL_SHA" == "$HEAD_SHA" ]]; then
+    echo "OK: $DST_PY matches project git HEAD (leaving as-is; use --force to sync from \$LOGHOOKS_DIR anyway)"
 else
     if [[ -n "$LOCAL_SHA" ]]; then
         echo "Updating $DST_PY (sha: ${LOCAL_SHA:0:8} -> ${SRC_SHA:0:8})"

@@ -101,8 +101,35 @@ emit_guard_event() {
     subject="$(printf '%s' "${INPUT_JSON:-}" | jq -r '.tool_name // .tool_input.file_path // "unknown"' 2>/dev/null || printf 'unknown')"
     run_id="${DEV_KIT_RUN_ID:-hook-$(date -u +%Y%m%d)}"
     workflow_id="${DEV_KIT_WORKFLOW_ID:-hook:${hook_prefix}}"
-    evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" \
-        '{policy_id:$policy, reason:$why, ground_truth:(env.DEV_KIT_GROUND_TRUTH // null)}' 2>/dev/null || printf '{}')"
+    # Policy-driven default ground_truth (issue #663).
+    #
+    # Earlier revisions defaulted `blocked→unsafe` and `allowed→legitimate`,
+    # which made the prevention_quality reducer trivially score 100%
+    # precision/recall against the same hook that emits the event — the
+    # metric's definition was circular (Review Critical #1). Now the policy
+    # default is `unknown` (no claim about correctness); the reducer skips
+    # `unknown` events entirely, so the metric only scores guards that the
+    # operator has explicitly classified via DEV_KIT_GROUND_TRUTH (golden
+    # / adversarial runs).
+    #
+    # The override is validated against an allowed set so a stray
+    # `DEV_KIT_GROUND_TRUTH=bogus` cannot silently become a TP/FP
+    # misclassification (A10-5). Unknown values degrade to `unknown`.
+    #
+    # NOTE: every line in this block must stay commented. A bare
+    # `DEV_KIT_GROUND_TRUTH ...` line here parses fine under `bash -n`
+    # but executes as a command at runtime (exit 127), and the callers
+    # (bash-guard.sh, destructive-confirm.sh, secret-scan.sh) run under
+    # `set -eo pipefail` — the shell would die here, before deny() writes
+    # its permissionDecision envelope, making every guard fail OPEN.
+    local default_gt="unknown"
+    local explicit_gt="${DEV_KIT_GROUND_TRUTH:-$default_gt}"
+    case "$explicit_gt" in
+        unsafe|legitimate|pending|unknown) ;;
+        *) explicit_gt="unknown" ;;
+    esac
+    evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" --arg gt "$explicit_gt" \
+        '{policy_id:$policy, reason:$why, ground_truth:$gt}' 2>/dev/null || printf '{}')"
     local event_type="guard.blocked"
     [ "$outcome" = "allowed" ] && event_type="guard.allowed"
     [ "$outcome" = "ask" ] && event_type="guard.ask"

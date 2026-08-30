@@ -41,6 +41,7 @@ from .fp_filter import (  # noqa: F401
 from .runner import (  # noqa: F401
     AnalysisResult,
     emit_suggested_diffs,
+    mask_secrets,
     render_markdown,
     run_analysis,
 )

@@ -488,3 +488,12 @@ def _diff_for_rewrite(f: Evidence) -> SuggestedDiff:
         command=f"# rewrite: {_mask_secrets(patch_text)}",
         reason=_mask_secrets(f.failure_scenario),
     )
+
+
+# inspect 2026-08-27 overarch-1: promote `_mask_secrets` to a public
+# `mask_secrets` so external callers (e.g. `lib.verify_harness`) do not
+# have to reach into the analysis_core subpackage's private namespace.
+# Both names point to the same function; the underscore form is kept as
+# a back-compat alias for any in-package call sites that haven't
+# migrated yet.
+mask_secrets = _mask_secrets

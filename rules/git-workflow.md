@@ -90,6 +90,13 @@ git worktree remove .worktrees/fix-<slug>
 git branch -d fix/<slug>        # local branch gone
 ```
 
+`babysit-pr` is the explicit exception to step 5: its PR-owning worktree is a
+long-running telemetry context. When `.dev-kit/babysit-retention.json` exists
+with `owner: "babysit-pr"`, do not remove the worktree or branch after the PR
+ends; retain it for post-PR log analysis until an operator explicitly removes
+the marker and approves cleanup. This exception does not change cleanup for
+ordinary task worktrees.
+
 **Why client-specific handoff?** Claude Code can enter a new interactive
 session at the worktree path. Codex's parent session cannot change its status
 line or cwd, so Codex must pass the worktree path, branch, task prompt, and

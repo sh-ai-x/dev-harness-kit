@@ -93,6 +93,8 @@ class TestReviewLocalShell(unittest.TestCase):
             "--review-only",
             "--security-only",
             "--maintenance-only",
+            "--injection-only",
+            "--no-injection-scan",
             "--dry-run",
             "--no-touch-probe",
         ):

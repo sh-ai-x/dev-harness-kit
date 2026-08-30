@@ -23,10 +23,10 @@ Score mapping:
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
+from lib.behavior_scorers._git_helper import git_output as _git_output
 from lib.behavior_scorers.types import Context, DimensionScore
 
 # L4 forbids TODO/FIXME/starting-point/'we'll extend later' in committed code.
@@ -34,20 +34,6 @@ _L1_FORBIDDEN_RE = re.compile(
     r"\b(TODO|FIXME|XXX|HACK)\b|we'll extend later|starting point",
     re.IGNORECASE,
 )
-
-
-def _git_output(worktree: Path, *args: str) -> str:
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(worktree), *args],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return ""
-    return (proc.stdout or "").strip()
 
 
 def _read_hook_log(worktree: Path, name: str) -> str:

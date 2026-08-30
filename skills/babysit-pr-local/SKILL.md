@@ -175,9 +175,22 @@ LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
   4L. LOCAL REVIEW — NEW STEP.
         a. Invoke `bin/babysit-pr-local.sh --pr $PR_NUMBER`.
            The wrapper validates args (refuses --auto-approve), then
-           execs `bin/review-local.sh --pr $PR_NUMBER` with the
-           provider-resolved env block + secret-scoped API key. The
-           local judge runs /dev-kit:review + /dev-kit:security +
+           runs `bin/review-local.sh --pr $PR_NUMBER` with the
+           provider-resolved env block + secret-scoped API key,
+           mirroring its stdout into
+           `.dev-kit/babysit-pr-local-live.log` via `tee` (the exit
+           code still propagates 1:1 from `review-local.sh`, now via
+           `PIPESTATUS` instead of `exec`). Before running it, the
+           wrapper also (best-effort, never blocking): ensures
+           `bin/review-local-server.py` is up on 127.0.0.1:8765
+           (spawning it if not) and opens `/pr/<N>?autostart=1` in the
+           operator's browser once per PR per hour -- that URL
+           connects to the server's read-only `/tail` route, which
+           mirrors the live log in real time WITHOUT spawning a second
+           `review-local.sh` (see
+           `docs/tools/review-local-html-viewer.md`). Opt out with
+           `BABYSIT_NO_VIEWER=1`; auto-skipped under `$CI`. The local
+           judge runs /dev-kit:review + /dev-kit:security +
            /dev-kit:maintenance and emits:
              - exit 0 → Approve (loop terminates next iteration)
              - exit 1 → Changes Requested / Blocked / parse failure
@@ -260,7 +273,7 @@ blocker list, exit 1. Never silently retry past the cap.
 | 4 (WAIT) | sleep 30s for CI | same sleep 30s for deterministic CI |
 | 4L (NEW) | n/a | `bin/babysit-pr-local.sh --pr N` → `bin/review-local.sh --pr N` |
 | 5 (FETCH LOGS) | for failing CI checks | identical (deterministic CI still runs) |
-| 7.5 (LOCAL VERIFY) | `--local-verify` opt-in, default OFF | always ON; default `pytest -q` |
+| 7.5 (LOCAL VERIFY) | n/a (no broad pre-push gate) | always ON; default `pytest -q` |
 | 11 (LOG) | `source=babysit-pr` | `source=babysit-pr-local mode=local review=<verdict>` |
 | 12 (SLEEP) | `gh pr checks --watch` / 20s | 20s only (no `--watch`) |
 
@@ -355,9 +368,23 @@ violates MUST-L3.
 
 ## Visual status surface
 
+Two independent surfaces exist; do not conflate them.
+
+**HTML live viewer (auto-wired, real-time)** -- step 4L above already
+does this on every iteration: the wrapper ensures
+`bin/review-local-server.py` is running and opens
+`http://127.0.0.1:8765/pr/<N>?autostart=1` in the operator's browser
+(once per PR per hour), which live-streams the current
+`review-local.sh` run's stdout plus the three gate dots
+(review/security/maintenance). See
+`docs/tools/review-local-html-viewer.md`. Opt out with
+`BABYSIT_NO_VIEWER=1`.
+
+**ANSI status line (manual opt-in, terminal-only)** --
 `bin/babysit-pr-local-status.py` is a read-only SSOT script that prints
 one ANSI line summarizing the current branch's PR gate state. It
-exposes that line to three render points from a single source:
+exposes that line to three render points from a single source, none of
+which are wired by default (each requires the manual step listed):
 
 | Render point | How to enable |
 |---|---|

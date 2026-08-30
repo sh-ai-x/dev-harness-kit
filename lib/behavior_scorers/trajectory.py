@@ -30,7 +30,30 @@ from lib.behavior_scorers.types import Context, DimensionScore
 
 
 def _load_latest_trace(worktree: Path) -> Dict[str, Any] | None:
-    """Load the most recent trace JSON under `eval/transcripts/`."""
+    """Load the most recent trace JSON under `eval/transcripts/`.
+
+    Layout contract: `<worktree>/eval/transcripts/<case_id>/*.json`.
+    Returns the JSON-decoded contents of the latest-mtime trace, or
+    `None` if the layout is empty / unreadable. Centralized here so
+    D7 (trajectory) and D3 (efficiency) cannot drift on the layout.
+    """
+    latest_path = _latest_trace_path(worktree)
+    if latest_path is None:
+        return None
+    try:
+        return json.loads(latest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _latest_trace_path(worktree: Path) -> Path | None:
+    """Resolve the latest-mtime `eval/transcripts/<dim>/*.json` path.
+
+    Returns `None` when no transcripts directory, no case_dirs, or no
+    `*.json` files exist. The pair (`_latest_trace_path` +
+    `_load_latest_trace`) lets `efficiency.py` compute metrics directly
+    on the path without re-decoding the JSON when only the path matters.
+    """
     transcripts = worktree / "eval" / "transcripts"
     if not transcripts.is_dir():
         return None
@@ -41,10 +64,7 @@ def _load_latest_trace(worktree: Path) -> Dict[str, Any] | None:
     traces = sorted(latest_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
     if not traces:
         return None
-    try:
-        return json.loads(traces[-1].read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
+    return traces[-1]
 
 
 def _heuristic(trace: Dict[str, Any]) -> Dict[str, Any]:

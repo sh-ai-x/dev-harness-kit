@@ -320,6 +320,19 @@ HTML_TEMPLATE = """<!doctype html>
     </div>
   </div>
 
+  <div class="section-title">Cache hit ratio vs turn index <span class="muted" style="font-weight:400;font-size:11px">(F1 cache_decay fix — bucket-band median; stable curve = stable prefix, dropping curve = volatile content reaching the prompt head)</span></div>
+  <div class="panel">
+    <table>
+      <thead><tr>
+        <th>Bucket</th>
+        <th style="text-align:right">Sessions</th>
+        <th>Turn-index curve (median cache-hit %)</th>
+      </tr></thead>
+      <tbody>{cache_decay_rows}</tbody>
+    </table>
+    <div class="muted" style="margin-top:8px;font-size:11px">Empty buckets are skipped. A bucket's curve ends at its shortest session so the median is over the same number of sessions at every turn index.</div>
+  </div>
+
   <div class="section-title">Active Sessions <span class="muted" style="font-weight:400;font-size:11px">(worktree state: main / live / fresh)</span></div>
   <div class="panel" style="overflow-x:auto">
     <table>
@@ -659,6 +672,74 @@ def render_worktree_index(worktree: str, sessions: list[dict], *, main_href: str
     return _sidecar_page(f"Worktree {worktree}", body)
 
 
+# Cache decay bucket boundaries — sessions are bucketed by call count
+# so the dashboard shows whether long sessions hold their prefix
+# (Iron Law 3) or whether short / medium / long curves diverge.
+_CACHE_DECAY_BUCKETS: tuple[tuple[str, int, int | None], ...] = (
+    ("1-3",  1,  3),
+    ("4-10", 4, 10),
+    ("11-30", 11, 30),
+    ("30+",  31, None),
+)
+
+
+def _bucket_cache_decay(sessions: list[dict]) -> dict:
+    """Aggregate the per-turn ``cache_decay`` curve across sessions,
+    bucketed by session length (F1 cache_decay fix).
+
+    For each bucket, return a list of ``(turn_index, median_hit)``
+    points spanning the shortest session in the bucket so the bucket
+    can be plotted turn-by-turn. Sessions longer than the shortest
+    contribute to the median at every turn index they cover.
+
+    Empty buckets emit ``points: []`` so the renderer can skip them.
+    """
+    out: dict[str, dict] = {}
+    for label, lo, hi in _CACHE_DECAY_BUCKETS:
+        # Collect every (turn_index, hit_ratio) sample across all
+        # sessions in this bucket.
+        samples_by_turn: dict[int, list[float]] = {}
+        n_sessions = 0
+        for s in sessions:
+            cd = s.get("cache_decay") or []
+            n_calls = len(cd)
+            if n_calls < lo:
+                continue
+            if hi is not None and n_calls > hi:
+                continue
+            n_sessions += 1
+            for i, ratio in enumerate(cd):
+                samples_by_turn.setdefault(i, []).append(float(ratio))
+        if n_sessions == 0:
+            out[label] = {"points": [], "n_sessions": 0}
+            continue
+        # Bucket length = the longest session in the bucket (so the
+        # median at turn index N is over sessions with N+1 turns).
+        max_len = max((len(s.get("cache_decay") or []) for s in sessions
+                       if lo <= len(s.get("cache_decay") or []) <= (hi if hi else 10**9)),
+                      default=0)
+        points: list[dict] = []
+        for i in range(max_len):
+            samples = samples_by_turn.get(i, [])
+            if not samples:
+                continue
+            samples_sorted = sorted(samples)
+            mid = len(samples_sorted) // 2
+            if len(samples_sorted) % 2:
+                median = samples_sorted[mid]
+            else:
+                median = (samples_sorted[mid - 1] + samples_sorted[mid]) / 2
+            points.append({
+                "turn": i + 1,
+                "median": round(median, 4),
+                "p25": round(samples_sorted[max(0, len(samples_sorted) // 4)], 4),
+                "p75": round(samples_sorted[min(len(samples_sorted) - 1, (3 * len(samples_sorted)) // 4)], 4),
+                "n": len(samples),
+            })
+        out[label] = {"points": points, "n_sessions": n_sessions}
+    return out
+
+
 def build_view_model(
     *,
     repo: str,
@@ -869,6 +950,16 @@ def build_view_model(
         "state": ttl_state,
     }
 
+    # ---- cache_decay (F1) ----
+    # Per-turn cache-hit-ratio curve, bucketed by session length so the
+    # dashboard can show "do long sessions keep a stable prefix, or does
+    # the curve fall toward 0% mid-stream?" Iron Law 3 in
+    # rules/session-hygiene.md is what we're measuring here — a sudden
+    # drop in cache_decay between adjacent turns means the prefix was
+    # invalidated (volatile content reached the head, or a hook injected
+    # new state).
+    cache_decay = _bucket_cache_decay(sessions)
+
     # ---- active / inactive ----
     active_count = sum(1 for s in sessions
                        if s.get("worktree_state") not in _stale_worktree_states())
@@ -899,6 +990,7 @@ def build_view_model(
         "cost_by_tool": cost_by_tool,
         "cost_by_model": cost_by_model,
         "cache_ttl": cache_ttl,
+        "cache_decay": cache_decay,
         "totals": {
             "total_cost": total_cost,
             "total_tokens": total_tokens,
