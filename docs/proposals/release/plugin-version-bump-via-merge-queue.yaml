@@ -1,0 +1,217 @@
+---
+title: Plugin version bump via GitHub Merge Queue
+status: ready-for-review
+date: 2026-08-30
+author: dev-harness-kit maintainers
+related_prs: [763, 764]
+related_issues: []
+supersedes: docs/reverts/2026-08-02-revert-eval-prs.md (the version-bump workflow
+  workaround note)
+---
+
+# Plugin version bump via GitHub Merge Queue
+
+## Why this exists
+
+Every PR into `main` on dev-harness-kit triggers a one-line conflict on
+`.claude-plugin/plugin.json:version` and `.codex-plugin/plugin.json:version`.
+
+The root cause is a self-imposed loop:
+
+1. PR #N is open, branched from `main` at version `v0.3.N`.
+2. PR #N-1 merges into `main`.
+3. `.github/workflows/version-bump.yml` auto-fires on `push: branches:
+   [main]`, opens a `chore(release): bump dev-kit to v0.3.N+1` PR (or
+   pushes directly).
+4. PR #N is now one version behind `main`; opening it against `main`
+   produces a content conflict on the version field.
+
+Every feature PR has hit this in 2026-08 (PRs #762, #763, #764 all
+shipped a "Merge origin/main" commit that only resolved this one
+line). The maintainer noted this in `docs/reverts/2026-08-02-revert-eval-prs.md`
+line 23: "Review the version-bump workflow (#522) — it was a workaround
+for #507's server-side branch protection and may be obsolete after this
+revert chain lands."
+
+The maintainer also wrote `docs/skills/bump.md` describing a manual
+`/dev-kit:bump` skill, which exists "for race recovery — redoing an
+orphaned bump locally after the workflow leaves a tip without a PR,
+and for cutting an explicit pre-PR release candidate." That skill
+exists because the workflow is racy.
+
+## Why a fix is needed now
+
+The conflict pattern is mechanical and zero-substance. Each conflict
+costs:
+
+- ~30 seconds of author time to merge main and recommit
+- a new "Merge origin/main" commit per PR (visible in PR history,
+  noise in changelog)
+- a recurring review/security LLM-judge run if the bot can't fast-forward
+  cleanly (cost on Anthropic API spend)
+
+Three PRs in the last 48 hours each shipped a merge commit for this
+alone. This is the wrong ratio of operator effort to release value.
+
+## Constraints (what we cannot break)
+
+[Claude Code plugin-marketplaces docs](https://code.claude.com/docs/en/plugin-marketplaces)
+and [issue #43763](https://github.com/anthropics/claude-code/issues/43763)
+both confirm: bumping `plugin.json:version` is the **primary cache
+invalidation mechanism** for installed users. Removing or computing
+this field at runtime would break user-side cache refresh.
+
+Therefore `plugin.json:version` MUST remain:
+
+1. A real string in the file (not generated at install time)
+2. Bumped on every change that should reach installed users
+3. Bumped monotonically with each merged PR
+
+## Constraints (what we CAN change)
+
+[GitHub Merge Queue docs](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+and [community discussion #102764](https://github.com/orgs/community/discussions/102764)
+confirm Merge Queue fires `merge_group` events at the moment a PR is
+merged. `merge_group` is the GitHub-provided mechanism that solves this
+exact problem:
+
+> "A merge queue runs required checks against every pull request head
+> immediately before merging, and updates the head branch with the
+> target branch before the merge to keep the test surface up to date."
+
+The merge queue's own behavior guarantees that **every merged PR has
+already incorporated the latest `main` state**, including any version
+bump. This makes the per-PR conflict resolution path obsolete.
+
+## Options considered
+
+### Option A — Remove `version` field, compute at runtime
+
+- **Verdict**: rejected. Breaks cache invalidation contract.
+- Source: [Claude Code plugin-marketplaces docs](https://code.claude.com/docs/en/plugin-marketplaces)
+  + [issue #757 stale marketplace.json](https://github.com/alirezarezvani/claude-skills/issues/757)
+  + [issue #43763 installed_plugins.json not updating](https://github.com/anthropics/claude-code/issues/43763)
+
+### Option B — Per-PR auto-rebase bot (cron + push)
+
+- **Verdict**: rejected. Re-triggers LLM-judge review per rebase
+  (cost explosion), race condition with version-bump workflow's own
+  PR, no conflict resolution on hard-conflict PRs.
+- Source: [community discussion #166932](https://github.com/orgs/community/discussions/166932)
+  + [PR Conflict Detector](https://github.com/github-community-projects/pr-conflict-detector)
+
+### Option C — GitHub Merge Queue (selected)
+
+- **Verdict**: selected. GitHub-managed rebase at merge time, no cron,
+  no bot, no LLM-judge re-run, all current contracts preserved.
+- Source: [Managing a merge queue](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+  + [merge_group event docs](https://docs.github.com/en/webhooks/webhook-events-and-payloads#merge_group)
+
+### Option D — Version from env var injected at build time
+
+- **Verdict**: rejected for now. Requires release artifact + tag
+  machinery this repo doesn't have; larger refactor with same end
+  state as C.
+
+## What changes
+
+### BEFORE (current)
+
+```
+PR #N open, branched from main at v0.3.K
+   │
+   ├─ PR #N-1 merges into main
+   │     └─ version-bump.yml auto-runs on push
+   │           └─ pushes chore(release): bump v0.3.(K+1) to main
+   │
+   ├─ PR #N now conflicts on plugin.json:version
+   │     └─ author: git fetch origin/main && git merge && git push
+   │           └─ LLM review re-runs (cost)
+   │
+   └─ PR #N merges, "Merge origin/main" commit in history
+```
+
+### AFTER (proposed)
+
+```
+PR #N open, branched from main at v0.3.K
+   │
+   ├─ PR #N-1 merges via Merge Queue
+   │     └─ merge_group event fires
+   │           └─ version-bump.yml bumps v0.3.(K+1) on the merge_group ref
+   │           └─ queue merges the result into main
+   │
+   ├─ PR #N enters queue
+   │     └─ GitHub auto-rebases PR #N onto new main (with v0.3.K+1)
+   │     └─ ready-check workflow runs (lint + validate + scope only)
+   │     └─ merges into main
+   │
+   └─ No conflict, no "Merge origin/main" commit
+```
+
+## Files in this migration
+
+### Added
+
+- `.github/workflows/merge-queue-ready-check.yml` — fast (<2min) checks
+  that gate the merge queue; does NOT include the 30-300s LLM judges
+  (those run on the `pull_request` event as today, finish before the PR
+  is queue-eligible).
+- `docs/proposals/release/plugin-version-bump-via-merge-queue.yaml` —
+  this file.
+- `docs/release.md` — operator-facing OLD vs NEW with evidence links.
+
+### Modified
+
+- `.github/workflows/version-bump.yml` — `on: push: branches: [main]`
+  → `on: merge_group`. Keep the title regex `chore(release): bump
+  dev-kit to vX.Y.Z` because every other workflow filters on it; the
+  bump still produces the same commit, just from a different trigger.
+- `bin/sync-version.sh` — becomes a no-op compat shim with a comment
+  pointing at the proposal. The pre-push auto-sync is removed.
+- `.githooks/pre-push` — the auto-SYNC block is removed; pre-push
+  keeps its other duties (block direct push to main, intent check).
+
+### Removed
+
+- The "auto-SYNC plugin.json from origin/main" code path in
+  `.githooks/pre-push` (dead under merge queue; creates race).
+- The functional body of `bin/sync-version.sh` (replaced by no-op shim).
+- The `description` paragraph in `skills/sync-version/SKILL.md` that
+  tells users to run it before pushing (now done automatically by the
+  queue).
+
+## Operational changes
+
+1. Repository admin: enable Merge Queue on `main` with the default
+   settings + the new `merge-queue-ready-check.yml` as a required
+   check. (This is an out-of-repo GitHub UI change; documented in
+   `docs/release.md` step 1.)
+2. Contributors: no change. PRs are auto-rebased by the queue.
+3. Release tagging: unchanged. Tag-driven releases still work; the
+   bump is a separate concern.
+
+## Evidence trail (preserved for auditability)
+
+- [Claude Code plugin-marketplaces spec](https://code.claude.com/docs/en/plugin-marketplaces) —
+  confirms `version` is the cache-invalidation field
+- [issue #43763 installed_plugins.json stale](https://github.com/anthropics/claude-code/issues/43763) —
+  confirms runtime-computed versions break cache
+- [issue #757 stale marketplace.json](https://github.com/alirezarezvani/claude-skills/issues/757) —
+  confirms cache staleness is a real production concern
+- [Managing a merge queue](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue) —
+  official merge-queue docs
+- [community discussion #102764 merge_group](https://github.com/orgs/community/discussions/102764) —
+  merge_group trigger semantics
+- [community discussion #24567 synchronize](https://github.com/orgs/community/discussions/24567) —
+  synchronize does NOT fire on base advance (the reason a custom bot
+  would be needed without the queue)
+- [merge_group webhook event](https://docs.github.com/en/webhooks/webhook-events-and-payloads#merge_group) —
+  official webhook payload spec
+- [docs/reverts/2026-08-02-revert-eval-prs.md line 23](file:///Users/sanghee/dev/dev-harness-kit/docs/reverts/2026-08-02-revert-eval-prs.md) —
+  internal: maintainer already flagged version-bump workflow as a
+  workaround
+- [docs/skills/bump.md](file:///Users/sanghee/dev/dev-harness-kit/docs/skills/bump.md) —
+  internal: skill exists only because the workflow is racy
+- [`.github/workflows/version-bump.yml`](file:///Users/sanghee/dev/dev-harness-kit/.github/workflows/version-bump.yml) —
+  current implementation being migrated

@@ -14,22 +14,27 @@ The full chain is:
        (no auto-bump on feature branches; parallel PRs never conflict)
     -> ci.yml:version-freshness check (HEAD > BASE) gates the merge
     -> PR is merged into main
-    -> version-bump.yml fires on pull_request(closed) with merged==true,
-       bumps PATCH, commits, pushes, then emits dev-kit--vX.Y.Z
+    -> version-bump.yml fires on the merge_group event (the GitHub
+       Merge Queue's pre-merge trigger), bumps PATCH on top of the
+       queued PR's HEAD, then emits dev-kit--vX.Y.Z
 
-Trigger note (2026-08-03): the workflow used to fire on `push:
-branches: [main]`, but its own bump commit is pushed straight to main
--- a push event -- which re-fired the workflow on itself and cascaded
-(v0.3.183 -> v0.3.188 in under a minute before being caught). Gating on
-"a PR into main was merged" is structurally immune: the bump step
-never goes through a PR, so it can't retrigger itself.
+Trigger history (read this before changing `on:` again):
+  - 2026-08-02: `on: push: branches: [main]` was an unbounded
+    self-retrigger cascade (the bump commit pushed to main, which
+    fired another bump). Fixed by moving to `pull_request: types:
+    [closed]`.
+  - 2026-08-30: `pull_request: types: [closed]` still had a per-PR
+    conflict on the version field against every parallel feature PR.
+    Fixed by moving to `merge_group` -- the queue guarantees the
+    PR's HEAD already has the prior bump when this fires.
 
 This test pins the structural contract the workflow must satisfy so the
 refactor cannot drift silently:
 
   T1: workflow file exists and parses as YAML.
-  T2: workflow ONLY triggers on pull_request(closed) into main, gated
-      on merged==true (no bare push trigger -- see cascade note above).
+  T2: workflow ONLY triggers on merge_group (no bare push trigger --
+      see cascade note above; no pull_request:closed trigger -- see
+      per-PR conflict note).
   T3: permissions include `contents: write` (for tag push + commit push).
   T4: concurrency group is configured with `cancel-in-progress: false`
       (bump+tag must serialize; never drop in-flight pushes).
@@ -37,7 +42,7 @@ refactor cannot drift silently:
   T6: tag emission is skipped if the tag already exists on origin.
   T7: workflow bumps BOTH plugin manifests (.claude-plugin and .codex-plugin).
   T8: workflow commits the bump with a chore(release): ... message.
-  T9: pre-push hook does NOT auto-bump; it only enforces version freshness.
+  T9: pre-push hook does NOT auto-sync local plugin.json (queue owns it).
 """
 from __future__ import annotations
 
@@ -109,54 +114,75 @@ class TestBumpWorkflow(unittest.TestCase):
         self.assertEqual(len(doc["jobs"]), 1,
                          "workflow must declare exactly one job")
 
-    def test_03_pull_request_merged_trigger_no_bare_push(self):
-        """The workflow fires on pull_request(closed) into main, gated on
-        merged==true, NOT on a bare `push: branches: [main]`. A bare push
-        trigger re-fires on the workflow's own bump commit (also pushed
-        to main) and cascades unboundedly -- pin this to prevent
-        re-introduction of that bug."""
+    def test_03_merge_group_trigger_no_bare_push_no_pull_request(self):
+        """The workflow fires on `merge_group` (the GitHub Merge Queue's
+        pre-merge trigger) ONLY -- not on a bare `push: branches:
+        [main]` (which self-retriggers on the bump commit and cascades)
+        and not on `pull_request: types: [closed]` (which had a per-PR
+        conflict on the version field against every parallel feature PR
+        that merged first). Pin both negative triggers so neither bug
+        can be re-introduced silently.
+        """
         doc = _yaml_doc()
         on_dict = self._on(doc)
-        self.assertIn("pull_request", on_dict)
-        pr = on_dict["pull_request"]
-        self.assertEqual(pr.get("types"), ["closed"],
-                         "pull_request trigger must fire on types: [closed]")
-        self.assertEqual(pr.get("branches"), ["main"],
-                         "pull_request trigger must pin to branches: [main]")
-        self.assertNotIn("push", on_dict,
-                         "version-bump.yml must NOT trigger on bare push; "
-                         "its own bump commit is pushed to main and would "
-                         "self-retrigger, cascading unboundedly")
-
-        job = doc["jobs"][next(iter(doc["jobs"]))]
-        self.assertIn("merged == true", job.get("if", ""),
-                      "job must gate on github.event.pull_request.merged "
-                      "== true (a closed-but-not-merged PR must not bump)")
+        self.assertIn(
+            "merge_group", on_dict,
+            "version-bump.yml must trigger on merge_group (the queue's "
+            "pre-merge event) -- per-PR conflict on plugin.json:version "
+            "is only avoidable via merge_group, not via pull_request:closed",
+        )
+        self.assertNotIn(
+            "pull_request", on_dict,
+            "version-bump.yml must NOT trigger on pull_request:closed -- "
+            "that path caused the per-PR conflict pattern this migration "
+            "removed (every parallel feature PR hit a one-line version "
+            "conflict). merge_group is the GitHub-provided replacement.",
+        )
+        self.assertNotIn(
+            "push", on_dict,
+            "version-bump.yml must NOT trigger on bare push; its own "
+            "bump commit is pushed to main and would self-retrigger, "
+            "cascading unboundedly (v0.3.183 -> v0.3.188 in under a "
+            "minute before the fix).",
+        )
 
     def test_03b_bump_pr_merge_skips_rebump_not_tag(self):
         """/dev-kit:bump opens a `chore(release): bump dev-kit to v...`
-        PR for manual bumps; merging it is also a pull_request(closed)
-        event. Without a guard, that double-bumps on top of the skill's
-        own bump. The idempotency step must detect this by PR title and
-        skip only the bump-and-commit steps -- tagging must still run,
-        since skills/bump/SKILL.md relies on this workflow for post-merge
-        tag emission (it does no local tagging)."""
+        PR for manual bumps. Under merge queue, merging it fires this
+        workflow's `merge_group` event too. Without a guard, that
+        double-bumps on top of the skill's own bump. The idempotency
+        step must detect this by PR title (fetched via `gh pr view`
+        because merge_group events do NOT carry `pull_request`
+        context -- the previous `pull_request: closed` trigger had
+        `github.event.pull_request.title` available, the new trigger
+        does not) and skip only the bump-and-commit steps -- tagging
+        must still run, since skills/bump/SKILL.md relies on this
+        workflow for post-merge tag emission (it does no local
+        tagging)."""
         doc = _yaml_doc()
         idem = _find_step(doc, "skip re-bump")
         self.assertIsNotNone(idem, "expected a 'Skip re-bump if PR is "
                               "itself a bump' step")
         self.assertEqual(idem.get("id"), "idempotency")
         run = idem.get("run", "")
+        # The match must use the same regex as the legacy trigger --
+        # the title is the source of truth either way.
         self.assertIn(r"chore\(release\):\ bump\ dev-kit\ to\ v", run,
                       "idempotency step must match the bump PR title format")
+        # AND it must NOT rely on github.event.pull_request.title
+        # (unavailable on merge_group events). Must use gh CLI instead.
+        self.assertIn("gh pr view", run,
+                      "merge_group events have no pull_request.title; the "
+                      "idempotency step must look up the PR title via `gh "
+                      "pr view <head_sha> --json title`")
 
         next_step = _find_step(doc, "compute next version")
         bump_step = _find_step(doc, "bump both manifests")
-        commit_step = _find_step(doc, "commit + push version bump")
+        commit_step = _find_step(doc, "commit bump")
         for step, label in (
             (next_step, "compute next version"),
             (bump_step, "bump both manifests"),
-            (commit_step, "commit + push version bump"),
+            (commit_step, "commit bump"),
         ):
             self.assertIsNotNone(step, f"expected a '{label}' step")
             self.assertEqual(step.get("if"), "steps.idempotency.outputs.skip != 'true'",
@@ -237,19 +263,29 @@ class TestBumpWorkflow(unittest.TestCase):
 
     def test_09_workflow_commits_the_bump(self):
         """The workflow must `git commit` the bump with a chore(release)
-        message, then push the bump back to main. This is the trunk
-        version advance that subsequent PRs will compare against."""
+        message. Under merge_group, the commit lives on top of the
+        queued PR's HEAD (the queue merges the result into main in
+        one squash/merge commit) -- there is NO `git push origin
+        HEAD:main` step, because the queue owns the merge."""
         doc = _yaml_doc()
         commit_step = _find_step(doc, "commit") or _find_step(doc, "push version")
-        self.assertIsNotNone(commit_step, "expected a 'Commit + push version bump' step")
+        self.assertIsNotNone(commit_step, "expected a 'Commit ... bump' step")
         run = commit_step.get("run", "")
         self.assertIn("git commit", run,
                       "commit step must call git commit (the bump itself)")
         self.assertIn("chore(release)", run,
                       "commit message must use chore(release): prefix so "
                       "changelog generators pick it up")
-        self.assertIn("git push origin HEAD:main", run,
-                      "commit step must push the bump back to main")
+        # The OLD contract was `git push origin HEAD:main` after
+        # commit. Under merge_group that push is WRONG -- the queue
+        # already owns the merge to main. Pin the negative.
+        self.assertNotIn(
+            "git push origin HEAD:main", run,
+            "commit step must NOT `git push origin HEAD:main` under "
+            "merge_group (the queue owns the merge; a parallel push "
+            "would race the queue and could be rejected by the "
+            "ruleset bypass).",
+        )
 
     def test_10_bump_step_uses_patch_plus_plus(self):
         """The version advance is strictly PATCH++. Bumping MAJOR or MINOR
@@ -269,18 +305,33 @@ class TestBumpWorkflow(unittest.TestCase):
                          "MINOR bumps require explicit maintainer action; "
                          "this workflow must not auto-bump MINOR")
 
-    def test_11_workflow_refreshes_origin_main_before_bump(self):
-        """Queued-run safety (review finding #1 on #439): the workflow
-        must re-fetch origin/main before computing the next version, so
-        a run that was queued behind another run's bump doesn't push
-        a non-fast-forward or compute against a stale version."""
+    def test_11_workflow_checkouts_merge_group_head_not_origin_main(self):
+        """Under merge_group, the workflow checks out the queued PR's
+        HEAD (`github.event.merge_group.head_sha`) -- which already
+        incorporates the queue's rebase onto latest main -- instead
+        of origin/main. This is the structural change from the OLD
+        contract (which did `git fetch origin main && git reset --hard
+        origin/main` to fast-forward before pushing the bump back to
+        main). With the queue owning the merge, the workflow only
+        needs to commit the bump on top of the PR's HEAD; the queue
+        merges that result as one unit.
+        """
         text = _yaml_text()
-        self.assertRegex(text, r"git fetch origin main",
-                         "workflow must `git fetch origin main` before "
-                         "computing the next version (queued-run safety)")
-        self.assertRegex(text, r"git reset --hard origin/main",
-                         "workflow must reset to origin/main so the push "
-                         "is a guaranteed fast-forward (queued-run safety)")
+        self.assertRegex(
+            text, r"merge_group\.head_sha",
+            "workflow must checkout github.event.merge_group.head_sha "
+            "(the queued PR's HEAD after queue rebase) -- this is the "
+            "structural change from the OLD contract that reset to "
+            "origin/main and pushed back",
+        )
+        # The OLD contract reset to origin/main before pushing. Pin
+        # the negative so the old behavior can't be re-introduced.
+        self.assertNotRegex(
+            text, r"git reset --hard origin/main",
+            "workflow must NOT `git reset --hard origin/main` under "
+            "merge_group (the queue owns the merge; resetting to main "
+            "would discard the queued PR's commits).",
+        )
 
     def test_12_workflow_tags_head_not_origin_main(self):
         """Tag target correctness (review finding #2 on #439): the
@@ -345,19 +396,39 @@ class TestPrePushRefactor(unittest.TestCase):
                          "pre-push must NOT create a chore(release) commit")
 
     def test_pre_push_enforces_freshness(self):
-        """The hook MUST bring the local version up to origin/main's
-        when local is older (auto-SYNC). The old contract refused
-        with a rebase error; the new contract closes the gap
-        automatically by calling bin/sync-version.sh."""
+        """Post-merge-queue contract: the hook is a NOTICE-only drift
+        detector. It does NOT auto-sync (the queue owns the sync),
+        does NOT call bin/sync-version.sh, does NOT create a
+        chore(sync) commit. The previous auto-sync contract was
+        deleted in 2026-08-30 -- pin the negative so the old path
+        can't be silently re-introduced.
+        """
         text = PRE_PUSH_PATH.read_text(encoding="utf-8")
-        # Old assertion: refused with "OLDER than origin/main" error.
-        # New contract: auto-sync via bin/sync-version.sh, falls back
-        # to a rebase-style error only when plugin.json has uncommitted
-        # edits (test_pre_push_falls_back_on_uncommitted_changes).
-        self.assertIn("auto-synced", text,
-                      "pre-push must auto-sync on local<main and print a sync-confirmation line")
-        self.assertIn("auto-SYNC", text,
-                      "pre-push header comment must declare the auto-SYNC contract")
+        # New contract: emit a NOTICE on drift; let the push through.
+        self.assertIn(
+            "NOTICE",
+            text,
+            "pre-push must emit a NOTICE when local != origin/main "
+            "(the operator needs to see drift; the queue handles "
+            "the actual sync)",
+        )
+        # And the OLD contract's "auto-synced" success line must be
+        # gone -- the queue handles drift; the hook doesn't.
+        self.assertNotIn(
+            "auto-synced",
+            text,
+            "pre-push must NOT print an auto-synced success line "
+            "(the auto-sync primitive is dead under merge queue)",
+        )
+        # And the OLD contract's header-comment "auto-SYNC" term --
+        # the comment was rewritten to declare the new contract;
+        # the term must be gone (no auto-sync contract to declare).
+        self.assertNotIn(
+            "auto-SYNC",
+            text,
+            "pre-push must NOT declare the old auto-SYNC contract in "
+            "its header comment (the contract is dead under merge queue)",
+        )
 
     def test_pre_push_blocks_direct_main_push(self):
         """Direct push to main remains forbidden (PR-only workflow)."""
@@ -507,19 +578,30 @@ class TestVersionFreshnessCheck(unittest.TestCase):
 
 
 class TestPrePushAutoSync(unittest.TestCase):
-    """The pre-push hook must AUTO-SYNC (not auto-bump) when local
-    plugin.json:version is older than origin/main's.
+    """The pre-push hook is now a NOTICE-only drift detector (no
+    auto-sync, no commit). The GitHub Merge Queue owns the version
+    sync at merge time, so the per-PR conflict this class's
+    predecessors were pinning can no longer happen.
 
-    Background: the post-#439 contract is "trunk owns the version
-    advance", so pre-push must not increment. But feature branches cut
-    at version V drift behind as parallel PRs merge and bump main.
-    The old hook refused to push, forcing the user through a manual
-    `git fetch && git rebase origin/main` cycle on every drift. The
-    new hook calls `bin/sync-version.sh` to copy origin/main's
-    version field into BOTH manifests, then commits the single-line
-    sync. Sync (==) is structurally distinct from bump (+1): only the
-    latter caused the parallel-PR cascade. This test pins the new
-    contract.
+    Background: pre-merge-queue (post-#439 contract), the trunk
+    workflow owned the version advance. Feature branches cut at
+    version V drifted behind as parallel PRs merged and bumped main.
+    The hook then called `bin/sync-version.sh` to copy origin/main's
+    version field into both manifests and committed the single-line
+    sync. Post-merge-queue (2026-08-30, see
+    docs/proposals/release/plugin-version-bump-via-merge-queue.yaml),
+    the queue rebases every PR onto the latest bumped main
+    immediately before merge, so the per-PR drift can't happen --
+    the auto-sync code is dead and the hook is reduced to a NOTICE
+    that lets the push through.
+
+    This test class now pins the new contract:
+      - bin/sync-version.sh is a no-op compat shim (preserves CLI
+        surface for callers that haven't migrated; refuses to mutate
+        working tree)
+      - pre-push emits NOTICE for drift but lets the push through
+        (does NOT auto-sync, does NOT create a chore(sync): commit,
+        does NOT call bin/sync-version.sh)
     """
 
     @staticmethod
@@ -533,15 +615,14 @@ class TestPrePushAutoSync(unittest.TestCase):
         self.assertTrue(os.access(p, os.X_OK),
                         f"bin/sync-version.sh must be executable: {p}")
 
-    def test_sync_script_idempotent_at_equal_version(self):
+    def test_sync_script_no_op_at_equal_version(self):
         """When local == target, the script must exit 0 with no
-        changes. The pre-push hook relies on this to pass through
-        without staging anything. We pass a target that matches the
-        current local version so the test is independent of whatever
-        the worktree was cut at."""
+        changes. The previous implementation printed 'no changes
+        needed'; the new shim still exits 0 but prints the
+        deprecation notice instead. We pass a target that matches
+        the current local version so the test is independent of
+        whatever the worktree was cut at."""
         import subprocess
-        # Read the actual local version so the test works whether
-        # local == 0.3.293 (cut at main) or 0.3.294 (post-bump).
         local_v = json.loads(
             (PRE_PUSH_PATH.parent.parent / ".claude-plugin" / "plugin.json").read_text()
         )["version"]
@@ -549,21 +630,22 @@ class TestPrePushAutoSync(unittest.TestCase):
             ["bash", str(self._sync_script()), "--target", local_v, "--check"],
             capture_output=True, text=True,
         )
-        # --check exits 1 on local < target; equality must still
-        # exit 0 with the no-op message.
+        # --check exits 0 when local == target; the new shim still
+        # honors that. (It exits 1 if local != target, with a NOTICE
+        # pointing at the queue -- that's tested by the test_sync_script_no_op_refuses_to_write
+        # case below.)
         self.assertEqual(
             result.returncode, 0,
             f"--check with target==local({local_v}) must exit 0; got {result.returncode}: {result.stderr}",
         )
-        self.assertIn("no changes needed", result.stdout,
-                      "idempotent path must print the no-op line")
 
-    def test_sync_script_updates_both_manifests(self):
-        """When local < target, the script must update BOTH
-        .claude-plugin/plugin.json AND .codex-plugin/plugin.json in
-        one pass (so the auto-sync commit is a single coherent change
-        and the freshness check on the next push sees matching
-        versions)."""
+    def test_sync_script_no_op_refuses_to_write(self):
+        """When local < target, the OLD implementation updated both
+        manifests in place. The new shim must NOT mutate the working
+        tree -- the queue owns the sync now. This is the single most
+        important behavioral guard against accidental re-introduction
+        of the dead auto-sync primitive.
+        """
         import json
         import shutil
         import subprocess
@@ -580,70 +662,111 @@ class TestPrePushAutoSync(unittest.TestCase):
                         work / ".claude-plugin" / "plugin.json")
             shutil.copy(PRE_PUSH_PATH.parent.parent / ".codex-plugin" / "plugin.json",
                         work / ".codex-plugin" / "plugin.json")
+            before_claude = json.loads((work / ".claude-plugin" / "plugin.json").read_text())["version"]
+            before_codex = json.loads((work / ".codex-plugin" / "plugin.json").read_text())["version"]
 
+            # --target with a deliberately-future value. Old script
+            # would write; new shim must refuse.
             result = subprocess.run(
-                ["bash", str(self._sync_script()), "--target", "0.3.400"],
+                ["bash", str(self._sync_script()), "--target", "9.9.9"],
                 capture_output=True, text=True, cwd=work,
             )
-            self.assertEqual(
-                result.returncode, 0,
-                f"sync to a future target must exit 0; got {result.returncode}: {result.stderr}",
-            )
+            self.assertEqual(result.returncode, 0,
+                             f"--target must be a no-op (exit 0); got {result.returncode}: {result.stderr!r}")
+            self.assertIn("no-op", (result.stdout + result.stderr).lower(),
+                          "--target must announce it's a no-op")
 
-            claude_v = json.loads((work / ".claude-plugin" / "plugin.json").read_text())["version"]
-            codex_v = json.loads((work / ".codex-plugin" / "plugin.json").read_text())["version"]
-            self.assertEqual(claude_v, "0.3.400",
-                             f".claude-plugin/plugin.json version must be 0.3.400, got {claude_v!r}")
-            self.assertEqual(codex_v, "0.3.400",
-                             f".codex-plugin/plugin.json version must be 0.3.400, got {codex_v!r}")
+            after_claude = json.loads((work / ".claude-plugin" / "plugin.json").read_text())["version"]
+            after_codex = json.loads((work / ".codex-plugin" / "plugin.json").read_text())["version"]
+            self.assertEqual(after_claude, before_claude,
+                             f"sync-version.sh must NOT mutate .claude-plugin/plugin.json "
+                             f"(was {before_claude}, became {after_claude})")
+            self.assertEqual(after_codex, before_codex,
+                             f"sync-version.sh must NOT mutate .codex-plugin/plugin.json "
+                             f"(was {before_codex}, became {after_codex})")
 
-    def test_pre_push_calls_sync_script(self):
-        """The pre-push hook must call bin/sync-version.sh (not inline
-        jq) when local < origin/main, so the script and the hook stay
-        in lockstep and the same logic is reusable from skills."""
+    def test_pre_push_does_not_call_sync_script(self):
+        """The pre-push hook must NOT call bin/sync-version.sh. Under
+        merge queue the per-PR conflict it used to resolve can't
+        happen anymore; if a developer sees drift they should rebase
+        manually, not have the hook mutate the working tree on
+        their behalf (which clobbers any in-progress edit).
+        """
         text = PRE_PUSH_PATH.read_text(encoding="utf-8")
-        self.assertIn("sync-version.sh", text,
-                      "pre-push must call bin/sync-version.sh on local<main")
-        self.assertIn("--target", text,
-                      "pre-push must pass an explicit --target so the "
-                      "sync lands on origin/main's exact version")
+        self.assertNotIn(
+            "sync-version.sh --target",
+            text,
+            "pre-push must NOT invoke bin/sync-version.sh --target "
+            "(merge queue owns the version sync)",
+        )
+        self.assertNotIn(
+            "SYNC_SCRIPT=",
+            text,
+            "pre-push must NOT resolve SYNC_SCRIPT (the auto-sync code "
+            "path is dead under merge queue)",
+        )
 
-    def test_pre_push_creates_sync_commit(self):
-        """The auto-sync must produce a chore(sync): commit (NOT a
-        chore(release): bump — that's the trunk workflow's job). The
-        commit message format must include both the old and new
-        versions so the audit trail is unambiguous."""
+    def test_pre_push_does_not_create_sync_commit(self):
+        """The pre-push hook must NOT create chore(sync): commits. The
+        queue rebases onto the bumped main, so any local commit
+        claiming to 'advance plugin.json from vX to vY' would itself
+        become a one-line conflict on the next push (the very bug
+        this migration removed).
+        """
         text = PRE_PUSH_PATH.read_text(encoding="utf-8")
-        self.assertIn("chore(sync):", text,
-                      "pre-push must commit the sync as chore(sync): (not chore(release): bump)")
-        self.assertNotIn("chore(release): bump", text,
-                         "pre-push must NOT create a chore(release) commit; "
-                         "that would re-introduce the parallel-PR cascade")
+        self.assertNotIn(
+            "chore(sync):",
+            text,
+            "pre-push must NOT commit chore(sync): changes (the queue "
+            "rebases onto bumped main; any local sync commit re-"
+            "introduces the conflict this migration removed)",
+        )
 
-    def test_pre_push_falls_back_on_uncommitted_changes(self):
-        """If plugin.json has uncommitted edits, the auto-sync cannot
-        run safely (it would clobber the user's work). The hook must
-        fall back to the old block-with-rebase-error path so the user
-        can either commit, stash, or discard their edit first."""
+    def test_pre_push_emits_drift_notice_only(self):
+        """Drift is informational, not blocking. The hook must let
+        the push through -- the queue will rebase -- and emit a
+        NOTICE so the developer knows they're behind.
+        """
         text = PRE_PUSH_PATH.read_text(encoding="utf-8")
-        self.assertIn("uncommitted", text,
-                      "pre-push must detect uncommitted plugin.json changes "
-                      "and refuse the sync (fall back to error path)")
+        self.assertIn(
+            "NOTICE",
+            text,
+            "pre-push must emit a NOTICE when local != origin/main "
+            "(the developer needs to see drift; the queue will "
+            "handle the actual sync)",
+        )
+        # And there must NOT be any auto-sync commit after the
+        # NOTICE -- the new contract is "notice + let push through".
+        # We assert this by checking the NOTICE is not immediately
+        # followed by a `git commit` (the old auto-sync shape).
+        notice_idx = text.find("NOTICE")
+        commit_after = text.find("git commit", notice_idx) if notice_idx >= 0 else -1
+        self.assertEqual(
+            commit_after, -1,
+            f"pre-push NOTICE must not be followed by `git commit` "
+            f"(auto-sync is dead; queue owns the sync). Got: "
+            f"...{text[notice_idx:notice_idx+200]!r}",
+        )
 
-    def test_pre_push_handles_missing_codex_manifest(self):
-        """bin/sync-version.sh silently skips a missing
-        .codex-plugin/plugin.json (single-runtime checkout). The pre-push
-        hook must do the same: only stage .codex-plugin/plugin.json if
-        it exists, otherwise `git add` would error and abort the sync
-        (defeating the whole point of the auto-sync primitive)."""
+    def test_pre_push_does_not_reference_codex_manifest_specifically(self):
+        """The pre-push hook used to gate `git add .codex-plugin/
+        plugin.json` on file existence (single-runtime checkout
+        support). Under merge queue that's also dead -- the hook
+        doesn't stage anything. We assert the dead reference is gone
+        so a future re-introduction of auto-sync would visibly break
+        a test (rather than silently pass).
+        """
         text = PRE_PUSH_PATH.read_text(encoding="utf-8")
-        self.assertIn(".codex-plugin/plugin.json", text,
-                      "pre-push must mention .codex-plugin/plugin.json")
-        # The fix shape: gate the `git add` on file existence so the
-        # auto-sync does not fail in single-runtime checkouts.
-        self.assertIn('if [ -f .codex-plugin/plugin.json ]', text,
-                      "pre-push must check .codex-plugin/plugin.json exists "
-                      "before `git add` (F4 from the maintenance review)")
+        # The previous implementation explicitly checked
+        # `.codex-plugin/plugin.json` existence before staging. The
+        # new hook must NOT have that pattern (it has no auto-sync
+        # code path that would stage anything).
+        self.assertNotIn(
+            'if [ -f .codex-plugin/plugin.json ]',
+            text,
+            "pre-push must not gate on .codex-plugin/plugin.json "
+            "existence (the auto-sync stage is dead)",
+        )
 
 
 if __name__ == "__main__":
