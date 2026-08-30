@@ -2157,61 +2157,89 @@ def _render_cache_decay_svg(points: list[dict], *, width: int = 220, height: int
 
     Three series stacked: p25 (bottom band), p75 (top band), median
     (the headline line). Y-axis = cache_hit_ratio ∈ [0, 1]. X-axis =
-    turn index (1..N). Defensive — every numeric is bounded before
-    serialization so a malformed point can't crash the renderer or
-    inject a bogus path attribute.
+    turn index, rendered RELATIVE TO the first turn in the bucket so
+    sparse / non-1-indexed ``turn`` values stay inside the viewBox.
+
+    Defensive — every numeric is bounded before serialization so a
+    malformed point can't crash the renderer or inject a bogus path
+    attribute. ``try/except ValueError, TypeError`` wraps every
+    numeric coercion; a future schema change that produces a string
+    field or a ``None`` falls back to 0 rather than ``TypeError``.
 
     Layout:
-      - viewBox 0 0 width height (responsive — the SVG scales to its
-        container)
+      - viewBox 0 0 width height (intrinsic — ``width``/``height``
+        attributes pin the render size; the viewBox makes the
+        coordinate system independent of the container so the path
+        stays valid if a downstream renderer scales the SVG).
       - left/bottom padding 0 (the y-axis is implied by the [0%, 100%]
-        title strip below; no labels clutter the small tile)
-      - median polyline in the accent color
-      - p25/p75 band filled with 12% opacity accent
+        title strip below; no labels clutter the small tile).
+      - median polyline in ``var(--accent)``.
+      - p25/p75 band filled with ``var(--accent)`` at 12% opacity so
+        dark / light themes render the band and the line in the same
+        colour.
     """
     if not points:
         return ""
+
+    def _safe_float(v, default: float = 0.0) -> float:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return default
+        return f
+
+    def _safe_int(v, default: int = 0) -> int:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
     n = len(points)
     # X step in viewBox units; clamp so even a 1-point curve looks right.
     x_step = max(1, (width - 4) // max(1, n - 1))
     y_max = float(height - 4)
-    def to_xy(p: dict, which: str) -> tuple[float, float]:
-        # `which` ∈ {"median", "p25", "p75"}. Defensive float coercion
-        # so a non-numeric value from a future analyzer change can't
-        # poison the path.
-        ratio = float(p.get(which, 0.0) or 0.0)
-        ratio = max(0.0, min(1.0, ratio))
-        x = 2 + (int(p["turn"]) - 1) * x_step
+    # X derives from enumerate (1..N) so sparse / non-1-indexed ``turn``
+    # values stay inside the viewBox. The first / last turn strings
+    # used in the <title> still come from the source data so the
+    # summary reports the real index range.
+    first_turn = _safe_int(points[0].get("turn"), 1)
+    def to_xy(p: dict, which: str, i: int) -> tuple[float, float]:
+        # `which` ∈ {"median", "p25", "p75"}. ``_safe_float`` clamps
+        # out-of-range values via the subsequent min/max; non-numeric
+        # values fall back to 0.0 before the bound.
+        ratio = max(0.0, min(1.0, _safe_float(p.get(which), 0.0)))
+        x = 2 + i * x_step
         y = 2 + (1.0 - ratio) * y_max
         return (x, y)
 
-    med_pts = [to_xy(p, "median") for p in points]
-    p25_pts = [to_xy(p, "p25") for p in points]
-    p75_pts = [to_xy(p, "p75") for p in points]
+    med_pts = [to_xy(p, "median", i) for i, p in enumerate(points)]
+    p25_pts = [to_xy(p, "p25", i) for i, p in enumerate(points)]
+    p75_pts = [to_xy(p, "p75", i) for i, p in enumerate(points)]
     band_path = (
         "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in p75_pts)
         + " L " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(p25_pts))
         + " Z"
     )
     med_path = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in med_pts)
-    # First/last point markers so a single-point curve still shows
-    # *where* on the X-axis the value lives.
     last = med_pts[-1]
     first = med_pts[0]
+    last_turn = _safe_int(points[-1].get("turn"), first_turn)
+    last_n = _safe_int(points[-1].get("n"), 0)
+    last_median_pct = _safe_float(points[-1].get("median"), 0.0) * 100
     return (
         f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
         f'role="img" aria-label="cache hit ratio per turn index, '
         f'p25/p75 band with median line">'
-        f'<path d="{band_path}" fill="rgba(10,132,255,0.12)" stroke="none"/>'
+        f'<path d="{band_path}" fill="var(--accent)" fill-opacity="0.12" stroke="none"/>'
         f'<path d="{med_path}" fill="none" stroke="var(--accent)" '
         f'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
         f'<circle cx="{first[0]:.1f}" cy="{first[1]:.1f}" r="2" '
         f'fill="var(--accent)"/>'
         f'<circle cx="{last[0]:.1f}" cy="{last[1]:.1f}" r="2" '
         f'fill="var(--accent)"/>'
-        f'<title>turn 1 → turn {html.escape(str(points[-1]["turn"]))}, '
-        f'final median {points[-1]["median"] * 100:.1f}% '
-        f'(n={html.escape(str(points[-1]["n"]))})</title>'
+        f'<title>turn {html.escape(str(first_turn))} → '
+        f'turn {html.escape(str(last_turn))}, final median '
+        f'{last_median_pct:.1f}% (n={html.escape(str(last_n))})</title>'
         f'</svg>'
     )
 

@@ -33,6 +33,11 @@ name: cache-decay-audit
 # Bypass for emergencies: there is no `--no-verify` equivalent.
 # Fix the flagged file in a follow-up commit; the maintainer cannot
 # bypass branch protection.
+#
+# Required precondition for the PR-comment step:
+#   repo → Settings → Actions → General → "Allow GitHub Actions to
+#   create and approve pull request comments" (the default token
+#   otherwise has read-only PR-comment scope).
 
 on:
   pull_request:
@@ -41,8 +46,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# No concurrency limit; this workflow is fast (<30s) and runs only on
-# deterministic audits. Concurrency control would only delay feedback.
+# Idempotent re-posts: two near-simultaneous pushes to the same PR
+# can't double-stamp the comment because the marker-based overwrite
+# resolves to one comment ID. The cancel-in-progress is a defensive
+# backstop so the workflow never runs twice in parallel on the same
+# ref — costs nothing when not triggered and avoids a torn comment
+# state when both jobs fire simultaneously.
+concurrency:
+  group: cache-decay-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   hook_stdout_determinism:
@@ -51,9 +63,8 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
-      pull-requests: read
     steps:
-      - uses: actions/checkout@34e114876b0b11b390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
@@ -63,8 +74,9 @@ jobs:
           # The audit is fast on a clean tree but a single misbehaving
           # hook with a tight `while true` could hang; the audit's
           # built-in 5s timeout per invocation keeps total runtime
-          # bounded by `hooks_count * 10s` (currently 27 hooks ≈ 5min
-          # upper bound, but real run <30s on every clean pass).
+          # bounded by `hooks_count * 10s` (currently 27 hooks ≈ 4.5min
+          # upper bound at the 5s-per-call timeout, but real run <30s
+          # on every clean pass — well under the 2-minute job timeout).
           if bash scripts/audit_hook_stdout.sh; then
             echo "::notice::hook stdout determinism: PASS"
           else
@@ -79,9 +91,8 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
-      pull-requests: read
     steps:
-      - uses: actions/checkout@34e114876b0b11b390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
@@ -105,6 +116,11 @@ jobs:
     name: cache-decay-audit summary
     runs-on: ubuntu-latest
     needs: [hook_stdout_determinism, skill_frontmatter_audit]
+    # Run on every outcome (success / failure / cancelled) so the
+    # terminal guard at the bottom always evaluates. ``always()`` is
+    # also required so the comment post step runs after a failed
+    # upstream and updates the comment with the *current* result —
+    # never leaves a stale "failure" comment on a now-green PR.
     if: always()
     permissions:
       contents: read
@@ -115,17 +131,24 @@ jobs:
           echo "hook_stdout_determinism: ${{ needs.hook_stdout_determinism.result }}"
           echo "skill_frontmatter_audit: ${{ needs.skill_frontmatter_audit.result }}"
 
+      - name: Terminal guard (exit 1 when any audit failed)
+        if: needs.hook_stdout_determinism.result != 'success' || needs.skill_frontmatter_audit.result != 'success'
+        run: |
+          echo "::error::cache-decay-audit gate RED — see the per-audit job logs above."
+          exit 1
+
       # Post a single consolidated comment on the PR (idempotent: uses
       # the same marker each run so re-posts overwrite, not duplicate).
-      # For push-to-main events `pull-requests: write` is a no-op since
-      # there's no PR context.
-      - name: Post PR comment (push-to-main events skip this)
-        if: github.event_name == 'pull_request' && (needs.hook_stdout_determinism.result == 'failure' || needs.skill_frontmatter_audit.result == 'failure')
+      # Posts on every outcome so a previously-red PR comment flips to
+      # green when the gate recovers. For push-to-main events
+      # `pull-requests: write` is a no-op since there's no PR context.
+      - name: Post PR comment (idempotent re-post on every outcome)
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           # Stable marker so successive runs overwrite the same comment
           # instead of stacking. Same pattern as post-verdict-audit.
           marker="<!-- cache-decay-audit -->"
