@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workflow Fast Mode — Profile-Driven Gate Selection for Vibe-Speed Local Builds</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Workflow Fast Mode — Profile-Driven Gate Selection for Vibe-Speed Local Builds</h1>
+<p class="meta">2026-08-28 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">workflow</span><span class="tag tag-info">gates</span><span class="tag tag-info">profile</span><span class="tag tag-info">vibe</span><span class="tag tag-info">fast</span><span class="tag tag-info">build</span><span class="tag tag-info">review</span><span class="tag tag-info">security</span><span class="tag tag-info">maintenance</span><span class="tag tag-info">babysit-pr</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">1. Design principle — one file, opt-in, optional-only</a></li><li><a href="#sec-1">2. File format</a></li><li><a href="#sec-2">3. Gate resolution order</a></li><li><a href="#sec-3">4. CLI surface — flags added to each gated skill</a></li><li><a href="#sec-4">5. Hook integration</a></li><li><a href="#sec-5">6. Sub-agent preamble (build steps)</a></li><li><a href="#sec-6">7. New skill — /dev-kit:workflow-profile</a></li><li><a href="#sec-7">8. Failure modes</a></li><li><a href="#sec-8">9. Migration path</a></li><li><a href="#sec-9">10. Out of scope</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">1. Design principle — one file, opt-in, optional-only</h2>
+<p>Today's escape hatches (env vars, CLI flags, sibling skills) each cover one gate. This proposal collapses them into a single project file with two reserved profiles:</p>
+<table><thead><tr><th>Profile</th><th>Mental model</th><th>Gates</th></tr></thead><tbody><tr><td><code>strict</code> (default)</td><td>"Run everything; trust the harness."</td><td>All gates ON. Identical to pre-proposal behavior.</td></tr><tr><td><code>vibe</code></td><td>"Fast local iteration; CI catches the rest on push."</td><td>All <code>mandatory</code> gates ON + the <code>verifier</code> pass in <code>/dev-kit:review</code> OFF + <code>tdd_scope_judge</code> OFF + <code>slop_detector</code> OFF + <code>pre_commit_review</code> OFF + <code>security_owasp</code> mode=quick + <code>maintenance</code> OFF + <code>babysit_pr</code> mode=manual.</td></tr></tbody></table>
+<p>Gate classification is encoded once in the file, not per-profile. Adding a new gate later is a one-line <code>mandatory: true</code> / <code>mandatory: false</code> annotation; the strict profile requires no edit, and the vibe profile auto-inherits the new gate as optional.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">2. File format</h2>
+<pre><code class="language-yaml"># .dev-kit/workflow-profile.yaml
+# Single source of truth for which gates the dev-harness-kit runs locally.
+# GH-Actions (.github/workflows/*.yml) runs the full set on push regardless.
+schema_version: 1
+active_profile: strict   # strict | vibe | &lt;custom&gt;
+
+gate_definitions:
+  stop_verify:           # MANDATORY — cannot be opted out
+    mandatory: true
+  secret_scan:           # MANDATORY — catches leaked credentials before commit
+    mandatory: true
+  intent_integrity:      # MANDATORY — refuses to start build on high findings
+    mandatory: true
+  gh_ci_required:        # MANDATORY — GH-Actions required checks on push
+    mandatory: true
+  tdd_scope_judge:       # OPTIONAL — replaced by explicit human review in vibe mode
+    mandatory: false
+  slop_detector:         # OPTIONAL — runtime assistant to the sub-agent
+    mandatory: false
+  pre_commit_review:     # OPTIONAL — codex:review before commit
+    mandatory: false
+  review_verifier:       # OPTIONAL — second-pass LLM judge on review findings
+    mandatory: false
+  security_owasp:        # OPTIONAL — 10-dim fan-out; can downgrade to quick mode
+    mandatory: false
+  maintenance:           # OPTIONAL — CC/OE/VM code-sanity gate
+    mandatory: false
+  babysit_pr:            # OPTIONAL — auto-fix polling loop
+    mandatory: false
+  # Future gates (e.g. coverage_diff) drop into this list with mandatory: true|false
+  # and pick up the correct behavior in both profiles automatically.
+
+profiles:
+  strict:
+    comment: &quot;Today&#x27;s behavior. No gate skips.&quot;
+    overrides: {}        # empty = use default (all mandatory ON, all optional ON)
+
+  vibe:
+    comment: &quot;Fast local iteration. CI catches the rest on push. Not for PRs to main.&quot;
+    overrides:
+      tdd_scope_judge: off
+      slop_detector: off
+      pre_commit_review: off
+      review_verifier: off
+      security_owasp: quick         # quick = single-dim summary; full = 10-dim fan-out
+      maintenance: off
+      babysit_pr: manual             # manual = one gh-check dump + exit
+      # mandatory gates (stop_verify, secret_scan, intent_integrity, gh_ci_required)
+      # cannot be overridden here; the parser rejects the file if attempted.
+
+  # Add custom profiles below. CI does not know about custom profiles; they only
+  # affect what runs LOCALLY before push. A gate can be &quot;off&quot; locally and &quot;required&quot;
+  # in .github/workflows/*.yml; the merge gate still holds.</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-2">3. Gate resolution order</h2>
+<p>When <code>/dev-kit:build 0-mvp --profile vibe --keep-maintenance</code> runs:</p>
+<pre><code class="language-text">1. Skill reads .dev-kit/workflow-profile.yaml. If missing, default to active_profile: strict.
+2. Resolve profile = &quot;vibe&quot;.
+3. Apply profile&#x27;s `overrides` to gate_definitions (mandatory keys cannot be turned off).
+4. Apply per-call flags in this precedence (last wins):
+   a. --keep-&lt;gate&gt;   -&gt; force ON   (highest)
+   b. --skip-&lt;gate&gt;   -&gt; force OFF
+   c. profile field   -&gt; from step 3
+   d. default         -&gt; mandatory: ON, optional: ON (strict)
+5. Build effective `gate_summary` dict; print it as the first stderr line:
+   &quot;gate_summary: profile=vibe overrides={&#x27;tdd_scope_judge&#x27;:&#x27;off&#x27;} keep={&#x27;maintenance&#x27;:&#x27;on&#x27;} skip={}&quot;
+6. Hand `gate_summary` to the runner, hooks, and sub-agent preamble.</code></pre>
+<p>If a <code>--skip-&lt;gate&gt;</code> targets a <code>mandatory: true</code> gate, the skill prints <code>error: --skip-stop-verify conflicts with mandatory gate; refusing</code> and exits non-zero. The same check runs at YAML-load time so a hand-edited profile cannot disable the mandatory set.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">4. CLI surface — flags added to each gated skill</h2>
+<p>All flags have the same semantics across skills. The active profile wins by default; per-call flags override the profile (--keep beats --skip beats profile).</p>
+<pre><code class="language-bash">/dev-kit:build 0-mvp
+  --profile &lt;strict|vibe|custom&gt;     # default: read from .dev-kit/workflow-profile.yaml
+  --keep-&lt;gate&gt;                      # one or more, comma-list or repeat
+  --skip-&lt;gate&gt;                      # one or more
+  --push                             # existing flag, unchanged
+  --skip-blocked                     # existing flag, unchanged
+
+/dev-kit:review [paths]
+  --profile &lt;name&gt;                   # new
+  --keep-verifier --skip-verifier    # maps to existing --fast / default
+  --fast                             # preserved as --skip-verifier alias (back-compat)
+
+/dev-kit:security
+  --profile &lt;name&gt;
+  --mode &lt;full|quick&gt;                # maps to the security_owasp override
+  --skip-security                    # run as a no-op with verdict=skipped
+
+/dev-kit:maintenance
+  --profile &lt;name&gt;
+  --skip-maintenance                 # exit 0 immediately
+
+/dev-kit:babysit-pr
+  --profile &lt;name&gt;
+  --mode &lt;full|manual&gt;               # manual = one gh pr checks dump + exit</code></pre>
+<p>Example vibe invocation:</p>
+<pre><code class="language-bash">/dev-kit:workflow-profile use vibe     # writes active_profile: vibe to the file
+/dev-kit:build 0-mvp                    # reads profile, prints gate_summary, runs
+git push origin feat/0-mvp              # GH-CI runs full strict gates on push
+/dev-kit:babysit-pr --keep-babysit      # one-shot override: poll + auto-fix anyway</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-4">5. Hook integration</h2>
+<p>Each optional hook gains a single line at the top:</p>
+<pre><code class="language-bash"># hooks/tdd-guard.sh
+GATE_SUMMARY=$(python3 -m lib.workflow_profile get tdd_scope_judge)
+if [ &quot;$GATE_SUMMARY&quot; = &quot;off&quot; ]; then
+  echo &quot;tdd-guard: opted out via profile=$(active_profile)&quot; &gt;&amp;2
+  exit 0
+fi</code></pre>
+<p><code>lib.workflow_profile</code> is a small CLI the hooks call so the same resolution path runs in hook context (where env vars come from the parent Claude Code, not the sub-agent). Each opt-out emits a structured event:</p>
+<pre><code class="language-json">{&quot;event_type&quot;: &quot;gate.opted_out&quot;, &quot;gate&quot;: &quot;tdd_scope_judge&quot;, &quot;profile&quot;: &quot;vibe&quot;,
+ &quot;subject_id&quot;: &quot;build:0-mvp:step:3&quot;}</code></pre>
+<p>into the existing <code>.dev-kit/trace/events.jsonl</code> so post-hoc audits see the choice. Required gates (stop-verify, secret-scan, intent-integrity) do not get the opt-out path at all — running them is not negotiable.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">6. Sub-agent preamble (build steps)</h2>
+<p>Each step's preamble today ends with:</p>
+<pre><code>AC: see step file. 3-cycle self-fix max.</code></pre>
+<p>The runner adds the resolved gate set:</p>
+<pre><code>AC: see step file. 3-cycle self-fix max.
+Gates in effect: stop_verify=ON, secret_scan=ON, tdd_scope_judge=OFF (profile=vibe).
+Do not write tests for non-production code unless the step file asks for them; vibes
+profile opted out of the TDD scope judge. Stick to the file paths and exit criteria in
+the step file. If a hook fires (stop_verify, secret_scan), treat it as a hard stop.</code></pre>
+<p>Sub-agent prompts stay accurate even when the local TDD gate is off; the agent no longer wonders why no test framework is loading.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">7. New skill — /dev-kit:workflow-profile</h2>
+<p>Single user-typed command for profile inspection + switching. Reads and writes the file; no other state.</p>
+<pre><code class="language-bash">/dev-kit:workflow-profile list          # show defined profiles + which is active
+/dev-kit:workflow-profile show          # print resolved gate set as a markdown table
+/dev-kit:workflow-profile use vibe      # write active_profile: vibe to the file
+/dev-kit:workflow-profile diff vibe     # show what vibe changes vs the active profile</code></pre>
+<p>The skill is <code>user-invocable: true</code> and <code>model: opus</code> (per the design-rule Iron Law 5). It does NOT change workflow behavior on its own — it only mutates the YAML. The next <code>/dev-kit:build</code> invocation re-reads the file and applies the new gate set.</p>
+<p><code>alpha: state</code> frontmatter per the L6 skill gate (<code>tests/test_skill_governance.py</code>). Justification for new skill vs. option on <code>/dev-kit:config</code>: <code>/dev-kit:config</code> is the multiSelect skill+hook+methodology picker; mixing profile management into it blurs the "picks" semantics. A dedicated skill has one verb (manage profile) and can grow into future "lock profile to branch" / "audit gate choices" features without bloating config.</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">8. Failure modes</h2>
+<table><thead><tr><th>Failure</th><th>Behavior</th></tr></thead><tbody><tr><td><code>.dev-kit/workflow-profile.yaml</code> missing</td><td>Default <code>active_profile: strict</code>; skill logs <code>workflow-profile: file missing — using strict default</code> to stderr. No error.</td></tr><tr><td>Unknown profile name in CLI</td><td>Skill exits 2 with <code>error: profile 'foo' is not defined. Available: strict, vibe</code>.</td></tr><tr><td>Profile overrides a mandatory gate</td><td>YAML load fails with <code>error: gate 'stop_verify' is mandatory and cannot be set to 'off' in profile 'vibe'</code>. File rejected; CLI returns to existing config.</td></tr><tr><td><code>--skip-stop_verify</code> on the CLI</td><td>Skill exits 2. Same error path as above. Hook does not run.</td></tr><tr><td>YAML parse error</td><td>Skill exits 2 with file path + line. Strict mode is NOT a silent fallback (would mask a corrupt edit).</td></tr><tr><td>Custom profile in repo; teammate lacks the skill</td><td>Stricter profile wins because unknown profile names fall back to strict. Custom profiles must be documented in the example file.</td></tr><tr><td>CI required check set contradicts <code>vibe</code> profile</td><td>Not detected locally; merge attempt fails at the GH-Actions gate. Same failure mode as today — no regression.</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-8">9. Migration path</h2>
+<ol><li>Land <code>.dev-kit/workflow-profile.example.yaml</code> first (no behavior change).</li><li>Land <code>lib/workflow_profile.py</code> + <code>tests/test_workflow_profile.py</code>. CI green.</li><li>Wire hooks (one-line guard per optional hook) in a separate PR. Each PR is a single, gated change so a regression can be bisected to one optional hook.</li><li>Land <code>/dev-kit:workflow-profile</code> skill + the <code>--profile</code> flag on <code>/dev-kit:build</code> first. Build is the entry point and gets the most usage; landing it first exposes any flag-resolver bugs in the most-tested path.</li><li>Wire <code>--profile</code> into <code>/dev-kit:review</code> (which already has <code>--fast</code>), then <code>/dev-kit:security</code>, then <code>/dev-kit:maintenance</code>, then <code>/dev-kit:babysit-pr</code>. Each in its own PR. Roll back is one <code>git revert</code> + restart of any in-flight build.</li><li>Update the dev-kit README to document the file once all five skills honor it.</li><li>The <code>feedback-dev-kit-pr-workflow</code> memory gets a one-line note: "vibe profile is the recommended fast path for throwaway local branches; strict remains the recommendation for any PR that touches harness logic."</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-9">10. Out of scope</h2>
+<ul><li>Per-gate CLI flags on the harness runner (kept narrow: --profile + --keep-<em> + --skip-</em>).</li><li>Branch-locked profiles (e.g. "vibe on feat/*, strict on main"). Future work; needs a different model (push-time hook + <code>lib.workflow_profile --lock-branch</code>).</li><li>Telemetry on "vibe users ship what would have been caught by skipped gates". Build the opt-in mechanism first; measure second.</li><li>GH-Actions workflow changes. CI keeps running the full set; profile changes only local gates.</li><li>Agent model selection. Today the model is fixed by Iron Law 5 (<code>opus</code> for design, <code>sonnet</code> for code). Profile does not change model; that is a separate decision.</li></ul>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>The dev-harness-kit build pipeline is a fixed, sequential stack of gates:</p>
+<pre><code>/dev-kit:build                per-step TDD + slop-detector + secret-scan + stop-verify hooks
+   ↓ step&lt;N&gt;-output.json + per-step commits
+/dev-kit:review (3-dim)       correctness + security + architecture (with verifier pass)
+   ↓ inline comments + PR summary verdict
+/dev-kit:security (10-dim)    OWASP Top 10 fan-out + verifier
+   ↓ per-category table + verdict
+/dev-kit:maintenance          CC-1..8 / OE-1..8 / VM-1..4 code-sanity (mirrors .github/workflows/maintenance.yml)
+   ↓ single Verdict: line
+/dev-kit:babysit-pr           poll gh pr checks, fetch failing logs, apply fixes, push, iterate</code></pre>
+<p>Every gated skill uses the SSOT constants in <code>lib/execute.py</code> (e.g. SUBAGENT_ALLOWED_TOOLS, SKIPPABLE_STATUSES, the <code>intent_integrity_pre_build_gate</code> 2/0/2 contract) and the GH-Actions workflows in <code>.github/workflows/{review,security,maintenance,gate}.yml</code> decide merge readiness. Escape hatches exist (DEV_KIT_SKIP_TDD=1, --skip-blocked, --fast on /dev-kit:review, the local <code>/dev-kit:review-local</code> mirror) but they are scattered across env vars, CLI flags, and sibling skills with no common shape.</p>
+<p>A developer in a "vibe" iteration loop — small local change, immediate visual feedback, manual smoke test in the terminal — pays for the full gate stack every commit. The git-workflow and pre-commit-review memories (<code>feedback-dev-kit-pr-workflow</code>, <code>feedback-pre-commit-auto-fix-loop</code>) describe the slow path correctly but treat the fast path as a skill of the user ("skip only for trivial PRs"), not a first-class mode the harness can express.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>lib/execute.py:46-53</code>: <code>DEV_KIT_AGENT_TIMEOUT_SECONDS</code> env override (escape hatch shape)</li><li><code>lib/execute.py:78-90</code>: <code>DEV_KIT_BUILD_AGENT</code> env override (claude | codex)</li><li><code>lib/execute.py:404-407</code>: <code>--skip-blocked</code> and <code>--push</code> CLI flags (only two flags surfaced)</li><li><code>skills/review/SKILL.md:30</code>: <code>--fast</code> flag explicitly documented as "skip verifier"</li><li><code>skills/babysit-pr-local/SKILL.md</code>: parallel local-mode mirror of <code>/dev-kit:babysit-pr</code></li><li><code>skills/review-local/SKILL.md</code>: parallel local-mode mirror of <code>/dev-kit:review</code></li><li><code>hooks/index.md</code>: tdd-guard, bash-guard, secret-scan, slop-detector, stop-verify listed with no per-project opt-out</li><li><code>.github/workflows/{review,security,maintenance,gate}.yml</code>: GH-Actions gate set runs unconditionally on push to non-main branches</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>A single project-level file, <code>.dev-kit/workflow-profile.yaml</code>, declares which local gates are mandatory, optional, or skipped. Each gated skill accepts <code>--profile &lt;name&gt;</code> (or reads the default from the file) and individual <code>--skip-&lt;gate&gt;</code> / <code>--keep-&lt;gate&gt;</code> overrides for one-shot invocations. The default profile is <code>strict</code>, which preserves today's behavior end-to-end. A new <code>vibe</code> profile keeps the must-have correctness gates (build per-step runner, secret-scan, stop-verify, GH-CI on push) and opts out of the optional human / LLM feedback loops (TDD scope judge, pre-commit codex:review, local OWASP fan-out, local maintenance gate, local babysit loop) until the user opts them back in or pushes to the branch where GH-Actions runs them anyway. A new utility skill <code>/dev-kit:workflow-profile</code> lists, reads, and switches the active profile without rewriting the file.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">.dev-kit/workflow-profile.example.yaml</span><p>Annotated example file with both <code>strict</code> and <code>vibe</code> profile bodies + comments.</p></li><li><span class="file-path">lib/workflow_profile.py</span><p>New module: load + validate <code>.dev-kit/workflow-profile.yaml</code>, resolve effective gate set from (profile + per-call overrides), and emit a single <code>gate_summary</code> dict consumable by hooks and skills.</p></li><li><span class="file-path">lib/execute.py</span><p>Add <code>--profile &lt;name&gt;</code> and <code>--skip-integrity</code> CLI flags to <code>argparse</code>; thread <code>gate_summary</code> into <code>_intent_integrity_pre_build_gate</code>, the TDD scope judge call, and the post-step <code>_emit_effectiveness_event</code> so the chosen gates are recorded in the evidence trail.</p></li><li><span class="file-path">hooks/tdd-guard.sh</span><p>Read resolved gate set; when <code>tdd_scope_judge</code> is opted out, log "tdd-guard: opted out via profile=&lt;vibe&gt;" and exit 0 instead of running the judge.</p></li><li><span class="file-path">hooks/slop-detector.sh</span><p>Same opt-out pattern: respect the <code>slop_detector</code> gate key from <code>.dev-kit/workflow-profile.yaml</code>; emit a structured "opted out" event so audit can see the choice was made, not just absent.</p></li><li><span class="file-path">hooks/stop-verify.sh</span><p>NOT opt-out-able. Stop-verify is always-on because it is the ONLY local gate that catches a sub-agent declaring success on no-diff writes (issue #221 RC2). The <code>stop_verify</code> key is documented as <code>mandatory</code> and rejected if a profile tries to set <code>off</code>.</p></li><li><span class="file-path">skills/build/SKILL.md</span><p>Document <code>--profile</code> flag, link to <code>.dev-kit/workflow-profile.example.yaml</code>, add a "Vibe-mode build" section that lists what <code>vibe</code> profile turns off + what stays on.</p></li><li><span class="file-path">skills/review/SKILL.md</span><p>Document <code>--profile</code> flag; explain that <code>--fast</code> (existing) is preserved as a one-shot override of the <code>verifier</code> gate, while <code>--profile vibe</code> flips broader gates.</p></li><li><span class="file-path">skills/security/SKILL.md</span><p>Document <code>--profile</code> flag; in <code>vibe</code> profile default to <code>mode=quick</code> (single-dim summary) instead of full 10-dim fan-out.</p></li><li><span class="file-path">skills/maintenance/SKILL.md</span><p>Document <code>--profile</code> flag; in <code>vibe</code> profile skip unless explicitly requested via <code>--keep-maintenance</code>.</p></li><li><span class="file-path">skills/babysit-pr/SKILL.md</span><p>Document <code>--profile</code> flag; in <code>vibe</code> profile default to "manual mode": print <code>gh pr checks</code> once and exit, do NOT loop. The full auto-fix loop stays available via <code>--keep-babysit</code>.</p></li><li><span class="file-path">skills/workflow-profile/SKILL.md</span><p>New skill: <code>/dev-kit:workflow-profile list|show|use &lt;name&gt;</code> (model-opus, user-invocable: true). <code>list</code> prints available profiles + active one; <code>show</code> renders the resolved gate set as a table; <code>use &lt;name&gt;</code> rewrites the <code>active_profile</code> field in <code>.dev-kit/workflow-profile.yaml</code>. All other skills read this file on each invocation — no global state.</p></li><li><span class="file-path">lib/render_proposal_html.py</span><p>No schema change; just confirm the new <code>vibe</code> profile example renders inside the existing <code>after.files</code> code blocks in HTML.</p></li><li><span class="file-path">tests/test_workflow_profile.py</span><p>Profile parsing (valid YAML, missing file, unknown profile name -&gt; error, invalid gate key -&gt; error); gate-resolution (profile + --skip overrides, --keep overrides, mandatory gates reject opt-out); strict-profile behavior matches today byte-for-byte on the harness-effectiveness rubric fixture.</p></li><li><span class="file-path">tests/test_execute.py</span><p>Add <code>TestMainProfileFlag</code> class: <code>--profile vibe</code> sets <code>gate_summary["active_profile"]</code>; default (no flag) sets it to <code>strict</code>; intent-integrity gate still runs in <code>vibe</code> profile (it is mandatory).</p></li><li><span class="file-path">docs/stages/STAGES.md</span><p>Add a "Profile resolution" row to the stage diagram showing which gates each profile flips; reference <code>.dev-kit/workflow-profile.yaml</code> as the SSOT.</p></li><li><span class="file-path">.claude-plugin/plugin.json</span><p>Bump patch version per the auto-bump pipeline; no schema change.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Single SSOT (<code>.dev-kit/workflow-profile.yaml</code>) the user can grep and audit; replaces 6 scattered escape hatches.</li><li>Default behavior unchanged (<code>strict</code> profile = today). Opt-in only — no project breaks on upgrade.</li><li>Each gated skill gains one <code>--profile</code> flag + N <code>--skip-&lt;gate&gt;</code> overrides. Flag semantics are uniform; profile semantics live in one file.</li><li>Mandatory-vs-optional gate classification is encoded in the file; future gates (e.g. a <code>coverage_diff</code> gate) declare themselves mandatory or optional at registration time, not at profile-write time.</li><li>GH-Actions workflows in <code>.github/workflows/*.yml</code> are untouched. Fast mode still catches the full gate set on push, so a vibe PR cannot merge without the rigorous review.</li><li>Compatible with <code>feedback-dev-kit-pr-workflow</code>: the strict profile is still the recommended path for any PR that touches harness logic; vibe is the recommendation for throwaway local branches (memo also acknowledges "trivial PRs" carve-out).</li><li>Auditability: every opt-out emits a structured event (e.g. <code>gate.opted_out</code>, profile=vibe, gate=maintenance). The same TraceLog that already records step.started/write.observed/verify.passed will record the gate choices, so post-hoc we can answer "what did this PR skip and why?".</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>New file format consumers must learn. Hidden complexity vs. today's "run the full stack" simplicity.</li><li>Profile-vs-flag precedence rules need careful docs (CLI override &gt; profile field &gt; default). One wrong precedence causes silent skip of a gate the user expected to run.</li><li>Adding a new gate later requires deciding whether it defaults to mandatory or optional, and updating the example file. If a contributor skips this, the gate silently runs only in strict.</li><li>Sub-agent prompts for <code>/dev-kit:build</code> (step&lt;N&gt;.md) currently bake in TDD + 3-cycle self-fix. If <code>vibe</code> profile opts out of TDD, the prompt becomes misleading; the runner must inject the active gate set into the preamble so the sub-agent sees what it is and is not responsible for.</li><li>Two state dimensions (profile + per-call flag) are harder to reason about than one (just <code>DEV_KIT_SKIP_TDD=1</code>). The trade is worth it for the breadth of gates covered, but each addition is another documented edge case.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>Profile cannot speed up GH-Actions itself; CI wall-clock is unchanged. Fast mode only removes local-only gates.</li><li>Profile cannot change agent model selection. Today the model is <code>--model claude-opus-4-8</code> on <code>/dev-kit:build</code> (per Iron Law 5). Selecting a cheaper model per-profile is out of scope for this proposal.</li><li>A profile that disagrees with the actual GH-CI required-checks policy will fail at merge time, not at build time. Profile correctness is the user's responsibility; CI cannot detect a too-permissive profile.</li><li>No telemetry to detect "vibe is the new default and CI is catching what local skips". This proposal ships the opt-in mechanism; the misuse detector is follow-up work.</li><li>Skills not listed (e.g. <code>/dev-kit:plan</code>, <code>/dev-kit:prune</code>, <code>/dev-kit:evaluate</code>) intentionally do not consume the profile — they are decision-support tools, not gate chains, and forcing them through the same gate vocabulary adds noise.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-28 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

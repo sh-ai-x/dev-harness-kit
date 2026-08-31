@@ -6,7 +6,11 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from harness_mode_state import resolved_gate  # noqa: E402
 
 STATE = ".dev-kit/.tdd-scope.json"
 INSTRUCTION = (
@@ -53,7 +57,7 @@ def _judge_command(prompt: str) -> list[str]:
     )
 
 
-def _skip_tdd_requested() -> bool:
+def _skip_tdd_requested(root: Path) -> bool:
     """Issue #647 Option B escape hatch.
 
     When ``DEV_KIT_SKIP_TDD`` is set to a truthy value (``1``, ``true``,
@@ -62,9 +66,18 @@ def _skip_tdd_requested() -> bool:
     Documented as: "may produce lower-quality builds; not for production
     use" — only for unblocking environments where ``claude -p`` is
     unresponsive and ``codex exec`` is unavailable.
+
+    Also true when the session's harness-mode state (resolved relative to
+    ``root``, the same root the caller resolved via ``--root``/
+    ``DEV_KIT_TDD_ROOT``) has opted the ``tdd_scope_judge`` gate out
+    (``/dev-kit:harness-mode fast`` or a ``custom`` pick) — the env var
+    remains a scriptable/CI shortcut, ``harness-mode`` is the interactive
+    path (workflow-fast-mode-lean).
     """
     raw = os.environ.get("DEV_KIT_SKIP_TDD", "").strip().lower()
-    return raw in ("1", "true", "yes")
+    if raw in ("1", "true", "yes"):
+        return True
+    return resolved_gate("tdd_scope_judge", root) == "off"
 
 
 def _parse(raw: str) -> dict:
@@ -97,11 +110,16 @@ def evaluate(prompt: str, root: Path) -> dict:
     inspect a stable record instead of inferring intent from a missing
     file.
     """
-    if _skip_tdd_requested():
+    if _skip_tdd_requested(root):
+        reason = (
+            "harness-mode opted tdd_scope_judge out"
+            if resolved_gate("tdd_scope_judge", root) == "off"
+            else "DEV_KIT_SKIP_TDD=1 — judge bypassed (issue #647 escape hatch)"
+        )
         decision = {
             "tdd_required": False,
             "confidence": 1.0,
-            "reason": "DEV_KIT_SKIP_TDD=1 — judge bypassed (issue #647 escape hatch)",
+            "reason": reason,
         }
         _write_state(root, decision)
         return decision

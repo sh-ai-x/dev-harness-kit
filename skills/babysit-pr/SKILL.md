@@ -80,6 +80,14 @@ re-verify that candidate with fresh `gh pr view` data before acting. Pass
 > (VERIFY LOCAL — re-run the *specific* failing check before commit) is
 > unchanged and remains a hard gate in this skill.
 
+### Session gate mode (workflow-fast-mode-lean)
+
+When `python3 -m lib.harness_mode_state get babysit_pr` returns `manual`
+(set via `/dev-kit:harness-mode fast` or `custom`), run `gh pr checks` once,
+print the result, and exit — do not enter the poll/auto-fix loop. This is a
+session-scoped opt-out for local iteration; it does not change the default
+(`full` — the normal poll-and-fix loop below) and never affects CI.
+
 Target precedence is: `--pr N` → an explicitly identified `CONVERSATION_PR` →
 the current branch's PR → main-checkout candidate resolution. A conversation
 handoff is valid only when the number was explicitly stated or returned by the

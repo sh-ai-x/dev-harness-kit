@@ -141,6 +141,15 @@
             "fail_closed": false
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-harness-mode-reset.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "PostToolUse": [

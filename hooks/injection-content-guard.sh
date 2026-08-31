@@ -103,13 +103,6 @@ if [ "${#BODY}" -gt 200000 ]; then
   BODY="${BODY:0:200000}"
 fi
 
-# Length cap — refuse to pipe multi-MB sub-agent outputs into Python.
-# The static filter is the canonical scan; this hook only catches
-# patterns that escaped Layer 1.
-if [ "${#BODY}" -gt 200000 ]; then
-  BODY="${BODY:0:200000}"
-fi
-
 # ── engine invocation ──────────────────────────────────────────────────────
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SCANNER="${PLUGIN_ROOT}/tools/prompt_injection_scan.py"
