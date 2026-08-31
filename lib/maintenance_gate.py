@@ -73,17 +73,39 @@ _VERDICT_EMOJI: Dict[str, str] = {
 
 
 def extract_verdict(comment_body: str) -> str:
-    """Return the LAST ``**Verdict:** <Word>`` line in `comment_body`,
-    or ``""`` when no well-formed verdict line is present.
+    """Return the LAST ``**Verdict:** <Word>`` line in `comment_body`
+    that is NOT inside a markdown code span, or ``""`` when no such
+    well-formed verdict line is present.
 
     The "last match wins" semantics mirror ``scripts/extract-verdict``
     in review.yml: an auto-fix-updated comment supersedes an earlier
     verdict, and a re-run of the action overwrites rather than
     appends.
+
+    Backtick-spanned ``**Verdict:**`` mentions are deliberately
+    ignored. LLM judges (security/maintenance) sometimes recap
+    earlier review verdicts inside backticks while writing their own
+    structural verdict higher up in the body, e.g.:
+
+        **Verdict:** Approve
+        ...
+        The earlier `**Verdict:** Blocked` (review lens) and
+        `**Verdict:** Changes Requested` (maintenance lens) at
+        `head_sha=abc123`...
+
+    A naive `re.findall` over the whole body would let the last
+    backtick-quoted recap win and silently flip an `Approve` comment
+    to `Changes Requested`. Stripping fenced + inline code spans
+    first isolates the structural verdict.
     """
     if not comment_body:
         return ""
-    matches = _VERDICT_RE.findall(comment_body)
+    # Strip fenced code blocks first (```...```), then inline code
+    # spans (`...`). Both can contain backtick-wrapped `**Verdict:**`
+    # mentions of prior reviews.
+    cleaned = re.sub(r"```.*?```", "", comment_body, flags=re.DOTALL)
+    cleaned = re.sub(r"`[^`\n]*`", "", cleaned)
+    matches = _VERDICT_RE.findall(cleaned)
     return matches[-1] if matches else ""
 
 

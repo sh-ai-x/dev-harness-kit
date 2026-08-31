@@ -63,6 +63,69 @@ class TestExtractVerdict(unittest.TestCase):
         # not a valid verdict — gate tolerates this as no-verdict.
         self.assertEqual(maintenance_gate.extract_verdict("**verdict:** approve"), "")
 
+    def test_extract_skips_backtick_quoted_recap(self) -> None:
+        """LLM judges recap prior review verdicts inside backticks when
+        discussing prior iterations. A naive `re.findall` over the
+        whole body lets the LAST backtick-quoted recap win and silently
+        flips a structurally `Approve` comment to `Changes Requested`.
+
+        Regression: this exact body shape appeared in the
+        /dev-kit:security + /dev-kit:maintenance judge outputs on
+        PR #781 and caused false-positive `Changes Requested`
+        extractions.
+        """
+        body = (
+            "**Claude finished @sh-ai-x's task in 1m 38s**\n"
+            "\n"
+            "---\n"
+            "### Task progress\n"
+            "- [x] Verify branch state\n"
+            "- [x] Apply 11-category security rubric\n"
+            "- [x] Map verdict per spec\n"
+            "- [x] Post security summary\n"
+            "\n"
+            "**Verdict:** Approve\n"
+            "\n"
+            "### Security review -- PR #781\n"
+            "\n"
+            "...long prose...\n"
+            "\n"
+            "The earlier `**Verdict:** Blocked` (review lens) and\n"
+            "`**Verdict:** Changes Requested` (maintenance lens) at\n"
+            "`head_sha=d67d9b` ...\n"
+        )
+        # Must extract the structural Approve, not the backtick-quoted
+        # Changes Requested recap at the bottom.
+        self.assertEqual(maintenance_gate.extract_verdict(body), "Approve")
+
+    def test_extract_skips_fenced_code_block_with_verdict_mention(self) -> None:
+        """Verdict mentions inside triple-backtick fenced code blocks
+        (e.g., a regex-pattern recap in a fenced block) must also be
+        ignored.
+        """
+        body = (
+            "**Verdict:** Approve\n"
+            "\n"
+            "```python\n"
+            "# Pattern: r'\\*\\*Verdict:\\*\\*\\s*(Approve|Blocked|Changes Requested)\\b'\n"
+            "**Verdict:** Blocked\n"  # inside the fenced block -- not the active verdict
+            "```\n"
+        )
+        self.assertEqual(maintenance_gate.extract_verdict(body), "Approve")
+
+    def test_extract_no_structural_verdict_returns_empty(self) -> None:
+        """If the body only contains backtick-quoted mentions and no
+        structural `**Verdict:**` line, extraction returns "" -- the
+        gate then tolerates the missing verdict per its lenient policy
+        rather than flipping to a stale recap.
+        """
+        body = (
+            "Some prose.\n"
+            "`**Verdict:** Approve` (a recap)\n"
+            "`**Verdict:** Blocked` (another recap)\n"
+        )
+        self.assertEqual(maintenance_gate.extract_verdict(body), "")
+
 
 class TestDocsUpdatedCheck(unittest.TestCase):
     """The docs-updated sub-gate logic."""
