@@ -99,6 +99,39 @@ CI run populates the submetric without any per-producer wiring.
 | `contract.test` | `tests/conftest.py` | `pytest_sessionfinish` appends one event per run. **CI-gated** (`CI=true`) so local `pytest` runs do not inflate a developer's trace log. The filename must stay `conftest.py` — pytest auto-registers hooks from no other name. |
 | `ground_truth` on guard events | `hooks/lib/payload-parse.sh::emit_guard_event` | Defaults to `"unknown"` for every outcome (no claim about correctness — a trigger-mirroring default would make the prevention_quality reducer trivially score 100% precision/recall against the same hook that emits the event). The reducer skips `unknown` events, so the metric only scores guards the operator has explicitly classified via `DEV_KIT_GROUND_TRUTH`. Override values are validated against the `unsafe` / `legitimate` / `pending` / `unknown` allowlist; anything else is rejected. |
 
+### Who actually sets `DEV_KIT_AGENT`
+
+The `append_event` auto-stamp above only fires when its caller's process
+env already carries `DEV_KIT_AGENT`. Before this note was added, no
+producer set it, so `agent_identity_coverage` measured `0.0` on every
+real worktree even though the plumbing existed. Two producers now set it:
+
+- `hooks/hooks.json` (Claude Code) and `.codex-plugin/hooks/hooks.json`
+  (Codex) prefix each event-emitting hook's command line with
+  `DEV_KIT_AGENT=claude-code` / `DEV_KIT_AGENT=codex` respectively — the
+  manifests are runtime-specific by construction, so the stamp is exact,
+  not a guess. `tools/portability_check.py` and
+  `tests/test_hooks_json_parity.py` normalize the prefix away before
+  comparing CC/Codex hook signatures, so it isn't flagged as manifest
+  drift.
+- `lib/execute.py::_emit_effectiveness_event` stamps `agent` from
+  `DEV_KIT_BUILD_AGENT` (the same env var `_agent_command` already reads
+  to pick the step runner), normalized to the `claude-code`/`codex`
+  convention above.
+
+`hooks/trace-session-end.sh`'s `evidence_ref.hook_event` also used to be
+hardcoded to `"SessionEnd"` regardless of whether the script fired via
+`Stop` or `SessionEnd` — it now reads `hook_event_name` from the hook
+payload, so the Stop-vs-SessionEnd terminal-event firing rate (which
+drives `subject_observability`, see `docs/quality/harness-effectiveness-stability.md`'s
+sibling submetric) is diagnosable from the trace log itself.
+
+`prevention_quality`, `first_pass_quality`, `recovery_quality`, and
+`learning_quality` are unaffected by this wiring — they need real
+`/dev-kit:build` activity, operator-supplied `DEV_KIT_GROUND_TRUTH`
+labels, and the (unbuilt) Phase-4 shadow-mode cohort respectively, none
+of which this change adds.
+
 ### Causal chaining in the executor
 
 `_first_pass` pairs a write with its first verification via

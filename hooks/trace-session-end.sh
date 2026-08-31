@@ -27,6 +27,13 @@ fi
 SESSION_ID=$(printf '%s' "${INPUT:-}" | jq -r '.session_id // .sessionId // empty' 2>/dev/null || true)
 [ -z "$SESSION_ID" ] && exit 0
 
+# Which hook trigger actually fired (Stop vs SessionEnd). This script is
+# registered on both, and downstream diagnostics (e.g. why so few
+# sessions reach a terminal event) need to know which path fired —
+# an earlier revision hardcoded "SessionEnd" in evidence_ref regardless
+# of trigger, making that diagnosis impossible.
+HOOK_EVENT_NAME=$(printf '%s' "${INPUT:-}" | jq -r '.hook_event_name // .hookEventName // "unknown"' 2>/dev/null || echo unknown)
+
 # Resolve the worktree root. The payload's `cwd` is the source of truth
 # (matches the cwd that produced step.started in session-start-check.sh,
 # so the matching pair lands in the same trace file). Fall back to $PWD
@@ -64,7 +71,7 @@ python3 -m lib.trace_log append-event \
   --run-id "session:${SESSION_ID}" --workflow-id "session-lifecycle" \
   --stage session --subject-id "session:${SESSION_ID}" \
   --outcome completed --source "hook:trace-session-end" \
-  --evidence-json "$(jq -nc --arg sid "$SESSION_ID" '{session_id:$sid, hook_event:"SessionEnd"}')" \
+  --evidence-json "$(jq -nc --arg sid "$SESSION_ID" --arg hn "$HOOK_EVENT_NAME" '{session_id:$sid, hook_event:$hn}')" \
   >/dev/null 2>&1 || true
 
 exit 0

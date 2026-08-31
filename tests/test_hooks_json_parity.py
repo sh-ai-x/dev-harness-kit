@@ -66,6 +66,13 @@ _COMMON_PREFIX = "${PLUGIN_ROOT}"
 # `bash ...` command. Captures the path the shell will execute.
 _SHELL_PATH_RE = re.compile(r"(?:\$\{[A-Z_]+\})?/?hooks/[A-Za-z0-9_.\-]+\.sh")
 
+# A leading `DEV_KIT_AGENT=<value> ` command prefix is an intentional,
+# expected divergence between the two manifests — each runtime stamps
+# its own identity so the harness-effectiveness stability submetric
+# (issue #663) can see which agent emitted an event. Strip it before
+# comparing triples, same as the plugin-root token substitution below.
+_DEV_KIT_AGENT_RE = re.compile(r"^DEV_KIT_AGENT=\S+ ")
+
 
 def _load_manifest(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
@@ -74,6 +81,7 @@ def _load_manifest(path: Path) -> dict:
 
 def _normalize_command(cmd: str) -> str:
     """Collapse plugin-root tokens so CC and Codex paths align."""
+    cmd = _DEV_KIT_AGENT_RE.sub("", cmd)
     return _CC_ROOT_RE.sub(_COMMON_PREFIX, cmd)
 
 
@@ -284,6 +292,65 @@ class TestHooksJsonParity(unittest.TestCase):
         # Already on Codex form — no-op.
         self.assertEqual(
             _normalize_command("bash ${PLUGIN_ROOT}/hooks/foo.sh"),
+            "bash ${PLUGIN_ROOT}/hooks/foo.sh",
+        )
+
+    def test_dev_kit_agent_prefix_names_the_correct_runtime(self):
+        """Every `DEV_KIT_AGENT=` prefixed command in `hooks/hooks.json`
+        must say `claude-code`, and every one in
+        `.codex-plugin/hooks/hooks.json` must say `codex`.
+
+        `_normalize_command` strips the prefix entirely before comparing
+        triples, so a mis-copied value (e.g. Codex's manifest
+        accidentally carrying `DEV_KIT_AGENT=claude-code`) would NOT be
+        caught by `test_triple_sets_match` — the normalized triple sets
+        would still be equal. This test reads the RAW commands (before
+        normalization) so a mis-copy fails loudly here instead of
+        silently mis-attributing every Codex-side trace event.
+        """
+
+        def _raw_commands(manifest: dict) -> list[str]:
+            commands: list[str] = []
+            for groups in manifest.get("hooks", {}).values():
+                for group in groups or []:
+                    for hook in group.get("hooks", []):
+                        if hook.get("type") == "command":
+                            commands.append(hook["command"])
+            return commands
+
+        cc_prefixed = [c for c in _raw_commands(self.cc_manifest) if c.startswith("DEV_KIT_AGENT=")]
+        codex_prefixed = [c for c in _raw_commands(self.codex_manifest) if c.startswith("DEV_KIT_AGENT=")]
+        self.assertTrue(cc_prefixed, "expected at least one DEV_KIT_AGENT= command in hooks/hooks.json")
+        self.assertTrue(codex_prefixed, "expected at least one DEV_KIT_AGENT= command in .codex-plugin/hooks/hooks.json")
+        for cmd in cc_prefixed:
+            self.assertTrue(
+                cmd.startswith("DEV_KIT_AGENT=claude-code "),
+                f"hooks/hooks.json command must stamp claude-code: {cmd}",
+            )
+        for cmd in codex_prefixed:
+            self.assertTrue(
+                cmd.startswith("DEV_KIT_AGENT=codex "),
+                f".codex-plugin/hooks/hooks.json command must stamp codex: {cmd}",
+            )
+
+    def test_normalize_command_strips_dev_kit_agent_prefix(self):
+        """A leading `DEV_KIT_AGENT=<value> ` command prefix is an
+        intentional, expected divergence between the two manifests (each
+        runtime stamps its own identity for the harness-effectiveness
+        stability submetric, issue #663) — normalization must strip it so
+        CC's `DEV_KIT_AGENT=claude-code ...` and Codex's
+        `DEV_KIT_AGENT=codex ...` converge to the same triple.
+        """
+        self.assertEqual(
+            _normalize_command(
+                "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/foo.sh"
+            ),
+            "bash ${PLUGIN_ROOT}/hooks/foo.sh",
+        )
+        self.assertEqual(
+            _normalize_command(
+                "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/foo.sh"
+            ),
             "bash ${PLUGIN_ROOT}/hooks/foo.sh",
         )
 

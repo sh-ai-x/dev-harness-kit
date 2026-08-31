@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
+            "command": "DEV_KIT_AGENT=claude-code bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
           }
         ]
       },
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
+            "command": "DEV_KIT_AGENT=claude-code bash \"${CLAUDE_PROJECT_DIR}/hooks/trace-session-end.sh\""
           }
         ]
       },

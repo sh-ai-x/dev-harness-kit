@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
+
+# A leading `DEV_KIT_AGENT=<value> ` command prefix is an intentional,
+# expected divergence between the Claude and Codex hooks.json — each
+# runtime stamps its own identity so the harness-effectiveness stability
+# submetric (issue #663) can see which agent emitted an event. Strip it
+# before comparing signatures, same as the CLAUDE_PLUGIN_ROOT/PLUGIN_ROOT
+# normalization below.
+_DEV_KIT_AGENT_PREFIX = re.compile(r"^DEV_KIT_AGENT=\S+ ")
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -20,6 +29,7 @@ def _hook_signature(config: dict[str, Any]) -> set[tuple[str, str, str]]:
             matcher = group.get("matcher", "")
             for hook in group.get("hooks", []):
                 command = hook.get("command", "").replace("${CLAUDE_PLUGIN_ROOT}", "${PLUGIN_ROOT}")
+                command = _DEV_KIT_AGENT_PREFIX.sub("", command)
                 result.add((event, matcher, command))
     return result
 

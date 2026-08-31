@@ -990,6 +990,72 @@ class TestRunStepBody(unittest.TestCase):
                 "_first_pass.causally_linked holds",
             )
 
+    def test_events_carry_agent_identity(self):
+        """Every executor-emitted event carries a non-empty ``agent`` field.
+
+        The harness-effectiveness ``stability`` submetric (issue #663)
+        reports 0% ``agent_identity_coverage`` when no producer stamps
+        ``agent``/``provider``/``model`` on its events. ``lib.execute`` is
+        one of the two real producers (the other is the session-lifecycle
+        hooks) — it already knows which runner executed the step via
+        ``DEV_KIT_BUILD_AGENT`` (default ``claude``), so it must forward
+        that identity onto every emitted event instead of leaving the
+        field unset.
+        """
+        import tempfile
+
+        from lib import execute as ex  # noqa: E402
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            ctx = ex._step_pre_spawn(root, phase, 0, branch_base)
+            (ctx["wt"] / "made_change.txt").write_text("hi\n")
+            ex._step_post_collect(
+                root, phase, 0, "my-name", ctx,
+                push=False, exit_code=0, stdout="", stderr="",
+            )
+            events = read_events(root)
+            self.assertTrue(events, "expected at least one emitted event")
+            for event in events:
+                self.assertEqual(
+                    event.get("agent"), "claude-code",
+                    f"event {event['event_type']} missing/wrong agent identity: {event}",
+                )
+
+    def test_unsupported_build_agent_stamps_empty_not_the_raw_value(self):
+        """An unsupported ``DEV_KIT_BUILD_AGENT`` value must NOT be stamped
+        onto the event verbatim.
+
+        ``_agent_command`` raises ``ValueError`` for any
+        ``DEV_KIT_BUILD_AGENT`` outside ``{claude, codex}``, but that
+        validation runs later (when the sub-agent subprocess is actually
+        spawned) than ``_emit_effectiveness_event`` (which fires at
+        ``_step_pre_spawn`` time, e.g. for ``step.started``). Stamping the
+        raw unvalidated value would silently mis-attribute an unknown
+        runner as if it were a recognized one —
+        ``lib/trace_log.py::_default_identity`` documents this exact
+        anti-pattern as the prior A06-1 regression (empty is the honest
+        "unset" signal, not a guess).
+        """
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        from lib import execute as ex  # noqa: E402
+        from lib.trace_log import read_events
+        with tempfile.TemporaryDirectory() as td:
+            root, phase, branch_base = self._setup_phase(Path(td))
+            with patch.dict(os.environ, {"DEV_KIT_BUILD_AGENT": "gpt5"}):
+                ex._step_pre_spawn(root, phase, 0, branch_base)
+            events = read_events(root)
+            self.assertTrue(events, "expected at least one emitted event")
+            for event in events:
+                self.assertEqual(
+                    event.get("agent"), "",
+                    f"unsupported DEV_KIT_BUILD_AGENT must stamp empty, "
+                    f"not the raw value, on {event}",
+                )
+
     def test_first_pass_quality_reflects_honest_verify_evidence(self):
         """End-to-end: the executor's own events must drive ``_first_pass``
         honestly. The executor records ``verify.passed`` for the causal
