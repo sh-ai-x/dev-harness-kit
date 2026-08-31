@@ -141,6 +141,15 @@
             "fail_closed": false
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-harness-mode-reset.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -191,6 +200,21 @@
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/sub-agent-handoff.sh",
             "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/injection-content-guard.sh",
+            "fail_closed": false
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/injection-content-guard.sh",
+            "fail_closed": false
           }
         ]
       }

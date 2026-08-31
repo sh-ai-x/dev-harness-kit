@@ -1333,5 +1333,49 @@ class TestSafeDurationSecondsExceptionNarrowing(unittest.TestCase):
             execute._safe_duration_seconds(None, "2026-08-21T12:00:00+09:00")
 
 
+class TestGateSummaryLine(unittest.TestCase):
+    """workflow-fast-mode-lean: _gate_summary_line() reflects harness-mode state.
+
+    Correctness gates (stop_verify, secret_scan) must always read ON in the
+    summary regardless of session mode — this is the sub-agent-facing half
+    of the same invariant tests/test_harness_mode_state.py enforces at the
+    resolver level.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_default_full_mode_reports_all_gates_on(self):
+        line = execute._gate_summary_line(self.root)
+        self.assertIn("stop_verify=ON", line)
+        self.assertIn("secret_scan=ON", line)
+        self.assertIn("tdd_scope_judge=ON", line)
+        self.assertIn("slop_detector=ON", line)
+
+    def test_fast_mode_reports_optional_gates_off_correctness_stays_on(self):
+        import harness_mode_state
+        harness_mode_state.write_state("fast", root=self.root)
+        line = execute._gate_summary_line(self.root)
+        self.assertIn("stop_verify=ON", line)
+        self.assertIn("secret_scan=ON", line)
+        self.assertIn("tdd_scope_judge=OFF", line)
+        self.assertIn("slop_detector=OFF", line)
+
+    def test_step_pre_spawn_appends_gate_summary_to_preamble(self):
+        (self.root / "phases" / "0-mvp").mkdir(parents=True, exist_ok=True)
+        (self.root / "phases" / "0-mvp" / "step1.md").write_text("# Step 1\n", encoding="utf-8")
+        idx = {"phase": "0-mvp", "worktree": "feat/x",
+               "steps": [{"step": 1, "name": "a", "status": "pending"}]}
+        (self.root / "phases" / "0-mvp" / "index.json").write_text(json.dumps(idx), encoding="utf-8")
+        with patch.object(execute, "cut_worktree"):
+            ctx = execute._step_pre_spawn(self.root, "0-mvp", 1, "feat/x")
+        self.assertIn("Gates in effect:", ctx["full_prompt"])
+        self.assertIn("stop_verify=ON", ctx["full_prompt"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

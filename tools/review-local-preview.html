@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>dev-kit: review-local live viewer</title>
+<title>dev-kit: babysit-pr-local mirror</title>
 <style>
   :root {
     --bg: #0e1116;
@@ -19,24 +19,22 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 14px; line-height: 1.45; }
-  header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 16px; font-weight: 600; }
   header .meta { color: var(--muted); font-size: 13px; }
-  header .status { margin-left: auto; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+  header .badge { margin-left: auto; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; background: #1f6feb33; color: var(--accent); border: 1px solid var(--accent); }
+  header .status { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
   header .status.idle { background: #21262d; color: var(--muted); }
   header .status.running { background: #1f6feb33; color: var(--running); border: 1px solid var(--running); }
   header .status.done-ok { background: #1f6feb33; color: var(--ok); border: 1px solid var(--ok); }
   header .status.done-err { background: #f8514922; color: var(--err); border: 1px solid var(--err); }
+  header .readonly-note { width: 100%; margin-top: 8px; padding: 8px 12px; background: #1f6feb22; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); font-size: 12px; }
+  header .readonly-note code { background: #0d1117; padding: 1px 5px; border-radius: 3px; color: var(--fg); }
   main { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
   nav { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; height: fit-content; }
   nav h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-  nav label { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
-  nav input[type=number] { width: 100%; padding: 6px 8px; margin-top: 4px; background: #0d1117; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  nav button { margin-top: 10px; width: 100%; padding: 8px; background: #238636; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
-  nav button:hover { background: #2ea043; }
-  nav button.stop { background: #6e2329; }
-  nav button.stop:hover { background: #8b2c33; }
+  nav .pr-display { margin-top: 4px; padding: 8px 10px; background: #0d1117; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
   nav .gate-list { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
   nav .gate { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
   nav .gate .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -74,17 +72,24 @@
 </head>
 <body>
 <header>
-  <h1>dev-kit review-local viewer</h1>
+  <h1>dev-kit: babysit-pr-local mirror</h1>
   <span class="meta" id="meta">PR &middot; title</span>
   <span class="status idle" id="status">idle</span>
+  <span class="badge">read-only</span>
+  <div class="readonly-note">
+    This page is a <strong>read-only mirror</strong> of a running <code>bin/babysit-pr-local.sh</code>
+    session. It follows <code>.dev-kit/babysit-pr-local-live.log</code> via the server's
+    <code>/tail</code> SSE route and never spawns <code>bin/review-local.sh</code>. There is
+    intentionally <strong>no Start / Stop button</strong> &mdash; clicking one would spawn a
+    duplicate verdict pipeline (and a second round of <code>claude -p</code> API spend) alongside
+    the babysit session already running. To run a one-shot local review manually, use
+    <code>bin/review-local.sh --pr N</code> from a terminal instead.
+  </div>
 </header>
 <main>
   <nav>
-    <h2>Controls</h2>
-    <label for="pr-input">PR number</label>
-    <input id="pr-input" type="number" min="1" step="1" placeholder="e.g. 725" />
-    <button id="start-btn">Start</button>
-    <button id="stop-btn" class="stop" disabled>Stop</button>
+    <h2>PR</h2>
+    <div class="pr-display" id="pr-display">&mdash;</div>
     <div class="gate-list">
       <h2>Gates</h2>
       <div class="gate" data-gate="review"><span class="name">/dev-kit:review</span><span class="verdict" data-verdict>&mdash;</span><span class="dot"></span></div>
@@ -92,16 +97,16 @@
       <div class="gate" data-gate="maintenance"><span class="name">/dev-kit:maintenance</span><span class="verdict" data-verdict>&mdash;</span><span class="dot"></span></div>
     </div>
     <div class="info">
-      Endpoint: <code id="endpoint-display">/pr/&lt;N&gt;/stream</code><br />
-      SSE reconnects automatically. Tab close kills the subprocess on the server.
+      Endpoint: <code id="endpoint-display">/tail</code><br />
+      SSE reconnects automatically. Tab close just detaches the mirror &mdash; babysit keeps running.
     </div>
   </nav>
   <section class="output">
     <header>
-      Live output of <code>bin/review-local.sh --pr &lt;N&gt;</code>
+      Live output of <code>bin/review-local.sh --pr &lt;N&gt;</code> (mirrored via tee)
       <span class="muted" style="float:right;" id="line-counter">&mdash; lines</span>
     </header>
-    <pre id="output" aria-live="polite"><span class="empty">Waiting for the first gate to start. Pick a PR number and press Start.</span></pre>
+    <pre id="output" aria-live="polite"><span class="empty">Waiting for babysit-pr-local to tee its first line into .dev-kit/babysit-pr-local-live.log&hellip;</span></pre>
   </section>
 </main>
 <script>
@@ -113,9 +118,7 @@
   var metaEl = document.getElementById("meta");
   var counterEl = document.getElementById("line-counter");
   var endpointEl = document.getElementById("endpoint-display");
-  var startBtn = document.getElementById("start-btn");
-  var stopBtn = document.getElementById("stop-btn");
-  var prInput = document.getElementById("pr-input");
+  var prDisplayEl = document.getElementById("pr-display");
 
   var currentSource = null;
   var lineCount = 0;
@@ -152,7 +155,7 @@
   }
 
   function appendOutput(line, cls) {
-    // First real line replaces the empty-state placeholder.
+    // First real line replaces the empty-state helper text.
     if (lineCount === 0 && outputEl.firstChild && outputEl.firstChild.classList && outputEl.firstChild.classList.contains("empty")) {
       outputEl.removeChild(outputEl.firstChild);
     }
@@ -220,8 +223,7 @@
     return null;
   }
 
-  function startStream(prNumber, endpoint) {
-    endpoint = endpoint || "stream";
+  function startTail(prNumber) {
     if (currentSource) {
       try { currentSource.close(); } catch (_e) { /* ignore */ }
       currentSource = null;
@@ -230,21 +232,17 @@
     resetGates();
     setStatus("connecting…", "running");
     metaEl.textContent = "PR #" + prNumber + " · connecting…";
-    endpointEl.textContent = "/pr/" + prNumber + "/" + endpoint;
+    endpointEl.textContent = "/pr/" + prNumber + "/tail";
+    prDisplayEl.textContent = "PR #" + prNumber;
 
-    var url = "/pr/" + prNumber + "/" + endpoint;
-    if (typeof EventSource !== "undefined") {
-      currentSource = new EventSource(url);
-    } else {
+    var url = "/pr/" + prNumber + "/tail";
+    if (typeof EventSource === "undefined") {
       appendOutput("[error] Browser does not support EventSource (SSE).", "stderr");
       setStatus("incompatible", "done-err");
       return;
     }
-    // Single onmessage dispatcher. The server emits only `data:` lines
-    // (no `event:` field), so named `addEventListener("ready", ...)`
-    // never fires -- every SSE frame arrives on the generic
-    // `onmessage` channel. Dispatch on the JSON payload's `event`
-    // field instead.
+    currentSource = new EventSource(url);
+
     currentSource.onmessage = function (e) {
       var data;
       try { data = JSON.parse(e.data); } catch (_err) { return; }
@@ -262,8 +260,7 @@
           break;
         }
         case "iteration_done": {
-          // Tail mode only (babysit's auto-opened, read-only mirror):
-          // one babysit LOOP iteration's review-local.sh run just
+          // One babysit LOOP iteration's review-local.sh run just
           // exited, but the babysit loop itself keeps going -- do NOT
           // close the EventSource or flip to a terminal status, just
           // note the iteration boundary and keep tailing.
@@ -275,8 +272,6 @@
           appendOutput("[stream] subprocess exited rc=" + data.exit_code + (data.reason ? " (" + data.reason + ")" : ""), "muted");
           var label = data.exit_code === 0 ? "Approve (rc=0)" : ("rc=" + data.exit_code);
           setStatus(label, data.exit_code === 0 ? "done-ok" : "done-err");
-          stopBtn.disabled = true;
-          startBtn.disabled = window.__AUTOSTART__ === true ? true : false;
           try { currentSource.close(); } catch (_e) { /* ignore */ }
           currentSource = null;
           break;
@@ -289,116 +284,25 @@
           break;
       }
     };
+
     currentSource.onerror = function () {
-      // EventSource fires `error` on transient drops AND on the
-      // terminal close after `done`. Only flag if we're still active.
-      //
-      // The browser EventSource API does NOT surface HTTP errors
-      // (e.g., 503 from the server's concurrency cap) -- it just
-      // silently retries. Worse: after a server-side failure
-      // (claude -p exits non-zero, then the script emits a final
-      // line and exits), the browser auto-reconnects -> new stream
-      // -> same failure -> 4-stream cap deadlock.
-      //
-      // Fix: CLOSE the EventSource on the first error after we've
-      // received at least one stdout frame. The operator must
-      // click Start to retry. We do NOT close on transient errors
-      // that arrive BEFORE any stdout (genuine network drops at
-      // connect time -- those should retry).
+      // Pure read-only tail: silently reconnect. EventSource's
+      // built-in auto-reconnect handles transient drops. The only
+      // terminal case is the server returning a 'done' frame, which
+      // the onmessage handler above closes cleanly.
       if (!currentSource || currentSource.readyState === EventSource.CLOSED) return;
-      var sawAnyOutput = output && output.textContent && output.textContent.trim().length > 0;
-      if (sawAnyOutput) {
-        appendOutput("[stream] server closed the stream after a non-zero exit. Click Start to retry.", "stderr");
-        setStatus("failed", "done-err");
-        try { currentSource.close(); } catch (_e) { /* ignore */ }
-        currentSource = null;
-        stopBtn.disabled = true;
-        // M1 fix: mirror the autostart check into the onerror branch.
-        // The whole point of ?autostart=1 is to prevent a duplicate
-        // /stream → review-local.sh invocation; re-enabling Start on
-        // any tail disconnect would re-introduce the very footgun the
-        // autostart path is built to prevent.
-        startBtn.disabled = window.__AUTOSTART__ === true;
-        return;
-      }
-      // No stdout yet -- might be stuck connecting. Detect a 5s+
-      // hang so we surface a clear error.
       appendOutput("[stream] reconnecting…", "muted");
-      var stuckSince = Date.now();
-      var stuckCheck = setInterval(function () {
-        if (!currentSource || currentSource.readyState === EventSource.CLOSED) {
-          clearInterval(stuckCheck);
-          return;
-        }
-        if (currentSource.readyState === EventSource.OPEN) {
-          clearInterval(stuckCheck);
-          return;
-        }
-        if (Date.now() - stuckSince > 5000) {
-          clearInterval(stuckCheck);
-          appendOutput(
-            "[error] stream stuck in CONNECTING > 5s. The server's 4-stream " +
-            "concurrency cap is likely full. Close other tabs or restart the server.",
-            "stderr"
-          );
-          setStatus("server rejected", "done-err");
-          try { currentSource.close(); } catch (_e) { /* ignore */ }
-          currentSource = null;
-          stopBtn.disabled = true;
-          // M1 fix: same autostart-aware disable as the sawAnyOutput
-          // branch above. See comment there.
-          startBtn.disabled = window.__AUTOSTART__ === true;
-        }
-      }, 500);
     };
-
-    stopBtn.disabled = false;
-    startBtn.disabled = true;
   }
 
-  function stopStream() {
-    if (currentSource) {
-      try { currentSource.close(); } catch (_e) { /* ignore */ }
-      currentSource = null;
-    }
-    setStatus("stopped", "idle");
-    stopBtn.disabled = true;
-    startBtn.disabled = false;
-  }
-
-  startBtn.addEventListener("click", function () {
-    var v = parseInt(prInput.value, 10);
-    if (!v || v < 1) {
-      prInput.focus();
-      return;
-    }
-    startStream(v, "stream");
-  });
-  stopBtn.addEventListener("click", stopStream);
-  prInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") startBtn.click();
-  });
-
-  // Pre-fill the input from the server-injected window.__PR_NUMBER__
-  // (set on /pr/<N> pages) so the operator sees which PR they were
-  // looking at.
+  // PR number is server-injected via window.__PR_NUMBER__. There is
+  // intentionally NO user input field -- the page is a passive mirror
+  // of one specific PR's babysit session.
   if (typeof window.__PR_NUMBER__ === "number" && window.__PR_NUMBER__ > 0) {
-    prInput.value = String(window.__PR_NUMBER__);
-  }
-
-  // window.__AUTOSTART__ is injected only on `/pr/<N>?autostart=1` --
-  // the URL bin/babysit-pr-local.sh opens automatically. It connects
-  // to /pr/<N>/tail (read-only mirror of babysit's OWN run, see
-  // bin/review-local-server.py's _tail_babysit_log) instead of
-  // /pr/<N>/stream, so the tab never spawns a second, duplicate
-  // verdict pipeline run. A manual visit to /pr/<N> (no query string)
-  // stays the passive viewer described above: streaming only starts
-  // when the operator clicks Start, which uses /stream (the real,
-  // spawning endpoint).
-  if (window.__AUTOSTART__ === true && typeof window.__PR_NUMBER__ === "number" && window.__PR_NUMBER__ > 0) {
-    startBtn.disabled = true;
-    startBtn.title = "Auto-watching babysit-pr-local's run (read-only mirror). Manual Start is disabled here to avoid spawning a duplicate verdict pipeline.";
-    startStream(window.__PR_NUMBER__, "tail");
+    startTail(window.__PR_NUMBER__);
+  } else {
+    appendOutput("[error] no PR number injected; the server must call _serve_preview_html(pr_number=N).", "stderr");
+    setStatus("misconfigured", "done-err");
   }
 })();
 </script>

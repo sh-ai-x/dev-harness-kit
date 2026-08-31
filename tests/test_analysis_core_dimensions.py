@@ -32,6 +32,8 @@ EXPECTED_DIM_NAMES = frozenset({
     # security OWASP Top 10
     "owasp-a01", "owasp-a02", "owasp-a03", "owasp-a04", "owasp-a05",
     "owasp-a06", "owasp-a07", "owasp-a08", "owasp-a09", "owasp-a10",
+    # security prompt-injection (LLM01 — separate from OWASP per L9)
+    "prompt-injection",
     # inspect health
     "dead", "dup", "smell", "overeng", "overarch", "cleancode",
     "tokenbudget", "slop",
@@ -116,8 +118,13 @@ class TestDimensionRegistry(unittest.TestCase):
 
     def test_group_security(self):
         names = {d.name for d in dim_mod.group("security")}
-        self.assertEqual(len(names), 10)
-        self.assertTrue(all(n.startswith("owasp-") for n in names))
+        # 10 OWASP Top 10 + 1 separate prompt-injection (LLM01) dimension.
+        # OWASP Top 10 is the symbolic surface; prompt-injection sits next
+        # to it (not as A11) per iron-laws/index.md L9.
+        self.assertEqual(len(names), 11)
+        owasp = {n for n in names if n.startswith("owasp-")}
+        self.assertEqual(len(owasp), 10, f"OWASP set drifted: {sorted(owasp)}")
+        self.assertIn("prompt-injection", names)
 
     def test_group_inspect(self):
         names = {d.name for d in dim_mod.group("inspect")}

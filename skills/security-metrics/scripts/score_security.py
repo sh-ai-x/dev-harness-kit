@@ -29,6 +29,14 @@ NAMES = {
     "A09": "Security Logging and Alerting Failures", "A10": "Mishandling Exceptional Conditions",
 }
 
+# LLM01 Prompt Injection — kept SEPARATE from the OWASP A01–A10 surface
+# above. Categorized separately in the scorecard table so the OWASP
+# count stays at 10 (matching OWASP's symbolic surface). Deducts when
+# the repo handles untrusted text (WebFetch / gh pr view / sub-agent
+# output) without either a static pre-filter or the <untrusted>
+# delimiter convention (iron-laws/index.md L9).
+PROMPT_injection = Category(code="LLM01", name="Prompt Injection (LLM01)")
+
 
 def files(root: Path) -> list[Path]:
     """Return regular repository files while excluding ignored trees and links.
@@ -112,6 +120,7 @@ def scan(root: Path) -> list[Category]:
     all_files = files(root)
     all_text = "\n".join(text for _, text in data)
     result = [Category(code, name) for code, name in NAMES.items()]
+    result.append(PROMPT_injection)
     by = {item.name: item for item in result}
 
     if not (root / "SECURITY.md").exists():
@@ -164,17 +173,34 @@ def scan(root: Path) -> list[Category]:
         by["Security Logging and Alerting Failures"].deduct(15, "no logging/audit marker detected")
     if not any(path.name == "dependabot.yml" or ".github/dependabot" in path.as_posix() for path in all_files):
         by["Software Supply Chain Failures"].deduct(5, "Dependabot configuration is missing")
+
+    # LLM01 Prompt Injection (separate row in the scorecard — see NAMES).
+    # Deducts when the repo ingests untrusted text but lacks BOTH
+    # (a) the static pre-filter and (b) the <untrusted> delimiter
+    # convention (iron-laws/index.md L9). The same scorecard also
+    # surfaces on its own row so dashboards / alert routing can target
+    # it independently of the OWASP set.
+    has_static_filter = any(path.name == "prompt_injection_scan.py" for path in all_files)
+    has_untrusted_delim = "<untrusted" in all_text
+    if has_static_filter:
+        by["Prompt Injection (LLM01)"].deduct(0, "static pre-filter present")
+    elif has_untrusted_delim:
+        by["Prompt Injection (LLM01)"].deduct(5, "no static pre-filter; <untrusted> delimiter in use")
+    else:
+        by["Prompt Injection (LLM01)"].deduct(
+            20, "no static pre-filter AND no <untrusted> delimiter convention"
+        )
     return result
 
 
 def render(root: Path, categories: list[Category]) -> str:
     """Render a byte-stable Markdown scorecard for already-scanned categories."""
     overall = round(sum(item.score for item in categories) / len(categories))
-    lines = ["# Security Metrics", "", f"- Repository: `{root}`", f"- Overall score: **{overall}/100**", "", "| OWASP area | Score | Status | Evidence / deductions |", "|---|---:|---|---|"]
+    lines = ["# Security Metrics", "", f"- Repository: `{root}`", f"- Overall score: **{overall}/100**", "", "| Code | Area | Score | Status | Evidence / deductions |", "|---|---|---:|---|---|"]
     for item in categories:
         evidence = "<br>".join(item.findings).replace("|", "\\|") if item.findings else "No deterministic findings"
         status = "PASS" if item.score == 100 else "REVIEW"
-        lines.append(f"| {item.code} {item.name} | {item.score}/100 | {status} | {evidence} |" )
+        lines.append(f"| {item.code} | {item.name} | {item.score}/100 | {status} | {evidence} |" )
     lines += ["", "> This is a deterministic triage metric, not a security certification. Run `/dev-kit:security` for the full OWASP evidence review.", ""]
     return "\n".join(lines)
 

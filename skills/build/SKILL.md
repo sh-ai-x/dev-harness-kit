@@ -18,6 +18,18 @@ disable-model-invocation: false
 
 Executes `phases/<name>/step{1..N}.md` end-to-end by spawning one non-interactive agent per step inside an isolated per-step git worktree, persisting real `step<N>-output.json` (subprocess exit code, stdout, stderr, measured duration), and emitting the 2-commit protocol on the per-step branch. Claude is the default; set `DEV_KIT_BUILD_AGENT=codex` to use `codex exec`. Every step has a bounded timeout from `DEV_KIT_AGENT_TIMEOUT_SECONDS` (default 1 hour, max 24 hours). Honors MUST-36 (one sub-agent per step), MUST-37 (3-cycle self-fix guard), MUST-38 (per-step worktree isolation).
 
+## Session-scoped gate mode (workflow-fast-mode-lean)
+
+Run `/dev-kit:harness-mode fast|full|custom` before (or during) a build to
+control which optional local gates run this session — `full` (the default,
+reset every session by a SessionStart hook) runs everything; `fast` skips
+`tdd_scope_judge` and `slop_detector`; `custom` picks each gate individually.
+Correctness gates (`stop_verify`, `secret_scan`, `intent_integrity`-high) never
+turn off, regardless of mode — see `skills/harness-mode/SKILL.md`. Every step
+preamble is appended with a one-line gate summary
+(`lib/execute.py:_gate_summary_line`) so the per-step sub-agent knows what it
+is and is not responsible for that step.
+
 ## Optional Linear preflight
 
 At the start of a new build task, invoke `/dev-kit:linear` once when Linear is

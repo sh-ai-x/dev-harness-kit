@@ -1,0 +1,290 @@
+---
+title: "Workflow Fast Mode (Lean v3) — harness-mode Skill, Ask-Based Custom Picker, Session-Scoped Default"
+status: design-discussion
+date: 2026-08-30
+tags: [workflow, gates, fast, full, custom, build, review, security, maintenance, babysit-pr, vibe, correctness, harness-mode, ask-tool, session-scoped]
+
+before:
+  summary: |
+    The dev-harness-kit build pipeline runs the full local gate stack by default:
+    TDD scope judge, intent-integrity pre-build gate, slop-detector, pre-commit
+    `codex:review`, and `/dev-kit:babysit-pr` polling loop. All-or-nothing today.
+
+    A "vibe" local iteration loop (small change, manual smoke test, no PR) pays
+    for the full gate stack every commit. Existing escape hatches
+    (`DEV_KIT_SKIP_TDD=1`, `--skip-blocked`, `--fast` on `/dev-kit:review`) are
+    scattered across env vars, CLI flags, and sibling skills with no common shape
+    and no way to express "skip every optional local gate at once", let alone
+    "skip only these three gates, keep those two".
+  evidence:
+    - '`lib/execute.py:46-53`: `DEV_KIT_AGENT_TIMEOUT_SECONDS` env override (escape-hatch shape)'
+    - '`lib/execute.py:78-90`: `DEV_KIT_BUILD_AGENT` env override (claude | codex)'
+    - '`lib/execute.py:404-407`: only `--skip-blocked` and `--push` flags exist on the runner today'
+    - '`skills/review/SKILL.md:30`: `--fast` flag scoped to one skill (skip verifier only)'
+    - '`hooks/index.md`: tdd-guard, slop-detector, secret-scan, stop-verify — no per-project opt-out path'
+    - 'Bash tool contract: "the working directory persists between commands, but shell state does not" — a plain `export DEV_KIT_FAST_MODE=1` cannot reliably carry across tool calls, ruling out a pure env-var mechanism for a multi-turn session'
+
+after:
+  summary: |
+    One new skill, `/dev-kit:harness-mode`, with three sub-commands: `fast`,
+    `full`, `custom`. `fast` and `full` apply instantly — no prompts. `custom`
+    walks the developer through the optional gates using the native interactive
+    choice tool available in the runtime (`AskUserQuestion` in Claude Code),
+    batched 3 questions per call so no single prompt exceeds a comfortable
+    choice count. The resolved mode is written to a small session-scoped state
+    file, `.dev-kit/harness-mode.session.json`, that every gated skill reads on
+    each invocation. A new SessionStart hook resets that file to `{"mode":
+    "full"}` at the start of every session — opening a new window always starts
+    strict; fast or custom must be chosen explicitly, every session. Correctness
+    gates (stop_verify, secret_scan, intent_integrity-high, gh_ci_required) are
+    never presented as options in the picker and never turn off, regardless of
+    mode.
+  files:
+    - path: skills/harness-mode/SKILL.md
+      change: 'New skill. `alpha: state` (persists a session-scoped mode.json). `user-invocable: true`, `model: opus`. `fast` and `full` write the state file and print the resolved gate table immediately. `custom` issues 2 batched `AskUserQuestion` calls (3 questions each) covering the 6 optional gates, then writes the resulting mix to the state file.'
+    - path: lib/harness_mode_state.py
+      change: 'New module: `read_state()` / `write_state(mode, gates=None)` for `.dev-kit/harness-mode.session.json`; `resolved_gate(name)` returns the effective on/off/mode value for one gate, with the four correctness gates hardcoded to always resolve "on" regardless of file contents (defense in depth — even a hand-edited state file cannot disable them).'
+    - path: hooks/session-start-harness-mode-reset.sh
+      change: 'New SessionStart hook. Writes `{"mode": "full", "gates": {}}` to `.dev-kit/harness-mode.session.json` unconditionally at the start of every Claude Code / Codex session, before any skill reads it. This is what makes the default session-scoped: a new window always starts strict.'
+    - path: lib/execute.py
+      change: 'Replace the earlier `_fast_mode()` sketch with `_gate_state(name)`, delegating to `lib.harness_mode_state.resolved_gate(name)`. Thread into `_intent_integrity_pre_build_gate` and the TDD scope judge call site. Inject the resolved gate set into the per-step preamble so the sub-agent sees what it is and is not responsible for.'
+    - path: hooks/slop-detector.sh
+      change: 'Add a 3-line guard calling `python3 -m lib.harness_mode_state get slop_detector`; if the result is `off`, print "slop-detector: opted out via harness-mode" to stderr and exit 0.'
+    - path: skills/build/SKILL.md
+      change: 'Document `/dev-kit:harness-mode` as the primary entrypoint. Mention the legacy `--fast` CLI flag / `DEV_KIT_FAST_MODE` env var as power-user shortcuts that write the same state file (kept for scriptability, not the recommended path).'
+    - path: skills/babysit-pr/SKILL.md
+      change: 'Document `babysit_pr` gate resolution: `manual` mode = one `gh pr checks` dump + exit, no loop.'
+    - path: tests/test_harness_mode_state.py
+      change: 'Read/write round-trip for `.dev-kit/harness-mode.session.json`; the four correctness gates resolve "on" even when the file explicitly sets them "off" (the critical invariant); missing file defaults to `mode=full`, all gates on.'
+    - path: tests/test_execute.py
+      change: 'Add `TestGateStateIntegration`: `_gate_state("tdd_scope_judge")` reflects the session file; intent-integrity gate still returns 2 when `mode=full` (no regression); correctness gates never skip regardless of file content.'
+    - path: .claude-plugin/plugin.json
+      change: 'Bump patch version per the auto-bump pipeline; no schema change.'
+
+pros:
+  - 'Single skill (`/dev-kit:harness-mode`) covers all three needs the user asked for: an instant fast toggle, an instant full toggle, and a granular custom picker — no YAML editing, no web form.'
+  - 'Interactive picker reuses the runtime-native choice tool (`AskUserQuestion`) instead of building a bespoke UI. Zero new UI surface, zero new dependency.'
+  - 'Batching at 3 questions per `AskUserQuestion` call keeps each prompt legible; 6 optional gates fit in 2 calls.'
+  - 'Session-scoped default (reset to `full` on every SessionStart) means forgetting to turn fast mode back off cannot leak into the next session, unlike a project-level `DEV_KIT_FAST_MODE=1` env var a developer forgets they exported.'
+  - 'Correctness guarantee unchanged from v2: the four mandatory gates (stop_verify, secret_scan, intent_integrity-high, gh_ci_required) are hardcoded in `lib.harness_mode_state.resolved_gate()` to always resolve "on" — not even a hand-edited state file can disable them.'
+  - 'GH-Actions workflows untouched — push still runs the full strict gate set, so a fast/custom-mode commit cannot merge without the rigorous review.'
+  - 'Legacy `--fast` flag / `DEV_KIT_FAST_MODE` env var preserved as scriptable shortcuts that resolve to the same underlying state file, so CI-invoked or headless runs are not forced through an interactive prompt.'
+
+cons:
+  - 'The interactive picker (`custom`) only works in a session where `AskUserQuestion` (or the runtime`s equivalent) is available — not in a fully headless/CI invocation. `fast` and `full` remain the non-interactive fallback for that context.'
+  - 'A new SessionStart hook is one more file competing for the SessionStart slot; needs to compose cleanly with the existing worktree auto-cut and loghooks SessionStart hooks already registered in this repo (`hooks/index.md`).'
+  - 'Session-scoped reset means a developer running many short sessions in one working day re-picks `custom` mode every time they want it — a deliberate trade-off (safety over convenience) but a real repeated cost for heavy fast-mode users.'
+  - 'Two mode-selection paths exist (interactive skill vs. legacy flag/env var) — needs a one-line precedence doc so a script that sets `DEV_KIT_FAST_MODE=1` and a developer who ran `/dev-kit:harness-mode custom` in the same session do not silently fight each other. Resolution: skill-mutated state file is the source of truth; the legacy flag/env var is read by `lib.harness_mode_state.resolved_gate()` ONLY as a fallback default when no session file exists yet.'
+
+limitations:
+  - 'Fast/custom mode cannot speed up GH-Actions itself; CI wall-clock is unchanged. It only removes local-only gates.'
+  - 'Fast/custom mode cannot change agent model selection (Iron Law 5: opus for design, sonnet for code). Model is fixed by the parent task, not by harness mode.'
+  - 'Fast/custom mode does NOT prevent merging a fast-mode PR — it only skips local gates. CI still enforces. This is the intended contract, not a gap.'
+  - 'No per-branch auto-detection (e.g. "fast on feat/*, full on main"). Out of scope; the developer runs `/dev-kit:harness-mode` explicitly every session.'
+  - 'No telemetry on "how often does fast-mode-shipped work get caught by CI". Ship the mechanism first; measure second.'
+  - 'The picker cannot express dependencies between gates (e.g. "if security_owasp=full, force maintenance=on"). All 6 optional gates are independent toggles/enums; if a dependency rule is needed later it goes in `lib.harness_mode_state.resolved_gate()`, not the picker UI.'
+
+sections:
+  - title: 1. Design principle — correctness gates stay local, others defer to CI
+    body: |
+      Vibe mode is not "skip safety". It is "pay the safety cost once, in CI,
+      instead of twice (local + CI)". The only gates that absolutely MUST run
+      locally are the ones whose failure CI cannot recover from.
+
+      Gates fall into four categories:
+
+      | Category | Examples | Picker-eligible? | Why |
+      |---|---|---|---|
+      | Correctness | `stop_verify`, `secret_scan`, `intent_integrity` (high), `gh_ci_required` | **NO — never shown, never off** | Sub-agent silently succeeding on no-diff (issue #221 RC2), leaked credentials, high-severity finding pushed as PR — CI cannot recover the time already invested, OR the leak happens before CI sees it. |
+      | Style | `slop_detector`, `maintenance` (CC/OE/VM) | YES | Lint / cosmetic. CI re-runs the same gates; nothing local-only is lost. |
+      | Quality | `/dev-kit:review` verifier pass, `/dev-kit:security` (10-dim OWASP) | YES | Multi-pass LLM judge — local wall-clock's main culprit. `.github/workflows/{review,security}.yml` runs the same checks on push. |
+      | Process | `pre_commit_review` (`codex:review`), `/dev-kit:babysit-pr` polling | YES | Human / loop time. Branch protection + GH-Actions required checks provide the same enforcement on push. |
+
+      Two outcomes:
+
+      - PR merged correctly with full strict review: same end state, less local time.
+      - CI catches something local would have caught: developer fixes it; same end state, slightly later.
+
+      There is no path where CI merges without strict review but local would have
+      caught it — because CI runs the same gates. The only thing fast/custom mode
+      sacrifices is developer time, not correctness.
+
+  - title: 2. What each mode flips
+    body: |
+      | Classification | Gate | `full` (default) | `fast` | `custom` |
+      |---|---|---|---|---|
+      | Correctness | `stop_verify` | ON | **ON (always)** | **ON (always, not shown)** |
+      | Correctness | `secret_scan` | ON | **ON (always)** | **ON (always, not shown)** |
+      | Correctness | `intent_integrity` (high) | ON | **ON (always)** | **ON (always, not shown)** |
+      | Correctness | `gh_ci_required` | ON | **ON (always)** | **ON (always, not shown)** |
+      | Quality | `tdd_scope_judge` | ON | OFF | picker Q1 |
+      | Style | `slop_detector` | ON | OFF | picker Q2 |
+      | Process | `pre_commit_review` | ON | OFF | picker Q3 |
+      | Style | `maintenance` | ON | OFF | picker Q4 |
+      | Quality | `security_owasp` | full (10-dim) | quick (1-dim) | picker Q5 (full / quick / off) |
+      | Process | `babysit_pr` | full (poll + auto-fix) | manual (1 dump + exit) | picker Q6 (full / manual) |
+
+      `full` is the literal default written by the SessionStart hook — every new
+      session starts here. `fast` is one skill call away
+      (`/dev-kit:harness-mode fast`) and flips every optional gate off in one
+      shot. `custom` is for the case where the developer wants, say, TDD off
+      but the pre-commit review kept on.
+
+  - title: 3. The /dev-kit:harness-mode skill
+    body: |
+      ```bash
+      /dev-kit:harness-mode fast     # instant: all optional gates OFF, correctness gates ON
+      /dev-kit:harness-mode full     # instant: everything ON (also the SessionStart default)
+      /dev-kit:harness-mode custom   # interactive: walks the 6 optional gates via AskUserQuestion
+      /dev-kit:harness-mode show     # prints the currently resolved gate table, no prompts
+      ```
+
+      `custom` issues two batched `AskUserQuestion` calls — 3 questions each,
+      matching the practical limit for a single legible prompt screen:
+
+      **Call 1 (Y/N gates):**
+
+      | # | Question | Options |
+      |---|---|---|
+      | 1 | Run the TDD scope judge locally before each build step? | Keep it ON / Skip locally (defer to CI) |
+      | 2 | Run slop-detector locally on each write? | Keep it ON / Skip locally |
+      | 3 | Run pre-commit `codex:review` before each commit? | Keep it ON / Skip locally |
+
+      **Call 2 (Y/N + enum gates):**
+
+      | # | Question | Options |
+      |---|---|---|
+      | 4 | Run the maintenance (CC/OE/VM) gate locally? | Keep it ON / Skip locally |
+      | 5 | Local security scan depth? | Full 10-dim OWASP fan-out / Quick single-dim summary / Skip locally |
+      | 6 | `/dev-kit:babysit-pr` behavior this session? | Full auto-fix polling loop / Manual: one `gh pr checks` dump + exit |
+
+      Each answer writes directly into
+      `.dev-kit/harness-mode.session.json:gates.<name>`. The skill then prints
+      the resolved table (same format as `full`/`fast`) so the developer sees
+      exactly what was chosen before continuing.
+
+      `alpha: state` per the L6 skill gate (`tests/test_skill_governance.py`) —
+      the skill persists a session artifact and gates subsequent skill behavior
+      from it, which is `state` by definition, not `analysis` or `enforcement`.
+
+  - title: 4. Session-scoped default — new window always starts full
+    body: |
+      A new SessionStart hook, `hooks/session-start-harness-mode-reset.sh`,
+      unconditionally writes:
+
+      ```json
+      {"mode": "full", "gates": {}}
+      ```
+
+      to `.dev-kit/harness-mode.session.json` at the start of every session —
+      before the worktree auto-cut hook, loghooks installer, or any other
+      SessionStart hook in this repo runs its own logic (order does not matter
+      here since this hook only touches its own file). This guarantees:
+
+      - Opening a new Claude Code window or Codex session always starts in
+        `full` (strict) mode, regardless of what the previous session left
+        behind.
+      - `fast` or `custom` must be chosen explicitly, every session — there is
+        no way to "leave fast mode on" by accident across a break.
+      - The state file is NOT a project-level config; it lives in
+        `.dev-kit/` (already gitignored alongside other session/run state
+        such as `.dev-kit/trace/`, `.dev-kit/repair/`), so it never gets
+        committed and never leaks between developers sharing a clone.
+
+      Failure mode: if the hook fails to run (e.g. `.dev-kit/` not writable),
+      `lib.harness_mode_state.read_state()` falls back to `mode=full` when the
+      file is missing or corrupt — the safe default either way.
+
+  - title: 5. Implementation sketch
+    body: |
+      ```python
+      # lib/harness_mode_state.py
+      STATE_PATH = Path(".dev-kit/harness-mode.session.json")
+      CORRECTNESS_GATES = frozenset({
+          "stop_verify", "secret_scan", "intent_integrity", "gh_ci_required",
+      })
+
+      def read_state() -> dict:
+          if not STATE_PATH.exists():
+              return {"mode": "full", "gates": {}}
+          try:
+              return json.loads(STATE_PATH.read_text())
+          except (OSError, json.JSONDecodeError):
+              return {"mode": "full", "gates": {}}  # corrupt file -> safe default
+
+      def write_state(mode: str, gates: Optional[dict] = None) -> None:
+          STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+          atomic_write_json(STATE_PATH, {"mode": mode, "gates": gates or {}})
+
+      def resolved_gate(name: str) -> str:
+          if name in CORRECTNESS_GATES:
+              return "on"  # hardcoded — no state file value can override this
+          state = read_state()
+          if name in state.get("gates", {}):
+              return state["gates"][name]
+          return "on" if state.get("mode") == "full" else "off"
+      ```
+
+      ```bash
+      # hooks/session-start-harness-mode-reset.sh
+      python3 -m lib.harness_mode_state write full
+      ```
+
+      ```bash
+      # hooks/slop-detector.sh — first 3 lines
+      if [ "$(python3 -m lib.harness_mode_state get slop_detector)" = "off" ]; then
+        echo "slop-detector: opted out via harness-mode" >&2
+        exit 0
+      fi
+      ```
+
+      Sub-agent preamble injection (unchanged shape from earlier iterations):
+
+      ```
+      AC: see step file. 3-cycle self-fix max.
+      Gates in effect: stop_verify=ON, secret_scan=ON, tdd_scope_judge=OFF (harness-mode=fast).
+      Do not write tests for non-production code unless the step file asks.
+      If stop_verify or secret_scan fires, treat as a hard stop.
+      ```
+
+  - title: 6. Failure modes
+    body: |
+      | Failure | Behavior |
+      |---|---|
+      | `AskUserQuestion` unavailable (headless/CI invocation of `custom`) | Skill falls back to printing the same 6 questions as a plain markdown table and instructs the caller to run `/dev-kit:harness-mode fast` or `full` instead; does not hang waiting for interactive input. |
+      | SessionStart hook fails to write the state file | `resolved_gate()` treats a missing/corrupt file as `mode=full` — fails safe, not fails open. |
+      | Developer runs `/dev-kit:harness-mode fast`, then a real secret is found by `secret_scan` | Hook exits non-zero as always — `secret_scan` is a correctness gate, never affected by mode. |
+      | Legacy `DEV_KIT_FAST_MODE=1` env var set AND `/dev-kit:harness-mode custom` run in the same session | The skill-written state file wins — `resolved_gate()` only consults the env var when `.dev-kit/harness-mode.session.json` does not yet exist this session. |
+      | `custom` picker interrupted mid-way (user closes 2nd `AskUserQuestion` without answering) | Partial answers from call 1 are already persisted (each call writes before returning); unanswered gates from call 2 default to `full`'s value (ON), not to `fast`'s value (OFF) — safe default. |
+      | CI required check set contradicts the chosen mode | Not detected locally. Merge attempt fails at the GH-Actions gate. Same as today — no regression. |
+
+  - title: 7. Why this beats the earlier all-YAML profile framework
+    body: |
+      The first (over-engineered) draft of this proposal added a new YAML
+      schema (`gate_definitions` + `profiles` + `active_profile`), a resolver
+      module, a config-management skill, and updates to 5 existing skills plus
+      N hooks — 12+ file changes for a project-level, hand-edited config file.
+
+      This version keeps the same underlying mechanism (one small state module,
+      correctness gates hardcoded) but replaces "hand-edit a YAML profile" with
+      "answer up to 6 quick questions via the tool you already have open" and
+      replaces "project-level persistent config" with "session-scoped, resets
+      every window". Both changes reduce the blast radius of a wrong or
+      forgotten setting: a bad YAML edit persists until someone notices it in a
+      diff; a bad interactive answer only lasts until the next session opens.
+
+  - title: 8. Out of scope (intentionally)
+    body: |
+      - Per-branch auto-detection. The developer runs `/dev-kit:harness-mode`
+        explicitly every session by design (section 4).
+      - Persisting a project-level DEFAULT mode across sessions/developers.
+        Every session starts `full`; there is no `.dev-kit/harness-mode.yaml`
+        equivalent to hand-edit and commit.
+      - Telemetry on "fast/custom-mode-shipped work caught by CI". Ship the
+        mechanism first; measure second.
+      - Agent model selection. Iron Law 5 is unchanged.
+      - GH-Actions workflow changes. CI is the safety net; local mode selection
+        is a developer convenience only.
+      - Gate dependency rules in the picker UI (e.g. auto-forcing `maintenance`
+        on when `security_owasp=full`). If needed later it lives in
+        `resolved_gate()`, not in the `AskUserQuestion` prompts.
