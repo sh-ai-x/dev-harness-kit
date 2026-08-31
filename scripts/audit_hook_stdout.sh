@@ -51,21 +51,21 @@ while IFS= read -r -d '' hook; do
     # /dev/null guarantees we send the same input both times. We don't
     # try to synthesize valid hook payloads — a hook that *requires*
     # a payload and errors out is still informative (its error message
-    # on the same payload should be byte-identical). The 5s per-call
+    # on the same payload should be byte-identical). The 2s per-call
     # timeout guards against a hook that blocks on stdin (none should,
-    # but defensive). On macOS ``gtimeout`` is preferred when present;
-    # fall back to a portable ``( sleep 5 ; kill ... ) &`` wrapper.
+    # but defensive). 2s × 2 invocations × 27 hooks = 108s worst case,
+    # well under the 5-minute GH-Actions job timeout the workflow sets.
     if command -v gtimeout >/dev/null 2>&1; then
-        a="$(gtimeout 5 bash "${hook}" </dev/null 2>/dev/null | sha256sum | awk '{print $1}')"
-        b="$(gtimeout 5 bash "${hook}" </dev/null 2>/dev/null | sha256sum | awk '{print $1}')"
+        a="$(gtimeout 2 bash "${hook}" </dev/null 2>/dev/null | sha256sum | awk '{print $1}')"
+        b="$(gtimeout 2 bash "${hook}" </dev/null 2>/dev/null | sha256sum | awk '{print $1}')"
     else
         # Portable fallback. The hook path is passed via argv
         # (``bash -c '... _ "$hook"``) so a filename containing a `"` or
-        # `;` cannot break out of the wrapper; SIGKILL on the 5s
+        # `;` cannot break out of the wrapper; SIGKILL on the 2s
         # deadline matches ``gtimeout`` and handles hooks that catch
         # SIGTERM.
-        a="$(bash -c 'bash "$1" </dev/null 2>/dev/null & sleep 5; kill -9 $! 2>/dev/null; wait $! 2>/dev/null' _ "${hook}" | sha256sum | awk '{print $1}')"
-        b="$(bash -c 'bash "$1" </dev/null 2>/dev/null & sleep 5; kill -9 $! 2>/dev/null; wait $! 2>/dev/null' _ "${hook}" | sha256sum | awk '{print $1}')"
+        a="$(bash -c 'bash "$1" </dev/null 2>/dev/null & sleep 2; kill -9 $! 2>/dev/null; wait $! 2>/dev/null' _ "${hook}" | sha256sum | awk '{print $1}')"
+        b="$(bash -c 'bash "$1" </dev/null 2>/dev/null & sleep 2; kill -9 $! 2>/dev/null; wait $! 2>/dev/null' _ "${hook}" | sha256sum | awk '{print $1}')"
     fi
     checked=$((checked + 1))
     if [[ "${a}" != "${b}" ]]; then

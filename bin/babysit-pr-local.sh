@@ -73,6 +73,101 @@ fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
+# --- per-PR concurrency lock (machine-wide, cross-worktree) -----------
+# A second babysit-pr-local invocation on the same PR would run its
+# own review-local.sh, write to the same live log, and possibly push
+# mid-fixup of the first. Refuse early with a one-line diagnostic that
+# surfaces the holder's PID + branch + ISO timestamp; the operator can
+# then kill the previous run or wait for it. Stale locks (PID gone OR
+# TTL exceeded) are removed via lib/babysit_pr_reliability.is_stale_lock.
+#
+# Lock path encodes the PR number, so two parallel wrappers on
+# DIFFERENT PRs do NOT collide -- only same-PR duplicates are
+# blocked. The lock dir defaults to `<git-common-dir>/dev-kit` so
+# every worktree in this repo shares the same per-PR namespace (a
+# second terminal in a different worktree hitting the same PR still
+# triggers "already running"). `BABYSIT_LOCK_PARENT` overrides the
+# parent directory for hermetic tests so they don't race with a
+# developer's own babysit session running against the real project
+# repo.
+LOCK_PARENT="${BABYSIT_LOCK_PARENT:-}"
+if [[ -z "$LOCK_PARENT" ]]; then
+  GIT_COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$GIT_COMMON_DIR" ]]; then
+    # `--git-common-dir` returns a relative path when run inside the
+    # main checkout; resolve to absolute so subsequent `mkdir -p`
+    # and lock writes do not depend on cwd.
+    case "$GIT_COMMON_DIR" in
+      /*) ABS_COMMON="$GIT_COMMON_DIR" ;;
+      *)  ABS_COMMON="$(cd "$REPO_ROOT" && cd "$GIT_COMMON_DIR" 2>/dev/null && pwd || echo "$REPO_ROOT/.git")" ;;
+    esac
+    LOCK_PARENT="$ABS_COMMON"
+  else
+    # Not a git checkout (defensive default) -- fall back to the
+    # in-repo .git so the lock still gates duplicate runs on the
+    # same machine (this script is meant to be invoked from inside
+    # the project repo, so the fallback is rarely exercised).
+    LOCK_PARENT="$REPO_ROOT/.git"
+  fi
+fi
+LOCK_DIR="$LOCK_PARENT/dev-kit"
+PR_LOCK_PATH="$LOCK_DIR/babysit-pr-local-${PR_NUMBER}.lock"
+mkdir -p "$LOCK_DIR" 2>/dev/null || true
+
+if [[ -f "$PR_LOCK_PATH" ]]; then
+  if python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.exit(0 if bpr.is_stale_lock('$PR_LOCK_PATH') else 1)
+" 2>/dev/null; then
+    echo "stale pr lock removed: $PR_LOCK_PATH" >&2
+    rm -f "$PR_LOCK_PATH"
+    # Also clear any stale lockdir from a prior crashed run.
+    rm -rf "${PR_LOCK_PATH}.d"
+  else
+    # `set -e` propagates into `$(...)`; `read_pr_lock_body` already
+    # collapses read failures to "" but the python3 call could still
+    # exit non-zero on an unhandled exception. `|| true` makes the
+    # assignment bulletproof so the diagnostic always prints.
+    HOLDER="$(python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
+" 2>/dev/null || true)"
+    HOLDER="${HOLDER:-<unreadable>}"
+    echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
+    exit 1
+  fi
+fi
+# Atomic acquire (closes the TOCTOU race the local security judge
+# flagged in PR #766 — the previous `[[ -f ]]` + `>` pattern let two
+# concurrent invocations both pass the check before either wrote the
+# lock, producing interleaved log writes and possibly conflicting
+# pushes). `try_acquire_pr_lock` uses `mkdir` of a sibling
+# `${PR_LOCK_PATH}.d` directory as the atomic primitive (POSIX
+# guarantees the directory either exists or doesn't after mkdir
+# returns — two concurrent mkdir calls cannot both succeed).
+LOCK_BODY="$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown') source=babysit-pr-local pr=${PR_NUMBER}"
+if ! python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.exit(0 if bpr.try_acquire_pr_lock('$PR_LOCK_PATH', '''$LOCK_BODY''') else 1)
+" 2>/dev/null; then
+  HOLDER="$(python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
+" 2>/dev/null || true)"
+  HOLDER="${HOLDER:-<unreadable>}"
+  echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
+  exit 1
+fi
+trap 'rm -f "$PR_LOCK_PATH" && rm -rf "${PR_LOCK_PATH}.d"' EXIT
+
 # --- auto-launch the localhost HTML viewer (best-effort) ---------------
 # `bin/review-local-server.py` (PR #731) exposes a live-streaming HTML
 # page for `bin/review-local.sh`, but nothing wired it to

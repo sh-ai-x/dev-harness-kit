@@ -1,0 +1,179 @@
+name: cache-decay-audit
+
+# Deterministic CI gate for the F1 cache_decay surface.
+#
+# Runs two read-only audits against the PR's working tree:
+#   1. ``scripts/audit_hook_stdout.sh`` (G4) — every hooks/*.sh must
+#      produce byte-identical stdout between two invocations on
+#      identical stdin. Volatile content (timestamps, PIDs, ephemeral
+#      ids) silently busts the prompt cache on every Claude Code turn
+#      — see rules/session-hygiene.md Iron Law 3.
+#   2. ``scripts/audit_skill_frontmatter.py`` (G5) — every
+#      skills/*/SKILL.md frontmatter must be free of non-deterministic
+#      fields (ISO dates, long hex SHAs, build-NNN). Maintenance-
+#      stamped fields like ``last-reviewed:`` are allowlisted.
+#
+# Both audits were introduced in PR #761 (cache_decay diagnostic).
+# This workflow turns them into a deterministic gate so future
+# contributors can't regress the prompt-cache stability surface
+# without the CI catching it.
+#
+# Why a separate workflow, not folded into maintenance.yml:
+#   - This gate is deterministic (bash + python, no LLM judge) and
+#     runs in <30s vs maintenance.yml's 15-min judge budget.
+#   - It blocks at the "hard rule" tier (CI RED) vs the maintenance
+#     gate's "verdict + docs-updated" soft tier.
+#   - Failure messages point directly at the offending file (no
+#     LLM verdict extraction overhead).
+#
+# Verdict contract:
+#   - All audits pass → exit 0 (gate green)
+#   - One or more audits fail → exit 1 (gate red)
+#
+# Bypass for emergencies: there is no `--no-verify` equivalent.
+# Fix the flagged file in a follow-up commit; the maintainer cannot
+# bypass branch protection.
+#
+# Required precondition for the PR-comment step:
+#   repo → Settings → Actions → General → "Allow GitHub Actions to
+#   create and approve pull request comments" (the default token
+#   otherwise has read-only PR-comment scope).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Idempotent re-posts: two near-simultaneous pushes to the same PR
+# can't double-stamp the comment because the marker-based overwrite
+# resolves to one comment ID. The cancel-in-progress is a defensive
+# backstop so the workflow never runs twice in parallel on the same
+# ref — costs nothing when not triggered and avoids a torn comment
+# state when both jobs fire simultaneously.
+concurrency:
+  group: cache-decay-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hook_stdout_determinism:
+    name: G4 — hook stdout determinism
+    runs-on: ubuntu-latest
+    # Real run on a clean tree is <30s (27 hooks × 2 invocations ×
+    # 0.5s per clean run). Worst case with the 2s per-hook timeout
+    # the audit script enforces is 27 × 2 × 2 = 108s; we leave 5min
+    # of headroom so a future bump in hook count doesn't push us
+    # back into the timeout.
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Run hook stdout determinism audit
+        run: |
+          set -uo pipefail
+          # The audit's built-in 2s per-invocation timeout keeps a
+          # single misbehaving hook from blowing the budget.
+          if bash scripts/audit_hook_stdout.sh; then
+            echo "::notice::hook stdout determinism: PASS"
+          else
+            echo "::error::hook stdout determinism: FAIL"
+            echo "::error::Run 'bash scripts/audit_hook_stdout.sh' locally for the offending hook list."
+            exit 1
+          fi
+
+  skill_frontmatter_audit:
+    name: G5 — skill frontmatter audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        with:
+          python-version: "3.13"
+
+      - name: Run skill frontmatter determinism audit
+        run: |
+          set -uo pipefail
+          if python3 scripts/audit_skill_frontmatter.py; then
+            echo "::notice::skill frontmatter: PASS"
+          else
+            echo "::error::skill frontmatter: FAIL"
+            echo "::error::Run 'python3 scripts/audit_skill_frontmatter.py' locally for the offending skill list."
+            exit 1
+          fi
+
+  aggregate_report:
+    name: cache-decay-audit summary
+    runs-on: ubuntu-latest
+    needs: [hook_stdout_determinism, skill_frontmatter_audit]
+    # Run on every outcome (success / failure / cancelled) so the
+    # terminal guard at the bottom always evaluates.
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Summarize gate state
+        run: |
+          echo "hook_stdout_determinism: ${{ needs.hook_stdout_determinism.result }}"
+          echo "skill_frontmatter_audit: ${{ needs.skill_frontmatter_audit.result }}"
+
+      # Post the consolidated PR comment FIRST so it runs even when
+      # the terminal guard below fails. ``always()`` makes this step
+      # run on every outcome; the ``github.event_name == 'pull_request'``
+      # half skips it for push-to-main events where there's no PR
+      # context. Skips fork-PR events entirely (read-only GITHUB_TOKEN
+      # would 403 the POST and turn this job red for an unrelated reason).
+      - name: Post PR comment (idempotent re-post on every outcome)
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Stable marker so successive runs overwrite the same comment
+          # instead of stacking. Same pattern as post-verdict-audit.
+          marker="<!-- cache-decay-audit -->"
+          body="$(cat <<EOF
+          ${marker}
+          ## cache-decay-audit — F1 cache_decay fix surface
+
+          - **G4 — hook stdout determinism**: ${{ needs.hook_stdout_determinism.result }}
+          - **G5 — skill frontmatter audit**: ${{ needs.skill_frontmatter_audit.result }}
+
+          Run \`bash scripts/audit_hook_stdout.sh\` and \`python3 scripts/audit_skill_frontmatter.py\`
+          locally to see which surface is bleeding the prompt cache. See
+          [docs/proposals/cache-hit-rate/structural-fix.yaml](docs/proposals/cache-hit-rate/structural-fix.yaml)
+          for the full rationale.
+          EOF
+          )"
+          existing="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --paginate --slurp \
+            | jq -r "[.[] | .[] | select(.body | test(\"${marker}\"))] | .[0].id // \"\"")"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${existing}" \
+              -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -f body="$body" >/dev/null
+          fi
+
+      # Terminal guard MUST be the last step — when it ``exit 1``s the
+      # comment above already ran (it has ``always()``), so the PR has
+      # both the human-visible comment AND the branch-protection signal.
+      - name: Terminal guard (exit 1 when any audit failed)
+        if: needs.hook_stdout_determinism.result != 'success' || needs.skill_frontmatter_audit.result != 'success'
+        run: |
+          echo "::error::cache-decay-audit gate RED — see the per-audit job logs above."
+          exit 1

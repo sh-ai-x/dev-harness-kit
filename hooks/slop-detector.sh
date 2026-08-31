@@ -24,6 +24,16 @@
 # bank and prints a one-shot WARN to stderr. No silent failure.
 
 set -eo pipefail
+# harness-mode opt-out (workflow-fast-mode-lean): /dev-kit:harness-mode fast|custom
+# can turn this gate off for the current session. Checked before the jq/stdin
+# machinery so the opt-out costs one Python process, not a wasted parse.
+if command -v python3 >/dev/null 2>&1; then
+  gate=$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && python3 -m lib.harness_mode_state get slop_detector 2>/dev/null || echo on)
+  if [ "$gate" = "off" ]; then
+    echo "slop-detector: opted out via harness-mode" >&2
+    exit 0
+  fi
+fi
 # Use %/* parameter expansion (POSIX, no external `dirname` required) so
 # the source line still works when PATH is broken (jq-less test envs
 # strip dirname along with jq — see TestSlopDetectorRefactor.fails_closed).

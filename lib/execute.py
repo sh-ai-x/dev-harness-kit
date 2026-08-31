@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atomic import atomic_write_json, now_iso  # noqa: E402
 from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
 from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
+from harness_mode_state import resolved_gate  # noqa: E402 — workflow-fast-mode-lean gate resolution
 from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
 
 SCHEMA_VERSION = "1.0.0"
@@ -51,6 +52,30 @@ def _agent_timeout_seconds() -> int:
     except ValueError:
         value = DEFAULT_AGENT_TIMEOUT_SECONDS
     return max(60, min(value, 24 * 60 * 60))
+
+
+def _gate_summary_line(root: Path) -> str:
+    """One-line gate summary appended to every step preamble.
+
+    Tells the sub-agent which optional gates are off this session (e.g.
+    tdd_scope_judge via `/dev-kit:harness-mode fast`) so it does not wonder
+    why no test framework is loading, and reiterates that correctness gates
+    (stop_verify, secret_scan) are non-negotiable regardless of mode.
+
+    ``root`` is the orchestrator's main checkout (where the SessionStart
+    hook writes `.dev-kit/harness-mode.session.json`), NOT the per-step
+    worktree — resolved_gate() must read the session-scoped file, not a
+    fresh per-step worktree that never saw the SessionStart reset.
+    """
+    tdd = resolved_gate("tdd_scope_judge", root)
+    slop = resolved_gate("slop_detector", root)
+    return (
+        f"Gates in effect: stop_verify=ON, secret_scan=ON, "
+        f"tdd_scope_judge={tdd.upper()}, slop_detector={slop.upper()}. "
+        f"If tdd_scope_judge is OFF, do not write tests for non-production "
+        f"code unless the step file asks for them. If stop_verify or "
+        f"secret_scan fires, treat it as a hard stop regardless of mode."
+    )
 
 
 def _output_text(value: object) -> str:
@@ -606,7 +631,10 @@ def _step_pre_spawn(
     )
     preamble_path = root / "phases" / phase / f"step{step_num}.md"
     preamble = preamble_path.read_text(encoding="utf-8") if preamble_path.exists() else ""
-    full_prompt = preamble + "\n\n---\nAC: see step file. 3-cycle self-fix max."
+    full_prompt = (
+        preamble + "\n\n---\nAC: see step file. 3-cycle self-fix max."
+        + "\n" + _gate_summary_line(root)
+    )
     update_step_status(root, phase, step_num, status="in_progress")
     started_event_id = _emit_effectiveness_event(
         root, phase, step_num, "step.started", "started",

@@ -2,75 +2,91 @@ name: version-bump
 
 # Single source of truth for plugin-version advancement.
 #
-# Architecture (post-#439):
+# Architecture (post-merge-queue, 2026-08-30):
 # - Feature PRs do NOT touch .claude-plugin/plugin.json or
 #   .codex-plugin/plugin.json. The PR branch keeps the version it was
-#   cut at, so parallel PRs never conflict on the `version` field.
-# - .githooks/pre-push enforces "refuse to push if local < origin/main"
-#   but does NOT auto-bump. The previous auto-bump behavior was the
-#   root cause of the parallel-PR cascade (every push incremented,
-#   every merge conflicted).
-# - When a PR into main is merged, this workflow:
-#     1. Reads the current version from .claude-plugin/plugin.json
-#     2. Bumps PATCH (0.3.129 -> 0.3.130)
-#     3. Updates both manifests and commits + pushes the bump to main
-#     4. Tags the new commit (annotated, idempotent on tag-already-exists)
-# - ci.yml's validate-job "Version freshness" check (in
-#   tests/test_smoke.py or tests/test_pre_commit_lint.py) continues to
-#   require HEAD version > BASE version for PR merges; with this
-#   workflow owning the trunk bump, that contract is unchanged.
+#   cut at; parallel PRs never conflict on the `version` field because
+#   the GitHub Merge Queue rebases each PR onto the latest main
+#   (which already contains this workflow's bump) before merge.
+#   See docs/proposals/release/plugin-version-bump-via-merge-queue.yaml
+#   for the before/after and evidence trail.
+# - When the merge queue is about to merge a PR into main, it fires
+#   `merge_group`. This workflow responds by:
+#     1. Reading the current version from .claude-plugin/plugin.json
+#     2. Bumping PATCH (0.3.129 -> 0.3.130)
+#     3. Updating both manifests and committing the bump on top of
+#        the merge_group ref (the queue then merges the result into
+#        main -- no separate push is needed because the bump lives
+#        inside the merge group)
+#     4. Tagging the merge_group head (annotated; idempotent on
+#        tag-already-exists)
+# - ci.yml's validate-job "Version freshness" check continues to
+#   require HEAD version > BASE version for PR merges; with the merge
+#   queue guaranteeing every PR's HEAD includes the bump, that
+#   contract is structurally upheld.
 #
-# Ruleset bypass (2026-08-02): `main` is protected by a repository
-# Ruleset (not classic branch protection) requiring a PR + 3 status
-# checks, with `bypass_actors: [{RepositoryRole: admin, always}]`.
-# The default `secrets.GITHUB_TOKEN` authenticates as the "github-actions"
+# Trigger history (read this before changing `on:` again):
+# - 2026-08-02: `on: push: branches: [main]` was an unbounded
+#   self-retrigger cascade (the bump commit pushed to main, which
+#   fired another bump). Fixed by moving to `pull_request: types:
+#   [closed]`.
+# - 2026-08-30: `pull_request: types: [closed]` still had a per-PR
+#   conflict on the version field against every parallel feature PR.
+#   Fixed by moving to `merge_group` -- the queue guarantees the
+#   PR's HEAD already has the prior bump when this fires.
+#
+# Ruleset bypass (unchanged from previous version of this file):
+# `main` is protected by a repository Ruleset (not classic branch
+# protection) requiring a PR + 3 status checks, with
+# `bypass_actors: [{RepositoryRole: admin, always}]`. The default
+# `secrets.GITHUB_TOKEN` authenticates as the "github-actions"
 # Integration, which is NOT eligible for ruleset bypass on personal
-# (non-org) GitHub accounts — Integration bypass_actors require an
-# owner organization. `secrets.DEV_KIT_GITHUB_TOKEN` is a fine-grained
-# PAT owned by the repo's admin account, so pushes authenticated with
-# it inherit the admin RepositoryRole and bypass the ruleset. This is
-# the only way to keep this workflow's direct-push-to-main working
-# without installing a dedicated GitHub App.
-#
-# Trigger: pull_request(closed) + merged==true (2026-08-03), not push.
-# The bump commit itself is pushed straight to main with `git push
-# origin HEAD:main` -- a `push` event, never a merged PR. Triggering on
-# `push: branches: [main]` therefore made the workflow re-fire on its
-# own bump commit, which bumped again, which pushed again... an
-# unbounded cascade (observed: v0.3.183 -> v0.3.188 in under a minute).
-# Gating on "a PR into main was merged" is structurally immune to that
-# self-retrigger, since the bump step never goes through a PR.
+# (non-org) GitHub accounts. `secrets.DEV_KIT_GITHUB_TOKEN` is a
+# fine-grained PAT owned by the repo's admin account, so pushes
+# authenticated with it inherit the admin RepositoryRole and bypass
+# the ruleset.
 #
 # Bump-PR interop: /dev-kit:bump (skills/bump/SKILL.md) also opens a
 # `chore(release): bump dev-kit to v...`-titled PR for manual/race-
-# recovery bumps, and merging THAT is a real pull_request(closed) event
-# -- it must not be double-bumped. The "Skip re-bump if PR is itself a
-# bump" step detects this by PR title and skips the bump-and-commit
-# steps, but tagging still runs (skills/bump/SKILL.md explicitly relies
-# on this workflow for post-merge tag emission; the skill does no local
-# tagging).
-
+# recovery bumps. With the merge queue, that PR also goes through
+# `merge_group` when merged, so this workflow would double-bump. The
+# "Skip re-bump if PR is itself a bump" step detects this by PR title
+# (still available on `merge_group` events via
+# github.event.merge_group.head_commit... actually NOT -- see below)
+# and skips the bump-and-commit steps; tagging still runs.
+#
+# IMPORTANT: `merge_group` events do NOT carry `github.event.pull_request`
+# context (only `merge_group.base_sha` + `merge_group.head_sha`). The
+# "Skip re-bump if PR is itself a bump" step therefore resolves the
+# PR title by reading it from `gh pr view <head_sha> --json title`,
+# not from `github.event.pull_request.title`. See the step body.
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+  merge_group:
 
 permissions:
   contents: write
+  # Required for `gh pr view <head_sha> --json title` (no pull_request
+  # context on merge_group events; title lookup goes through the API).
+  pull-requests: read
 
 concurrency:
-  group: version-bump
+  group: version-bump-${{ github.event.merge_group.head_sha }}
   cancel-in-progress: false
 
 jobs:
   bump-and-tag:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout merge_group head
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
-          ref: main
+          # The merge_group event gives us the head_sha of the PR
+          # after the queue has rebased it onto latest main. Checkout
+          # that ref so the bump is on top of the queued PR, which
+          # the queue then merges as a single unit. Do NOT use
+          # `ref: main` here -- the queue expects the bump to live
+          # inside the merge_group, not as a parallel push.
+          ref: ${{ github.event.merge_group.head_sha }}
           fetch-depth: 0
           token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
 
@@ -79,30 +95,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Refresh origin/main (queued-run safety)
-        # If a previous workflow run pushed its bump first while this run
-        # was queued, our local checkout is stale. Re-fetch + reset to
-        # origin/main so the upcoming bump is computed against the
-        # latest trunk version and the push is a guaranteed fast-forward.
-        # This is the fix for review finding #1 on #439.
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          git reset --hard origin/main
-
       - name: Skip re-bump if PR is itself a bump
         id: idempotency
         # /dev-kit:bump opens a `chore(release): bump dev-kit to v...`
-        # PR for manual/race-recovery bumps. Merging it is a real
-        # pull_request(closed) event that would otherwise double-bump
-        # (the skill already advanced plugin.json). Detect by PR title
-        # and skip the bump-and-commit steps below; tagging still runs.
+        # PR for manual/race-recovery bumps. Merging it through the
+        # queue would otherwise double-bump (the skill already advanced
+        # plugin.json). Detect by PR title (fetched via gh because
+        # merge_group events do NOT carry pull_request context, unlike
+        # the previous pull_request:closed trigger) and skip the
+        # bump-and-commit steps; tagging still runs.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          TITLE=${{ toJSON(github.event.pull_request.title) }}
-          if [[ "$TITLE" =~ ^\"chore\(release\):\ bump\ dev-kit\ to\ v ]]; then
+          TITLE="$(gh pr view "$HEAD_SHA" --json title --jq .title)"
+          echo "PR title for head=${HEAD_SHA}: $TITLE"
+          if [[ "$TITLE" =~ ^chore\(release\):\ bump\ dev-kit\ to\ v ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::merged PR is itself a bump ($TITLE); skipping re-bump, tag still runs."
+            echo "::notice::merged PR is itself a bump; skipping re-bump, tag still runs."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -138,18 +149,30 @@ jobs:
             mv "$f.tmp" "$f"
           done
 
-      - name: Commit + push version bump
+      - name: Commit bump on top of merge_group head
         if: steps.idempotency.outputs.skip != 'true'
         env:
           NEXT: ${{ steps.next.outputs.version }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           set -euo pipefail
           git add .claude-plugin/plugin.json .codex-plugin/plugin.json
           git commit -m "chore(release): bump dev-kit to v${NEXT}"
-          # Push to origin/main. The pre-push hook on the runner side
-          # does not fire here (workflow runs git push directly), so
-          # no recursion.
-          git push origin HEAD:main
+          # Push the bump commit (the current local HEAD) back to the
+          # merge_group head_ref so the queue picks it up. Without this
+          # push the bump is local-only and the queue squashes/merges
+          # the un-bumped head_sha into main. The refspec MUST be
+          # `HEAD:<ref>` (not `${HEAD_SHA}:<ref>`): HEAD_SHA is the
+          # static pre-bump SHA captured from the webhook payload, so
+          # pushing it would deliver the old commit and exit 0 as an
+          # up-to-date no-op -- defeating the entire bump. The queue
+          # owns the merge into main; this push only updates the temp
+          # merge_group ref the queue is tracking. Using
+          # `secrets.DEV_KIT_GITHUB_TOKEN` (the admin PAT, configured
+          # for the checkout step) so the push bypasses the ruleset
+          # branch protection -- the merge_group ref is a queue-
+          # internal ref, not main.
+          git push origin "HEAD:${HEAD_REF}"
 
       - name: Emit annotated tag
         env:
@@ -160,25 +183,27 @@ jobs:
           VERSION="${NEXT:-$CURRENT}"
           TAG="dev-kit--v${VERSION}"
 
-          # Idempotency: if the tag already exists in local refs
-          # (because fetch-depth: 0 fetched refs/tags/*), skip. Same
-          # rationale as before — local ref is authoritative; ls-remote
-          # is eventually consistent and would let near-simultaneous
-          # pushes slip through.
+          # Idempotency: if the tag already exists in local refs,
+          # skip. Same rationale as before — local ref is
+          # authoritative; ls-remote is eventually consistent and
+          # would let near-simultaneous pushes slip through.
           if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
             echo "tag ${TAG} already exists locally; skipping"
             exit 0
           fi
 
-          # Annotated (not lightweight) so downstream tooling gets the metadata
-          # tagger identity + creation date + message. Lightweight tags
-          # are just ref pointers; many release consumers (changelog
-          # generators, marketplace pin logic) expect the metadata.
-          # Target HEAD (the bump commit just pushed), not origin/main
-          # — by the time we reach this step, origin/main may have
-          # advanced if another workflow run slipped in between, and
-          # tagging origin/main would tag the wrong commit. This is
-          # the fix for review finding #2 on #439.
+          # Annotated (not lightweight) so downstream tooling gets
+          # the metadata: tagger identity + creation date + message.
+          # Lightweight tags are just ref pointers; many release
+          # consumers (changelog generators, marketplace pin logic)
+          # expect the metadata.
+          #
+          # Target the merge_group head (where the bump commit now
+          # lives, either as the original PR head or as the bump on
+          # top of it), not origin/main -- by the time we reach this
+          # step, origin/main may have advanced if another workflow
+          # run slipped in between, and tagging origin/main would tag
+          # the wrong commit.
           git tag -a -m "dev-kit v${VERSION}" "$TAG" HEAD
           git push origin "$TAG"
           echo "tagged ${TAG} (annotated) at HEAD=${VERSION}"
