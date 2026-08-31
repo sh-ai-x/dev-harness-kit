@@ -78,11 +78,31 @@ class TestReviewLocalPreview(unittest.TestCase):
             f"Node test fixture missing: {NODE_TEST}",
         )
         node_modules = NODE_TEST.parent / "node_modules"
-        self.assertTrue(
-            (node_modules / "jsdom").is_dir(),
-            f"jsdom not installed in fixture dir; run "
-            f"`npm install --prefix {NODE_TEST.parent}` once.",
-        )
+        jsdom_dir = node_modules / "jsdom"
+        if not jsdom_dir.is_dir():
+            # Hermetic CI: install on first run. Fixture is tiny (jsdom +
+            # transitive deps, ~5s cold). Subsequent runs use the populated
+            # node_modules. If `npm` is missing, fail with a clear hint.
+            npm = os.environ.get("NPM_BIN", "npm")
+            install = subprocess.run(
+                [npm, "install", "--no-audit", "--no-fund", "--prefix", str(NODE_TEST.parent)],
+                cwd=str(NODE_TEST.parent),
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if install.returncode != 0:
+                self.fail(
+                    "jsdom not installed in fixture dir and `npm install` "
+                    f"failed (rc={install.returncode}).\n"
+                    f"stdout:\n{install.stdout}\n"
+                    f"stderr:\n{install.stderr}\n"
+                    f"Run manually: npm install --prefix {NODE_TEST.parent}"
+                )
+            self.assertTrue(
+                jsdom_dir.is_dir(),
+                f"npm install succeeded but {jsdom_dir} still missing",
+            )
 
         env = os.environ.copy()
         env["NODE_PATH"] = str(node_modules)
