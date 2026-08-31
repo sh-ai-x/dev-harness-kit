@@ -115,6 +115,112 @@ class TestPerPrLockHelpers(unittest.TestCase):
             self.assertEqual(bpr.read_pr_lock_body(t), "")
 
 
+class TestTryAcquirePrLockAtomicity(unittest.TestCase):
+    """Pin the atomic-acquire contract for `try_acquire_pr_lock`.
+
+    The previous wrapper used `[[ -f "$PATH" ]]` followed by
+    `echo ... > "$PATH"` — two processes could both pass the file-
+    exists check before either wrote the lock (TOCTOU race). The fix
+    uses `mkdir` of a sibling `.d` directory as the atomic primitive
+    (POSIX guarantees the directory either exists or doesn't after
+    `mkdir` returns — two concurrent `mkdir` calls cannot both
+    succeed). Regression-pinned here so a future maintainer cannot
+    revert to the non-atomic pattern.
+    """
+
+    def test_first_acquire_succeeds_and_writes_body(self) -> None:
+        import sys
+        sys.path.insert(0, str(LIB_DIR))
+        import babysit_pr_reliability as bpr  # type: ignore[import-not-found]
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "babysit-pr-local-123.lock"
+            ok = bpr.try_acquire_pr_lock(p, "pid=42 branch=main")
+            self.assertTrue(ok, "first acquire on a free path must succeed")
+            self.assertTrue(p.exists(), "lock body file must exist after acquire")
+            self.assertEqual(p.read_text(encoding="utf-8"), "pid=42 branch=main")
+            self.assertTrue(
+                p.with_suffix(p.suffix + ".d").is_dir(),
+                "lockdir must exist after acquire (the atomic primitive)",
+            )
+
+    def test_second_acquire_on_held_lock_returns_false(self) -> None:
+        """If a sibling lockdir exists, the second acquire MUST return
+        False without writing the body file. The caller then prints
+        the existing holder's body via `read_pr_lock_body`."""
+        import sys
+        sys.path.insert(0, str(LIB_DIR))
+        import babysit_pr_reliability as bpr  # type: ignore[import-not-found]
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "babysit-pr-local-99.lock"
+            self.assertTrue(bpr.try_acquire_pr_lock(p, "first"))
+            ok = bpr.try_acquire_pr_lock(p, "second")
+            self.assertFalse(ok, "second acquire on held lock must return False")
+            self.assertEqual(
+                p.read_text(encoding="utf-8"), "first",
+                "second acquire must NOT overwrite the holder's body",
+            )
+
+    def test_concurrent_acquires_only_one_wins(self) -> None:
+        """Race the helper from two threads in the same process. POSIX
+        `mkdir` is the atomic primitive, so exactly one of the
+        concurrent attempts must succeed. The test asserts that
+        invariant holds — a regression to a non-atomic pattern would
+        let both succeed."""
+        import sys
+        sys.path.insert(0, str(LIB_DIR))
+        import threading
+
+        import babysit_pr_reliability as bpr  # type: ignore[import-not-found]
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "babysit-pr-local-7.lock"
+            results: list[bool] = [False, False]
+
+            def attempt(idx: int) -> None:
+                results[idx] = bpr.try_acquire_pr_lock(p, f"attempt-{idx}")
+
+            t1 = threading.Thread(target=attempt, args=(0,))
+            t2 = threading.Thread(target=attempt, args=(1,))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+            winners = sum(1 for r in results if r)
+            self.assertEqual(
+                winners, 1,
+                f"exactly one of two concurrent acquires must win (got {results})",
+            )
+
+    def test_wrapper_uses_atomic_acquire_not_toctou_check(self) -> None:
+        """Belt-and-suspenders: scan the wrapper script's source to
+        lock out re-introduction of the TOCTOU `[[ -f ]]` + `>`
+        pattern. The new flow MUST go through
+        `try_acquire_pr_lock`."""
+        text = SCRIPT.read_text(encoding="utf-8")
+        # Positive: the wrapper calls the atomic helper.
+        self.assertIn(
+            "try_acquire_pr_lock", text,
+            "wrapper must use try_acquire_pr_lock for the per-PR lock "
+            "(closes the TOCTOU race in `[[ -f ]]` + `>`)"
+        )
+        # Negative: the old `[[ -f "$PR_LOCK_PATH" ]]` then
+        # `> "$PR_LOCK_PATH"` pattern MUST NOT appear together as the
+        # sole gate. The wrapper still checks `[[ -f "$PR_LOCK_PATH" ]]`
+        # for the stale-lock branch (lines that follow immediately call
+        # `is_stale_lock` and `rm -f`), so we look for the specific
+        # shape: file-exists check, no stale-handling, then
+        # `> "$PR_LOCK_PATH"` write.
+        # Match: line with [[ -f "$PR_LOCK_PATH" ]] followed (within 25
+        # lines) by a `> "$PR_LOCK_PATH"` write that is NOT preceded by
+        # `is_stale_lock` in the same window.
+        # Simpler regression: the explicit non-atomic echo-to-PR_LOCK_PATH
+        # write that defined the OLD contract MUST be gone.
+        self.assertNotIn(
+            "echo \"$(date -Iseconds) pid=$$", text,
+            "wrapper MUST NOT use the old `echo $(date ...) > PR_LOCK_PATH` "
+            "non-atomic write; use try_acquire_pr_lock instead."
+        )
+
+
 class TestPerPrLockAcquisition(unittest.TestCase):
     """End-to-end shell tests: two concurrent wrappers on the same PR."""
 

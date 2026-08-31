@@ -123,6 +123,8 @@ sys.exit(0 if bpr.is_stale_lock('$PR_LOCK_PATH') else 1)
 " 2>/dev/null; then
     echo "stale pr lock removed: $PR_LOCK_PATH" >&2
     rm -f "$PR_LOCK_PATH"
+    # Also clear any stale lockdir from a prior crashed run.
+    rm -rf "${PR_LOCK_PATH}.d"
   else
     # `set -e` propagates into `$(...)`; `read_pr_lock_body` already
     # collapses read failures to "" but the python3 call could still
@@ -139,8 +141,32 @@ sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
     exit 1
   fi
 fi
-echo "$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown') source=babysit-pr-local pr=${PR_NUMBER}" > "$PR_LOCK_PATH"
-trap 'rm -f "$PR_LOCK_PATH"' EXIT
+# Atomic acquire (closes the TOCTOU race the local security judge
+# flagged in PR #766 — the previous `[[ -f ]]` + `>` pattern let two
+# concurrent invocations both pass the check before either wrote the
+# lock, producing interleaved log writes and possibly conflicting
+# pushes). `try_acquire_pr_lock` uses `mkdir` of a sibling
+# `${PR_LOCK_PATH}.d` directory as the atomic primitive (POSIX
+# guarantees the directory either exists or doesn't after mkdir
+# returns — two concurrent mkdir calls cannot both succeed).
+LOCK_BODY="$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown') source=babysit-pr-local pr=${PR_NUMBER}"
+if ! python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.exit(0 if bpr.try_acquire_pr_lock('$PR_LOCK_PATH', '''$LOCK_BODY''') else 1)
+" 2>/dev/null; then
+  HOLDER="$(python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
+" 2>/dev/null || true)"
+  HOLDER="${HOLDER:-<unreadable>}"
+  echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
+  exit 1
+fi
+trap 'rm -f "$PR_LOCK_PATH" && rm -rf "${PR_LOCK_PATH}.d"' EXIT
 
 # --- auto-launch the localhost HTML viewer (best-effort) ---------------
 # `bin/review-local-server.py` (PR #731) exposes a live-streaming HTML

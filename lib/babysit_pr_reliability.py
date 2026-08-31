@@ -354,3 +354,53 @@ def read_pr_lock_body(path: PathLike) -> str:
         return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def try_acquire_pr_lock(path: PathLike, body: str) -> bool:
+    """Atomically acquire the per-PR lock for PR N.
+
+    Closes the TOCTOU race in `bin/babysit-pr-local.sh`'s previous
+    `[[ -f "$PATH" ]]` + `echo ... > "$PATH"` pattern: two processes
+    could both pass the file-exists check before either wrote the
+    lock, producing interleaved log writes and possibly conflicting
+    `git push`es. The check-and-create must be ONE syscall.
+
+    Implementation: `mkdir` is atomic on POSIX (the filesystem
+    guarantees the directory either exists or does not after the
+    call returns -- two concurrent `mkdir` calls cannot both succeed).
+    We create a sibling directory `${path}.d` and write the body to
+    the original `path` only after `mkdir` succeeds. If `mkdir`
+    fails, the lock is held by another process.
+
+    Returns True iff THIS caller acquired the lock. False means
+    another process holds it (or the filesystem refused creation);
+    the caller should print the holder's body via `read_pr_lock_body`
+    and exit 1.
+
+    Failure modes:
+      - Directory creation refused (EEXIST) → False (lock held)
+      - Filesystem readonly (EROFS) → False
+      - Permission denied (EACCES) → False
+      - Body write failed (race between mkdir and write) → best-effort
+        rmdir of the lockdir to avoid leaving an empty held-lockdir
+        for the next arrival; returns False.
+    """
+    lock_path = Path(path)
+    lockdir = lock_path.with_suffix(lock_path.suffix + ".d")
+    try:
+        lockdir.mkdir(mode=0o700)
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+    try:
+        lock_path.write_text(body, encoding="utf-8")
+    except OSError:
+        # Best-effort rollback: another process created lockdir but
+        # we couldn't write the body -- leave no half-acquired lock.
+        try:
+            lockdir.rmdir()
+        except OSError:
+            pass
+        return False
+    return True
