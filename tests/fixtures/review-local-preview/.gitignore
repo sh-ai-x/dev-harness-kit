@@ -1,0 +1,2 @@
+# Fixture-local deps for the jsdom harness.
+node_modules/
