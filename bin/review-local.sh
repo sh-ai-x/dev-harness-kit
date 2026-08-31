@@ -939,8 +939,17 @@ The summary MUST begin with a single line exactly of the form:
 #
 # Runs BEFORE the LLM judges would have, so a hostile PR with Critical
 # markers fails fast (saves the ~3-5 min LLM judge minutes). Same
-# `tools/prompt_injection_scan.py` engine used in GH-Actions; verdict
-# contract:
+# `tools/prompt_injection_scan.py` engine used in GH-Actions.
+#
+# PARITY CONTRACT: this invocation must use the same flags as
+# `.github/workflows/review.yml` line ~193 (the CI gate). The current
+# flags are `--json --decode`; `--decode` in particular is required --
+# without it, smuggled base64 payloads that the scanner detects at
+# critical severity under `--decode` are reported at medium
+# severity (Changes Requested), letting a hostile fork PR pass the
+# local mirror while CI would gate it. If you change the scanner's
+# CLI surface, update BOTH this invocation AND the workflow in the
+# same PR, and pin the parity in tests. Verdict contract:
 #   exit 0 + verdict=Approve        → continue
 #   exit 1 + verdict=Changes*       → soft fail (rank 1, non-blocking)
 #   exit 2 + verdict=Blocked        → hard fail (rank 2, gate fails)
@@ -952,8 +961,26 @@ if [ "$RUN_INJECTION_SCAN" = "1" ]; then
     log "would run: python3 tools/prompt_injection_scan.py --file <pr-diff>"
   else
     PR_BODY_LOCAL="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""' 2>/dev/null || echo "")"
-    PR_DIFF_LOCAL="$(gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null || true)"
-    SCAN_RAW="$(printf '%s\n\n%s' "$PR_BODY_LOCAL" "$PR_DIFF_LOCAL" | python3 tools/prompt_injection_scan.py --json 2>/dev/null || echo '{"verdict":"Approve"}')"
+    # Mirror CI's `PR_DIFF=""` -- exclude the diff from the local
+    # scan. Reason: the scanner's own PR (this PR, plus any future
+    # pattern-table update) contains literal adversarial strings in
+    # tests/test_prompt_injection_scan.py; scanning the diff would
+    # self-flag the scanner's own changes and force every scanner
+    # PR through a maintainer's manual override. CI gates on body
+    # only; the local mirror must match. (If a future operator wants
+    # to opt back in for local debugging, set
+    # BABYSIT_INCLUDE_DIFF_IN_SCAN=1.)
+    PR_DIFF_LOCAL=""
+    if [ "${BABYSIT_INCLUDE_DIFF_IN_SCAN:-0}" = "1" ]; then
+      PR_DIFF_LOCAL="$(gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null || true)"
+    fi
+    # PARITY NOTE: the fallback `|| echo ...` is intentional fail-OPEN
+    # for the local mirror -- a scanner crash (missing tool, syntax
+    # error) means "can't verify", and locally that should NOT block
+    # the operator's work; CI uses a different contract (fail-CLOSED
+    # on exit != 0) because the gate is the structural backstop.
+    # CI vs local intent mismatch is documented at the gate itself.
+    SCAN_RAW="$(printf '%s\n\n%s' "$PR_BODY_LOCAL" "$PR_DIFF_LOCAL" | python3 tools/prompt_injection_scan.py --json --decode 2>/dev/null || echo '{"verdict":"Approve"}')"
     INJECTION_V="$(printf '%s' "$SCAN_RAW" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict","Approve"))')"
     log "injection_scan verdict: $INJECTION_V"
     if [ "$INJECTION_V" = "Blocked" ]; then

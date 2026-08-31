@@ -1,0 +1,113 @@
+name: merge-queue-ready-check
+
+# Fast (<2 min total) checks that gate the GitHub Merge Queue. Heavy
+# review/security judges stay out of this path -- they already run on
+# the `pull_request` event in ci.yml / review.yml / maintenance.yml and
+# MUST complete successfully before a PR is even eligible for the
+# queue. The queue's job is only to catch the "main advanced while the
+# PR was waiting" case (which version-bump.yml's merge_group trigger
+# handles), not to redo LLM judging on every retry.
+#
+# Why this exists (added 2026-08-30, see docs/proposals/release/plugin-version-bump-via-merge-queue.yaml):
+# Before merge queue, every PR hit a one-line `plugin.json:version`
+# conflict because version-bump.yml's push-to-main bump was racy with
+# parallel feature PRs. The queue itself prevents the conflict by
+# rebase-merging each PR onto latest main before merge; this workflow
+# is the required-check the queue uses to refuse a merge if it can't
+# pass these fast gates. If any of these fail, the queue surfaces the
+# failure to the PR author and the PR is NOT merged -- preserving the
+# old contract of "failing required check = blocked" without the
+# per-PR conflict resolution churn.
+#
+# Concurrency: keyed to PR + merge_group so that queue retries (a PR
+# can be evaluated multiple times before merge) collapse to a single
+# running workflow per PR rather than racing their own conclusions.
+# cancel-in-progress: true so an aborted queue attempt doesn't leave a
+# dangling run consuming runner minutes.
+
+on:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-queue-ready-check-${{ github.event.merge_group.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 1
+      - uses: astral-sh/ruff-action@127e6a115e4fdbd928e06e221a87d6dc07eb6f93  # v4.1.0
+        with:
+          args: check
+      - uses: astral-sh/ruff-action@127e6a115e4fdbd928e06e221a87d6dc07eb6f93  # v4.1.0
+        with:
+          args: format --check
+
+  validate:
+    name: validate (manifest + bash syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 1
+      - name: jq validate plugin manifests
+        run: |
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json; do
+            jq -e '.version' "$f" >/dev/null || { echo "::error::$f: missing version"; exit 1; }
+          done
+      - name: bash -n on all bin/*.sh and skills/*/scripts/*.sh
+        run: |
+          set -euo pipefail
+          # Cheap syntax check; full smoke lives in maintenance gate.
+          find bin hooks skills docs -name '*.sh' -not -path '*/node_modules/*' -print0 \
+            | xargs -0 -P 4 -I {} bash -n {}
+          echo "bash syntax OK across $(find bin hooks skills docs -name '*.sh' -not -path '*/node_modules/*' | wc -l) scripts"
+
+  scope:
+    name: scope (production-code diff sanity)
+    runs-on: ubuntu-latest
+    # Read the merge-group base SHA from the webhook payload. This is
+    # the SHA the queue captured when it formed the group, so the
+    # diff stays stable for the lifetime of the queue run -- origin/main
+    # can advance underneath us (another PR in the same merge-group
+    # batch merged first) and would otherwise produce a false-positive
+    # scope block. Passed to the step via env because GitHub Actions
+    # does not expand ${{ }} expressions inside `run:` blocks except
+    # through env / secrets indirection. Pinned by tests/test_bump_workflow.py.
+    env:
+      MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0
+      - name: Reject changes outside the documented paths
+        # The LLM judges already enforce semantic correctness on the
+        # pull_request event; here we just refuse to merge a PR that
+        # touches both production code AND bypass files in the same
+        # commit (a known PR-splitter anti-pattern). Cheap to compute
+        # and gives the queue a structural veto power the LLM judges
+        # don't have.
+        run: |
+          set -euo pipefail
+          BASE="${MERGE_GROUP_BASE_SHA:?merge_group.base_sha is required (queue must supply it)}"
+          DIFF_PATHS="$(git diff --name-only "$BASE" HEAD || true)"
+          if [[ -z "$DIFF_PATHS" ]]; then
+            echo "::notice::no diff against base (initial merge); skipping scope check"
+            exit 0
+          fi
+          PROD_TOUCHED="$(echo "$DIFF_PATHS" | grep -E '^(bin|lib|hooks|skills)/' || true)"
+          BYPASS_TOUCHED="$(echo "$DIFF_PATHS" | grep -E '^(\.githooks/|\.claude/settings|\.codex/hooks)' || true)"
+          if [[ -n "$PROD_TOUCHED" && -n "$BYPASS_TOUCHED" ]]; then
+            echo "::error::this PR mixes production-code edits with bypass-file edits; split into two PRs."
+            echo "  prod: $PROD_TOUCHED"
+            echo "  bypass: $BYPASS_TOUCHED"
+            exit 1
+          fi
+          echo "scope OK ($PROD_TOUCHED prod / $BYPASS_TOUCHED bypass)"

@@ -65,6 +65,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`prune`](prune.md) | `analysis` | 4-phase deletion sweep: sweep → dependents → report → verify. |
 | [`babysit-pr`](babysit-pr.md) | `state` | PR babysitter loop: poll CI, fix, commit, re-iterate to a green Approve. |
 | [`pr-verify`](pr-verify.md) | `enforcement` | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, structured verdict, no "stale CI" false positive. |
+| [`maintenance`](maintenance.md) | `enforcement` | Code-sanity gate (CC-1..8 clean code + OE-1..8 over-engineering + VM-1..4 value/meaning) on the PR diff; mirrors `.github/workflows/maintenance.yml`. |
 | [`ship`](ship.md) | `state` | Release tag emit; gate check only. |
 | [`bump`](bump.md) | `state` | Explicit `plugin.json` version bump + push. |
 
@@ -91,6 +92,9 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`log`](log.md) | `state` | Toggle session loghooks (`setup`/`on`/`off`/`status`) per project. |
 | [`codex-cache-update`](codex-cache-update.md) | `analysis` | Refresh the Codex marketplace checkout + versioned plugin cache. |
 | [`llm-refresh`](llm-refresh.md) | `analysis` | Refresh `docs/llm-info/<provider>.json` from each vendor's pricing page. |
+| [`adapt`](../../commands/adapt.md) | `state` | Mid-build plan/spec amendment — pauses the current step, proposes a minimal patch, resumes after approval. |
+| [`review-local`](../../commands/review-local.md) | `state` | Local equivalent of the GH-Actions review chain (`/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance`) via `bin/review-local.sh`. |
+| [`skill-usage`](../../commands/skill-usage.md) | `analysis` | Skill-usage telemetry CLI — turns + invocations per project, from `tools/skill_usage.py`. |
 
 ### Design
 
@@ -123,6 +127,7 @@ step inside their parent skill's flow; you never type them directly.
 
 | Skill | Category | Alpha | Invocable |
 |---|---|---|---|
+| [`adapt`](../../commands/adapt.md) | `shortcuts` | `state` | human |
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | human |
 | [`babysit-pr-local`](babysit-pr-local.md) | `ship` | `state` | human |
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
@@ -151,6 +156,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`linear`](linear.md) | `config` | `state` | human |
 | [`llm-refresh`](llm-refresh.md) | `shortcuts` | `analysis` | human |
 | [`log`](log.md) | `shortcuts` | `state` | human |
+| [`maintenance`](maintenance.md) | `audit` | `enforcement` | human |
 | [`plan`](plan.md) | `plan` | `state` | human |
 | [`proposal`](proposal.md) | `design` | `state` | human |
 | [`prune`](prune.md) | `build` | `analysis` | human |
@@ -159,9 +165,11 @@ step inside their parent skill's flow; you never type them directly.
 | [`refactor`](refactor.md) | `build` | `analysis` | human |
 | [`research`](research.md) | `design` | `enforcement` | human |
 | [`review`](review.md) | `review` | `analysis` | human |
+| [`review-local`](../../commands/review-local.md) | `shortcuts` | `state` | human |
 | [`security`](security.md) | `security` | `enforcement` | human |
 | [`security-metrics`](security-metrics.md) | `security` | `enforcement` | human |
 | [`ship`](ship.md) | `ship` | `state` | human |
+| [`skill-usage`](../../commands/skill-usage.md) | `shortcuts` | `analysis` | human |
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | human |
 | [`status`](status.md) | `status` | `state` | human |
 | [`sync-version`](sync-version.md) | `config` | `state` | human |

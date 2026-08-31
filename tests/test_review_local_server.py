@@ -186,60 +186,54 @@ class TestReviewLocalServer(unittest.TestCase):
             self.assertEqual(r.status, 200)
             self.assertIn("text/html", r.headers.get("Content-Type", ""))
             body = r.read().decode("utf-8")
-            self.assertIn("dev-kit: review-local live viewer", body)
+            self.assertIn("babysit-pr-local mirror", body)
             # The injected PR-number script must appear in <body>.
             self.assertIn("window.__PR_NUMBER__ = 725;", body)
+            # No Start / Stop buttons -- the page is a pure read-only
+            # mirror of the babysit session. Regression guard for
+            # issue #769 (HTML must not expose a button that spawns a
+            # second `bin/review-local.sh`).
+            self.assertNotIn('id="start-btn"', body)
+            self.assertNotIn('id="stop-btn"', body)
 
     def test_pr_page_autostart_query_injects_flag(self) -> None:
         """`?autostart=1` (the URL bin/babysit-pr-local.sh opens) must
         inject `window.__AUTOSTART__ = true;` so the page's JS connects
-        to the read-only `/tail` route on load without a click.
+        to the read-only `/tail` route on load.
         """
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725?autostart=1", timeout=3) as r:
             body = r.read().decode("utf-8")
         self.assertIn("window.__AUTOSTART__ = true;", body)
         self.assertIn("window.__PR_NUMBER__ = 725;", body)
 
-    def test_autostart_keeps_start_disabled_on_tail_onerror(self) -> None:
-        """M1 regression: when ?autostart=1 is set, the page's `onerror`
-        recovery paths (both `sawAnyOutput` and the 5s stuck branch) must
-        NOT re-enable the Start button. Re-enabling would let a tail
-        disconnect route the operator back to /stream, which re-spawns
-        review-local.sh — the exact footgun the autostart path is built
-        to prevent. The Start button must mirror the autostart flag in
-        BOTH the initial click handler and the onerror branches.
+    def test_pr_page_no_manual_buttons_anywhere(self) -> None:
+        """The HTML must not expose any UI that spawns a fresh
+        `bin/review-local.sh` (issue #769). The whole point of the
+        post-fix viewer is to be a passive read-only mirror -- no
+        Start, Stop, or PR-number input that could trigger a /stream
+        spawn. The PR number is server-injected via window.__PR_NUMBER__
+        so the operator never has to type one.
         """
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725?autostart=1", timeout=3) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725", timeout=3) as r:
             body = r.read().decode("utf-8")
-        # Locate the two onerror branches that previously set
-        # `startBtn.disabled = false;` unconditionally.
-        import re
-        saw_branch = re.search(
-            r"if \(sawAnyOutput\) \{.*?startBtn\.disabled = ([^;]+);",
-            body,
-            re.DOTALL,
-        )
-        stuck_branch = re.search(
-            r"Date\.now\(\) - stuckSince > 5000.*?startBtn\.disabled = ([^;]+);",
-            body,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(saw_branch, "sawAnyOutput onerror branch not found")
-        self.assertIsNotNone(stuck_branch, "5s stuck branch not found")
-        for branch in (saw_branch, stuck_branch):
-            rhs = branch.group(1).strip()
-            # The RHS must reference __AUTOSTART__, not be a bare `false`.
-            self.assertIn(
-                "__AUTOSTART__",
-                rhs,
-                f"Start button is unconditionally re-enabled: `{rhs}`. "
-                "M1: must mirror the autostart flag.",
-            )
+        # No Start / Stop buttons.
+        self.assertNotIn("start-btn", body)
+        self.assertNotIn("stop-btn", body)
+        # No PR-number input the operator could fill and click to
+        # spawn /stream.
+        self.assertNotIn('id="pr-input"', body)
+        # The /stream route is NEVER referenced from the client JS --
+        # the page only connects to /tail. A stray /stream reference
+        # would mean a future change re-enabled the spawn footgun.
+        self.assertNotIn("/stream", body)
 
     def test_pr_page_without_autostart_query_omits_flag(self) -> None:
-        """A manual visit to `/pr/<N>` (no query string) stays the
-        passive viewer -- no autostart flag, streaming only starts on
-        a Start click.
+        """A manual visit to `/pr/<N>` (no query string) does NOT
+        inject the autostart flag (the page stays a passive read-only
+        mirror -- it never spawns `bin/review-local.sh` regardless of
+        the query string, but the autostart flag is a clear signal to
+        the JS layer that the server believes a babysit session is in
+        flight).
         """
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/pr/725", timeout=3) as r:
             body = r.read().decode("utf-8")

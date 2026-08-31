@@ -1,0 +1,362 @@
+---
+title: "Workflow Fast Mode — Profile-Driven Gate Selection for Vibe-Speed Local Builds"
+status: design-discussion
+date: 2026-08-28
+tags: [workflow, gates, profile, vibe, fast, build, review, security, maintenance, babysit-pr]
+
+before:
+  summary: |
+    The dev-harness-kit build pipeline is a fixed, sequential stack of gates:
+
+    ```
+    /dev-kit:build                per-step TDD + slop-detector + secret-scan + stop-verify hooks
+       ↓ step<N>-output.json + per-step commits
+    /dev-kit:review (3-dim)       correctness + security + architecture (with verifier pass)
+       ↓ inline comments + PR summary verdict
+    /dev-kit:security (10-dim)    OWASP Top 10 fan-out + verifier
+       ↓ per-category table + verdict
+    /dev-kit:maintenance          CC-1..8 / OE-1..8 / VM-1..4 code-sanity (mirrors .github/workflows/maintenance.yml)
+       ↓ single Verdict: line
+    /dev-kit:babysit-pr           poll gh pr checks, fetch failing logs, apply fixes, push, iterate
+    ```
+
+    Every gated skill uses the SSOT constants in `lib/execute.py` (e.g. SUBAGENT_ALLOWED_TOOLS,
+    SKIPPABLE_STATUSES, the `intent_integrity_pre_build_gate` 2/0/2 contract) and the GH-Actions
+    workflows in `.github/workflows/{review,security,maintenance,gate}.yml` decide merge readiness.
+    Escape hatches exist (DEV_KIT_SKIP_TDD=1, --skip-blocked, --fast on /dev-kit:review, the
+    local `/dev-kit:review-local` mirror) but they are scattered across env vars, CLI flags, and
+    sibling skills with no common shape.
+
+    A developer in a "vibe" iteration loop — small local change, immediate visual feedback, manual
+    smoke test in the terminal — pays for the full gate stack every commit. The git-workflow and
+    pre-commit-review memories (`feedback-dev-kit-pr-workflow`, `feedback-pre-commit-auto-fix-loop`)
+    describe the slow path correctly but treat the fast path as a skill of the user ("skip only for
+    trivial PRs"), not a first-class mode the harness can express.
+  evidence:
+    - '`lib/execute.py:46-53`: `DEV_KIT_AGENT_TIMEOUT_SECONDS` env override (escape hatch shape)'
+    - '`lib/execute.py:78-90`: `DEV_KIT_BUILD_AGENT` env override (claude | codex)'
+    - '`lib/execute.py:404-407`: `--skip-blocked` and `--push` CLI flags (only two flags surfaced)'
+    - '`skills/review/SKILL.md:30`: `--fast` flag explicitly documented as "skip verifier"'
+    - '`skills/babysit-pr-local/SKILL.md`: parallel local-mode mirror of `/dev-kit:babysit-pr`'
+    - '`skills/review-local/SKILL.md`: parallel local-mode mirror of `/dev-kit:review`'
+    - '`hooks/index.md`: tdd-guard, bash-guard, secret-scan, slop-detector, stop-verify listed with no per-project opt-out'
+    - '`.github/workflows/{review,security,maintenance,gate}.yml`: GH-Actions gate set runs unconditionally on push to non-main branches'
+
+after:
+  summary: |
+    A single project-level file, `.dev-kit/workflow-profile.yaml`, declares which local gates are
+    mandatory, optional, or skipped. Each gated skill accepts `--profile <name>` (or reads the
+    default from the file) and individual `--skip-<gate>` / `--keep-<gate>` overrides for
+    one-shot invocations. The default profile is `strict`, which preserves today's behavior
+    end-to-end. A new `vibe` profile keeps the must-have correctness gates (build per-step
+    runner, secret-scan, stop-verify, GH-CI on push) and opts out of the optional human / LLM
+    feedback loops (TDD scope judge, pre-commit codex:review, local OWASP fan-out,
+    local maintenance gate, local babysit loop) until the user opts them back in or pushes to
+    the branch where GH-Actions runs them anyway. A new utility skill
+    `/dev-kit:workflow-profile` lists, reads, and switches the active profile without
+    rewriting the file.
+  files:
+    - path: .dev-kit/workflow-profile.example.yaml
+      change: 'Annotated example file with both `strict` and `vibe` profile bodies + comments.'
+    - path: lib/workflow_profile.py
+      change: 'New module: load + validate `.dev-kit/workflow-profile.yaml`, resolve effective gate set from (profile + per-call overrides), and emit a single `gate_summary` dict consumable by hooks and skills.'
+    - path: lib/execute.py
+      change: 'Add `--profile <name>` and `--skip-integrity` CLI flags to `argparse`; thread `gate_summary` into `_intent_integrity_pre_build_gate`, the TDD scope judge call, and the post-step `_emit_effectiveness_event` so the chosen gates are recorded in the evidence trail.'
+    - path: hooks/tdd-guard.sh
+      change: 'Read resolved gate set; when `tdd_scope_judge` is opted out, log "tdd-guard: opted out via profile=<vibe>" and exit 0 instead of running the judge.'
+    - path: hooks/slop-detector.sh
+      change: 'Same opt-out pattern: respect the `slop_detector` gate key from `.dev-kit/workflow-profile.yaml`; emit a structured "opted out" event so audit can see the choice was made, not just absent.'
+    - path: hooks/stop-verify.sh
+      change: 'NOT opt-out-able. Stop-verify is always-on because it is the ONLY local gate that catches a sub-agent declaring success on no-diff writes (issue #221 RC2). The `stop_verify` key is documented as `mandatory` and rejected if a profile tries to set `off`.'
+    - path: skills/build/SKILL.md
+      change: 'Document `--profile` flag, link to `.dev-kit/workflow-profile.example.yaml`, add a "Vibe-mode build" section that lists what `vibe` profile turns off + what stays on.'
+    - path: skills/review/SKILL.md
+      change: 'Document `--profile` flag; explain that `--fast` (existing) is preserved as a one-shot override of the `verifier` gate, while `--profile vibe` flips broader gates.'
+    - path: skills/security/SKILL.md
+      change: 'Document `--profile` flag; in `vibe` profile default to `mode=quick` (single-dim summary) instead of full 10-dim fan-out.'
+    - path: skills/maintenance/SKILL.md
+      change: 'Document `--profile` flag; in `vibe` profile skip unless explicitly requested via `--keep-maintenance`.'
+    - path: skills/babysit-pr/SKILL.md
+      change: 'Document `--profile` flag; in `vibe` profile default to "manual mode": print `gh pr checks` once and exit, do NOT loop. The full auto-fix loop stays available via `--keep-babysit`.'
+    - path: skills/workflow-profile/SKILL.md
+      change: 'New skill: `/dev-kit:workflow-profile list|show|use <name>` (model-opus, user-invocable: true). `list` prints available profiles + active one; `show` renders the resolved gate set as a table; `use <name>` rewrites the `active_profile` field in `.dev-kit/workflow-profile.yaml`. All other skills read this file on each invocation — no global state.'
+    - path: lib/render_proposal_html.py
+      change: 'No schema change; just confirm the new `vibe` profile example renders inside the existing `after.files` code blocks in HTML.'
+    - path: tests/test_workflow_profile.py
+      change: 'Profile parsing (valid YAML, missing file, unknown profile name -> error, invalid gate key -> error); gate-resolution (profile + --skip overrides, --keep overrides, mandatory gates reject opt-out); strict-profile behavior matches today byte-for-byte on the harness-effectiveness rubric fixture.'
+    - path: tests/test_execute.py
+      change: 'Add `TestMainProfileFlag` class: `--profile vibe` sets `gate_summary["active_profile"]`; default (no flag) sets it to `strict`; intent-integrity gate still runs in `vibe` profile (it is mandatory).'
+    - path: docs/stages/STAGES.md
+      change: 'Add a "Profile resolution" row to the stage diagram showing which gates each profile flips; reference `.dev-kit/workflow-profile.yaml` as the SSOT.'
+    - path: .claude-plugin/plugin.json
+      change: 'Bump patch version per the auto-bump pipeline; no schema change.'
+
+pros:
+  - 'Single SSOT (`.dev-kit/workflow-profile.yaml`) the user can grep and audit; replaces 6 scattered escape hatches.'
+  - 'Default behavior unchanged (`strict` profile = today). Opt-in only — no project breaks on upgrade.'
+  - 'Each gated skill gains one `--profile` flag + N `--skip-<gate>` overrides. Flag semantics are uniform; profile semantics live in one file.'
+  - 'Mandatory-vs-optional gate classification is encoded in the file; future gates (e.g. a `coverage_diff` gate) declare themselves mandatory or optional at registration time, not at profile-write time.'
+  - 'GH-Actions workflows in `.github/workflows/*.yml` are untouched. Fast mode still catches the full gate set on push, so a vibe PR cannot merge without the rigorous review.'
+  - 'Compatible with `feedback-dev-kit-pr-workflow`: the strict profile is still the recommended path for any PR that touches harness logic; vibe is the recommendation for throwaway local branches (memo also acknowledges "trivial PRs" carve-out).'
+  - 'Auditability: every opt-out emits a structured event (e.g. `gate.opted_out`, profile=vibe, gate=maintenance). The same TraceLog that already records step.started/write.observed/verify.passed will record the gate choices, so post-hoc we can answer "what did this PR skip and why?".'
+
+cons:
+  - 'New file format consumers must learn. Hidden complexity vs. today''s "run the full stack" simplicity.'
+  - 'Profile-vs-flag precedence rules need careful docs (CLI override > profile field > default). One wrong precedence causes silent skip of a gate the user expected to run.'
+  - 'Adding a new gate later requires deciding whether it defaults to mandatory or optional, and updating the example file. If a contributor skips this, the gate silently runs only in strict.'
+  - 'Sub-agent prompts for `/dev-kit:build` (step<N>.md) currently bake in TDD + 3-cycle self-fix. If `vibe` profile opts out of TDD, the prompt becomes misleading; the runner must inject the active gate set into the preamble so the sub-agent sees what it is and is not responsible for.'
+  - 'Two state dimensions (profile + per-call flag) are harder to reason about than one (just `DEV_KIT_SKIP_TDD=1`). The trade is worth it for the breadth of gates covered, but each addition is another documented edge case.'
+
+limitations:
+  - 'Profile cannot speed up GH-Actions itself; CI wall-clock is unchanged. Fast mode only removes local-only gates.'
+  - 'Profile cannot change agent model selection. Today the model is `--model claude-opus-4-8` on `/dev-kit:build` (per Iron Law 5). Selecting a cheaper model per-profile is out of scope for this proposal.'
+  - 'A profile that disagrees with the actual GH-CI required-checks policy will fail at merge time, not at build time. Profile correctness is the user''s responsibility; CI cannot detect a too-permissive profile.'
+  - 'No telemetry to detect "vibe is the new default and CI is catching what local skips". This proposal ships the opt-in mechanism; the misuse detector is follow-up work.'
+  - 'Skills not listed (e.g. `/dev-kit:plan`, `/dev-kit:prune`, `/dev-kit:evaluate`) intentionally do not consume the profile — they are decision-support tools, not gate chains, and forcing them through the same gate vocabulary adds noise.'
+
+sections:
+  - title: 1. Design principle — one file, opt-in, optional-only
+    body: |
+      Today's escape hatches (env vars, CLI flags, sibling skills) each cover one gate. This
+      proposal collapses them into a single project file with two reserved profiles:
+
+      | Profile | Mental model | Gates |
+      |---|---|---|
+      | `strict` (default) | "Run everything; trust the harness." | All gates ON. Identical to pre-proposal behavior. |
+      | `vibe` | "Fast local iteration; CI catches the rest on push." | All `mandatory` gates ON + the `verifier` pass in `/dev-kit:review` OFF + `tdd_scope_judge` OFF + `slop_detector` OFF + `pre_commit_review` OFF + `security_owasp` mode=quick + `maintenance` OFF + `babysit_pr` mode=manual. |
+
+      Gate classification is encoded once in the file, not per-profile. Adding a new gate later
+      is a one-line `mandatory: true` / `mandatory: false` annotation; the strict profile
+      requires no edit, and the vibe profile auto-inherits the new gate as optional.
+
+  - title: 2. File format
+    body: |
+      ```yaml
+      # .dev-kit/workflow-profile.yaml
+      # Single source of truth for which gates the dev-harness-kit runs locally.
+      # GH-Actions (.github/workflows/*.yml) runs the full set on push regardless.
+      schema_version: 1
+      active_profile: strict   # strict | vibe | <custom>
+
+      gate_definitions:
+        stop_verify:           # MANDATORY — cannot be opted out
+          mandatory: true
+        secret_scan:           # MANDATORY — catches leaked credentials before commit
+          mandatory: true
+        intent_integrity:      # MANDATORY — refuses to start build on high findings
+          mandatory: true
+        gh_ci_required:        # MANDATORY — GH-Actions required checks on push
+          mandatory: true
+        tdd_scope_judge:       # OPTIONAL — replaced by explicit human review in vibe mode
+          mandatory: false
+        slop_detector:         # OPTIONAL — runtime assistant to the sub-agent
+          mandatory: false
+        pre_commit_review:     # OPTIONAL — codex:review before commit
+          mandatory: false
+        review_verifier:       # OPTIONAL — second-pass LLM judge on review findings
+          mandatory: false
+        security_owasp:        # OPTIONAL — 10-dim fan-out; can downgrade to quick mode
+          mandatory: false
+        maintenance:           # OPTIONAL — CC/OE/VM code-sanity gate
+          mandatory: false
+        babysit_pr:            # OPTIONAL — auto-fix polling loop
+          mandatory: false
+        # Future gates (e.g. coverage_diff) drop into this list with mandatory: true|false
+        # and pick up the correct behavior in both profiles automatically.
+
+      profiles:
+        strict:
+          comment: "Today's behavior. No gate skips."
+          overrides: {}        # empty = use default (all mandatory ON, all optional ON)
+
+        vibe:
+          comment: "Fast local iteration. CI catches the rest on push. Not for PRs to main."
+          overrides:
+            tdd_scope_judge: off
+            slop_detector: off
+            pre_commit_review: off
+            review_verifier: off
+            security_owasp: quick         # quick = single-dim summary; full = 10-dim fan-out
+            maintenance: off
+            babysit_pr: manual             # manual = one gh-check dump + exit
+            # mandatory gates (stop_verify, secret_scan, intent_integrity, gh_ci_required)
+            # cannot be overridden here; the parser rejects the file if attempted.
+
+        # Add custom profiles below. CI does not know about custom profiles; they only
+        # affect what runs LOCALLY before push. A gate can be "off" locally and "required"
+        # in .github/workflows/*.yml; the merge gate still holds.
+      ```
+
+  - title: 3. Gate resolution order
+    body: |
+      When `/dev-kit:build 0-mvp --profile vibe --keep-maintenance` runs:
+
+      ```text
+      1. Skill reads .dev-kit/workflow-profile.yaml. If missing, default to active_profile: strict.
+      2. Resolve profile = "vibe".
+      3. Apply profile's `overrides` to gate_definitions (mandatory keys cannot be turned off).
+      4. Apply per-call flags in this precedence (last wins):
+         a. --keep-<gate>   -> force ON   (highest)
+         b. --skip-<gate>   -> force OFF
+         c. profile field   -> from step 3
+         d. default         -> mandatory: ON, optional: ON (strict)
+      5. Build effective `gate_summary` dict; print it as the first stderr line:
+         "gate_summary: profile=vibe overrides={'tdd_scope_judge':'off'} keep={'maintenance':'on'} skip={}"
+      6. Hand `gate_summary` to the runner, hooks, and sub-agent preamble.
+      ```
+
+      If a `--skip-<gate>` targets a `mandatory: true` gate, the skill prints
+      `error: --skip-stop-verify conflicts with mandatory gate; refusing` and exits non-zero.
+      The same check runs at YAML-load time so a hand-edited profile cannot disable the
+      mandatory set.
+
+  - title: 4. CLI surface — flags added to each gated skill
+    body: |
+      All flags have the same semantics across skills. The active profile wins by default;
+      per-call flags override the profile (--keep beats --skip beats profile).
+
+      ```bash
+      /dev-kit:build 0-mvp
+        --profile <strict|vibe|custom>     # default: read from .dev-kit/workflow-profile.yaml
+        --keep-<gate>                      # one or more, comma-list or repeat
+        --skip-<gate>                      # one or more
+        --push                             # existing flag, unchanged
+        --skip-blocked                     # existing flag, unchanged
+
+      /dev-kit:review [paths]
+        --profile <name>                   # new
+        --keep-verifier --skip-verifier    # maps to existing --fast / default
+        --fast                             # preserved as --skip-verifier alias (back-compat)
+
+      /dev-kit:security
+        --profile <name>
+        --mode <full|quick>                # maps to the security_owasp override
+        --skip-security                    # run as a no-op with verdict=skipped
+
+      /dev-kit:maintenance
+        --profile <name>
+        --skip-maintenance                 # exit 0 immediately
+
+      /dev-kit:babysit-pr
+        --profile <name>
+        --mode <full|manual>               # manual = one gh pr checks dump + exit
+      ```
+
+      Example vibe invocation:
+
+      ```bash
+      /dev-kit:workflow-profile use vibe     # writes active_profile: vibe to the file
+      /dev-kit:build 0-mvp                    # reads profile, prints gate_summary, runs
+      git push origin feat/0-mvp              # GH-CI runs full strict gates on push
+      /dev-kit:babysit-pr --keep-babysit      # one-shot override: poll + auto-fix anyway
+      ```
+
+  - title: 5. Hook integration
+    body: |
+      Each optional hook gains a single line at the top:
+
+      ```bash
+      # hooks/tdd-guard.sh
+      GATE_SUMMARY=$(python3 -m lib.workflow_profile get tdd_scope_judge)
+      if [ "$GATE_SUMMARY" = "off" ]; then
+        echo "tdd-guard: opted out via profile=$(active_profile)" >&2
+        exit 0
+      fi
+      ```
+
+      `lib.workflow_profile` is a small CLI the hooks call so the same resolution path runs in
+      hook context (where env vars come from the parent Claude Code, not the sub-agent).
+      Each opt-out emits a structured event:
+
+      ```json
+      {"event_type": "gate.opted_out", "gate": "tdd_scope_judge", "profile": "vibe",
+       "subject_id": "build:0-mvp:step:3"}
+      ```
+
+      into the existing `.dev-kit/trace/events.jsonl` so post-hoc audits see the choice.
+      Required gates (stop-verify, secret-scan, intent-integrity) do not get the opt-out path
+      at all — running them is not negotiable.
+
+  - title: 6. Sub-agent preamble (build steps)
+    body: |
+      Each step's preamble today ends with:
+
+      ```
+      AC: see step file. 3-cycle self-fix max.
+      ```
+
+      The runner adds the resolved gate set:
+
+      ```
+      AC: see step file. 3-cycle self-fix max.
+      Gates in effect: stop_verify=ON, secret_scan=ON, tdd_scope_judge=OFF (profile=vibe).
+      Do not write tests for non-production code unless the step file asks for them; vibes
+      profile opted out of the TDD scope judge. Stick to the file paths and exit criteria in
+      the step file. If a hook fires (stop_verify, secret_scan), treat it as a hard stop.
+      ```
+
+      Sub-agent prompts stay accurate even when the local TDD gate is off; the agent no longer
+      wonders why no test framework is loading.
+
+  - title: 7. New skill — /dev-kit:workflow-profile
+    body: |
+      Single user-typed command for profile inspection + switching. Reads and writes the file;
+      no other state.
+
+      ```bash
+      /dev-kit:workflow-profile list          # show defined profiles + which is active
+      /dev-kit:workflow-profile show          # print resolved gate set as a markdown table
+      /dev-kit:workflow-profile use vibe      # write active_profile: vibe to the file
+      /dev-kit:workflow-profile diff vibe     # show what vibe changes vs the active profile
+      ```
+
+      The skill is `user-invocable: true` and `model: opus` (per the design-rule Iron Law 5).
+      It does NOT change workflow behavior on its own — it only mutates the YAML. The next
+      `/dev-kit:build` invocation re-reads the file and applies the new gate set.
+
+      `alpha: state` frontmatter per the L6 skill gate (`tests/test_skill_governance.py`).
+      Justification for new skill vs. option on `/dev-kit:config`: `/dev-kit:config` is the
+      multiSelect skill+hook+methodology picker; mixing profile management into it blurs the
+      "picks" semantics. A dedicated skill has one verb (manage profile) and can grow into
+      future "lock profile to branch" / "audit gate choices" features without bloating config.
+
+  - title: 8. Failure modes
+    body: |
+      | Failure | Behavior |
+      |---|---|
+      | `.dev-kit/workflow-profile.yaml` missing | Default `active_profile: strict`; skill logs `workflow-profile: file missing — using strict default` to stderr. No error. |
+      | Unknown profile name in CLI | Skill exits 2 with `error: profile 'foo' is not defined. Available: strict, vibe`. |
+      | Profile overrides a mandatory gate | YAML load fails with `error: gate 'stop_verify' is mandatory and cannot be set to 'off' in profile 'vibe'`. File rejected; CLI returns to existing config. |
+      | `--skip-stop_verify` on the CLI | Skill exits 2. Same error path as above. Hook does not run. |
+      | YAML parse error | Skill exits 2 with file path + line. Strict mode is NOT a silent fallback (would mask a corrupt edit). |
+      | Custom profile in repo; teammate lacks the skill | Stricter profile wins because unknown profile names fall back to strict. Custom profiles must be documented in the example file. |
+      | CI required check set contradicts `vibe` profile | Not detected locally; merge attempt fails at the GH-Actions gate. Same failure mode as today — no regression. |
+
+  - title: 9. Migration path
+    body: |
+      1. Land `.dev-kit/workflow-profile.example.yaml` first (no behavior change).
+      2. Land `lib/workflow_profile.py` + `tests/test_workflow_profile.py`. CI green.
+      3. Wire hooks (one-line guard per optional hook) in a separate PR. Each PR is a single,
+         gated change so a regression can be bisected to one optional hook.
+      4. Land `/dev-kit:workflow-profile` skill + the `--profile` flag on `/dev-kit:build`
+         first. Build is the entry point and gets the most usage; landing it first exposes
+         any flag-resolver bugs in the most-tested path.
+      5. Wire `--profile` into `/dev-kit:review` (which already has `--fast`), then
+         `/dev-kit:security`, then `/dev-kit:maintenance`, then `/dev-kit:babysit-pr`.
+         Each in its own PR. Roll back is one `git revert` + restart of any in-flight build.
+      6. Update the dev-kit README to document the file once all five skills honor it.
+      7. The `feedback-dev-kit-pr-workflow` memory gets a one-line note: "vibe profile is
+         the recommended fast path for throwaway local branches; strict remains the
+         recommendation for any PR that touches harness logic."
+
+  - title: 10. Out of scope
+    body: |
+      - Per-gate CLI flags on the harness runner (kept narrow: --profile + --keep-* + --skip-*).
+      - Branch-locked profiles (e.g. "vibe on feat/*, strict on main"). Future work; needs a
+        different model (push-time hook + `lib.workflow_profile --lock-branch`).
+      - Telemetry on "vibe users ship what would have been caught by skipped gates". Build
+        the opt-in mechanism first; measure second.
+      - GH-Actions workflow changes. CI keeps running the full set; profile changes only
+        local gates.
+      - Agent model selection. Today the model is fixed by Iron Law 5 (`opus` for design,
+        `sonnet` for code). Profile does not change model; that is a separate decision.
