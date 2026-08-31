@@ -226,12 +226,15 @@ class TestHtmlViewerGateStateTransitions(unittest.TestCase):
         `_verdictToState` so any case-variation lands on the correct
         state.
         """
+        # Same playwright-optional guard as the first test method.
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
         # Spawn a separate server with a lowercase-verdict log so we
         # don't disturb the class-level server. The server is
         # read-only, so we just point it at a different log file.
         import shutil as _shutil
-
-        from playwright.sync_api import sync_playwright
 
         # Write a lowercase-variant log to a fresh tmpdir + boot a
         # sister server against it.
