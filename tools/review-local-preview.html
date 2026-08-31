@@ -132,6 +132,22 @@
     row.verdict = row.querySelector("[data-verdict]");
   });
 
+  // Track which judge is currently speaking so the next
+  // `**Verdict:** <Word>` line can be attributed to the right gate.
+  // Set by the `running /dev-kit:<X>` marker; cleared when the
+  // verdict line consumes it. The bulk `verdicts:` line (one frame
+  // setting all three at once) is unaffected and still works as a
+  // fallback for runs that emit it.
+  var activeGate = null;
+
+  // Map a judge verdict string to the per-gate CSS state + label.
+  function _verdictToState(verdict) {
+    if (verdict === "Approve") return { state: "approved", label: "Approve" };
+    if (verdict === "Changes Requested") return { state: "changes", label: "Changes Requested" };
+    if (verdict === "Blocked") return { state: "blocked", label: "Blocked" };
+    return { state: "failed", label: verdict || "unknown" };
+  }
+
   function setStatus(label, cls) {
     statusEl.textContent = label;
     statusEl.className = "status " + cls;
@@ -176,6 +192,7 @@
 
   function resetGates() {
     gates.forEach(function (g) { setGateState(g, "", "—"); });
+    activeGate = null;
   }
 
   function clearOutput() {
@@ -219,6 +236,7 @@
     var m = runningRe.exec(line);
     if (m) {
       setGateState(m[1], "running", "running");
+      activeGate = m[1];
       return "gate-marker";
     }
     m = verdictsRe.exec(line);
@@ -245,10 +263,23 @@
     }
     m = judgeVerdictRe.exec(line);
     if (m) {
-      var v = m[1].toLowerCase();
-      if (v === "approve") return "verdict-approve";
-      if (v === "changes requested") return "verdict-changes";
-      if (v === "blocked") return "verdict-blocked";
+      // Per-judge verdict line. If a `running /dev-kit:<X>` marker
+      // set `activeGate` recently, attribute this verdict to that
+      // gate and transition its dot from `running` to the verdict
+      // state. Without this transition the dot column would stay
+      // stuck on "running" forever, even though the right pane shows
+      // the verdict clearly (the bug this fixes).
+      var verdict = m[1];
+      var cssClass;
+      if (verdict === "Approve") cssClass = "verdict-approve";
+      else if (verdict === "Changes Requested") cssClass = "verdict-changes";
+      else if (verdict === "Blocked") cssClass = "verdict-blocked";
+      if (activeGate) {
+        var mapping = _verdictToState(verdict);
+        setGateState(activeGate, mapping.state, mapping.label);
+        activeGate = null;
+      }
+      return cssClass;
     }
     return null;
   }
