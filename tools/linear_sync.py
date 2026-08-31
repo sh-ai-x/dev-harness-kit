@@ -60,6 +60,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -308,6 +309,19 @@ def _free_tier_cleanup_enabled(repo: Path) -> bool:
     return config.get("free_tier_cleanup") is True
 
 
+def _auto_archive_done_enabled(repo: Path) -> bool:
+    """Return whether auto-archive-on-Done is enabled for this worktree.
+
+    Defaults to ``True`` when no key is present (free-tier friendly).
+    Explicit ``False`` is honored so an operator who wants to keep
+    Done-state history in the Linear UI can opt out per-worktree.
+    """
+    config = _read_worktree_config(repo) or {}
+    if "auto_archive_done" not in config:
+        return True
+    return config.get("auto_archive_done") is True
+
+
 def _write_linear_config(repo: Path, **updates: Any) -> Path:
     """Update Linear config while preserving unrelated operator settings."""
     config = _read_worktree_config(repo) or {}
@@ -315,6 +329,7 @@ def _write_linear_config(repo: Path, **updates: Any) -> Path:
     config.setdefault("enabled", True)
     config.setdefault("project_name", "")
     config.setdefault("team_id", "")
+    config.setdefault("auto_archive_done", True)
     config["set_at"] = _utc_now_iso()
     return _write_worktree_config(repo, config)
 
@@ -898,6 +913,100 @@ def _cmd_list(rest: list[str]) -> int:
         return 0
 
 
+def _parse_cleanup_done_args(rest: list[str]) -> dict[str, Any]:
+    """Parse `linear cleanup-done` argv.
+
+    Flags:
+            --dry-run            print identifiers that would be archived, archive none.
+            --older-than <N>     skip issues whose updatedAt is more recent than
+                                 N days ago. Default 0 (archive every terminal issue).
+    """
+    args: dict[str, Any] = {"dry_run": False, "older_than_days": 0}
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "--dry-run":
+            args["dry_run"] = True
+            i += 1
+        elif token == "--older-than":
+            if i + 1 >= len(rest):
+                raise SystemExit("linear: cleanup-done --older-than expects an integer")
+            try:
+                args["older_than_days"] = int(rest[i + 1])
+            except ValueError:
+                raise SystemExit(f"linear: cleanup-done --older-than expects an integer, got {rest[i + 1]!r}")
+            i += 2
+        elif token.startswith("--older-than="):
+            value = token.split("=", 1)[1]
+            try:
+                args["older_than_days"] = int(value)
+            except ValueError:
+                raise SystemExit(f"linear: cleanup-done --older-than expects an integer, got {value!r}")
+            i += 1
+        else:
+            raise SystemExit(f"linear: cleanup-done: unknown flag {token!r}")
+    if args["older_than_days"] < 0:
+        raise SystemExit("linear: cleanup-done --older-than must be >= 0")
+    return args
+
+
+def _cmd_cleanup_done(rest: list[str]) -> int:
+    """CLI `linear cleanup-done [--dry-run] [--older-than <N>]`.
+
+    Archives every Done/Canceled issue in the active project. Always
+    available (does NOT depend on `auto_archive_done`); the flag and
+    the manual command are independent levers, by design — paid tiers
+    can still want to reclaim UI real estate, and free tiers can opt
+    in to the flag but skip the manual sweep.
+    """
+    args = _parse_cleanup_done_args(rest)
+    repo = _repo_root()
+    team_id = _resolve_team_id()
+    project_id = _find_or_create_project(repo, team_id)
+    project_name = _project_name_override(repo) or _repo_name(repo)
+    try:
+        archived, identifiers = _archive_done_issues(
+            project_id, older_than_days=args["older_than_days"], dry_run=args["dry_run"]
+        )
+    except RuntimeError as exc:
+        print(f"linear: cleanup-done: {exc}", file=sys.stderr)
+        return 0
+    mode = "would archive" if args["dry_run"] else "archived"
+    suffix = (
+        f" (older-than {args['older_than_days']}d)" if args["older_than_days"] > 0 else ""
+    )
+    print(
+        f"linear: cleanup-done: project={project_name} {mode}={len(identifiers)}{suffix}"
+    )
+    for ident in identifiers:
+        print(f"  [{mode.split()[0]}] {ident}")
+    if not args["dry_run"]:
+        print(f"linear: cleanup-done: archived {archived}/{len(identifiers)}")
+    return 0
+
+
+def _cmd_auto_archive(rest: list[str]) -> int:
+    """CLI `linear auto-archive on|off|status` — per-worktree config flag.
+
+    Controls whether the auto-sync Done transition also archives the
+    issue. Default is `on` (free-tier friendly). Setting it to `off`
+    preserves the existing behavior where Done issues stay visible in
+    the Linear UI.
+    """
+    value = rest[0].strip().lower() if rest else "status"
+    if value not in {"on", "off", "status"}:
+        print("linear: auto-archive expects on|off|status")
+        return 2
+    repo = _repo_root()
+    enabled = _auto_archive_done_enabled(repo)
+    if value == "status":
+        print(f"linear: auto-archive={'on' if enabled else 'off'}")
+        return 0
+    path = _write_linear_config(repo, auto_archive_done=(value == "on"))
+    print(f"linear: auto-archive={'on' if value == 'on' else 'off'} (config={path})")
+    return 0
+
+
 def _scope_key(prompt: str, branch: str) -> str:
     """Hash-free scope key for matching an issue to a task.
 
@@ -1179,6 +1288,73 @@ def _cleanup_free_tier_issues(project_id: str, limit: int = 10) -> tuple[int, st
         if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
             print(f"[linear-sync] free-tier cleanup failed: {error}", file=sys.stderr)
     return archived, error
+
+
+def _done_cleanup_candidates(project_id: str, older_than_days: int = 0) -> list[dict]:
+    """Return Done/Canceled issues in ``project_id`` eligible for archival.
+
+    ``older_than_days`` (default 0) skips issues whose
+    ``updatedAt`` is more recent than the cutoff. The default 0 keeps
+    every Done/Canceled issue — the operator opts in to a non-zero
+    cutoff via ``--older-than N`` when they want a grace period.
+
+    ``orderBy: updatedAt`` ascending ensures the oldest terminal
+    issues are archived first, which preserves the freshest
+    Done-state visibility in the Linear UI when combined with a
+    grace period.
+
+    Defense in depth: the Linear ``state.name.in`` filter is the
+    server-side gate, but we also filter client-side. The mutation
+    that follows is irreversible from the script's perspective
+    (Linear's archive is reversible from the UI trash, but a stray
+    Todo issue archived here is a real footgun), so a wrong row in
+    the GraphQL response must not slip through to ``issueArchive``.
+    """
+    query = (
+        "query($filter: IssueFilter!) {"
+        "  issues(filter: $filter,"
+        "         first: 200, orderBy: updatedAt) {"
+        "    nodes { id identifier updatedAt state { name } }"
+        "  }"
+        "}"
+    )
+    issue_filter: dict[str, Any] = {
+        "project": {"id": {"eq": project_id}},
+        "state": {"name": {"in": ["Done", "Canceled"]}},
+    }
+    data = _linear_query(query, {"filter": issue_filter})
+    terminal = {"Done", "Canceled"}
+    nodes = [
+        n for n in ((data.get("issues") or {}).get("nodes") or [])
+        if str((n.get("state") or {}).get("name") or "") in terminal
+    ]
+    if older_than_days <= 0:
+        return nodes
+    cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)).isoformat()
+    return [n for n in nodes if str(n.get("updatedAt") or "") <= cutoff]
+
+
+def _archive_done_issues(project_id: str, older_than_days: int = 0,
+                         dry_run: bool = False) -> tuple[int, list[str]]:
+    """Archive every Done/Canceled issue in ``project_id``.
+
+    Returns ``(archived, identifiers)``. When ``dry_run`` is true, no
+    archive mutation is sent; the returned ``identifiers`` list is
+    still populated so callers can render a preview. Errors per issue
+    are swallowed (logged when ``LINEAR_DEBUG=1``) so one bad
+    identifier never blocks the rest.
+    """
+    candidates = _done_cleanup_candidates(project_id, older_than_days=older_than_days)
+    archived = 0
+    identifiers: list[str] = []
+    for node in candidates:
+        ident = str(node.get("identifier") or "")
+        identifiers.append(ident)
+        if dry_run:
+            continue
+        if _archive_issue(str(node["id"])):
+            archived += 1
+    return archived, identifiers
 
 
 def _find_issue(project_id: str, scope_key: str) -> str | None:
@@ -1689,6 +1865,19 @@ def sync() -> int:
                 })
                 return 0
             if _set_issue_state(existing_issue_ref, "Done"):
+                auto_archived = False
+                if _auto_archive_done_enabled(repo):
+                    # Free-tier friendly default: archive right after the
+                    # Done transition so the active-issue count stays
+                    # low. The issue can always be restored from Linear's
+                    # trash, so this is reversible on demand.
+                    auto_archived = _archive_issue(existing_issue_ref)
+                    if auto_archived and os.environ.get("LINEAR_DEBUG", "").strip() == "1":
+                        print(
+                            f"[linear-sync] auto-archived {existing_issue_ref} "
+                            f"(scope={scope})",
+                            file=sys.stderr,
+                        )
                 _write_handoff(repo, {
                     **(handoff if isinstance(handoff, dict) else {}),
                     "issue": existing_issue_ref,
@@ -1699,6 +1888,7 @@ def sync() -> int:
                     "action": "completed",
                     "state": "Done",
                     "completed_at": _utc_now_iso(),
+                    "auto_archived": auto_archived,
                 })
                 if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
                     print(f"[linear-sync] done {existing_issue_ref} (scope={scope})", file=sys.stderr)
@@ -1762,7 +1952,7 @@ def sync() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point. Subcommands: setup|on|off|project-name|status|list|sync.
+    """CLI entry point. Subcommands: setup|on|off|free-tier-cleanup|auto-archive|cleanup-done|project-name|status|list|sync.
 
     Default (no args, or `sync`) runs the auto-sync once and returns
     its exit code. All other subcommands manipulate the per-worktree
@@ -1829,6 +2019,10 @@ def main(argv: list[str] | None = None) -> int:
         path = _write_linear_config(repo, free_tier_cleanup=value == "on")
         print(f"linear: free-tier-cleanup={'on' if value == 'on' else 'off'} (config={path})")
         return 0
+    if cmd == "auto-archive":
+        return _cmd_auto_archive(rest)
+    if cmd == "cleanup-done":
+        return _cmd_cleanup_done(rest)
     if cmd == "setup":
         # Print the recommended setup steps. The script never reads or
         # writes the API key itself — that stays in the env.
@@ -1838,7 +2032,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"    2. cd {repo}")
         print("    3. python3 tools/linear_sync.py on")
         print("    4. python3 tools/linear_sync.py project-name <name>   # optional")
-        print("    5. python3 tools/linear_sync.py free-tier-cleanup on   # optional, archives 10 oldest issues only on free-tier limit errors")
+        print("    5. python3 tools/linear_sync.py auto-archive on        # default on; archives Done issues on auto-Done (free-tier friendly)")
+        print("    6. python3 tools/linear_sync.py cleanup-done           # optional, batch archive Done/Canceled now (with --older-than N for grace period)")
         print()
         print("  Option B — user-scope env file (recommended for solo dev, shared across repos):")
         print("    1. mkdir -p ~/.config/dev-kit")
@@ -1847,13 +2042,13 @@ def main(argv: list[str] | None = None) -> int:
         print("         Optional: LINEAR_TEAM_ID=..., LINEAR_PROJECT_NAME=...")
         print("    3. python3 tools/linear_sync.py on")
         print("    4. python3 tools/linear_sync.py project-name <name>   # optional")
-        print("    5. python3 tools/linear_sync.py free-tier-cleanup on   # optional")
+        print("    5. python3 tools/linear_sync.py cleanup-done           # optional, batch archive Done/Canceled now")
         print()
         print("  Option C — per-worktree env file (backward compat, Linear-only):")
         print(f"    1. Add to {repo / _ENV_FILE_REL} (untracked, .gitignore'd):")
         print("         LINEAR_API_KEY=<your-token>")
         print("    2. python3 tools/linear_sync.py on")
-        print("    3. python3 tools/linear_sync.py free-tier-cleanup on   # optional")
+        print("    3. python3 tools/linear_sync.py cleanup-done           # optional")
         env_key = bool(os.environ.get("LINEAR_API_KEY", "").strip())
         env_file = (repo / _ENV_FILE_REL).is_file()
         user_env = _user_env_path()
@@ -1864,9 +2059,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  .dev-kit/.env.linear present:             {env_file}")
         cfg = _read_worktree_config(repo)
         print(f"  worktree config: {cfg or '(none — defaults to env-only)'}")
+        auto_archive = _auto_archive_done_enabled(repo)
+        print(f"  auto-archive on Done transition: {'on (default — archives Done issues)' if auto_archive else 'off (Done issues stay visible)'}")
         print("  free-tier cleanup: disabled by default; enable with `free-tier-cleanup on`")
+        print("  manual cleanup:    `linear cleanup-done [--dry-run] [--older-than <N>]` archives every Done/Canceled issue now")
         return 0
-    print(f"linear: unknown command {cmd!r} (try: setup|on|off|free-tier-cleanup|project-name|status|list|sync)")
+    print(f"linear: unknown command {cmd!r} (try: setup|on|off|free-tier-cleanup|auto-archive|cleanup-done|project-name|status|list|sync)")
     return 2
 
 

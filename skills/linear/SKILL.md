@@ -84,7 +84,7 @@ Once a worktree has auto-sync enabled and a matching issue exists, the hook perf
 
 1. **Auto-open** — on the first Edit/Write that contains a work verb, the script creates a new issue in the team's `Todo` state (falling back to `Backlog` when no `Todo` column is configured). The scope-marker `<!-- scope:... -->` is prepended to the description so the next edit reuses the same issue.
 2. **Auto-In-progress** — on subsequent Edit/Write with a starting-verb (`implement`, `build`, `wire`, `integrate`, `start`, `sync`, `register`, `track`, `add`, `create`), the matching issue is transitioned to `In Progress`. The transition is idempotent (skipped when the handoff cache already records `In Progress`); the Linear API is the source of truth, so a manual state change on the issue is preserved.
-3. **Auto-Done** — when the prompt contains a completion verb (`done`, `finished`, `complete[d]?`, `shipped`, `merged`, `closed`), the matching issue is transitioned to `Done` and the sync round exits without further mutations. Already-terminal issues (Done / Canceled) are left alone — manual moves in the Linear UI always win.
+3. **Auto-Done** — when the prompt contains a completion verb (`done`, `finished`, `complete[d]?`, `shipped`, `merged`, `closed`), the matching issue is transitioned to `Done` and the sync round exits without further mutations. Already-terminal issues (Done / Canceled) are left alone — manual moves in the Linear UI always win. When the per-worktree `auto_archive_done` flag is `on` (the default, free-tier friendly), the issue is also archived right after the Done transition via the `issueArchive` mutation — Linear's reversible soft-delete. Archived issues can always be restored from Linear's trash; set `auto-archive off` if you want Done-state history to stay visible.
 4. **Auto-archive duplicates** — when more than one open issue shares the same `<!-- scope:... -->` marker (typically from a `linear off` + `linear on` cycle), the older issues are archived via the `issueArchive` mutation. Archive is reversible + idempotent, never delete. Only the newest match survives and is used for subsequent updates.
 
 Set `LINEAR_DEBUG=1` to surface every activation decision, state transition, and archive event on stderr. Without the flag, silent no-ops are reported only on transport failures.
@@ -101,6 +101,8 @@ Set `LINEAR_DEBUG=1` to surface every activation decision, state transition, and
 | `/dev-kit:linear setup` | Print the one-time setup checklist + the current state (whether `LINEAR_API_KEY` is set, what the resolved project name is, whether the worktree config exists). |
 | `/dev-kit:linear project-name <name>` | Override the auto-detected project name for this worktree. Without an argument, prints the resolved name. |
 | `/dev-kit:linear free-tier-cleanup on\|off\|status` | Opt in/out of free-tier recovery. When enabled, a confirmed free issue-limit creation error archives up to the 10 oldest non-terminal issues in the active project, then retries once. Disabled by default. |
+| `/dev-kit:linear auto-archive on\|off\|status` | Opt in/out of the on-Done auto-archive flag. Default `on` (free-tier friendly): every auto-Done transition also archives the issue. Set `off` to keep Done issues visible in the Linear UI. |
+| `/dev-kit:linear cleanup-done [--dry-run] [--older-than <N>]` | Manual batch archive of every Done/Canceled issue in the active project. Always available regardless of tier — useful for reclaiming UI real estate, running on a cron, or as a one-off cleanup. `--dry-run` lists identifiers without archiving; `--older-than N` skips issues updated within the last N days (default 0, i.e. archive every terminal issue). |
 | `/dev-kit:linear list` | Print recent Linear issues (default 25, newest first). Flags: `--state=<name>`, `--team=<key>`, `--project=<name>`, `--all-projects`, `--assignee=me|none|<id>`, `--limit=<N>`. By default the list is scoped to the active repo project (per-worktree override or repo basename); pass `--all-projects` to see every project the team can see. Non-blocking; never raises. |
 | `/dev-kit:linear status` | Print a JSON snapshot of the resolved state (worktree path, slug, config, env-var presence, resolved project + team). |
 
@@ -191,6 +193,7 @@ The MCP server uses the same `LINEAR_*` scope (issues / projects / comments) as 
   "project_name": "My Linear Project",
   "team_id": "",
   "free_tier_cleanup": false,
+  "auto_archive_done": true,
   "set_at": "2026-08-03T00:54:03Z"
 }
 ```
