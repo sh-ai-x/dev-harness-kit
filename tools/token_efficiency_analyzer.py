@@ -1569,6 +1569,10 @@ assert round(WEIGHT_CACHE + WEIGHT_DENSITY + WEIGHT_REDUNDANCY + WEIGHT_ECONOMY,
 
 CACHE_HIT_FULL = 0.85
 CACHE_HIT_WARN = 0.50
+# Minimum total_input for CACHE_HIT_LOW to fire. A 1-2 turn session with a
+# low hit ratio is arithmetically forced (no prefix to cache on the first
+# call) and is not actionable as a prefix-alignment warning.
+CACHE_HIT_LOW_MIN_INPUT_TOKENS = 50_000
 
 GRADE_BANDS: tuple[tuple[float, str], ...] = (
     (90.0, "A"), (80.0, "B"), (70.0, "C"), (60.0, "D"),
@@ -1699,7 +1703,7 @@ def evaluate_warnings(s: dict, score: dict,
     # 1. Cache hit < CACHE_HIT_WARN (50%) — prefix misalignment suspected.
     # Token floor: a 1-2 turn session with a low hit ratio is arithmetically
     # forced (no prefix to cache on the first call) and is not actionable.
-    if total_input > 50_000 and cache_hit < CACHE_HIT_WARN:
+    if total_input > CACHE_HIT_LOW_MIN_INPUT_TOKENS and cache_hit < CACHE_HIT_WARN:
         warnings.append(Warning(
             level="critical",
             code="CACHE_HIT_LOW",
