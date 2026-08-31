@@ -1328,3 +1328,111 @@ class TestCheckProviderConsistency(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestCheckRulesetWorkflowContract(unittest.TestCase):
+    """Wrapper tests for lib/ci_doctor.py:_check_ruleset_workflow_contract.
+
+    The shared loader has its own regression test
+    (`tests/test_ci_ruleset_contract.py`) - these tests pin the
+    wrapper-side state mapping end-to-end so any future change to the
+    ci-doctor row shape (renaming the label, dropping INFO rows)
+    catches before merge.
+    """
+    @classmethod
+    def setUpClass(cls):
+        cls.cd = _load("ci_doctor", "ci_doctor.py")
+
+    def test_no_local_ruleset_files_emits_info_row(self):
+        """Source-repo path: target with no `.github/rulesets/*.json`
+        yields exactly one INFO row from the wrapper."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".github" / "workflows").mkdir(parents=True)
+            rows = self.cd._check_ruleset_workflow_contract(target)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].state, "INFO")
+            self.assertEqual(rows[0].label, "ruleset workflow contract")
+
+    def test_mismatch_fixture_yields_fail_row_in_ci_doctor_shape(self):
+        """Issue #774 reproduction as it surfaces in the ci-doctor
+        report: FAIL row, offending file path in detail, missing
+        context named explicitly."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".github" / "rulesets").mkdir(parents=True)
+            (target / ".github" / "workflows").mkdir(parents=True)
+            (target / ".github" / "rulesets" / "protect-main.json").write_text(
+                '{"rules":[{"type":"required_status_checks",'
+                '"parameters":{"required_status_checks":['
+                '{"context":"severity gate (review + security + injection_scan)",'
+                '"integration_id":null}]}}]}',
+                encoding="utf-8",
+            )
+            (target / ".github" / "workflows" / "review.yml").write_text(
+                "jobs:\n  gate:\n    name: severity gate (review + security)\n"
+                "    runs-on: ubuntu-latest\n    steps: [{run: echo}]\n",
+                encoding="utf-8",
+            )
+            rows = self.cd._check_ruleset_workflow_contract(target)
+            self.assertTrue(
+                any(r.state == "FAIL" for r in rows),
+                f"expected FAIL for #774 mismatch, got {[(r.label, r.state, r.detail) for r in rows]}",
+            )
+            joined = " ".join(r.detail for r in rows)
+            self.assertIn("severity gate (review + security + injection_scan)", joined)
+            self.assertIn("protect-main.json", joined)
+
+    def test_match_fixture_yields_pass_row_in_ci_doctor_shape(self):
+        """Same-data-shape match -> exactly one PASS row via the
+        wrapper. Uses an inline fixture rather than the dedicated
+        dir to keep this test independent of fixture path layout.
+        """
+        import tempfile
+
+        import yaml  # PyYAML - pinned in requirements.lock
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".github" / "rulesets").mkdir(parents=True)
+            (target / ".github" / "workflows").mkdir(parents=True)
+            (target / ".github" / "rulesets" / "protect-main.json").write_text(
+                '{"rules":[{"type":"required_status_checks",'
+                '"parameters":{"required_status_checks":['
+                '{"context":"ci","integration_id":null}]}}]}',
+                encoding="utf-8",
+            )
+            (target / ".github" / "workflows" / "ci.yml").write_text(
+                yaml.safe_dump({
+                    "jobs": {"ci": {"name": "ci", "runs-on": "ubuntu-latest",
+                              "steps": [{"run": "echo"}]}}
+                }),
+                encoding="utf-8",
+            )
+            rows = self.cd._check_ruleset_workflow_contract(target)
+            self.assertTrue(
+                any(r.state == "PASS" for r in rows),
+                f"expected PASS for matched fixture, got {[(r.label, r.state) for r in rows]}",
+            )
+
+    def test_wrapper_wired_into_audit_call(self):
+        """Audit aggregator emits the new row. Sanity-check by counting
+        at least one `ruleset workflow contract` label in the report.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".github" / "workflows").mkdir(parents=True)
+            # Source-repo mode OFF so PASS/WARN/FAIL semantics match
+            # production. We're just checking the row is wired in.
+            target.joinpath(".env.example").write_text(
+                "CI_REVIEW_PROVIDER=minimax\n", encoding="utf-8"
+            )
+            r = self.cd.audit(target)
+            labels = [c.label for c in r.checks]
+            self.assertIn(
+                "ruleset workflow contract", labels,
+                f"audit() must include the new ruleset row; got {labels}",
+            )
+
