@@ -1569,6 +1569,10 @@ assert round(WEIGHT_CACHE + WEIGHT_DENSITY + WEIGHT_REDUNDANCY + WEIGHT_ECONOMY,
 
 CACHE_HIT_FULL = 0.85
 CACHE_HIT_WARN = 0.50
+# Minimum total_input for CACHE_HIT_LOW to fire. A 1-2 turn session with a
+# low hit ratio is arithmetically forced (no prefix to cache on the first
+# call) and is not actionable as a prefix-alignment warning.
+CACHE_HIT_LOW_MIN_INPUT_TOKENS = 50_000
 
 GRADE_BANDS: tuple[tuple[float, str], ...] = (
     (90.0, "A"), (80.0, "B"), (70.0, "C"), (60.0, "D"),
@@ -1697,7 +1701,9 @@ def evaluate_warnings(s: dict, score: dict,
     cache_hit = score["cache_hit_ratio"]
 
     # 1. Cache hit < CACHE_HIT_WARN (50%) — prefix misalignment suspected.
-    if total_input > 0 and cache_hit < CACHE_HIT_WARN:
+    # Token floor: a 1-2 turn session with a low hit ratio is arithmetically
+    # forced (no prefix to cache on the first call) and is not actionable.
+    if total_input > CACHE_HIT_LOW_MIN_INPUT_TOKENS and cache_hit < CACHE_HIT_WARN:
         warnings.append(Warning(
             level="critical",
             code="CACHE_HIT_LOW",
@@ -1758,7 +1764,7 @@ def evaluate_warnings(s: dict, score: dict,
             ),
             estimated_save_usd=round(reclaim_cache_miss, 2),
             priority=3,
-            reclaim_axis="cache_miss",
+            reclaim_axis="",  # context-size axis; reclaim comes from /compact or delegation, not cache alignment
             session_id=s["session_id"],
             evidence=f"{total_input:,} input tokens (> 500,000)",
         ))
@@ -2592,6 +2598,7 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
         avg_redundancy=totals["avg_redundancy"],
         avg_economy=totals["avg_economy"],
         avg_cache_hit=totals["avg_cache_hit"],
+        avg_cache_hit_unweighted=totals.get("avg_cache_hit_unweighted", totals["avg_cache_hit"]),
         stale_cost=stale_cost,
         stale_pct=stale_pct,
         cost_gate_banner=cost_gate_banner,

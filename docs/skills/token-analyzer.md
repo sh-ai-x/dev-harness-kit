@@ -100,9 +100,9 @@ Each trigger has the exact emoji-prefixed message from the prompt, rendered verb
 
 | Code | Condition | Fix | Reclaim axis |
 |---|---|---|---|
-| `CACHE_HIT_LOW` | `cache_hit < 50%` | move volatile data to prompt tail; don't switch models mid-session | `cache_miss` |
+| `CACHE_HIT_LOW` | `total_input > 50K AND cache_hit < 50%` | move volatile data to prompt tail; don't switch models mid-session | `cache_miss` |
 | `READ_HEAVY` | `Read` ≥ 40% of tool cost | pin large files once; build a cartography | `dup_read` |
-| `HEAVY_CONTEXT` | `total_input > 500K` in one session | delegate to sub-agents; run `/compact` | `cache_miss` |
+| `HEAVY_CONTEXT` | `total_input > 500K` in one session | delegate to sub-agents; run `/compact` | `""` |
 | `MODEL_OVERSPEC` | Opus + density score < 20 | downgrade to Sonnet / Haiku | `model_downgrade` |
 | `WRITE_NOT_REUSED` | `cache_write > 50K` AND `cache_read < 2*cache_write` | only put re-readable data in front of the prompt | `cache_miss` |
 | `REPEATED_USER_MSG` | any user message text appears ≥ 2x | drop finished sub-tasks from context | `cache_miss` |

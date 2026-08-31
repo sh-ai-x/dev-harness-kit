@@ -150,9 +150,9 @@ verbatim으로 렌더링된다. 각 `Warning`은 `estimated_save_usd`, `priority
 
 | 코드 | 조건 | 수정 | 회수 축 |
 |---|---|---|---|
-| `CACHE_HIT_LOW` | `cache_hit < 50%` | volatile 데이터를 프롬프트 꼬리로 이동; 세션 중간에 모델을 바꾸지 말 것 | `cache_miss` |
+| `CACHE_HIT_LOW` | `total_input > 50K AND cache_hit < 50%` | volatile 데이터를 프롬프트 꼬리로 이동; 세션 중간에 모델을 바꾸지 말 것 | `cache_miss` |
 | `READ_HEAVY` | `Read`가 도구 비용의 ≥ 40% | 큰 파일을 한 번 고정; 카르토그래피 구축 | `dup_read` |
-| `HEAVY_CONTEXT` | 한 세션에서 `total_input > 500K` | 서브에이전트에 위임; `/compact` 실행 | `cache_miss` |
+| `HEAVY_CONTEXT` | 한 세션에서 `total_input > 500K` | 서브에이전트에 위임; `/compact` 실행 | `""` |
 | `MODEL_OVERSPEC` | Opus + density 점수 < 20 | Sonnet / Haiku로 다운그레이드 | `model_downgrade` |
 | `WRITE_NOT_REUSED` | `cache_write > 50K` AND `cache_read < 2*cache_write` | 재읽기 가능한 데이터만 프롬프트 앞에 둘 것 | `cache_miss` |
 | `REPEATED_USER_MSG` | 어떤 사용자 메시지 텍스트든 ≥ 2회 출현 | 완료된 서브태스크를 컨텍스트에서 제거 | `cache_miss` |
