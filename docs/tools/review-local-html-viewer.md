@@ -93,7 +93,20 @@ need an SSH tunnel for that (`ssh -L 8765:127.0.0.1:8765 …`).
 The screenshot shows the three gate dots (review / security /
 maintenance) and the live stdout below. The header banner makes the
 "read-only" contract explicit; there is intentionally no Start / Stop
-button visible. To regenerate after HTML changes, run
+button visible. Each dot transitions through the state machine:
+
+| State | Trigger |
+|---|---|
+| _(default)_ | initial render; "—" label |
+| `running` | `running /dev-kit:<X> via provider=...` line streamed |
+| `approved` / `changes` / `blocked` | `**Verdict:** <Word>` line streamed (or `verdicts: review='...' security='...' maintenance='...'` bulk line) |
+
+The per-judge `**Verdict:**` transition is what makes the dots useful
+mid-pipeline — without it, the dot column would stay stuck on
+"running" forever even after the right pane shows the verdict in
+green. The transition is driven by an `activeGate` variable in the
+IIFE closure that remembers which judge is currently speaking. To
+regenerate after HTML changes, run
 `tools/render_review_local_screenshot.py` (a Playwright capture script).
 
 ## Safety properties

@@ -154,7 +154,19 @@ class TestHtmlViewerGateStateTransitions(unittest.TestCase):
         """Open the page, wait for SSE frames to flush, return the class
         attribute of each gate row.
         """
-        from playwright.sync_api import sync_playwright
+        # Playwright is an optional dependency for this test -- the
+        # test's sole purpose is to pin a browser-driven state-machine
+        # contract that is otherwise only exercisable via the manual
+        # `tools/render_review_local_screenshot.py` capture. CI runs
+        # without playwright installed (it's a dev-time tool for the
+        # screenshot generator, not a CI runtime dep) so we skip the
+        # test body if the import fails. Local runs that have
+        # playwright installed (e.g. `pip install playwright &&
+        # playwright install chromium`) exercise the real assertions.
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed; install via `pip install playwright && playwright install chromium`")
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
