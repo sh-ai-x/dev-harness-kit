@@ -144,6 +144,36 @@
     if (verdictLabel !== undefined) row.verdict.textContent = verdictLabel;
   }
 
+  // Reads the per-gate row's current CSS class and returns the gate
+  // state (e.g. "approved", "blocked", "running"), or null when the
+  // gate has not yet been touched (className === "gate "). Used by
+  // the `iteration_done` handler to derive the header badge from
+  // aggregate gate verdicts, so a wrapper-script rc=1 with all
+  // three judges approving is NOT misread as "still running".
+  function gateState(name) {
+    var row = document.querySelector('[data-gate="' + name + '"]');
+    if (!row) return null;
+    var classes = row.className.split(/\s+/);
+    var known = ["running", "approved", "changes", "blocked", "failed"];
+    for (var i = 0; i < known.length; i++) {
+      if (classes.indexOf(known[i]) !== -1) return known[i];
+    }
+    return null;
+  }
+
+  // Aggregate verdict across the three gates for the header badge.
+  // Returns one of: "approve" | "blocked" | "changes" | "incomplete".
+  // Precedence: blocked > changes > running > missing > all-approved.
+  function aggregateGateVerdict() {
+    var states = gates.map(gateState);
+    if (states.indexOf("blocked") !== -1) return "blocked";
+    if (states.indexOf("changes") !== -1) return "changes";
+    if (states.indexOf("running") !== -1) return "incomplete";
+    if (states.some(function (s) { return s === null; })) return "incomplete";
+    if (states.every(function (s) { return s === "approved"; })) return "approve";
+    return "incomplete";
+  }
+
   function resetGates() {
     gates.forEach(function (g) { setGateState(g, "", "—"); });
   }
@@ -264,8 +294,41 @@
           // exited, but the babysit loop itself keeps going -- do NOT
           // close the EventSource or flip to a terminal status, just
           // note the iteration boundary and keep tailing.
-          appendOutput("[babysit] iteration finished rc=" + data.exit_code + " -- watching for the next one…", "muted");
-          setStatus("watching (iter done, rc=" + data.exit_code + ")", data.exit_code === 0 ? "done-ok" : "running");
+          //
+          // Badge precedence (issue #777):
+          //   1. derive from aggregate gate verdict when all 3 gates
+          //      are accounted for -- a wrapper-script rc=1 with all
+          //      judges approving is a wrapper bug, NOT a verdict
+          //      rejection (operators cannot tell that the run is
+          //      semantically complete when the badge stays "running"
+          //      indefinitely).
+          //   2. fall back to "watching" + rc only when gate state is
+          //      incomplete (some still missing / running), since at
+          //      that point rc IS the only signal we have.
+          var rc = data.exit_code;
+          var verdict = aggregateGateVerdict();
+          var badgeLabel, badgeCls, logSuffix;
+          if (verdict === "approve") {
+            badgeLabel = "Approve (all gates, rc=" + rc + ")";
+            badgeCls = "done-ok";
+            logSuffix = "all gates approved";
+          } else if (verdict === "blocked") {
+            badgeLabel = "Blocked (rc=" + rc + ")";
+            badgeCls = "done-err";
+            logSuffix = "blocked gate detected";
+          } else if (verdict === "changes") {
+            badgeLabel = "Changes Requested (rc=" + rc + ")";
+            badgeCls = "done-err";
+            logSuffix = "changes-requested gate detected";
+          } else {
+            // incomplete: at least one gate still missing or running,
+            // so we genuinely cannot derive a verdict from gates alone.
+            badgeLabel = "watching (iter done, rc=" + rc + ", incomplete)";
+            badgeCls = "running";
+            logSuffix = "watching for the next iteration";
+          }
+          appendOutput("[babysit] iteration finished rc=" + rc + " -- " + logSuffix, "muted");
+          setStatus(badgeLabel, badgeCls);
           break;
         }
         case "done": {
