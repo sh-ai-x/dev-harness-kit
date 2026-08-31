@@ -1938,5 +1938,277 @@ class TestLinearAutosyncHookCallsAutoSync(unittest.TestCase):
                       "the hook must pass task-change-sync as the subcommand argument")
 
 
+class TestAutoArchiveDone(unittest.TestCase):
+    """Auto-archive flag drives whether the Done transition also archives."""
+
+    def test_default_true_when_config_missing(self):
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config=None) as repo:
+            self.assertTrue(linear_sync._auto_archive_done_enabled(repo))
+
+    def test_explicit_false_is_honored(self):
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config={"auto_archive_done": False}) as repo:
+            self.assertFalse(linear_sync._auto_archive_done_enabled(repo))
+
+    def test_explicit_true_is_honored(self):
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config={"auto_archive_done": True}) as repo:
+            self.assertTrue(linear_sync._auto_archive_done_enabled(repo))
+
+    def test_done_transition_calls_archive_when_enabled(self):
+        with _fake_repo(linear_api_key="test-key",
+                        branch="feat/x",
+                        handoff={"prompt": "implement foo",
+                                 "issue": "DEMO-1 (iss-1)",
+                                 "state": "In Progress", "branch": "feat/x",
+                                 "scope": "feat/x::implement foo",
+                                 "action": "updated"},
+                        commit_subject="implement foo done") as repo:
+            archive_calls: list[str] = []
+
+            def handler(payload):
+                q = payload["query"]
+                if "projects(filter:" in q and "projectCreate" not in q:
+                    return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+                if "issues(filter:" in q:
+                    return {"data": {"issues": {"nodes": [{
+                        "id": "iss-1", "identifier": "DEMO-1",
+                        "description": "<!-- scope:feat/x::implement foo done -->body",
+                        "updatedAt": "2026-08-06T00:00:00Z",
+                        "state": {"name": "In Progress"},
+                    }]}}}
+                if "workflowStates" in q:
+                    return {"data": {"workflowStates": {"nodes": [{"id": "state-done", "name": "Done"}]}}}
+                if "issueUpdate" in q:
+                    return {"data": {"issueUpdate": {"success": True, "issue": {"id": "iss-1", "identifier": "DEMO-1", "state": {"name": "Done"}}}}}
+                if "issueArchive" in q:
+                    archive_calls.append(payload["variables"]["id"])
+                    return {"data": {"issueArchive": {"success": True, "entity": {"id": "iss-1", "identifier": "DEMO-1", "archivedAt": "2026-08-31T00:00:00Z"}}}}
+                raise AssertionError(f"unexpected query: {q}")
+
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                self.assertEqual(linear_sync.sync(), 0)
+            self.assertEqual(archive_calls, ["iss-1"], "Done transition should archive the issue when the flag is on")
+            handoff = json.loads(
+                (repo / ".dev-kit" / "hand-off" / "linear" / "fake-worktree.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(handoff["auto_archived"])
+
+    def test_done_transition_skips_archive_when_disabled(self):
+        with _fake_repo(linear_api_key="test-key",
+                        branch="feat/x",
+                        linear_config={"auto_archive_done": False},
+                        handoff={"prompt": "implement foo",
+                                 "issue": "DEMO-1 (iss-1)",
+                                 "state": "In Progress", "branch": "feat/x",
+                                 "scope": "feat/x::implement foo",
+                                 "action": "updated"},
+                        commit_subject="implement foo done") as repo:
+            archive_calls: list[str] = []
+
+            def handler(payload):
+                q = payload["query"]
+                if "projects(filter:" in q and "projectCreate" not in q:
+                    return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+                if "issues(filter:" in q:
+                    return {"data": {"issues": {"nodes": [{
+                        "id": "iss-1", "identifier": "DEMO-1",
+                        "description": "<!-- scope:feat/x::implement foo done -->body",
+                        "updatedAt": "2026-08-06T00:00:00Z",
+                        "state": {"name": "In Progress"},
+                    }]}}}
+                if "workflowStates" in q:
+                    return {"data": {"workflowStates": {"nodes": [{"id": "state-done", "name": "Done"}]}}}
+                if "issueUpdate" in q:
+                    return {"data": {"issueUpdate": {"success": True, "issue": {"id": "iss-1", "identifier": "DEMO-1", "state": {"name": "Done"}}}}}
+                if "issueArchive" in q:
+                    archive_calls.append(payload["variables"]["id"])
+                    return {"data": {"issueArchive": {"success": True, "entity": {"id": "iss-1", "identifier": "DEMO-1", "archivedAt": "2026-08-31T00:00:00Z"}}}}
+                raise AssertionError(f"unexpected query: {q}")
+
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                self.assertEqual(linear_sync.sync(), 0)
+            self.assertEqual(archive_calls, [], "Done transition must NOT archive when the flag is off")
+            handoff = json.loads(
+                (repo / ".dev-kit" / "hand-off" / "linear" / "fake-worktree.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(handoff["auto_archived"])
+
+
+class TestCleanupDoneArgs(unittest.TestCase):
+    """`linear cleanup-done` argv parsing + subcommand dispatch."""
+
+    def test_parse_cleanup_done_args_defaults(self):
+        args = linear_sync._parse_cleanup_done_args([])
+        self.assertEqual(args, {"dry_run": False, "older_than_days": 0})
+
+    def test_parse_cleanup_done_args_dry_run(self):
+        args = linear_sync._parse_cleanup_done_args(["--dry-run"])
+        self.assertTrue(args["dry_run"])
+        self.assertEqual(args["older_than_days"], 0)
+
+    def test_parse_cleanup_done_args_older_than_space(self):
+        args = linear_sync._parse_cleanup_done_args(["--older-than", "7"])
+        self.assertEqual(args["older_than_days"], 7)
+
+    def test_parse_cleanup_done_args_older_than_equals(self):
+        args = linear_sync._parse_cleanup_done_args(["--older-than=14"])
+        self.assertEqual(args["older_than_days"], 14)
+
+    def test_parse_cleanup_done_args_combined(self):
+        args = linear_sync._parse_cleanup_done_args(["--dry-run", "--older-than=3"])
+        self.assertTrue(args["dry_run"])
+        self.assertEqual(args["older_than_days"], 3)
+
+    def test_parse_cleanup_done_args_invalid_value(self):
+        with self.assertRaises(SystemExit):
+            linear_sync._parse_cleanup_done_args(["--older-than", "abc"])
+
+    def test_parse_cleanup_done_args_missing_value(self):
+        with self.assertRaises(SystemExit):
+            linear_sync._parse_cleanup_done_args(["--older-than"])
+
+    def test_parse_cleanup_done_args_negative(self):
+        with self.assertRaises(SystemExit):
+            linear_sync._parse_cleanup_done_args(["--older-than=-1"])
+
+    def test_parse_cleanup_done_args_unknown_flag(self):
+        with self.assertRaises(SystemExit):
+            linear_sync._parse_cleanup_done_args(["--what"])
+
+    def test_cmd_cleanup_done_dry_run_lists_without_archiving(self):
+        archive_calls: list[str] = []
+
+        def handler(payload):
+            q = payload["query"]
+            if "projects(filter:" in q and "projectCreate" not in q:
+                return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+            if "issues(filter:" in q:
+                return {"data": {"issues": {"nodes": [
+                    {"id": "iss-a", "identifier": "DEMO-1", "updatedAt": "2026-08-30T00:00:00Z", "state": {"name": "Done"}},
+                    {"id": "iss-b", "identifier": "DEMO-2", "updatedAt": "2026-08-29T00:00:00Z", "state": {"name": "Canceled"}},
+                ]}}}
+            if "issueArchive" in q:
+                archive_calls.append(payload["variables"]["id"])
+                return {"data": {"issueArchive": {"success": True, "entity": {"id": payload["variables"]["id"], "identifier": "X", "archivedAt": "2026-08-31T00:00:00Z"}}}}
+            raise AssertionError(f"unexpected query: {q}")
+
+        captured = io.StringIO()
+        with _fake_repo(linear_api_key="test-key"):
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)), \
+                 mock.patch("sys.stdout", captured):
+                self.assertEqual(linear_sync.main(["cleanup-done", "--dry-run"]), 0)
+        out = captured.getvalue()
+        self.assertIn("would archive=2", out)
+        self.assertIn("DEMO-1", out)
+        self.assertIn("DEMO-2", out)
+        self.assertEqual(archive_calls, [], "dry-run must not send issueArchive")
+
+    def test_cmd_cleanup_done_runs_archive_when_not_dry_run(self):
+        archive_calls: list[str] = []
+
+        def handler(payload):
+            q = payload["query"]
+            if "projects(filter:" in q and "projectCreate" not in q:
+                return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+            if "issues(filter:" in q:
+                return {"data": {"issues": {"nodes": [
+                    {"id": "iss-a", "identifier": "DEMO-1", "updatedAt": "2026-08-30T00:00:00Z", "state": {"name": "Done"}},
+                ]}}}
+            if "issueArchive" in q:
+                archive_calls.append(payload["variables"]["id"])
+                return {"data": {"issueArchive": {"success": True, "entity": {"id": payload["variables"]["id"], "identifier": "DEMO-1", "archivedAt": "2026-08-31T00:00:00Z"}}}}
+            raise AssertionError(f"unexpected query: {q}")
+
+        with _fake_repo(linear_api_key="test-key"):
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                self.assertEqual(linear_sync.main(["cleanup-done"]), 0)
+        self.assertEqual(archive_calls, ["iss-a"], "real run must send issueArchive")
+
+    def test_cmd_auto_archive_status_off(self):
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config={"auto_archive_done": False}):
+            captured = io.StringIO()
+            with mock.patch("sys.stdout", captured):
+                self.assertEqual(linear_sync.main(["auto-archive", "status"]), 0)
+            self.assertIn("auto-archive=off", captured.getvalue())
+
+    def test_cmd_auto_archive_on_writes_flag(self):
+        with _fake_repo(linear_api_key="test-key") as repo:
+            self.assertEqual(linear_sync.main(["auto-archive", "on"]), 0)
+            cfg = json.loads((repo / ".dev-kit" / "linear-config.json").read_text(encoding="utf-8"))
+            self.assertTrue(cfg["auto_archive_done"])
+
+    def test_cmd_auto_archive_off_writes_flag(self):
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config={"auto_archive_done": True}) as repo:
+            self.assertEqual(linear_sync.main(["auto-archive", "off"]), 0)
+            cfg = json.loads((repo / ".dev-kit" / "linear-config.json").read_text(encoding="utf-8"))
+            self.assertFalse(cfg["auto_archive_done"])
+
+    def test_cmd_auto_archive_invalid_value_returns_2(self):
+        with _fake_repo(linear_api_key="test-key"):
+            self.assertEqual(linear_sync.main(["auto-archive", "maybe"]), 2)
+
+
+class TestCleanupDoneCandidates(unittest.TestCase):
+    """`_done_cleanup_candidates` filters Done/Canceled by project + age."""
+
+    def test_filters_to_terminal_states_only(self):
+        def handler(payload):
+            q = payload["query"]
+            if "projects(filter:" in q and "projectCreate" not in q:
+                return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+            if "issues(filter:" in q:
+                return {"data": {"issues": {"nodes": [
+                    {"id": "iss-done", "identifier": "DEMO-1", "updatedAt": "2026-08-30T00:00:00Z", "state": {"name": "Done"}},
+                    {"id": "iss-open", "identifier": "DEMO-2", "updatedAt": "2026-08-30T00:00:00Z", "state": {"name": "Todo"}},
+                    {"id": "iss-cancel", "identifier": "DEMO-3", "updatedAt": "2026-08-30T00:00:00Z", "state": {"name": "Canceled"}},
+                ]}}}
+            raise AssertionError(f"unexpected query: {q}")
+
+        with _fake_repo(linear_api_key="test-key"):
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                candidates = linear_sync._done_cleanup_candidates("proj-1", older_than_days=0)
+            ids = [c["id"] for c in candidates]
+            self.assertEqual(ids, ["iss-done", "iss-cancel"], "filter must restrict to terminal states")
+
+    def test_older_than_zero_returns_all(self):
+        def handler(payload):
+            q = payload["query"]
+            if "projects(filter:" in q and "projectCreate" not in q:
+                return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+            if "issues(filter:" in q:
+                return {"data": {"issues": {"nodes": [
+                    {"id": "iss-fresh", "identifier": "DEMO-1", "updatedAt": "2026-08-31T00:00:00Z", "state": {"name": "Done"}},
+                ]}}}
+            raise AssertionError(f"unexpected query: {q}")
+
+        with _fake_repo(linear_api_key="test-key"):
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                candidates = linear_sync._done_cleanup_candidates("proj-1", older_than_days=0)
+            self.assertEqual([c["id"] for c in candidates], ["iss-fresh"])
+
+    def test_older_than_skips_fresh_issues(self):
+        def handler(payload):
+            q = payload["query"]
+            if "projects(filter:" in q and "projectCreate" not in q:
+                return {"data": {"projects": {"nodes": [{"id": "proj-1", "name": "demo"}]}}}
+            if "issues(filter:" in q:
+                # One old, one fresh. updatedAt < cutoff -> old.
+                return {"data": {"issues": {"nodes": [
+                    {"id": "iss-old", "identifier": "DEMO-1", "updatedAt": "2020-01-01T00:00:00Z", "state": {"name": "Done"}},
+                    {"id": "iss-new", "identifier": "DEMO-2", "updatedAt": "2026-08-31T00:00:00Z", "state": {"name": "Done"}},
+                ]}}}
+            raise AssertionError(f"unexpected query: {q}")
+
+        with _fake_repo(linear_api_key="test-key"):
+            with mock.patch("urllib.request.urlopen", _mocked_urlopen(handler)):
+                candidates = linear_sync._done_cleanup_candidates("proj-1", older_than_days=30)
+            self.assertEqual([c["id"] for c in candidates], ["iss-old"],
+                             "fresh issues must be skipped when older_than_days > 0")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
