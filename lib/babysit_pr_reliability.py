@@ -336,3 +336,21 @@ def diff_check_states(
         else:
             unchanged.append(name)
     return {"changed": sorted(changed), "unchanged": sorted(unchanged)}
+
+
+def read_pr_lock_body(path: PathLike) -> str:
+    """Return the raw body of a per-PR lock file, or "" on missing/unreadable.
+
+    Pure helper, no I/O randomness: callers can pass it the path they
+    just verified exists. Used by `bin/babysit-pr-local.sh` to print
+    the *current* lock holder's PID + branch + ISO timestamp in its
+    "already running" diagnostic so the operator can decide whether
+    to kill the previous run or wait for it. Failure modes (missing,
+    unreadable, permission denied, is-a-directory) all collapse to
+    an empty string -- the caller already gated on existence, so an
+    empty body just means "the lock body is gone, treat as stale".
+    """
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""

@@ -293,8 +293,20 @@ blocker list, exit 1. Never silently retry past the cap.
   skill aborts with the file:line and exits 1.
 - **No destructive git ops**: `reset --hard`, `clean -fd`, branch
   deletion forbidden.
-- **One PR at a time**: refuse to run if a sibling process holds
-  `<worktree>/.dev-kit/babysit.lock` (TTL via `is_stale_lock`).
+- **One PR at a time (per-machine)**: refuse to run if a sibling
+  process holds `<worktree>/.dev-kit/babysit.lock` (TTL via
+  `is_stale_lock`) OR `<git-common-dir>/dev-kit/babysit-pr-local-<N>.lock`
+  (same TTL). The per-PR lock is cross-worktree so a second terminal
+  in a different worktree hitting the same PR still triggers
+  "already running". See §Lock file protocol §2 for the full
+  protocol + diagnostic message shape.
+- **No duplicate HTML viewer spawn**: the auto-opened browser tab at
+  `/pr/<N>?autostart=1` is a read-only mirror of the babysit session's
+  own `tee`'d log. The HTML intentionally has NO Start / Stop
+  buttons (and no PR-number input that could route to `/stream`),
+  so a second click cannot spawn a duplicate `bin/review-local.sh`
+  pipeline. To run a one-shot local review manually, use
+  `bin/review-local.sh --pr N` from a terminal.
 - **Provider pre-resolved**: `bin/review-local.sh` reads
   `CI_REVIEW_PROVIDER` from env → `.env` via `lib/ci_setup.read_provider`
   and passes the matching `*_API_KEY` only to the `claude -p` invocation
@@ -321,7 +333,9 @@ retry past the cap, lower the bar, or skip.
 
 ## Lock file protocol
 
-On start (existing-lock safety net FIRST; then stamp-and-write):
+Two locks, both enforced by `bin/babysit-pr-local.sh`:
+
+### 1. Per-worktree lock (skill-level, shared with `/dev-kit:babysit-pr`)
 
 ```bash
 mkdir -p .dev-kit
@@ -344,9 +358,50 @@ echo "$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD) source=
 trap 'rm -f .dev-kit/babysit.lock' EXIT
 ```
 
-The lock is **shared** with `/dev-kit:babysit-pr`; either skill's
-stale-lock detector accepts the other's marker (the `source=` field is
-the disambiguator).
+Shared with `/dev-kit:babysit-pr`; either skill's stale-lock detector
+accepts the other's marker (the `source=` field is the disambiguator).
+
+### 2. Per-PR lock (machine-wide, cross-worktree) — NEW
+
+Prevents two `babysit-pr-local` invocations against the same PR from
+racing past the per-worktree lock and concurrently running their own
+`bin/review-local.sh` (which would clobber the shared live log and
+risk a duplicate `git push`). Acquired by `bin/babysit-pr-local.sh`
+at the top of every iteration, BEFORE the viewer auto-launch block.
+Lock path encodes the PR number; the parent dir defaults to
+`<git-common-dir>/dev-kit` so every worktree in the repo shares the
+same per-PR namespace.
+
+```bash
+PR_LOCK_PATH="<git-common-dir>/dev-kit/babysit-pr-local-${PR_NUMBER}.lock"
+if [[ -f "$PR_LOCK_PATH" ]]; then
+  if python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.exit(0 if bpr.is_stale_lock('$PR_LOCK_PATH') else 1)
+" 2>/dev/null; then
+    rm -f "$PR_LOCK_PATH"
+  else
+    HOLDER="$(python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR/../lib')
+import babysit_pr_reliability as bpr
+sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
+" 2>/dev/null || true)"
+    echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
+    exit 1
+  fi
+fi
+echo "$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD) source=babysit-pr-local pr=${PR_NUMBER}" \
+  > "$PR_LOCK_PATH"
+trap 'rm -f "$PR_LOCK_PATH"' EXIT
+```
+
+A second wrapper on a DIFFERENT PR is allowed (the lock path encodes
+the PR number, so locks do not collide across PRs). The
+`BABYSIT_LOCK_PARENT` env var overrides the parent dir for hermetic
+tests.
 
 ---
 
@@ -374,11 +429,17 @@ Two independent surfaces exist; do not conflate them.
 does this on every iteration: the wrapper ensures
 `bin/review-local-server.py` is running and opens
 `http://127.0.0.1:8765/pr/<N>?autostart=1` in the operator's browser
-(once per PR per hour), which live-streams the current
-`review-local.sh` run's stdout plus the three gate dots
-(review/security/maintenance). See
-`docs/tools/review-local-html-viewer.md`. Opt out with
-`BABYSIT_NO_VIEWER=1`.
+(once per PR per hour). The page is a **read-only mirror** of
+`bin/review-local-server.py`'s `/pr/<N>/tail` SSE route -- it
+follows `.dev-kit/babysit-pr-local-live.log` (the file the wrapper
+already `tee`s its own `review-local.sh` run into) and NEVER spawns
+a second verdict pipeline. There is intentionally no Start / Stop
+button on the page (issue #769): clicking one would spawn a
+duplicate `bin/review-local.sh` (and a second round of `claude -p`
+API spend) alongside the babysit session already running. To run a
+one-shot local review manually, use `bin/review-local.sh --pr N`
+from a terminal. See `docs/tools/review-local-html-viewer.md` for
+the full contract + screenshot. Opt out with `BABYSIT_NO_VIEWER=1`.
 
 **ANSI status line (manual opt-in, terminal-only)** --
 `bin/babysit-pr-local-status.py` is a read-only SSOT script that prints
