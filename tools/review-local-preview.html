@@ -269,7 +269,12 @@
       // state. Without this transition the dot column would stay
       // stuck on "running" forever, even though the right pane shows
       // the verdict clearly (the bug this fixes).
-      var verdict = m[1];
+      // Normalize to title case so a judge emitting "approve" (any
+      // case) still hits _verdictToState's strict-equality branches
+      // -- otherwise it falls through to the `failed` (red-dot)
+      // default and silently flips a clean gate to red.
+      var rawVerdict = m[1];
+      var verdict = rawVerdict.charAt(0).toUpperCase() + rawVerdict.slice(1).toLowerCase();
       var cssClass;
       if (verdict === "Approve") cssClass = "verdict-approve";
       else if (verdict === "Changes Requested") cssClass = "verdict-changes";

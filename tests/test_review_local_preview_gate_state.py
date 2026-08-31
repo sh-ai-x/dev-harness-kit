@@ -217,6 +217,108 @@ class TestHtmlViewerGateStateTransitions(unittest.TestCase):
                     f"got class={classes.get(gate, '<missing>')!r}",
                 )
 
+    def test_lowercase_verdict_does_not_flip_gate_to_failed(self) -> None:
+        """Regression: judgeVerdictRe uses `/i` (case-insensitive) but the
+        downstream `===` checks were strict. A judge emitting
+        `**Verdict:** approve` (lowercase) previously fell through to
+        _verdictToState's `failed` default and flipped a clean gate to
+        the red `failed` class. The fix normalizes verdict case before
+        `_verdictToState` so any case-variation lands on the correct
+        state.
+        """
+        # Spawn a separate server with a lowercase-verdict log so we
+        # don't disturb the class-level server. The server is
+        # read-only, so we just point it at a different log file.
+        import shutil as _shutil
+
+        from playwright.sync_api import sync_playwright
+
+        # Write a lowercase-variant log to a fresh tmpdir + boot a
+        # sister server against it.
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "repo"
+            fake_root.mkdir()
+            (fake_root / "bin").mkdir()
+            (fake_root / "tools").symlink_to(PROJECT_ROOT / "tools")
+            (fake_root / "bin" / "review-local.sh").write_text(
+                "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
+            )
+            (fake_root / "bin" / "review-local.sh").chmod(
+                (fake_root / "bin" / "review-local.sh").stat().st_mode | stat.S_IXUSR
+            )
+            _shutil.copy(SERVER, fake_root / "bin" / "review-local-server.py")
+            (fake_root / ".dev-kit").mkdir()
+            (fake_root / ".dev-kit" / "babysit-pr-local-live.log").write_text(
+                "  running /dev-kit:review via provider=minimax (dry_run=0)\n"
+                "**Verdict:** approve\n"  # lowercase
+                "  running /dev-kit:security via provider=minimax (dry_run=0)\n"
+                "**Verdict:** approve\n"
+                "  running /dev-kit:maintenance via provider=minimax (dry_run=0)\n"
+                "**Verdict:** approve\n"
+                "##BABYSIT-DONE exit_code=0##\n",
+                encoding="utf-8",
+            )
+            port = _free_port()
+            proc = subprocess.Popen(
+                [sys.executable, str(fake_root / "bin" / "review-local-server.py"),
+                 "--port", str(port), "--bind", "127.0.0.1"],
+                cwd=str(fake_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            try:
+                _wait_for_server("127.0.0.1", port, timeout=5)
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    try:
+                        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+                        page = ctx.new_page()
+                        page.goto(
+                            f"http://127.0.0.1:{port}/pr/999?autostart=1",
+                            wait_until="domcontentloaded", timeout=10_000,
+                        )
+                        # Wait for the SSE `done` event (signals iteration
+                        # finished). On lowercase-verdict runs the
+                        # `combined verdict:` line isn't emitted, so
+                        # `iteration_done` is the only terminal frame.
+                        page.wait_for_function(
+                            "() => document.getElementById('status').textContent.includes('iter done') "
+                            "|| document.getElementById('status').textContent.includes('Approve') "
+                            "|| document.getElementById('status').textContent.includes('Changes Requested')",
+                            timeout=15_000,
+                        )
+                        page.wait_for_timeout(150)
+                        classes = page.evaluate("""() => {
+                            const out = {};
+                            document.querySelectorAll('[data-gate]').forEach(el => {
+                                out[el.getAttribute('data-gate')] = el.className;
+                            });
+                            return out;
+                        }""")
+                    finally:
+                        browser.close()
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+        for gate in ("review", "security", "maintenance"):
+            with self.subTest(gate=gate):
+                self.assertIn(
+                    "approved", classes.get(gate, ""),
+                    f"lowercase `**Verdict:** approve` should still resolve "
+                    f"to gate {gate!r} `approved` (not `failed`); "
+                    f"got class={classes.get(gate, '<missing>')!r}. all={classes!r}",
+                )
+                self.assertNotIn(
+                    "failed", classes.get(gate, ""),
+                    f"lowercase verdict must NOT fall through to the "
+                    f"`failed` (red-dot) default; gate={gate!r} class="
+                    f"{classes.get(gate, '<missing>')!r}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
