@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workflow Fast Mode (Lean v3) — harness-mode Skill, Ask-Based Custom Picker, Session-Scoped Default</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Workflow Fast Mode (Lean v3) — harness-mode Skill, Ask-Based Custom Picker, Session-Scoped Default</h1>
+<p class="meta">2026-08-30 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">workflow</span><span class="tag tag-info">gates</span><span class="tag tag-info">fast</span><span class="tag tag-info">full</span><span class="tag tag-info">custom</span><span class="tag tag-info">build</span><span class="tag tag-info">review</span><span class="tag tag-info">security</span><span class="tag tag-info">maintenance</span><span class="tag tag-info">babysit-pr</span><span class="tag tag-info">vibe</span><span class="tag tag-info">correctness</span><span class="tag tag-info">harness-mode</span><span class="tag tag-info">ask-tool</span><span class="tag tag-info">session-scoped</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">1. Design principle — correctness gates stay local, others defer to CI</a></li><li><a href="#sec-1">2. What each mode flips</a></li><li><a href="#sec-2">3. The /dev-kit:harness-mode skill</a></li><li><a href="#sec-3">4. Session-scoped default — new window always starts full</a></li><li><a href="#sec-4">5. Implementation sketch</a></li><li><a href="#sec-5">6. Failure modes</a></li><li><a href="#sec-6">7. Why this beats the earlier all-YAML profile framework</a></li><li><a href="#sec-7">8. Out of scope (intentionally)</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">1. Design principle — correctness gates stay local, others defer to CI</h2>
+<p>Vibe mode is not "skip safety". It is "pay the safety cost once, in CI, instead of twice (local + CI)". The only gates that absolutely MUST run locally are the ones whose failure CI cannot recover from.</p>
+<p>Gates fall into four categories:</p>
+<table><thead><tr><th>Category</th><th>Examples</th><th>Picker-eligible?</th><th>Why</th></tr></thead><tbody><tr><td>Correctness</td><td><code>stop_verify</code>, <code>secret_scan</code>, <code>intent_integrity</code> (high), <code>gh_ci_required</code></td><td><strong>NO — never shown, never off</strong></td><td>Sub-agent silently succeeding on no-diff (issue #221 RC2), leaked credentials, high-severity finding pushed as PR — CI cannot recover the time already invested, OR the leak happens before CI sees it.</td></tr><tr><td>Style</td><td><code>slop_detector</code>, <code>maintenance</code> (CC/OE/VM)</td><td>YES</td><td>Lint / cosmetic. CI re-runs the same gates; nothing local-only is lost.</td></tr><tr><td>Quality</td><td><code>/dev-kit:review</code> verifier pass, <code>/dev-kit:security</code> (10-dim OWASP)</td><td>YES</td><td>Multi-pass LLM judge — local wall-clock's main culprit. <code>.github/workflows/{review,security}.yml</code> runs the same checks on push.</td></tr><tr><td>Process</td><td><code>pre_commit_review</code> (<code>codex:review</code>), <code>/dev-kit:babysit-pr</code> polling</td><td>YES</td><td>Human / loop time. Branch protection + GH-Actions required checks provide the same enforcement on push.</td></tr></tbody></table>
+<p>Two outcomes:</p>
+<ul><li>PR merged correctly with full strict review: same end state, less local time.</li><li>CI catches something local would have caught: developer fixes it; same end state, slightly later.</li></ul>
+<p>There is no path where CI merges without strict review but local would have caught it — because CI runs the same gates. The only thing fast/custom mode sacrifices is developer time, not correctness.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">2. What each mode flips</h2>
+<table><thead><tr><th>Classification</th><th>Gate</th><th><code>full</code> (default)</th><th><code>fast</code></th><th><code>custom</code></th></tr></thead><tbody><tr><td>Correctness</td><td><code>stop_verify</code></td><td>ON</td><td><strong>ON (always)</strong></td><td><strong>ON (always, not shown)</strong></td></tr><tr><td>Correctness</td><td><code>secret_scan</code></td><td>ON</td><td><strong>ON (always)</strong></td><td><strong>ON (always, not shown)</strong></td></tr><tr><td>Correctness</td><td><code>intent_integrity</code> (high)</td><td>ON</td><td><strong>ON (always)</strong></td><td><strong>ON (always, not shown)</strong></td></tr><tr><td>Correctness</td><td><code>gh_ci_required</code></td><td>ON</td><td><strong>ON (always)</strong></td><td><strong>ON (always, not shown)</strong></td></tr><tr><td>Quality</td><td><code>tdd_scope_judge</code></td><td>ON</td><td>OFF</td><td>picker Q1</td></tr><tr><td>Style</td><td><code>slop_detector</code></td><td>ON</td><td>OFF</td><td>picker Q2</td></tr><tr><td>Process</td><td><code>pre_commit_review</code></td><td>ON</td><td>OFF</td><td>picker Q3</td></tr><tr><td>Style</td><td><code>maintenance</code></td><td>ON</td><td>OFF</td><td>picker Q4</td></tr><tr><td>Quality</td><td><code>security_owasp</code></td><td>full (10-dim)</td><td>quick (1-dim)</td><td>picker Q5 (full / quick / off)</td></tr><tr><td>Process</td><td><code>babysit_pr</code></td><td>full (poll + auto-fix)</td><td>manual (1 dump + exit)</td><td>picker Q6 (full / manual)</td></tr></tbody></table>
+<p><code>full</code> is the literal default written by the SessionStart hook — every new session starts here. <code>fast</code> is one skill call away (<code>/dev-kit:harness-mode fast</code>) and flips every optional gate off in one shot. <code>custom</code> is for the case where the developer wants, say, TDD off but the pre-commit review kept on.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">3. The /dev-kit:harness-mode skill</h2>
+<pre><code class="language-bash">/dev-kit:harness-mode fast     # instant: all optional gates OFF, correctness gates ON
+/dev-kit:harness-mode full     # instant: everything ON (also the SessionStart default)
+/dev-kit:harness-mode custom   # interactive: walks the 6 optional gates via AskUserQuestion
+/dev-kit:harness-mode show     # prints the currently resolved gate table, no prompts</code></pre>
+<p><code>custom</code> issues two batched <code>AskUserQuestion</code> calls — 3 questions each, matching the practical limit for a single legible prompt screen:</p>
+<p><strong>Call 1 (Y/N gates):</strong></p>
+<table><thead><tr><th>#</th><th>Question</th><th>Options</th></tr></thead><tbody><tr><td>1</td><td>Run the TDD scope judge locally before each build step?</td><td>Keep it ON / Skip locally (defer to CI)</td></tr><tr><td>2</td><td>Run slop-detector locally on each write?</td><td>Keep it ON / Skip locally</td></tr><tr><td>3</td><td>Run pre-commit <code>codex:review</code> before each commit?</td><td>Keep it ON / Skip locally</td></tr></tbody></table>
+<p><strong>Call 2 (Y/N + enum gates):</strong></p>
+<table><thead><tr><th>#</th><th>Question</th><th>Options</th></tr></thead><tbody><tr><td>4</td><td>Run the maintenance (CC/OE/VM) gate locally?</td><td>Keep it ON / Skip locally</td></tr><tr><td>5</td><td>Local security scan depth?</td><td>Full 10-dim OWASP fan-out / Quick single-dim summary / Skip locally</td></tr><tr><td>6</td><td><code>/dev-kit:babysit-pr</code> behavior this session?</td><td>Full auto-fix polling loop / Manual: one <code>gh pr checks</code> dump + exit</td></tr></tbody></table>
+<p>Each answer writes directly into <code>.dev-kit/harness-mode.session.json:gates.&lt;name&gt;</code>. The skill then prints the resolved table (same format as <code>full</code>/<code>fast</code>) so the developer sees exactly what was chosen before continuing.</p>
+<p><code>alpha: state</code> per the L6 skill gate (<code>tests/test_skill_governance.py</code>) — the skill persists a session artifact and gates subsequent skill behavior from it, which is <code>state</code> by definition, not <code>analysis</code> or <code>enforcement</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">4. Session-scoped default — new window always starts full</h2>
+<p>A new SessionStart hook, <code>hooks/session-start-harness-mode-reset.sh</code>, unconditionally writes:</p>
+<pre><code class="language-json">{&quot;mode&quot;: &quot;full&quot;, &quot;gates&quot;: {}}</code></pre>
+<p>to <code>.dev-kit/harness-mode.session.json</code> at the start of every session — before the worktree auto-cut hook, loghooks installer, or any other SessionStart hook in this repo runs its own logic (order does not matter here since this hook only touches its own file). This guarantees:</p>
+<ul><li>Opening a new Claude Code window or Codex session always starts in <code>full</code> (strict) mode, regardless of what the previous session left behind.</li><li><code>fast</code> or <code>custom</code> must be chosen explicitly, every session — there is no way to "leave fast mode on" by accident across a break.</li><li>The state file is NOT a project-level config; it lives in <code>.dev-kit/</code> (already gitignored alongside other session/run state such as <code>.dev-kit/trace/</code>, <code>.dev-kit/repair/</code>), so it never gets committed and never leaks between developers sharing a clone.</li></ul>
+<p>Failure mode: if the hook fails to run (e.g. <code>.dev-kit/</code> not writable), <code>lib.harness_mode_state.read_state()</code> falls back to <code>mode=full</code> when the file is missing or corrupt — the safe default either way.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">5. Implementation sketch</h2>
+<pre><code class="language-python"># lib/harness_mode_state.py
+STATE_PATH = Path(&quot;.dev-kit/harness-mode.session.json&quot;)
+CORRECTNESS_GATES = frozenset({
+    &quot;stop_verify&quot;, &quot;secret_scan&quot;, &quot;intent_integrity&quot;, &quot;gh_ci_required&quot;,
+})
+
+def read_state() -&gt; dict:
+    if not STATE_PATH.exists():
+        return {&quot;mode&quot;: &quot;full&quot;, &quot;gates&quot;: {}}
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {&quot;mode&quot;: &quot;full&quot;, &quot;gates&quot;: {}}  # corrupt file -&gt; safe default
+
+def write_state(mode: str, gates: Optional[dict] = None) -&gt; None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(STATE_PATH, {&quot;mode&quot;: mode, &quot;gates&quot;: gates or {}})
+
+def resolved_gate(name: str) -&gt; str:
+    if name in CORRECTNESS_GATES:
+        return &quot;on&quot;  # hardcoded — no state file value can override this
+    state = read_state()
+    if name in state.get(&quot;gates&quot;, {}):
+        return state[&quot;gates&quot;][name]
+    return &quot;on&quot; if state.get(&quot;mode&quot;) == &quot;full&quot; else &quot;off&quot;</code></pre>
+<pre><code class="language-bash"># hooks/session-start-harness-mode-reset.sh
+python3 -m lib.harness_mode_state write full</code></pre>
+<pre><code class="language-bash"># hooks/slop-detector.sh — first 3 lines
+if [ &quot;$(python3 -m lib.harness_mode_state get slop_detector)&quot; = &quot;off&quot; ]; then
+  echo &quot;slop-detector: opted out via harness-mode&quot; &gt;&amp;2
+  exit 0
+fi</code></pre>
+<p>Sub-agent preamble injection (unchanged shape from earlier iterations):</p>
+<pre><code>AC: see step file. 3-cycle self-fix max.
+Gates in effect: stop_verify=ON, secret_scan=ON, tdd_scope_judge=OFF (harness-mode=fast).
+Do not write tests for non-production code unless the step file asks.
+If stop_verify or secret_scan fires, treat as a hard stop.</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-5">6. Failure modes</h2>
+<table><thead><tr><th>Failure</th><th>Behavior</th></tr></thead><tbody><tr><td><code>AskUserQuestion</code> unavailable (headless/CI invocation of <code>custom</code>)</td><td>Skill falls back to printing the same 6 questions as a plain markdown table and instructs the caller to run <code>/dev-kit:harness-mode fast</code> or <code>full</code> instead; does not hang waiting for interactive input.</td></tr><tr><td>SessionStart hook fails to write the state file</td><td><code>resolved_gate()</code> treats a missing/corrupt file as <code>mode=full</code> — fails safe, not fails open.</td></tr><tr><td>Developer runs <code>/dev-kit:harness-mode fast</code>, then a real secret is found by <code>secret_scan</code></td><td>Hook exits non-zero as always — <code>secret_scan</code> is a correctness gate, never affected by mode.</td></tr><tr><td>Legacy <code>DEV_KIT_FAST_MODE=1</code> env var set AND <code>/dev-kit:harness-mode custom</code> run in the same session</td><td>The skill-written state file wins — <code>resolved_gate()</code> only consults the env var when <code>.dev-kit/harness-mode.session.json</code> does not yet exist this session.</td></tr><tr><td><code>custom</code> picker interrupted mid-way (user closes 2nd <code>AskUserQuestion</code> without answering)</td><td>Partial answers from call 1 are already persisted (each call writes before returning); unanswered gates from call 2 default to <code>full</code>'s value (ON), not to <code>fast</code>'s value (OFF) — safe default.</td></tr><tr><td>CI required check set contradicts the chosen mode</td><td>Not detected locally. Merge attempt fails at the GH-Actions gate. Same as today — no regression.</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-6">7. Why this beats the earlier all-YAML profile framework</h2>
+<p>The first (over-engineered) draft of this proposal added a new YAML schema (<code>gate_definitions</code> + <code>profiles</code> + <code>active_profile</code>), a resolver module, a config-management skill, and updates to 5 existing skills plus N hooks — 12+ file changes for a project-level, hand-edited config file.</p>
+<p>This version keeps the same underlying mechanism (one small state module, correctness gates hardcoded) but replaces "hand-edit a YAML profile" with "answer up to 6 quick questions via the tool you already have open" and replaces "project-level persistent config" with "session-scoped, resets every window". Both changes reduce the blast radius of a wrong or forgotten setting: a bad YAML edit persists until someone notices it in a diff; a bad interactive answer only lasts until the next session opens.</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">8. Out of scope (intentionally)</h2>
+<ul><li>Per-branch auto-detection. The developer runs <code>/dev-kit:harness-mode</code> explicitly every session by design (section 4).</li><li>Persisting a project-level DEFAULT mode across sessions/developers. Every session starts <code>full</code>; there is no <code>.dev-kit/harness-mode.yaml</code> equivalent to hand-edit and commit.</li><li>Telemetry on "fast/custom-mode-shipped work caught by CI". Ship the mechanism first; measure second.</li><li>Agent model selection. Iron Law 5 is unchanged.</li><li>GH-Actions workflow changes. CI is the safety net; local mode selection is a developer convenience only.</li><li>Gate dependency rules in the picker UI (e.g. auto-forcing <code>maintenance</code> on when <code>security_owasp=full</code>). If needed later it lives in <code>resolved_gate()</code>, not in the <code>AskUserQuestion</code> prompts.</li></ul>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>The dev-harness-kit build pipeline runs the full local gate stack by default: TDD scope judge, intent-integrity pre-build gate, slop-detector, pre-commit <code>codex:review</code>, and <code>/dev-kit:babysit-pr</code> polling loop. All-or-nothing today.</p>
+<p>A "vibe" local iteration loop (small change, manual smoke test, no PR) pays for the full gate stack every commit. Existing escape hatches (<code>DEV_KIT_SKIP_TDD=1</code>, <code>--skip-blocked</code>, <code>--fast</code> on <code>/dev-kit:review</code>) are scattered across env vars, CLI flags, and sibling skills with no common shape and no way to express "skip every optional local gate at once", let alone "skip only these three gates, keep those two".</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>lib/execute.py:46-53</code>: <code>DEV_KIT_AGENT_TIMEOUT_SECONDS</code> env override (escape-hatch shape)</li><li><code>lib/execute.py:78-90</code>: <code>DEV_KIT_BUILD_AGENT</code> env override (claude | codex)</li><li><code>lib/execute.py:404-407</code>: only <code>--skip-blocked</code> and <code>--push</code> flags exist on the runner today</li><li><code>skills/review/SKILL.md:30</code>: <code>--fast</code> flag scoped to one skill (skip verifier only)</li><li><code>hooks/index.md</code>: tdd-guard, slop-detector, secret-scan, stop-verify — no per-project opt-out path</li><li>Bash tool contract: "the working directory persists between commands, but shell state does not" — a plain <code>export DEV_KIT_FAST_MODE=1</code> cannot reliably carry across tool calls, ruling out a pure env-var mechanism for a multi-turn session</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>One new skill, <code>/dev-kit:harness-mode</code>, with three sub-commands: <code>fast</code>, <code>full</code>, <code>custom</code>. <code>fast</code> and <code>full</code> apply instantly — no prompts. <code>custom</code> walks the developer through the optional gates using the native interactive choice tool available in the runtime (<code>AskUserQuestion</code> in Claude Code), batched 3 questions per call so no single prompt exceeds a comfortable choice count. The resolved mode is written to a small session-scoped state file, <code>.dev-kit/harness-mode.session.json</code>, that every gated skill reads on each invocation. A new SessionStart hook resets that file to <code>{"mode": "full"}</code> at the start of every session — opening a new window always starts strict; fast or custom must be chosen explicitly, every session. Correctness gates (stop_verify, secret_scan, intent_integrity-high, gh_ci_required) are never presented as options in the picker and never turn off, regardless of mode.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">skills/harness-mode/SKILL.md</span><p>New skill. <code>alpha: state</code> (persists a session-scoped mode.json). <code>user-invocable: true</code>, <code>model: opus</code>. <code>fast</code> and <code>full</code> write the state file and print the resolved gate table immediately. <code>custom</code> issues 2 batched <code>AskUserQuestion</code> calls (3 questions each) covering the 6 optional gates, then writes the resulting mix to the state file.</p></li><li><span class="file-path">lib/harness_mode_state.py</span><p>New module: <code>read_state()</code> / <code>write_state(mode, gates=None)</code> for <code>.dev-kit/harness-mode.session.json</code>; <code>resolved_gate(name)</code> returns the effective on/off/mode value for one gate, with the four correctness gates hardcoded to always resolve "on" regardless of file contents (defense in depth — even a hand-edited state file cannot disable them).</p></li><li><span class="file-path">hooks/session-start-harness-mode-reset.sh</span><p>New SessionStart hook. Writes <code>{"mode": "full", "gates": {}}</code> to <code>.dev-kit/harness-mode.session.json</code> unconditionally at the start of every Claude Code / Codex session, before any skill reads it. This is what makes the default session-scoped: a new window always starts strict.</p></li><li><span class="file-path">lib/execute.py</span><p>Replace the earlier <code>_fast_mode()</code> sketch with <code>_gate_state(name)</code>, delegating to <code>lib.harness_mode_state.resolved_gate(name)</code>. Thread into <code>_intent_integrity_pre_build_gate</code> and the TDD scope judge call site. Inject the resolved gate set into the per-step preamble so the sub-agent sees what it is and is not responsible for.</p></li><li><span class="file-path">hooks/slop-detector.sh</span><p>Add a 3-line guard calling <code>python3 -m lib.harness_mode_state get slop_detector</code>; if the result is <code>off</code>, print "slop-detector: opted out via harness-mode" to stderr and exit 0.</p></li><li><span class="file-path">skills/build/SKILL.md</span><p>Document <code>/dev-kit:harness-mode</code> as the primary entrypoint. Mention the legacy <code>--fast</code> CLI flag / <code>DEV_KIT_FAST_MODE</code> env var as power-user shortcuts that write the same state file (kept for scriptability, not the recommended path).</p></li><li><span class="file-path">skills/babysit-pr/SKILL.md</span><p>Document <code>babysit_pr</code> gate resolution: <code>manual</code> mode = one <code>gh pr checks</code> dump + exit, no loop.</p></li><li><span class="file-path">tests/test_harness_mode_state.py</span><p>Read/write round-trip for <code>.dev-kit/harness-mode.session.json</code>; the four correctness gates resolve "on" even when the file explicitly sets them "off" (the critical invariant); missing file defaults to <code>mode=full</code>, all gates on.</p></li><li><span class="file-path">tests/test_execute.py</span><p>Add <code>TestGateStateIntegration</code>: <code>_gate_state("tdd_scope_judge")</code> reflects the session file; intent-integrity gate still returns 2 when <code>mode=full</code> (no regression); correctness gates never skip regardless of file content.</p></li><li><span class="file-path">.claude-plugin/plugin.json</span><p>Bump patch version per the auto-bump pipeline; no schema change.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Single skill (<code>/dev-kit:harness-mode</code>) covers all three needs the user asked for: an instant fast toggle, an instant full toggle, and a granular custom picker — no YAML editing, no web form.</li><li>Interactive picker reuses the runtime-native choice tool (<code>AskUserQuestion</code>) instead of building a bespoke UI. Zero new UI surface, zero new dependency.</li><li>Batching at 3 questions per <code>AskUserQuestion</code> call keeps each prompt legible; 6 optional gates fit in 2 calls.</li><li>Session-scoped default (reset to <code>full</code> on every SessionStart) means forgetting to turn fast mode back off cannot leak into the next session, unlike a project-level <code>DEV_KIT_FAST_MODE=1</code> env var a developer forgets they exported.</li><li>Correctness guarantee unchanged from v2: the four mandatory gates (stop_verify, secret_scan, intent_integrity-high, gh_ci_required) are hardcoded in <code>lib.harness_mode_state.resolved_gate()</code> to always resolve "on" — not even a hand-edited state file can disable them.</li><li>GH-Actions workflows untouched — push still runs the full strict gate set, so a fast/custom-mode commit cannot merge without the rigorous review.</li><li>Legacy <code>--fast</code> flag / <code>DEV_KIT_FAST_MODE</code> env var preserved as scriptable shortcuts that resolve to the same underlying state file, so CI-invoked or headless runs are not forced through an interactive prompt.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>The interactive picker (<code>custom</code>) only works in a session where <code>AskUserQuestion</code> (or the runtime<code>s equivalent) is available — not in a fully headless/CI invocation. </code>fast<code> and </code>full` remain the non-interactive fallback for that context.</li><li>A new SessionStart hook is one more file competing for the SessionStart slot; needs to compose cleanly with the existing worktree auto-cut and loghooks SessionStart hooks already registered in this repo (<code>hooks/index.md</code>).</li><li>Session-scoped reset means a developer running many short sessions in one working day re-picks <code>custom</code> mode every time they want it — a deliberate trade-off (safety over convenience) but a real repeated cost for heavy fast-mode users.</li><li>Two mode-selection paths exist (interactive skill vs. legacy flag/env var) — needs a one-line precedence doc so a script that sets <code>DEV_KIT_FAST_MODE=1</code> and a developer who ran <code>/dev-kit:harness-mode custom</code> in the same session do not silently fight each other. Resolution: skill-mutated state file is the source of truth; the legacy flag/env var is read by <code>lib.harness_mode_state.resolved_gate()</code> ONLY as a fallback default when no session file exists yet.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>Fast/custom mode cannot speed up GH-Actions itself; CI wall-clock is unchanged. It only removes local-only gates.</li><li>Fast/custom mode cannot change agent model selection (Iron Law 5: opus for design, sonnet for code). Model is fixed by the parent task, not by harness mode.</li><li>Fast/custom mode does NOT prevent merging a fast-mode PR — it only skips local gates. CI still enforces. This is the intended contract, not a gap.</li><li>No per-branch auto-detection (e.g. "fast on feat/*, full on main"). Out of scope; the developer runs <code>/dev-kit:harness-mode</code> explicitly every session.</li><li>No telemetry on "how often does fast-mode-shipped work get caught by CI". Ship the mechanism first; measure second.</li><li>The picker cannot express dependencies between gates (e.g. "if security_owasp=full, force maintenance=on"). All 6 optional gates are independent toggles/enums; if a dependency rule is needed later it goes in <code>lib.harness_mode_state.resolved_gate()</code>, not the picker UI.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-08-30 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
