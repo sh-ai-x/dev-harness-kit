@@ -76,6 +76,8 @@ jobs:
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
+      agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
+      verdict_source: ${{ steps.extract_verdict.outputs.verdict_source }}
     permissions:
       contents: read
       pull-requests: write
@@ -292,22 +294,68 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           set -uo pipefail
-          # Pick the MOST RECENT claude[bot] comment whose body actually
-          # contains a `**Verdict:**` line — NOT the most recent comment
-          # overall (the track_progress placeholder "Claude Code is
-          # working…" otherwise wins and the verdict is reported MISSING
-          # even when the run produced one). The `?per_page=100`
-          # ensures we read the latest comment on PRs with 30+ comments
-          # (pagination bug fix from PR #566). Delegate the line-level
-          # extraction to the python helper so the same regex the unit
-          # tests pin governs CI (no shell-only awk drift that collapses
-          # "Changes Requested" to "Requested").
-          comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
-          verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
-          echo "maintenance_verdict=${verdict:-<none>}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Issue #244 root-cause fix (ported from templates/ci/.github/
+          # workflows/review.yml — see that workflow's "Extract review
+          # verdict" step for the full rationale): read the verdict from
+          # the agent's own output file instead of grepping PR comments.
+          # The comment-grep raced against claude-code-action's
+          # asynchronous `track_progress` comment finalization.
+          AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
+          if [ ! -f "$AGENT_OUTPUT" ]; then
+            AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
+          fi
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
+          file_verdict=""
+          if [ -f "$AGENT_OUTPUT" ]; then
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          else
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          fi
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            echo "::warning::maintenance verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+            verdict="PARSE_FAILED"
+            verdict_source="parse-failed-no-verdict"
+            agent_ran="true"
+          elif [ -n "$file_verdict" ]; then
+            verdict="$file_verdict"
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+            else
+              verdict_source="agent-output-file"
+            fi
+            agent_ran="true"
+          else
+            case "${{ job.status }}" in
+              cancelled|failure)
+                echo "::warning::maintenance verdict missing (job.status=${{ job.status }}, transient); gate will hard-fail via agent_ran=false"
+                verdict=""
+                verdict_source="default-no-verdict-job-${{ job.status }}"
+                agent_ran="false"
+                ;;
+              *)
+                echo "::warning::maintenance verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-no-file"
+                agent_ran="false"
+                ;;
+            esac
+          fi
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
+            comment_verdict=$(CUTOFF="$CUTOFF" JOB_NAME=maintenance WORKSPACE="${{ github.workspace }}" "${{ github.workspace }}/.github/workflows/_verdict_comments_fallback.sh" "$PR_NUMBER")
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+            fi
+          fi
+          echo "maintenance_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
+          echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           # PR_HEAD_SHA is captured at job-start by the `pr_meta`
           # step above (NOT fetched here) to close the TOCTOU. Audit
           # posting flows through the composite action so all three
@@ -322,6 +370,7 @@ jobs:
           job: maintenance
           status: ${{ job.status }}
           verdict: ${{ steps.extract_verdict.outputs.verdict }}
+          source: ${{ steps.extract_verdict.outputs.verdict_source }}
           head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   gate:
@@ -425,11 +474,61 @@ jobs:
         run: |
           set -uo pipefail
           judge_verdict="${{ needs.maintenance_judge.outputs.verdict }}"
+          judge_agent_ran="${{ needs.maintenance_judge.outputs.agent_ran }}"
+          judge_source="${{ needs.maintenance_judge.outputs.verdict_source }}"
+          judge_result="${{ needs.maintenance_judge.result }}"
           docs_ok="${{ steps.docs_check.outputs.docs_ok }}"
           docs_reason="${{ steps.docs_check.outputs.docs_reason }}"
 
-          echo "judge_verdict=$judge_verdict  docs_ok=$docs_ok"
+          echo "judge_verdict=$judge_verdict (result=$judge_result, agent_ran=$judge_agent_ran, source=$judge_source)  docs_ok=$docs_ok"
           echo "docs_reason=$docs_reason"
+
+          # Issue #212-C1: an upstream agent that never ran (agent_ran=false)
+          # is a distinct failure mode from "ran and gave no verdict" — hard-
+          # fail so an install/secret/rate-limit problem surfaces instead of
+          # being papered over by the Approve default a few lines down.
+          # Ported from review.yml's combined verdict gate.
+          if [ "$judge_agent_ran" = "false" ]; then
+            {
+              echo "::error::maintenance gate: AI agent was skipped"
+              echo "  maintenance_judge.agent_ran=$judge_agent_ran verdict=$judge_verdict source=$judge_source"
+              echo
+              echo "  Most often this is the issue #212-C1 install-broken signature:"
+              echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
+              echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
+              echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+              echo "    - provider=minimax occasionally drops the assistant stream (issue #625):"
+              echo "      set CI_REVIEW_PROVIDER=anthropic via 'gh variable set' to switch provider."
+              echo
+              echo "  The gate does NOT default to Approve here -- that would mask"
+              echo "  install bugs. Fix the upstream failure and re-push."
+            } >&2
+            exit 1
+          fi
+
+          if [ "$judge_result" = "failure" ]; then
+            {
+              echo "::error::maintenance gate: upstream judge job failed"
+              echo "  maintenance_judge.result=$judge_result verdict=$judge_verdict"
+              echo
+              echo "  The maintenance gate does NOT default to Approve on failure"
+              echo "  (that would mask install bugs -- issue #212-C1)."
+            } >&2
+            exit 1
+          fi
+
+          # Issue #397: PARSE_FAILED is a parse-error sentinel, NOT an
+          # unparseable verdict. Hard-fail so a broken parser can't mask
+          # itself as a passing review.
+          if [ "$judge_verdict" = "PARSE_FAILED" ]; then
+            {
+              echo "::error::maintenance gate: verdict parser failed"
+              echo "  maintenance_judge.verdict=$judge_verdict"
+              echo "  The agent ran but no recognizable 'Verdict:' line was found."
+              echo "  This is NOT a successful pass -- the review is inconclusive."
+            } >&2
+            exit 1
+          fi
 
           # Issue (workflow self-validation): if the PR modifies the
           # maintenance workflow itself, the claude-code-action refuses
