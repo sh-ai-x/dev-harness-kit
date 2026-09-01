@@ -248,6 +248,8 @@ jobs:
            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
+      agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
+      verdict_source: ${{ steps.extract_verdict.outputs.verdict_source }}
     permissions:
       contents: read
       pull-requests: write
@@ -480,27 +482,95 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           set -uo pipefail
-          # Pick the MOST RECENT claude[bot] comment whose body contains
-          # a `**Verdict:**` line, NOT the most recent comment overall
-          # (otherwise the track_progress placeholder wins and the
-          # verdict reports MISSING even when the run produced one).
-          # Delegate the line-level extraction to the python helper so
-          # the same regex the unit tests pin governs CI (no shell-only
-          # awk drift that collapses "Changes Requested" to "Requested"
-          # or accidentally matches a nested literal "**Verdict:**"
-          # mention inside a paragraph).
-          # `--paginate` is REQUIRED here — without it `gh api` returns
-          # only the first page (default 30, even with ?per_page=100 on
-          # a single page of 94+ comments the API has historically
-          # returned an inconsistent snapshot mid-write). PRs with >30
-          # comments would otherwise extract the verdict from the OLDEST
-          # page-1 comment instead of the LLM judge's latest verdict.
-          comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
-          verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
-          echo "review_verdict=${verdict:-<none>}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Issue #244 root-cause fix (ported from templates/ci/.github/
+          # workflows/review.yml, the SSOT shipped to dev-kit consumers):
+          # read the verdict from the agent's own output file
+          # (claude-execution-output.json) instead of grepping PR
+          # comments. The comment-grep approach raced against
+          # claude-code-action's asynchronous `track_progress` comment
+          # finalization: this step could run and capture the comment's
+          # mid-draft body up to ~2.5min before the agent's final edit
+          # landed, silently downgrading an eventual Approve to a stale
+          # Changes Requested (observed on PR #780).
+          AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
+          if [ ! -f "$AGENT_OUTPUT" ]; then
+            AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
+          fi
+          # Issue #625: fetch PR comments for THIS run (filtered by run_id) so
+          # extract-verdict.py can recover the verdict when the MINIMAX
+          # provider drops the assistant stream from the execution file.
+          # The run_id filter defeats #244's stale-comment flap — by
+          # construction only comments posted in THIS run are candidates.
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
+          file_verdict=""
+          if [ -f "$AGENT_OUTPUT" ]; then
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          else
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          fi
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 fix: extract-verdict.py saw the file existed
+            # with parseable content but no recognizable `Verdict:`
+            # line — the agent ran but did not follow the verdict
+            # contract. Thread PARSE_FAILED through so the gate
+            # hard-fails with its dedicated remediation instead of
+            # silently defaulting to Approve.
+            echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+            verdict="PARSE_FAILED"
+            verdict_source="parse-failed-no-verdict"
+            agent_ran="true"
+          elif [ -n "$file_verdict" ]; then
+            verdict="$file_verdict"
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+            else
+              verdict_source="agent-output-file"
+            fi
+            agent_ran="true"
+          else
+            # Issue #638: cancelled/failed upstream agent is NOT
+            # default-Approve — agent_ran=false routes through the
+            # gate's "AI agent was skipped" hard-fail branch. The
+            # empty-file `*)` arm keeps the existing tolerance (file
+            # genuinely missing == transient / provider quirk).
+            case "${{ job.status }}" in
+              cancelled|failure)
+                echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); gate will hard-fail via agent_ran=false"
+                verdict=""
+                verdict_source="default-no-verdict-job-${{ job.status }}"
+                agent_ran="false"
+                ;;
+              *)
+                echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-no-file"
+                agent_ran="false"
+                ;;
+            esac
+          fi
+          # Issue #625 comment-derived fallback: only attempted when
+          # extract-verdict.py returned PARSE_FAILED (e.g. provider=minimax
+          # wrapper-format envelope, which this repo's CI does run). The
+          # cutoff filter on createdAt avoids resurrecting stale verdicts
+          # from previous pushes (issue #244 root-cause). The retry-loop
+          # is delegated to _verdict_comments_fallback.sh so review +
+          # security share a single SSOT.
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
+            comment_verdict=$(CUTOFF="$CUTOFF" JOB_NAME=review WORKSPACE="${{ github.workspace }}" "${{ github.workspace }}/.github/workflows/_verdict_comments_fallback.sh" "$PR_NUMBER")
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+            fi
+          fi
+          echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
+          echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           # PR_HEAD_SHA is captured at job-start by the `pr_meta` step
           # above (NOT fetched here) to close the TOCTOU that would
           # transfer an Approve to an unjudged commit pushed between
@@ -518,6 +588,7 @@ jobs:
           job: review
           status: ${{ job.status }}
           verdict: ${{ steps.extract_verdict.outputs.verdict }}
+          source: ${{ steps.extract_verdict.outputs.verdict_source }}
           head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   security:
@@ -537,6 +608,8 @@ jobs:
            contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)))))
     outputs:
       verdict: ${{ steps.extract_verdict.outputs.verdict }}
+      agent_ran: ${{ steps.extract_verdict.outputs.agent_ran }}
+      verdict_source: ${{ steps.extract_verdict.outputs.verdict_source }}
     permissions:
       contents: read
       pull-requests: write
@@ -755,18 +828,65 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           set -uo pipefail
-          # Pick the MOST RECENT claude[bot] comment whose body contains
-          # a `**Verdict:**` line, NOT the most recent comment overall.
-          # Delegate line-level extraction to the python helper so the
-          # same regex the unit tests pin governs CI (no nested-mention
-          # false-positive from a literal `**Verdict:**` inside the
-          # body prose).
-          comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
-          verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
-          echo "security_verdict=${verdict:-<none>}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Issue #244 root-cause fix (ported from templates/ci/.github/
+          # workflows/review.yml). See the review job's "Extract review
+          # verdict" step for the full rationale — same race, same fix.
+          AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
+          if [ ! -f "$AGENT_OUTPUT" ]; then
+            AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
+          fi
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
+          file_verdict=""
+          if [ -f "$AGENT_OUTPUT" ]; then
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          else
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          fi
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+            verdict="PARSE_FAILED"
+            verdict_source="parse-failed-no-verdict"
+            agent_ran="true"
+          elif [ -n "$file_verdict" ]; then
+            verdict="$file_verdict"
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+            else
+              verdict_source="agent-output-file"
+            fi
+            agent_ran="true"
+          else
+            case "${{ job.status }}" in
+              cancelled|failure)
+                echo "::warning::security verdict missing (job.status=${{ job.status }}, transient); gate will hard-fail via agent_ran=false"
+                verdict=""
+                verdict_source="default-no-verdict-job-${{ job.status }}"
+                agent_ran="false"
+                ;;
+              *)
+                echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-no-file"
+                agent_ran="false"
+                ;;
+            esac
+          fi
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
+            comment_verdict=$(CUTOFF="$CUTOFF" JOB_NAME=security WORKSPACE="${{ github.workspace }}" "${{ github.workspace }}/.github/workflows/_verdict_comments_fallback.sh" "$PR_NUMBER")
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+            fi
+          fi
+          echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
+          echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           # PR_HEAD_SHA is captured at job-start by the `pr_meta`
           # step above (NOT fetched here) to close the TOCTOU. Audit
           # posting flows through the composite action so all three
@@ -781,6 +901,7 @@ jobs:
           job: security
           status: ${{ job.status }}
           verdict: ${{ steps.extract_verdict.outputs.verdict }}
+          source: ${{ steps.extract_verdict.outputs.verdict_source }}
           head_sha: ${{ steps.pr_meta.outputs.head_sha }}
 
   gate:
@@ -899,8 +1020,24 @@ jobs:
           R="${{ needs.review.outputs.verdict }}"
           S="${{ needs.security.outputs.verdict }}"
           I="${{ needs.injection_scan.outputs.verdict }}"
+          # agent_ran: false when anthropics/claude-code-action@v1 SKIPPED
+          # the run (workflow-validation guard) or the extract step
+          # observed job.status in {cancelled, failure} with no execution
+          # file. Ported from templates/ci/.github/workflows/review.yml —
+          # distinguishes "the agent legitimately produced no verdict" from
+          # "the agent never ran at all" (issue #212-C1 install-broken
+          # protection: an empty verdict from a broken install must NOT
+          # silently default to Approve).
+          R_AGENT="${{ needs.review.outputs.agent_ran }}"
+          S_AGENT="${{ needs.security.outputs.agent_ran }}"
+          R_SOURCE="${{ needs.review.outputs.verdict_source }}"
+          S_SOURCE="${{ needs.security.outputs.verdict_source }}"
+          R_RESULT="${{ needs.review.result }}"
+          S_RESULT="${{ needs.security.result }}"
           EVENT="$EVENT_NAME"
-          echo "review=$R  security=$S  injection_scan=$I"
+          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT, source=$R_SOURCE)"
+          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT, source=$S_SOURCE)"
+          echo "injection_scan=$I"
 
           # Capture the raw (undefaulted) values so the auto-approve
           # step can refuse to fire when either LLM judge returned no
@@ -911,6 +1048,46 @@ jobs:
           echo "raw_review=${R:-}" >> "$GITHUB_OUTPUT"
           echo "raw_security=${S:-}" >> "$GITHUB_OUTPUT"
           echo "raw_injection=${I:-}" >> "$GITHUB_OUTPUT"
+
+          # Issue #212-C1: an upstream agent that never ran (agent_ran=false)
+          # is a distinct failure mode from "ran and gave no verdict" — hard-
+          # fail so an install/secret/rate-limit problem surfaces instead of
+          # being papered over by the Approve default a few lines down.
+          if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
+            {
+              echo "::error::review+security gate: AI agent was skipped"
+              echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
+              echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
+              echo
+              echo "  Most often this is the issue #212-C1 install-broken signature:"
+              echo "    - DEV_KIT_GITHUB_TOKEN / MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
+              echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
+              echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+              echo "    - provider=minimax occasionally drops the assistant stream"
+              echo "      when the conversation goes silent (issue #625): no execution"
+              echo "      file is emitted. Set CI_REVIEW_PROVIDER=anthropic via"
+              echo "      'gh variable set CI_REVIEW_PROVIDER=anthropic' to switch provider."
+              echo
+              echo "  The gate does NOT default to Approve here -- that would mask"
+              echo "  install bugs. Fix the upstream failure and re-push."
+            } >&2
+            exit 1
+          fi
+
+          # Hard-fail if EITHER upstream job actually failed (not
+          # skipped/cancelled). An empty verdict + failure result is the
+          # canonical "install is broken" signature from issue #212.
+          if [ "$R_RESULT" = "failure" ] || [ "$S_RESULT" = "failure" ]; then
+            {
+              echo "::error::review+security gate: upstream agent job failed"
+              echo "  review.result=$R_RESULT verdict=$R"
+              echo "  security.result=$S_RESULT verdict=$S"
+              echo
+              echo "  The severity gate does NOT default to Approve on failure"
+              echo "  (that would mask install bugs -- issue #212-C1)."
+            } >&2
+            exit 1
+          fi
 
           # Tolerate missing verdicts in BOTH event modes. The previous
           # strict pull_request branch hard-failed on empty R or S, which
