@@ -286,6 +286,47 @@ jobs:
           ANTHROPIC_MODEL: 'deepseek-v4-pro'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bin/ci-claude-p.sh maintenance "${{ steps.provider.outputs.pr_number }}"
+
+      - name: Detect bootstrap-PR fallback
+        id: fallback
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # anthropics/claude-code-action@v1 skips when the PR head's
+          # .github/workflows/*.yml differs from the default branch.
+          workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
+            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
+          if [ -n "$workflow_files" ]; then
+            listed=$(echo "$workflow_files" | paste -sd, -)
+            echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
+            echo "needs_fallback=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_fallback=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post fallback verdict comment (maintenance)
+        if: steps.fallback.outputs.needs_fallback == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+        run: |
+          {
+            echo "Verdict: Approve"
+            echo
+            echo "LLM maintenance (code-sanity) skipped -- workflow validation guard"
+            echo
+            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo
+            echo "Action required: manual review of the workflow changes by a maintainer before merge."
+          } | gh pr comment "$PR_NUMBER" --body-file -
+
       - name: Extract maintenance verdict
         id: extract_verdict
         if: always()
@@ -294,6 +335,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
           set -uo pipefail
+          if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
+            echo "maintenance_verdict=Approve (fallback: PR modifies workflow files)"
+            echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            echo "verdict_source=needs-fallback-bootstrap-pr" >> "$GITHUB_OUTPUT"
+            echo "agent_ran=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Issue #244 root-cause fix (ported from templates/ci/.github/
           # workflows/review.yml — see that workflow's "Extract review
           # verdict" step for the full rationale): read the verdict from
@@ -489,21 +537,30 @@ jobs:
           # being papered over by the Approve default a few lines down.
           # Ported from review.yml's combined verdict gate.
           if [ "$judge_agent_ran" = "false" ]; then
-            {
-              echo "::error::maintenance gate: AI agent was skipped"
-              echo "  maintenance_judge.agent_ran=$judge_agent_ran verdict=$judge_verdict source=$judge_source"
-              echo
-              echo "  Most often this is the issue #212-C1 install-broken signature:"
-              echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
-              echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
-              echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
-              echo "    - provider=minimax occasionally drops the assistant stream (issue #625):"
-              echo "      set CI_REVIEW_PROVIDER=anthropic via 'gh variable set' to switch provider."
-              echo
-              echo "  The gate does NOT default to Approve here -- that would mask"
-              echo "  install bugs. Fix the upstream failure and re-push."
-            } >&2
-            exit 1
+            if [ "$judge_source" = "needs-fallback-bootstrap-pr" ]; then
+              # Bootstrap-PR exception: this PR modifies .github/workflows/*,
+              # so claude-code-action's workflow-validation guard skipped
+              # the agent by design. The extract step already posted a
+              # synthesized 'Verdict: Approve' comment; the human gate
+              # (REVIEW_REQUIRED / CHANGES_REQUESTED) decides merge.
+              echo "::notice::bootstrap-PR fallback: maintenance agent skipped due to anthropics/claude-code-action@v1's workflow-validation guard (PR modifies .github/workflows/*). Accepting synthesized Approve; human gate decides merge."
+            else
+              {
+                echo "::error::maintenance gate: AI agent was skipped (non-bootstrap)"
+                echo "  maintenance_judge.agent_ran=$judge_agent_ran verdict=$judge_verdict source=$judge_source"
+                echo
+                echo "  Most often this is the issue #212-C1 install-broken signature:"
+                echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
+                echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
+                echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+                echo "    - provider=minimax occasionally drops the assistant stream (issue #625):"
+                echo "      set CI_REVIEW_PROVIDER=anthropic via 'gh variable set' to switch provider."
+                echo
+                echo "  The gate does NOT default to Approve here -- that would mask"
+                echo "  install bugs. Fix the upstream failure and re-push."
+              } >&2
+              exit 1
+            fi
           fi
 
           if [ "$judge_result" = "failure" ]; then
