@@ -3,6 +3,30 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **fix(ci-setup):** consumer hook payload now installs under
+  `.dev-kit/hooks/` instead of project-root `hooks/`, which collides with
+  the React/Next.js/Vue convention for custom hooks (and with the kit's own
+  `role-frontend` rule). Project-root `hooks/` is no longer written to by
+  `lib/ci_setup.py:install_ci_config()`. Mirrors dev-kit-lite commit
+  45da476e (PR #12 — `fix(install): namespace kit hook scripts under
+  .dev-kit/hooks/`). The dev-kit repo's own working-tree `hooks/` layout is
+  unchanged. Updated: `lib/ci_setup.py` (`_canonical_hook_paths` returns
+  `.dev-kit/hooks/...`, `_resolve_template_source` strips the prefix to
+  find plugin-root sources, `EXECUTABLE_PATHS` and the marker `hooks`
+  field carry the new prefix), the shipped `templates/ci/scripts/validate.py`
+  (validator's `hooks_dir` and bash-syntax sweep), `skills/ci-setup/SKILL.md`,
+  `docs/quality/ci-setup.md`, and `tests/test_ci_setup.py`. A new
+  `TestHookPayloadNamespace` class pins the namespace across all three
+  surfaces (EXPECTED_PATHS / marker / EXECUTABLE_PATHS).
+
+  **Migration** for consumers already bootstrapped before this change:
+
+  ```bash
+  mkdir -p .dev-kit/hooks && git mv hooks/* .dev-kit/hooks/ && rmdir hooks
+  ```
+
+  After the move, re-run `bash scripts/validate.py` from the consumer
+  repo root to confirm the hook manifest resolves cleanly.
 - **fix(review):** severity gate tolerates the bootstrap-PR fallback contract
   on BOTH review + security jobs. When `anthropics/claude-code-action@v1`'s
   anti-recursion guard skips both agents because the PR modifies

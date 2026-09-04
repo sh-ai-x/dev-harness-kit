@@ -200,7 +200,7 @@ _CI_PATHS_AFTER_HOOKS: tuple[str, ...] = (
 
 
 def _canonical_hook_paths() -> tuple[str, ...]:
-    """Return the complete hook tree from the plugin's canonical source.
+    """Return the complete hook tree, namespaced under `.dev-kit/hooks/`.
 
     `hooks/hooks.json` registers hook entrypoints while shared shell helpers
     are sourced indirectly. Installing both the manifest and every `.sh`
@@ -213,19 +213,26 @@ def _canonical_hook_paths() -> tuple[str, ...]:
     without everything it needs" failure class as #273/#277/#310, one level
     down: the hook file itself is present but silently degrades (or crashes)
     because a file it reads was never installed.
+
+    The consumer install writes the entire payload under `.dev-kit/hooks/`
+    instead of project-root `hooks/` so adopting projects can keep `hooks/`
+    reserved for their own app code (React/Next.js/Vue custom hooks, etc.).
+    Mirrors dev-kit-lite's commit 45da476e (PR #12):
+    `fix(install): namespace kit hook scripts under .dev-kit/hooks/`. The
+    dev-kit repo's own working-tree `hooks/` layout is unchanged.
     """
     manifest = _HOOKS_ROOT / "hooks.json"
     if not manifest.is_file():
         raise FileNotFoundError(f"hook manifest missing: {manifest}")
     references_root = _HOOKS_ROOT / "references"
     reference_paths = (
-        [f"hooks/{path.relative_to(_HOOKS_ROOT).as_posix()}"
+        [f".dev-kit/hooks/{path.relative_to(_HOOKS_ROOT).as_posix()}"
          for path in sorted(references_root.rglob("*")) if path.is_file()]
         if references_root.is_dir() else []
     )
     return tuple(
-        ["hooks/hooks.json"]
-        + [f"hooks/{path.relative_to(_HOOKS_ROOT).as_posix()}"
+        [".dev-kit/hooks/hooks.json"]
+        + [f".dev-kit/hooks/{path.relative_to(_HOOKS_ROOT).as_posix()}"
            for path in sorted(_HOOKS_ROOT.rglob("*.sh"))]
         + reference_paths
     )
@@ -307,7 +314,7 @@ EXECUTABLE_PATHS: _LazyTuple = _LazyTuple(
         "bin/review-local.sh",
         "bin/set-provider.sh",
         *[path for path in EXPECTED_PATHS
-          if path.startswith("hooks/") and path.endswith(".sh")],
+          if path.startswith(".dev-kit/hooks/") and path.endswith(".sh")],
     )
 )
 
@@ -662,7 +669,14 @@ def _resolve_template_source(rel_path: str) -> Path:
     resolved source does not exist.
     """
     # Hook files: read from the plugin-root hooks/ tree (single source of
-    # truth, shared with the project's own .claude/settings.json).
+    # truth, shared with the project's own .claude/settings.json). Consumer
+    # paths are namespaced under `.dev-kit/hooks/` (PR mirrors dev-kit-lite
+    # commit 45da476e) — strip that prefix to find the source.
+    if rel_path.startswith(".dev-kit/hooks/"):
+        candidate = _HOOKS_ROOT / rel_path[len(".dev-kit/hooks/"):]
+        if not candidate.exists():
+            raise FileNotFoundError(f"hook source missing: {candidate}")
+        return candidate
     if rel_path.startswith("hooks/"):
         candidate = _HOOKS_ROOT / rel_path[len("hooks/"):]
         if not candidate.exists():
@@ -842,7 +856,7 @@ def _build_marker() -> dict:
             "scripts/ci-local.sh",
         ],
         "githooks": [".githooks/pre-push"],
-        "hooks": [path for path in EXPECTED_PATHS if path.startswith("hooks/")],
+        "hooks": [path for path in EXPECTED_PATHS if path.startswith(".dev-kit/hooks/")],
         "rules": [".claude/rules/git-workflow.md"],
         "tests": [
             "tests/test_worktree_guard.py",

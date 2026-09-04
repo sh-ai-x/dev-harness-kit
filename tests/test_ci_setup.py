@@ -227,11 +227,11 @@ class TestCiSetup(unittest.TestCase):
         /dev-kit:babysit-pr-local entrypoints and lib helpers added in
         PR for issue #619."""
         expected_new = {
-            "hooks/worktree-guard.sh",
-            "hooks/session-start-check.sh",
-            "hooks/lib/worktree-detect.sh",
-            "hooks/lib/payload-parse.sh",
-            "hooks/hooks.json",
+            ".dev-kit/hooks/worktree-guard.sh",
+            ".dev-kit/hooks/session-start-check.sh",
+            ".dev-kit/hooks/lib/worktree-detect.sh",
+            ".dev-kit/hooks/lib/payload-parse.sh",
+            ".dev-kit/hooks/hooks.json",
             ".claude/rules/git-workflow.md",
             "tests/test_worktree_guard.py",
             # /dev-kit:babysit-pr-local entrypoints (issue #619).
@@ -260,11 +260,11 @@ class TestCiSetup(unittest.TestCase):
 
         expected = set(self.ci_setup.EXPECTED_PATHS)
         source_hooks = {
-            f"hooks/{p.relative_to(PROJECT_ROOT / 'hooks').as_posix()}"
+            f".dev-kit/hooks/{p.relative_to(PROJECT_ROOT / 'hooks').as_posix()}"
             for p in (PROJECT_ROOT / "hooks").rglob("*.sh")
         }
         self.assertTrue(source_hooks.issubset(expected))
-        self.assertIn("hooks/hooks.json", expected)
+        self.assertIn(".dev-kit/hooks/hooks.json", expected)
         manifest = json.loads((PROJECT_ROOT / "hooks" / "hooks.json").read_text())
         commands = [
             hook["command"]
@@ -279,7 +279,7 @@ class TestCiSetup(unittest.TestCase):
         assert spec.loader is not None
         spec.loader.exec_module(validator)
         referenced = {
-            f"hooks/{match}"
+            f".dev-kit/hooks/{match}"
             for command in commands
             for match in validator.referenced_hook_scripts(command)
         }
@@ -298,7 +298,7 @@ class TestCiSetup(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            hook_count = len(list((target / "hooks").rglob("*.sh")))
+            hook_count = len(list((target / ".dev-kit" / "hooks").rglob("*.sh")))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(f"+ {hook_count} hooks", result.stdout)
 
@@ -319,7 +319,7 @@ class TestCiSetup(unittest.TestCase):
             self.ci_setup.install_ci_config(target)
             # Overwrite the manifest with bytes that are not valid UTF-8
             # so ``read_text(encoding='utf-8')`` raises ``UnicodeDecodeError``.
-            manifest = target / "hooks" / "hooks.json"
+            manifest = target / ".dev-kit" / "hooks" / "hooks.json"
             manifest.write_bytes(b"\xff\xfe\x00\x01garbage")
             result = subprocess.run(
                 [sys.executable, "scripts/validate.py"],
@@ -336,10 +336,10 @@ class TestCiSetup(unittest.TestCase):
         import stat
         import tempfile
         new_sh = (
-            "hooks/worktree-guard.sh",
-            "hooks/session-start-check.sh",
-            "hooks/lib/worktree-detect.sh",
-            "hooks/lib/payload-parse.sh",
+            ".dev-kit/hooks/worktree-guard.sh",
+            ".dev-kit/hooks/session-start-check.sh",
+            ".dev-kit/hooks/lib/worktree-detect.sh",
+            ".dev-kit/hooks/lib/payload-parse.sh",
         )
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
@@ -365,8 +365,8 @@ class TestCiSetup(unittest.TestCase):
             for key in ("hooks", "rules", "tests"):
                 self.assertIn(key, marker, f"marker missing key: {key}")
                 self.assertTrue(len(marker[key]) > 0, f"marker.{key} should be non-empty")
-            self.assertIn("hooks/worktree-guard.sh", marker["hooks"])
-            self.assertIn("hooks/lib/payload-parse.sh", marker["hooks"])
+            self.assertIn(".dev-kit/hooks/worktree-guard.sh", marker["hooks"])
+            self.assertIn(".dev-kit/hooks/lib/payload-parse.sh", marker["hooks"])
             self.assertIn(".claude/rules/git-workflow.md", marker["rules"])
             self.assertIn("tests/test_worktree_guard.py", marker["tests"])
 
@@ -946,7 +946,7 @@ class TestCiSetup(unittest.TestCase):
         """EXPECTED_PATHS must list hooks/lib/payload-parse.sh so consumers
         don't ship a hook tree whose deny() helper is missing."""
         self.assertIn(
-            "hooks/lib/payload-parse.sh",
+            ".dev-kit/hooks/lib/payload-parse.sh",
             self.ci_setup.EXPECTED_PATHS,
             "EXPECTED_PATHS is missing hooks/lib/payload-parse.sh — fix #273",
         )
@@ -955,7 +955,7 @@ class TestCiSetup(unittest.TestCase):
         """The helper is sourced at runtime; +x bit must be set after install
         so consumers can also invoke it as a CLI guard if they want."""
         self.assertIn(
-            "hooks/lib/payload-parse.sh",
+            ".dev-kit/hooks/lib/payload-parse.sh",
             self.ci_setup.EXECUTABLE_PATHS,
             "EXECUTABLE_PATHS is missing hooks/lib/payload-parse.sh — fix #273",
         )
@@ -969,21 +969,21 @@ class TestCiSetup(unittest.TestCase):
             target = Path(td)
             r = self.ci_setup.install_ci_config(target, force=True)
             self.assertEqual(r.errors, [], f"errors: {r.errors}")
-            helper = target / "hooks" / "lib" / "payload-parse.sh"
+            helper = target / ".dev-kit" / "hooks" / "lib" / "payload-parse.sh"
             self.assertTrue(
                 helper.exists(),
-                f"hooks/lib/payload-parse.sh missing from install target "
+                f".dev-kit/hooks/lib/payload-parse.sh missing from install target "
                 f"(created={r.created}, overwritten={r.overwritten})",
             )
             self.assertTrue(
                 helper.stat().st_mode & stat.S_IXUSR,
-                f"hooks/lib/payload-parse.sh must be +x (mode={oct(helper.stat().st_mode)})",
+                f".dev-kit/hooks/lib/payload-parse.sh must be +x (mode={oct(helper.stat().st_mode)})",
             )
             # Marker must list the helper so ci-doctor / drift-detection see it
             marker = json.loads(
                 (target / ".dev-kit" / "ci-config.json").read_text()
             )
-            self.assertIn("hooks/lib/payload-parse.sh", marker["hooks"])
+            self.assertIn(".dev-kit/hooks/lib/payload-parse.sh", marker["hooks"])
 
     def test_payload_parse_installed_into_already_partial_consumer(self):
         """A consumer repo that already has the pre-#273 install (marker +
@@ -1000,7 +1000,7 @@ class TestCiSetup(unittest.TestCase):
             # snapshot of what consumer repos currently have on disk.
             pre_273_paths = [
                 p for p in self.ci_setup.EXPECTED_PATHS
-                if p != "hooks/lib/payload-parse.sh"
+                if p != ".dev-kit/hooks/lib/payload-parse.sh"
             ]
             for rel in pre_273_paths:
                 src = self.ci_setup._resolve_template_source(rel)
@@ -1009,23 +1009,26 @@ class TestCiSetup(unittest.TestCase):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(src.read_bytes())
             # Seed a minimal marker so the no-op detection has something to test.
-            (target / ".dev-kit").mkdir()
+            # (The seed loop above already created `.dev-kit/` via
+            # `.dev-kit/hooks/...` copies with parents=True; exist_ok guards
+            # the case where hooks payload doesn't ship on this branch.)
+            (target / ".dev-kit").mkdir(exist_ok=True)
             seed_marker = target / ".dev-kit" / "ci-config.json"
             seed_marker.write_text(json.dumps({
                 "schema_version": self.ci_setup.MARKER_SCHEMA_VERSION,
                 "installed_at": "2026-07-01T00:00:00Z",
                 "installed_by": "dev-kit:ci-setup",
-                "hooks": [p for p in pre_273_paths if p.startswith("hooks/")],
+                "hooks": [p for p in pre_273_paths if p.startswith(".dev-kit/hooks/")],
             }))
             # Sanity: pre-state has no payload-parse.sh.
             self.assertFalse(
-                (target / "hooks" / "lib" / "payload-parse.sh").exists(),
+                (target / ".dev-kit" / "hooks" / "lib" / "payload-parse.sh").exists(),
                 "seed must NOT contain payload-parse.sh — that's the bug",
             )
             # A plain (force=False) install must now refresh and ship the helper.
             r = self.ci_setup.install_ci_config(target)
             self.assertEqual(r.errors, [], f"errors: {r.errors}")
-            helper = target / "hooks" / "lib" / "payload-parse.sh"
+            helper = target / ".dev-kit" / "hooks" / "lib" / "payload-parse.sh"
             self.assertTrue(
                 helper.exists(),
                 "non-force install must add the helper that was missing pre-#273",
@@ -1157,12 +1160,17 @@ class TestCiSetup(unittest.TestCase):
         plugin_root = Path(__file__).parent.parent
         sourced: set[str] = set()
         sources_examined: list[str] = []
-        # Walk both hooks/ (PR #273 catalog) and bin/ (issue #619). Either
-        # can source a lib helper; both must be guarded.
+        # Walk both .dev-kit/hooks/ (PR #273 catalog, consumer-side) and
+        # bin/ (issue #619). Either can source a lib helper; both must be
+        # guarded.
         for rel in self.ci_setup.EXPECTED_PATHS:
-            if not (rel.endswith(".sh") and (rel.startswith("hooks/") or rel.startswith("bin/"))):
+            if not (rel.endswith(".sh") and (rel.startswith(".dev-kit/hooks/") or rel.startswith("bin/"))):
                 continue
-            src_path = plugin_root / rel
+            # Resolve the consumer-side path back to the source-side path
+            # so the on-disk check uses the actual plugin tree, not the
+            # not-yet-installed `.dev-kit/hooks/<x>.sh` mirror under plugin_root.
+            source_rel = rel[len(".dev-kit/"):] if rel.startswith(".dev-kit/") else rel
+            src_path = plugin_root / source_rel
             self.assertTrue(
                 src_path.is_file(),
                 f"EXPECTED_PATHS entry {rel} does not exist on disk — "
@@ -1170,8 +1178,9 @@ class TestCiSetup(unittest.TestCase):
             )
             sources_examined.append(rel)
             # The helper ref is always relative to the file's own directory:
-            # hooks/<x>.sh -> hooks/lib/<helper>.sh; bin/<x>.sh -> lib/<helper>.sh.
-            helper_prefix = "hooks/lib/" if rel.startswith("hooks/") else "lib/"
+            # .dev-kit/hooks/<x>.sh -> .dev-kit/hooks/lib/<helper>.sh;
+            # bin/<x>.sh -> lib/<helper>.sh.
+            helper_prefix = ".dev-kit/hooks/lib/" if rel.startswith(".dev-kit/hooks/") else "lib/"
             for m in sourced_helper_re.finditer(src_path.read_text(encoding="utf-8")):
                 sourced.add(f"{helper_prefix}{m.group(1)}")
         # Every sourced helper must be in EXPECTED_PATHS (so it ships) AND
@@ -1527,6 +1536,59 @@ class TestMarkerSchemaVersioning(unittest.TestCase):
             new_marker = json.loads(marker_path.read_text())
             self.assertEqual(new_marker["installed_at"], original_installed_at,
                              "backfill must preserve the original installed_at")
+
+
+class TestHookPayloadNamespace(unittest.TestCase):
+    """Consumer hook payload installs under `.dev-kit/hooks/`, not `hooks/`.
+
+    Mirrors dev-kit-lite's commit 45da476e (PR #12):
+    `fix(install): namespace kit hook scripts under .dev-kit/hooks/`.
+    Project-root `hooks/` is reserved for the consumer's app code
+    (React/Next.js/Vue custom hooks); the kit's operational hook scripts
+    land under `.dev-kit/hooks/` so the two namespaces never collide.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, str(PROJECT_ROOT / "lib"))
+        self.ci_setup = importlib.import_module("ci_setup")
+
+    def test_expected_paths_uses_devkit_hook_namespace(self):
+        """Every hook payload path in EXPECTED_PATHS starts with `.dev-kit/hooks/`."""
+        hook_paths = [
+            p for p in self.ci_setup.EXPECTED_PATHS if p.endswith(".sh") or p.endswith("hooks.json")
+        ]
+        self.assertTrue(hook_paths, "no hook payload paths found in EXPECTED_PATHS")
+        for rel in hook_paths:
+            if "hooks/" in rel and not rel.startswith(".dev-kit/"):
+                self.fail(
+                    f"hook payload still uses bare `hooks/` prefix: {rel}. "
+                    f"Must install under `.dev-kit/hooks/` to avoid colliding "
+                    f"with React/Next.js/Vue custom-hook conventions."
+                )
+
+    def test_marker_hooks_field_uses_devkit_namespace(self):
+        """`.dev-kit/ci-config.json` `hooks` field is rooted at `.dev-kit/hooks/`."""
+        marker = self.ci_setup._build_marker()
+        hook_entries = marker["hooks"]
+        self.assertTrue(hook_entries)
+        for rel in hook_entries:
+            self.assertTrue(
+                rel.startswith(".dev-kit/hooks/"),
+                f"marker['hooks'] entry uses bare `hooks/` prefix: {rel}",
+            )
+
+    def test_executable_paths_hook_scripts_under_devkit(self):
+        """EXECUTABLE_PATHS for hook scripts points at `.dev-kit/hooks/`."""
+        exec_hook_paths = [
+            p for p in self.ci_setup.EXECUTABLE_PATHS
+            if p.startswith("hooks/") or p.startswith(".dev-kit/hooks/")
+        ]
+        self.assertTrue(exec_hook_paths, "no hook script entries in EXECUTABLE_PATHS")
+        bare_hook = [p for p in exec_hook_paths if p.startswith("hooks/")]
+        self.assertEqual(
+            bare_hook, [],
+            f"EXECUTABLE_PATHS still has bare `hooks/...` entries: {bare_hook}",
+        )
 
 
 if __name__ == "__main__":

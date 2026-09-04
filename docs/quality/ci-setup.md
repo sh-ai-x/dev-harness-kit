@@ -68,8 +68,8 @@ Run `/dev-kit:ci-setup` once per project, after `/dev-kit:bootstrap` and before 
 ## What gets installed
 
 The skill copies the CI templates and the canonical hook source tree into the
-target project. Workflow/script files are explicit; `hooks/hooks.json`, all
-`hooks/**/*.sh` files, and their non-code data (`hooks/references/**`, e.g.
+target project. Workflow/script files are explicit; `.dev-kit/hooks/hooks.json`, all
+`.dev-kit/hooks/**/*.sh` files, and their non-code data (`.dev-kit/hooks/references/**`, e.g.
 `slop-detector.sh`'s phrase/structure banks) are derived from the plugin
 source so hook code — and the data it depends on — is not duplicated under
 `templates/ci/`.
@@ -94,12 +94,12 @@ added hooks and their helpers.
 | `scripts/test.sh` | `pytest` wrapper (gracefully skips if no `tests/` directory) |
 | `scripts/branch-policy.sh` | Mirror of `pre-push` for CI script context |
 | `scripts/ci-local.sh` | Local-runner entrypoint: `validate.py` + `test.sh` + optional `act -l` |
-| **`hooks/**/*.sh`** | Complete canonical hook implementation set, including shared helpers |
-| **`hooks/hooks.json`** | Canonical registration manifest copied with all hook sources |
+| **`.dev-kit/hooks/**/*.sh`** | Complete canonical hook implementation set, including shared helpers (namespaced under `.dev-kit/`) |
+| **`.dev-kit/hooks/hooks.json`** | Canonical registration manifest copied with all hook sources (namespaced under `.dev-kit/`) |
 | **`rules/git-workflow.md`** | Canonical worktree rule; installed to `.claude/rules/git-workflow.md` for Claude Code discovery |
 | **`tests/test_worktree_guard.py`** | regression tests covering the worktree rule (blocks/allows/executable bits/etc.) |
 | `tools/_repo_name.py` | Shared `main_repo_root` + `repo_name` helper used by the Linear sync tools |
-| `tools/linear_sync.py` | Edit/Write auto-sync entrypoint invoked by `hooks/linear-*.sh` |
+| `tools/linear_sync.py` | Edit/Write auto-sync entrypoint invoked by `.dev-kit/hooks/linear-*.sh` |
 | `tools/linear_pr_sync.py` | GH-Actions-driven PR sync entrypoint (workflow picks it up via sparse-checkout) |
 
 After install, the marker file `.dev-kit/ci-config.json` is written at the project root. The marker is the **contract** with `/dev-kit:build` — without it, build refuses to start.
@@ -107,7 +107,7 @@ After install, the marker file `.dev-kit/ci-config.json` is written at the proje
 ## How to verify
 
 The Claude Code and Codex lifecycle hook definition is shared from
-`hooks/hooks.json`. For a local status report, run:
+`.dev-kit/hooks/hooks.json`. For a local status report, run:
 
 ```bash
 python3 bin/dev-kit-hooks-status.py

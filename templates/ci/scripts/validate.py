@@ -40,9 +40,13 @@ _HOOK_SCRIPT_REFERENCE = re.compile(
 def referenced_hook_scripts(manifest_text: str) -> set[str]:
     """Return hook source paths referenced by a hook manifest.
 
-    The returned paths are relative to the installed ``hooks/`` directory.
-    Keep this helper in the shipped validator so consumer-side validation and
-    source-repo tests use the same parser without duplicating its regex.
+    The returned paths are relative to the installed ``.dev-kit/hooks/``
+    directory (mirrors ``fix(install): namespace kit hook scripts under
+    .dev-kit/hooks/`` in dev-kit-lite commit 45da476e). The regex strips the
+    ``hooks/`` prefix from each match so consumers and the source-repo
+    validator agree on the post-install location. Keep this helper in the
+    shipped validator so consumer-side validation and source-repo tests
+    use the same parser without duplicating its regex.
     """
     return set(_HOOK_SCRIPT_REFERENCE.findall(manifest_text))
 
@@ -64,7 +68,7 @@ def validate_installation_complete(repo_root: pathlib.Path) -> bool:
     if missing:
         _fail(f"installation: missing {len(missing)} file(s): {missing}")
         return False
-    hooks_dir = repo_root / "hooks"
+    hooks_dir = repo_root / ".dev-kit" / "hooks"
     manifest = hooks_dir / "hooks.json"
     hook_files = list(hooks_dir.rglob("*.sh")) if hooks_dir.is_dir() else []
     if not manifest.is_file():
@@ -113,7 +117,7 @@ def validate_bash_syntax(repo_root: pathlib.Path) -> bool:
     """
     sh_files = (
         list((repo_root / "scripts").glob("*.sh"))
-        + list((repo_root / "hooks").rglob("*.sh"))
+        + list((repo_root / ".dev-kit" / "hooks").rglob("*.sh"))
         + [repo_root / ".githooks" / "pre-push"]
     )
     failures = []
