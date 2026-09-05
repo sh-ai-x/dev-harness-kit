@@ -10,9 +10,12 @@ Set `DEV_KIT_MODE` in `<proj>/.claude/settings.json` `env` block, or via `/dev-k
 
 ## Resolution order (highest wins)
 
-1. `$DEV_KIT_MODE` env var in the shell — per-session override
-2. `env.DEV_KIT_MODE` in `<proj>/.claude/settings.json` — committed project choice
-3. Default = `full`
+| Source | Effective value | Notes |
+|---|---|---|
+| `$DEV_KIT_MODE` shell env var | wins over everything | per-session override |
+| `<proj>/.claude/settings.json` `env.DEV_KIT_MODE` | wins over default | committed project choice |
+| `<proj>/.claude/settings.local.json` `env.DEV_KIT_MODE` | wins over default | this checkout only |
+| not set | `full` **only when** `enabledPlugins.dev-kit@dev-kit: true`; otherwise `undev` (silent — plugin not loaded) | the conditional default |
 
 ## Switching modes
 
@@ -37,17 +40,6 @@ DEV_KIT_MODE=undev claude --plugin-dir <dev-harness-kit-repo>
 
 The third mode is the one that makes the silent default intentional instead of accidental. Today, "undev" means "no plugin enabled" — which is what already happens for projects without `enabledPlugins`. The mode label just makes it explicit and reviewable.
 
-## Mode + scope interaction
-
-| Where mode is set | Precedence |
-|---|---|
-| `$DEV_KIT_MODE` shell env var | wins over everything |
-| `<proj>/.claude/settings.json` env | wins over default |
-| `<proj>/.claude/settings.local.json` env | wins over default (this checkout only) |
-| not set | default = `full` |
-
-Local-scope mode is useful when you want to test `lite` behavior in a `full` project without committing it.
-
 ## Mode + plugin-enable interaction
 
 `undev` means the plugin is **off**, not "the plugin is on but with lite behavior". If `enabledPlugins.dev-kit@dev-kit: true` and `DEV_KIT_MODE=undev`, the plugin is on (full hooks fire) but the mode label is misleading. To actually be undev:
@@ -59,3 +51,5 @@ Local-scope mode is useful when you want to test `lite` behavior in a `full` pro
   "env": { "DEV_KIT_MODE": "undev" }     // ← explicit label
 }
 ```
+
+The resolution-order table above already encodes this: the default-conditional-on-plugin-enabled row is the same "silent undev" rule the conditional default implements.

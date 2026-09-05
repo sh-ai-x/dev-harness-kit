@@ -30,7 +30,7 @@ Answer in order. Stop at the first "yes".
 
 ## Q3'. My teammate sees different hooks than I do in the same project. Why?
 
-- One of you has a project-scope override in `settings.json`, the other has a local-scope override in `settings.local.json`. Or one of you has the user-scope enabled. See [`troubleshooting.md`](troubleshooting.md) §"hooks fire in unexpected projects".
+- One of you has a project-scope override in `settings.json`, the other has a local-scope override in `settings.local.json`. Or one of you has the user-scope enabled. See [`troubleshooting.md`](troubleshooting.md) §"My teammate sees different hooks than I do".
 
 ---
 
