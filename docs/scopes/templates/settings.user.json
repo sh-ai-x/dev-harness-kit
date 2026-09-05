@@ -1,0 +1,25 @@
+{
+  "theme": "default",
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-command.sh"
+  },
+  "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": false,
+  "permissions": {
+    "allow": [
+      "Edit(.worktrees/**)",
+      "Read(.worktrees/**)",
+      "Bash(git -C .worktrees/** *)"
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "dev-kit-lite": {
+      "source": {
+        "source": "github",
+        "repo": "sh-ai-x/dev-harness-kit-lite"
+      }
+    }
+  },
+  "enabledPlugins": {}
+}

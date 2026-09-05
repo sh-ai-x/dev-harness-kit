@@ -24,6 +24,9 @@ __pycache__/
 .claude/commands/
 .codex/commands/
 
+# Claude Code: per-checkout personal settings, never commit
+.claude/settings.local.json
+
 # Deps (added per-project)
 node_modules/
 .venv/

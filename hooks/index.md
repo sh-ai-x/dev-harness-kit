@@ -1,5 +1,11 @@
 # Hooks (SSOT)
 
+> **Scope and mode reference** → [`docs/scopes/README.md`](../docs/scopes/README.md)
+>
+> Hooks are loaded based on three scopes (user / project / local) and three modes (`full` / `lite` / `undev`). If a hook fires in an unexpected project, or your `enabledPlugins` doesn't seem to take effect, the answer is in `docs/scopes/troubleshooting.md`.
+
+
+
 > The active-hooks state lives in `.dev-kit/.active-hooks.json` (MUST-13).
 > Shells live in `hooks/*.sh` and are wired via `hooks/hooks.json`.
 > Two writers share the file via namespaced top-level keys:
