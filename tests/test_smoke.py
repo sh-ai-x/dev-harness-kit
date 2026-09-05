@@ -52,14 +52,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # SKILL.md for the post-#439 sync (=) vs bump (+) rationale) (42 -> 43).
 # Added skills/ci-update/SKILL.md (dev-kit ⇄ consumer drift apply,
 # PR #684 — backup-before-overwrite + 4-state classifier) (43 -> 44).
-# Added skills/guard-mode/SKILL.md (session-scoped tdd-guard /
-# worktree-guard toggle, mirrors harness-mode's session-reset design) (46 -> 47).
-# Added skills/gate-select/SKILL.md (unified 3-dimension picker for project /
-# session / AI-judge gates; dispatches to /dev-kit:ci-setup, /dev-kit:harness-mode,
-# and the AI-judge skills). (47 -> 48).
-# On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print |wc -l`
+# Rebase of feat/worktree-prune-skill on origin/main at SKILL_COUNT=46
+# brings in three SKILL.md additions on the same trip: worktree-prune
+# (this branch), guard-mode + gate-select (main). Combined 46 -> 49.
+# On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 48
+SKILL_COUNT = 49
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

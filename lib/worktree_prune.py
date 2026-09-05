@@ -122,12 +122,13 @@ def _resolve_main(repo_root: str) -> str:
     return str(Path(_run(["git", "-C", repo_root, "rev-parse", "--show-toplevel"], cwd=repo_root).strip()).resolve())
 
 
-def collect(repo_root: str) -> list[Row]:
+def collect(repo_root: str, exclude_paths: list[str] | None = None) -> list[Row]:
     """Return removable worktree rows, oldest first.
 
-    Excludes the main checkout (the row whose path == ``repo_root``) and
-    detached-HEAD worktrees (no branch tip to compare; janitor agent
-    classifies those separately). Worktrees in the legacy
+    Excludes the main checkout (the row whose path == ``repo_root``),
+    any caller-supplied ``exclude_paths`` (resolved to absolute paths),
+    and detached-HEAD worktrees (no branch tip to compare; janitor
+    agent classifies those separately). Worktrees in the legacy
     ``.claude/worktrees/`` and ``.codex/worktrees/`` roots ARE included
     — the script's job is "show me all candidates", the caller decides
     which root to act on.
@@ -135,6 +136,13 @@ def collect(repo_root: str) -> list[Row]:
     porcelain = _run(["git", "-C", repo_root, "worktree", "list", "--porcelain"], cwd=repo_root)
     epoch_map = _branch_epoch_map(repo_root)
     main_abs = _resolve_main(repo_root)
+    excluded_abs: set[str] = set()
+    if exclude_paths:
+        for p in exclude_paths:
+            try:
+                excluded_abs.add(str(Path(p).resolve()))
+            except OSError:
+                excluded_abs.add(p)
 
     rows: list[Row] = []
     for block in _porcelain_blocks(porcelain):
@@ -147,7 +155,7 @@ def collect(repo_root: str) -> list[Row]:
             path_abs = str(Path(path).resolve())
         except OSError:
             path_abs = path
-        if path_abs == main_abs:
+        if path_abs == main_abs or path_abs in excluded_abs:
             continue
         epoch = epoch_map.get(branch, 0)
         rows.append(Row(path=path, branch=branch, epoch=epoch, sha=sha))
@@ -212,15 +220,19 @@ def main() -> None:
                    help="Print only the integer count of candidates")
     p.add_argument("--head", type=int, default=None,
                    help="In --table mode, render only the first N rows")
+    p.add_argument("--exclude", action="append", default=None, metavar="PATH",
+                   help="Absolute worktree path to exclude from candidates. Repeatable.")
     args = p.parse_args()
 
-    rows = collect(args.repo)
+    rows = collect(args.repo, exclude_paths=args.exclude)
     if args.count:
         print(len(rows))
         return
     if args.table:
         now = int(_time.time())
-        print(f"Worktrees registered: {len(rows)} (excluding main checkout)")
+        print(f"Worktrees registered: {len(rows)} (excluding main checkout"
+              + (f" + {len(args.exclude)} excluded path(s)" if args.exclude else "")
+              + ")")
         print()
         # --head trims the table contents (preview) without changing the
         # summary line — the operator still sees the full candidate
