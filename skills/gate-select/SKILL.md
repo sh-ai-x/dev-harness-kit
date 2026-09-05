@@ -182,4 +182,4 @@ These are not new installers — they exist so gate-select can serve as a single
 
 ## Next step
 
-After installing gates, run `/dev-kit:build <first-feature>` to start the canonical plan → build loop. `/dev-kit:ci-doctor` is also available for post-install drift verification.
+After a `pick` that installed something, run `/dev-kit:build <first-feature>` (or `/dev-kit:plan` for idea → PRD.md synthesis). `/dev-kit:ci-doctor` is also available for post-install drift verification. For `show` or a Skip-everything `pick`, no further stage is required.

@@ -43,7 +43,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`bootstrap`](bootstrap.md) | `state` | One-shot setup for new projects — generates `CLAUDE.md` + `AGENTS.md` + `active-hooks.json`, then prompts for ci-setup (pass `--skip-ci` to decline or `--yes` to auto-accept). |
 | [`ci-setup`](ci-setup.md) | `enforcement` | Installs dev-kit's reusable CI workflow templates into a target project. |
 | [`config`](config.md) | `state` | Skill / hook / methodology picker. |
-| [`gate-select`](gate-select.md) | `state` | Unified 3-dimension picker for project / session / AI-judge gates (`show` / `pick` / `install-project` / `install-session`). Reads existing sources (`.dev-kit/ci-config.json`, `.dev-kit/harness-mode.session.json`) — no new state file. |
+| [`gate-select`](../../skills/gate-select/SKILL.md) | `state` | Unified 3-dimension picker for project / session / AI-judge gates (`show` / `pick` / `install-project` / `install-session`). Reads existing sources (`.dev-kit/ci-config.json`, `.dev-kit/harness-mode.session.json`) — no new state file. (Consumer docs land in a follow-up PR.) |
 | [`linear`](linear.md) | `state` | Optional Linear task tracker — reconciling the current repo task with a canonical project + issue (auto-sync on every edit when configured). |
 
 ### Plan → Build
