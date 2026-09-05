@@ -150,6 +150,15 @@
             "fail_closed": false
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-guard-mode-reset.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "PostToolUse": [

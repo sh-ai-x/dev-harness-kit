@@ -45,6 +45,13 @@ fi
 FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)"
 [ -z "$FILE_PATH" ] && exit 0
 
+# Session-scoped bypass via /dev-kit:guard-mode. Reset to "on" at every
+# SessionStart (hooks/session-start-guard-mode-reset.sh) — never persists
+# across sessions. Fails to "on" (enforced) if python3 is unavailable.
+if [ "$(python3 -m lib.guard_mode_state get worktree_guard 2>/dev/null)" = "off" ]; then
+  exit 0
+fi
+
 # Orchestration branches (orch/*) are routing/analysis-only worktrees.
 # Edits to protected paths (code, hooks, tests, manifests, plugins,
 # and source extensions) are denied here so any code change still
