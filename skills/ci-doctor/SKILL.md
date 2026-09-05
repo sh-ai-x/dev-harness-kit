@@ -55,6 +55,7 @@ For each `.github/workflows/*.yml` the install shipped, the audit emits diagnost
 | `job name: <file>/<job>` | INFO (`review.yml`) / WARN (`auto-fix-pr.yml`) when missing | Surfaces bare keys vs named jobs in the GitHub UI; matters for branch-protection matching |
 | `action ref mutable: <file>` | INFO listing non-SHA third-party `uses:` refs | Supply-chain hardening signal |
 | `branch policy` | WARN on required-status mismatch; SKIP if `gh` absent / unauth / no repo context; INFO in source-repo mode | Compares GitHub branch-protection required checks against workflow job `name:`s |
+| `ruleset workflow contract` | FAIL when a local `.github/rulesets/*.json` declares a required-status context that no workflow job `name:` (or bare key) emits; WARN on unparseable ruleset file; INFO when no local ruleset files exist | Local-file equivalent of the `branch policy` row; pins the issue #774 contract so renames don't leave the ruleset context stranded. See docs/quality/ci-ruleset-contract.md. |
 
 WARN rows appear in the count line (`warnings: N`) and on screen; they never flip the verdict. INFO rows are advisory and never counted — same contract as the existing `repo role: dev-kit source repo` row.
 

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "first",
+    "rules": [
+      {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "ci", "integration_id": null}]}}
+    ]
+  },
+  {
+    "name": "second",
+    "rules": [
+      {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "review", "integration_id": null}]}}
+    ]
+  }
+]

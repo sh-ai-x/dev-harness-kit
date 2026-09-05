@@ -1,0 +1,15 @@
+{
+  "id": 20232367,
+  "name": "protect main",
+  "target": "branch",
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "required_status_checks": [
+          {"context": "auto-fix", "integration_id": null}
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": 20232367,
+  "name": "protect main (admin PAT bypass)",
+  "target": "branch",
+  "enforcement": "active",
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {"context": "severity gate (review + security)", "integration_id": null},
+          {"context": "severity gate (review + security + injection_scan)", "integration_id": null}
+        ]
+      }
+    }
+  ]
+}
