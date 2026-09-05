@@ -4,7 +4,7 @@
 
 **Category:** `bootstrap` · **Alpha:** `state` · **Invocation:** `/dev-kit:bootstrap` (human-invoked)
 
-`bootstrap` is the canonical one-shot setup for a fresh dev-harness-kit project. It runs the unconditional bootstrap pipeline (sanity, codebase-map, hook-matrix, write-claude-md), then prompts the operator for whether to also install CI templates. Pass `--yes` to auto-accept CI or `--skip-ci` to decline. With Y (default), end state on disk matches the legacy `/dev-kit:bootstrap-full` slash — three SSOT files plus the 15 CI workflow templates plus pre-push hook plus `.dev-kit/ci-config.json` marker.
+`bootstrap` is the canonical one-shot setup for a fresh dev-harness-kit project. It runs the unconditional bootstrap pipeline (sanity, codebase-map, hook-matrix, write-claude-md), then prompts the operator for whether to also install CI templates (default N; pass `--yes` to auto-accept CI or `--skip-ci` to decline). If the operator answers Y, end state on disk matches the legacy `/dev-kit:bootstrap-full` slash — three SSOT files plus the 15 CI workflow templates plus pre-push hook plus `.dev-kit/ci-config.json` marker.
 
 ## When to use it
 
@@ -36,7 +36,7 @@ Hidden flags (no visible option prompts — MUST-NOT-13): `--skip-sanity`, `--sk
 
 | Flag | Effect |
 |---|---|
-| *(0-arg)* | Runs the full pipeline and prompts for ci-setup then git-defaults; default is Y on both (full setup, matches legacy `/dev-kit:bootstrap-full`). |
+| *(0-arg)* | Runs the full pipeline and prompts for ci-setup (default N) then git-defaults (default Y). Pass `--yes` to auto-accept CI for the legacy `/dev-kit:bootstrap-full` end state, or `--skip-ci` to skip ci-setup and print the unavailable-features list. |
 | `--skip-sanity` | Skips the sanity sub-stage. |
 | `--skip-map` | Skips the codebase-map sub-stage. |
 | `--slim` / `--full` | Controls CLAUDE.md verbosity mode. |

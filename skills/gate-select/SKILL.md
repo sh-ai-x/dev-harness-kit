@@ -15,8 +15,6 @@ user-invocable: true
 ---
 > [← Skills index](../../README.md)
 
-# /dev-kit:gate-select — Unified 3-dimension gate picker
-
 ## What it does
 
 One skill that exposes the three gate dimensions the rest of dev-kit fragments across separate pickers:
@@ -48,7 +46,7 @@ One skill that exposes the three gate dimensions the rest of dev-kit fragments a
 
 ## `show` output
 
-```
+```text
 PROJECT GATES (CI workflows, .dev-kit/ci-config.json marker)
   ci.yml (branch-policy + test + validate):   installed | /dev-kit:ci-setup
   auto-fix-pr.yml:                            installed | /dev-kit:ci-setup
@@ -71,11 +69,20 @@ AI-JUDGE GATES (skills shipped with the plugin; wired into CI by ci-setup)
 ### How `show` reads each dimension
 
 ```bash
-# Project — marker presence + per-workflow file presence
+# Project — marker presence + per-workflow file presence.
+# Loop matches the spec table above (4 workflows, including maintenance.yml
+# which is NOT YET shipped as a template).
 [ -f .dev-kit/ci-config.json ] && echo "ci-config marker: present"
 for f in ci.yml auto-fix-pr.yml review.yml; do
-  [ -f .github/workflows/$f ] && echo "$f: installed" || echo "$f: missing"
+  [ -f ".github/workflows/$f" ] && echo "$f: installed" || echo "$f: missing"
 done
+# maintenance.yml ships in a separate PR; while absent, `show` MUST report
+# the gap so the single-pane view stays honest about future-PR blockers.
+if [ -f .github/workflows/maintenance.yml ]; then
+  echo "maintenance.yml: installed"
+else
+  echo "maintenance.yml: NOT INSTALLED — template not shipped yet"
+fi
 
 # Session — delegated to the existing CLI
 python3 -m lib.harness_mode_state show
@@ -96,41 +103,52 @@ Two `AskUserQuestion` calls, 3 questions each (mirrors `harness-mode` lines 61�
 | Set **session gates** mode? | `full` (Recommended) / `fast` / `custom` (delegate to `/dev-kit:harness-mode custom`) |
 | Wire **AI-judge gates** into CI? | `review + security` via review.yml (Recommended, ships today) / `review + security + maintenance` (blocked until template lands) / Skip — leave AI-judge skill-only |
 
-### Call 2 (only if project pick = Install)
+### Call 2 (project pick follow-ups + persistent session mode)
 
-| Question | Options |
-|---|---|
-| Run **Phase 3 verify** after ci-setup install? | Run verify (Recommended) / `--skip-verify` (faster, no `bash -n` / `validate.py` / `ci-local.sh`) |
-| Persist **session mode** choice across sessions? | Write `.dev-kit/harness-mode.session.json` (Recommended, SessionStart will reset to `full` next session) / One-shot — leave as-is |
-| Print **post-install checklist** after ci-setup? | Print 5-step checklist (Recommended) / Skip checklist |
+The "Persist session mode" question is independent of project pick — the
+session pick in Call 1 (`full|fast|custom`) is always set, so persist it
+regardless of whether project gates were installed. The Phase 3 verify and
+post-install checklist questions stay conditional on `project_pick = Install`.
 
-### Dispatch script (read each AskUserQuestion answer, then run)
+| Question | When | Options |
+|---|---|---|
+| Run **Phase 3 verify** after ci-setup install? | only if `project_pick = Install` | Run verify (Recommended) / `--skip-verify` (faster, no `bash -n` / `validate.py` / `ci-local.sh`) |
+| Persist **session mode** choice across sessions? | always | Write `.dev-kit/harness-mode.session.json` (Recommended, SessionStart will reset to `full` next session) / One-shot — leave as-is |
+| Print **post-install checklist** after ci-setup? | only if `project_pick = Install` | Print 5-step checklist (Recommended) / Skip checklist |
 
-The script bodies below are documentation of what `pick` does at runtime.
-`lib.ci_setup` is a Python module (no argparse CLI), so the project pick
-dispatches by `Skill` invocation rather than a shell call. `harness-mode`
-*does* expose a real CLI (`lib.harness_mode_state write <mode>`), so it
-can be invoked directly.
+### Dispatch (Skill tool invocations, not bash)
 
-```bash
-# Project pick — delegate to the existing installer via Skill tool.
-# (lib/ci_setup.py is a Python module, not a CLI; do NOT shell out.)
-if [ "$project_pick" = "Install" ]; then
-  /dev-kit:ci-setup ${force:+--force} ${skip_verify:+--skip-verify}
-fi
+The `pick` flow ends by dispatching to existing skills and one real CLI.
+Slash commands are LLM-mediated Skill tool calls, not binaries — `lib.ci_setup`
+is a Python module (no argparse CLI), so the project pick dispatches via the
+Skill tool, not by shelling out to a non-existent `/dev-kit/ci-setup` binary.
+`lib.harness_mode_state` *does* expose a real CLI and is invoked directly.
 
-# Session pick — harness-mode is a real CLI; invoke directly.
-case "$session_pick" in
-  full|fast) python3 -m lib.harness_mode_state write "$session_pick" ;;
-  custom)    /dev-kit:harness-mode custom ;;
-esac
+```python
+# Project pick — Skill tool (slash commands are not on PATH).
+if project_pick == "Install":
+    Skill(name="ci-setup", args={"force": force, "skip_verify": skip_verify})
 
-# AI-judge pick — no installer yet; just report the resulting state.
-case "$ai_judge_pick" in
-  "review + security") echo "✓ Wired via .github/workflows/review.yml (installed by ci-setup)" ;;
-  "review + security + maintenance") echo "✗ maintenance.yml template not shipped — out of scope here" ;;
-  "Skip") echo "✓ AI-judge skills remain skill-only (no CI wiring)" ;;
-esac
+# Session pick — harness-mode is a real CLI for fast|full; custom goes via Skill.
+if session_pick in ("fast", "full"):
+    subprocess.run(["python3", "-m", "lib.harness_mode_state", "write", session_pick], check=True)
+elif session_pick == "custom":
+    Skill(name="harness-mode", args={"mode": "custom"})
+
+# AI-judge pick — no installer; the echo below is a status report, not a write.
+# Gate the "Wired via review.yml" claim on actual file presence. If the
+# operator skipped the project pick, review.yml is not installed, so the
+# status must say so — otherwise the echo is a pure lie.
+case ai_judge_pick:
+    case "review + security":
+        if project_pick == "Install" or Path(".github/workflows/review.yml").is_file():
+            print("✓ Wired via .github/workflows/review.yml (installed by ci-setup)")
+        else:
+            print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
+    case "review + security + maintenance":
+        print("✗ maintenance.yml template not shipped — out of scope here")
+    case "Skip":
+        print("✓ AI-judge skills remain skill-only (no CI wiring)")
 ```
 
 ## `install-project` and `install-session` sub-commands

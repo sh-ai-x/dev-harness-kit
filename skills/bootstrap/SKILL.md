@@ -17,14 +17,14 @@ disable-model-invocation: false
 
 ## What it does
 
-Runs the deterministic bootstrap pipeline (sanity -> codebase-map -> hook-matrix -> write-claude-md), then prompts the operator for whether to also install CI. On a fresh repo, the unconditional bootstrap set lands on disk: `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`, `iron-laws/index.md`, `guidelines/index.md`, `hooks/index.md`, plus `rules/index.md` if `rules/` exists. CI is opt-in via a single `y/N` prompt (default N; legacy default-Y preserved by `--with-ci`; pass `--skip-ci` or `--yes` to skip the prompt).
+Runs the deterministic bootstrap pipeline (sanity -> codebase-map -> hook-matrix -> write-claude-md), then prompts the operator for whether to also install CI. On a fresh repo, the unconditional bootstrap set lands on disk: `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`, `iron-laws/index.md`, `guidelines/index.md`, `hooks/index.md`, plus `rules/index.md` if `rules/` exists. CI is opt-in via a single `y/N` prompt (default N; pass `--skip-ci` to skip the prompt and print the unavailable-features list, or `--yes` to auto-accept and skip the prompt).
 
 If Y: also runs `lib/ci_setup.py:install_ci_config()` to install the 15 CI workflow templates, pre-push hook, `.dev-kit/ci-config.json` marker, Phase 1.5 pre-flight probe, Phase 1.7 lint, and Phase 3 verify. End state on disk is identical to the legacy `/dev-kit:bootstrap-full` slash.
 
 If N (or `--skip-ci`): prints the unavailable-features list below and exits with code 0. CI can be added later via `/dev-kit:ci-setup --force`.
 
 ## Iron Law (no exceptions)
-**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the prompt, default `Y`), `--with-ci` (skip the ci-setup prompt and assume `Y`; preserves the legacy default for operators who always want CI gates), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
+**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the ci-setup prompt, assume `Y`; preserves the legacy default for operators who always want CI gates), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
 
 ## 9-Step Orchestration (4 auto + 1 prompt + 1 ci-setup + 2 git-defaults + 1 user review)
 
@@ -38,7 +38,7 @@ If N (or `--skip-ci`): prints the unavailable-features list below and exits with
 [4] write-claude-md lib/write_project_md.py -> CLAUDE.md + AGENTS.md + 4 index.md files
        | (auto)
 [5] ci-setup prompt       -> "Also install CI templates (ci-setup)? [y/N]"
-       | (N default; auto-Y if --yes or --with-ci; skip-prompt + N if --skip-ci)
+       | (N default; auto-Y if --yes; skip-prompt + N if --skip-ci)
 [6] ci-setup              -> lib/ci_setup.py:install_ci_config() (only if Y/--yes)
        |-- 1.5 pre-flight probe
        |-- 15 EXPECTED_PATHS + .dev-kit/ci-config.json marker
