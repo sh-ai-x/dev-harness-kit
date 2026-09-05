@@ -50,13 +50,9 @@ sys.exit(0 if report.ok and not report.errors else 1)
 2.1. `lib/ci_setup.py:install_ci_config()` resolves sources relative to its
      own `__file__`: consumer templates from `templates/ci/`, hooks from the
      canonical `hooks/` tree, tools from `tools/`, and the workflow rule from
-     `rules/`. Consumer install paths for the hook payload are namespaced
-     under `.dev-kit/hooks/` (not project-root `hooks/`) so adopting projects
-     can keep `hooks/` reserved for their own app code (React/Next.js/Vue
-     custom hooks). Mirrors dev-kit-lite commit 45da476e (PR #12).
+     `rules/`.
 2.2. For each path in the canonical `EXPECTED_PATHS` inventory (explicit CI
-     templates plus the complete `.dev-kit/hooks/` payload, rules, tests,
-     and tools):
+     templates plus the complete `hooks/` source tree, rules, tests, and tools):
   - Skip if exists and `force=False` (idempotent).
   - Overwrite if exists and `force=True`.
   - `shutil.copy2` (preserves mtime for git diff stability).
@@ -146,12 +142,9 @@ The install is considered successful even if `gh secret set` fails — secrets a
 ## Files Installed (canonical inventory)
 
 The installer keeps the CI workflow list below explicit, but derives the
-complete `.dev-kit/hooks/` payload from the canonical `hooks/hooks.json` +
-`hooks/**/*.sh` tree. This prevents a new hook or shared helper from being
-added twice (once to the source tree and once to `templates/ci/`) or omitted
-from consumers. The payload installs under `.dev-kit/hooks/` instead of
-project-root `hooks/` so adopting projects can keep `hooks/` reserved for
-their own app code.
+complete `hooks/` payload from the canonical `hooks/hooks.json` + `hooks/**/*.sh`
+tree. This prevents a new hook or shared helper from being added twice (once
+to the source tree and once to `templates/ci/`) or omitted from consumers.
 
 | Path | Purpose |
 |---|---|
@@ -163,8 +156,8 @@ their own app code.
 | `scripts/test.sh` | Pytest wrapper (gracefully skips if no `tests/`) |
 | `scripts/branch-policy.sh` | Mirror of `pre-push` for CI script context |
 | `scripts/ci-local.sh` | Local-runner entrypoint: `validate.py` + `test.sh` + optional `act -l` |
-| `.dev-kit/hooks/**/*.sh` | Complete canonical hook implementation set, including shared helpers (namespaced under `.dev-kit/`) |
-| `.dev-kit/hooks/hooks.json` | Canonical hook registration manifest copied with every referenced source (namespaced under `.dev-kit/`) |
+| `hooks/**/*.sh` | Complete canonical hook implementation set, including shared helpers |
+| `hooks/hooks.json` | Canonical hook registration manifest copied with every referenced source |
 | `.claude/rules/git-workflow.md` | Branch / worktree / PR conventions (Iron Law rule text) |
 | `tests/test_worktree_guard.py` | Regression tests for the 4 rule hooks + hooks.json wiring |
 | `tools/skill_usage.py` | `/dev-kit:skill-usage` CLI entrypoint (turns + invocations telemetry) |
