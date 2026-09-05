@@ -44,7 +44,7 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
    `AGENTS.md`(CLIs가 AGENTS.md를 읽는 경우를 위한 CLAUDE.md로의 1줄
    포인터)를 §1-§5 섹션으로 원자적으로 작성.
 5. **ci-setup prompt** — 무조건적인 bootstrap 세트가 착륙한 후 스킬은
-   `Also install CI templates (ci-setup)? [Y/n]`을 묻는다. 기본은 Y.
+   `Also install CI templates (ci-setup)? [y/N]`을 묻는다. 기본은 N.
    프롬프트를 건너뛰려면 `--yes`(Y 가정), 건너뛰고 불가-기능 리스트를
    출력하려면 `--skip-ci`.
 6. **ci-setup** (Y에 한해) — `lib/ci_setup.py:install_ci_config(force=True)`에

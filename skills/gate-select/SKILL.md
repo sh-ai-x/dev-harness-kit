@@ -106,20 +106,26 @@ Two `AskUserQuestion` calls, 3 questions each (mirrors `harness-mode` lines 61�
 
 ### Dispatch script (read each AskUserQuestion answer, then run)
 
+The script bodies below are documentation of what `pick` does at runtime.
+`lib.ci_setup` is a Python module (no argparse CLI), so the project pick
+dispatches by `Skill` invocation rather than a shell call. `harness-mode`
+*does* expose a real CLI (`lib.harness_mode_state write <mode>`), so it
+can be invoked directly.
+
 ```bash
-# Project pick
+# Project pick — delegate to the existing installer via Skill tool.
+# (lib/ci_setup.py is a Python module, not a CLI; do NOT shell out.)
 if [ "$project_pick" = "Install" ]; then
-  python3 -m lib.ci_setup install --target "$PWD" \
-    ${force:+--force} ${skip_verify:+--skip-verify} ${print_checklist:+--print-checklist}
+  /dev-kit:ci-setup ${force:+--force} ${skip_verify:+--skip-verify}
 fi
 
-# Session pick
+# Session pick — harness-mode is a real CLI; invoke directly.
 case "$session_pick" in
   full|fast) python3 -m lib.harness_mode_state write "$session_pick" ;;
   custom)    /dev-kit:harness-mode custom ;;
 esac
 
-# AI-judge pick
+# AI-judge pick — no installer yet; just report the resulting state.
 case "$ai_judge_pick" in
   "review + security") echo "✓ Wired via .github/workflows/review.yml (installed by ci-setup)" ;;
   "review + security + maintenance") echo "✗ maintenance.yml template not shipped — out of scope here" ;;
@@ -143,9 +149,11 @@ These are not new installers — they exist so gate-select can serve as a single
 
 ## What is out of scope
 
-- **`templates/ci/.github/workflows/maintenance.yml` does not ship today** — `skills/maintenance/SKILL.md` cross-references it but `ci-setup` does not install it. `gate-select`'s "review + security + maintenance" pick is intentionally blocked until a separate PR adds the workflow template + tests.
-- **`lib/config_state.py` does not exist** — `.dev-kit/.enabled.json` is referenced only by `skills/config/SKILL.md` and consumed by `hooks/linear-*.sh`; not used by gate-select.
-- **AI-judge gate disabling** — no skill-disable mechanism exists. `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` are always available while the plugin is loaded; `gate-select` only orchestrates the **CI wiring** of these, not their skill-level enablement.
+| Surface | Today | Why |
+|---|---|---|
+| `templates/ci/.github/workflows/maintenance.yml` | Not shipped | `gate-select`'s "review + security + maintenance" pick stays blocked until a separate PR adds the template + tests. |
+| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used | Referenced only by `skills/config/SKILL.md` + `hooks/linear-*.sh`; gate-select reads from `ci-config.json` + `harness-mode.session.json`. |
+| Skill-disable mechanism for AI-judge skills | None exists | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` are always-on with the plugin; gate-select only orchestrates their **CI wiring**, not their skill-level enablement. |
 
 ## Rules (no exceptions)
 

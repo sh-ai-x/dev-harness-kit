@@ -17,7 +17,7 @@ disable-model-invocation: false
 
 ## What it does
 
-Runs the deterministic bootstrap pipeline (sanity -> codebase-map -> hook-matrix -> write-claude-md), then prompts the operator for whether to also install CI. On a fresh repo, the unconditional bootstrap set lands on disk: `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`, `iron-laws/index.md`, `guidelines/index.md`, `hooks/index.md`, plus `rules/index.md` if `rules/` exists. CI is opt-in via a single Y/n prompt (or `--skip-ci` / `--yes` flags).
+Runs the deterministic bootstrap pipeline (sanity -> codebase-map -> hook-matrix -> write-claude-md), then prompts the operator for whether to also install CI. On a fresh repo, the unconditional bootstrap set lands on disk: `CLAUDE.md`, `AGENTS.md`, `.dev-kit/.active-hooks.json`, `iron-laws/index.md`, `guidelines/index.md`, `hooks/index.md`, plus `rules/index.md` if `rules/` exists. CI is opt-in via a single `y/N` prompt (default N; legacy default-Y preserved by `--with-ci`; pass `--skip-ci` or `--yes` to skip the prompt).
 
 If Y: also runs `lib/ci_setup.py:install_ci_config()` to install the 15 CI workflow templates, pre-push hook, `.dev-kit/ci-config.json` marker, Phase 1.5 pre-flight probe, Phase 1.7 lint, and Phase 3 verify. End state on disk is identical to the legacy `/dev-kit:bootstrap-full` slash.
 
@@ -38,7 +38,7 @@ If N (or `--skip-ci`): prints the unavailable-features list below and exits with
 [4] write-claude-md lib/write_project_md.py -> CLAUDE.md + AGENTS.md + 4 index.md files
        | (auto)
 [5] ci-setup prompt       -> "Also install CI templates (ci-setup)? [y/N]"
-       | (N default; auto if --yes/--with-ci; skip if --skip-ci)
+       | (N default; auto-Y if --yes or --with-ci; skip-prompt + N if --skip-ci)
 [6] ci-setup              -> lib/ci_setup.py:install_ci_config() (only if Y/--yes)
        |-- 1.5 pre-flight probe
        |-- 15 EXPECTED_PATHS + .dev-kit/ci-config.json marker
@@ -181,7 +181,7 @@ After the unconditional bootstrap set lands on disk, the skill prompts:
 Also install CI templates (ci-setup)? [y/N]
 ```
 
-### y branch (default)
+### y branch (when chosen)
 
 Delegates to `lib/ci_setup.py:install_ci_config(force=<--force>)` -- the default is **idempotent** (re-runs on an already-installed repo are no-op). Pass `--force` to overwrite customized CI workflows and the pre-push hook (same code path as `/dev-kit:ci-setup --force`):
 
@@ -212,7 +212,7 @@ Run any of these in any order to layer additional gates on top of the minimal bo
 
 ## git-defaults prompt (sub-stage 7)
 
-After ci-setup (Y/n), the skill prompts:
+After ci-setup (`y/N`), the skill prompts:
 
 ```
 Also configure operator-global git defaults (rebase.autoStash + pull.rebase)? [Y/n]
@@ -261,7 +261,7 @@ For a single-pane view of all three gate dimensions (project, session, AI-judge)
 ## Rules (no exceptions)
 
 - **0-arg UX (MUST-21)**: zero args. Branching via `when_to_use` auto-match.
-- **HOTL (MUST-29)**: steps 1~4 auto. Step 5 ci-setup prompt is a single Y/n with no further sub-prompts.
+- **HOTL (MUST-29)**: steps 1~4 auto. Step 5 ci-setup prompt is a single `y/N` with no further sub-prompts.
 - **YAGNI**: no extra option prompts (MUST-NOT-13). Only hidden flags.
 - **No-over-engineering (MUST-25)**: defaults handle 80%. Extra features require ADR.
 - **Minimal file footprint**: unconditional set is 6~7 files (CLAUDE.md, AGENTS.md, `.dev-kit/.active-hooks.json`, 4 index.md). With ci-setup, +15 CI workflows + `.dev-kit/ci-config.json` + pre-push hook.
