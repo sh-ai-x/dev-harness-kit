@@ -3,6 +3,16 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **ADR-0024:** close PR #785. Consumer hook payload stays at project-root
+  `hooks/` (NOT `.dev-kit/hooks/`). See
+  `docs/adr/ADR-0024-consumer-hook-namespace.md` for the full reasoning
+  (mirrors-with-dev-kit-lite argument rejected: no `role-frontend` rule
+  here to motivate the move, `.dev-kit/` semantic blur, critical regression
+  in `tests/test_hooks_single_source.py` during mechanical mirror).
+  Consumers who hit the React/Next.js collision resolve it manually via
+  the migration snippet in ADR-0024. Triggers for revisiting:
+  consumer-reported collision, `role-frontend` rule added here, or Codex
+  parity work.
 - **fix(review):** severity gate tolerates the bootstrap-PR fallback contract
   on BOTH review + security jobs. When `anthropics/claude-code-action@v1`'s
   anti-recursion guard skips both agents because the PR modifies
