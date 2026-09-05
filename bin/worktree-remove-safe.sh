@@ -87,5 +87,17 @@ fi
 # 2. Run the actual `git worktree remove`. The defensive `--`
 # protects against the rare case where WT_ABS starts with `--`
 # (git would otherwise interpret it as a flag); never causes harm
-# otherwise.
-git -C "$REPO_ROOT" worktree remove -- "$WT_ABS" "${GW_ARGS[@]}"
+# otherwise. The `${GW_ARGS[@]+...}` idiom is the canonical
+# bash 3.2 + set -u safe expansion for an array that may be
+# empty — the bare `"${GW_ARGS[@]}"` form raises "unbound
+# variable" when GW_ARGS is empty (no `--` was passed).
+#
+# GW_ARGS is placed BEFORE WT_ABS (not after) because git's
+# `worktree remove` signature is `git worktree remove [-f]
+# <worktree>` — the -f flag MUST precede the positional
+# argument. Earlier passing them in the other order (after
+# WT_ABS, separated by `--`) caused every bulk prune call to
+# fail with the usage banner since `<worktree>` ate the slot
+# and `--force` became an unexpected 2nd positional arg.
+# Discovered during /dev-kit:worktree-prune rollout.
+git -C "$REPO_ROOT" worktree remove ${GW_ARGS[@]+"${GW_ARGS[@]}"} -- "$WT_ABS"

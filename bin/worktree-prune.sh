@@ -33,7 +33,12 @@
 #   -k, --keep N    Keep exactly N newest worktrees (selects the
 #                   TOTAL-N oldest for removal). Mutually exclusive with
 #                   positional N.
-#   -h, --help      Show usage and exit 0.
+#   --except-self     Exclude the worktree the script is currently
+#                     running from (resolved via `git rev-parse
+#                     --show-toplevel` from $PWD). Combine with no
+#                     count to nuke every other worktree. The
+#                     typical pattern is `--except-self -y`.
+#   -h, --help        Show usage and exit 0.
 #
 # Exit codes:
 #   0   Removed (or nothing selected, or dry-run completed).
@@ -47,6 +52,7 @@
 #   bin/worktree-prune.sh -y 10           # remove 10 oldest, no prompt
 #   bin/worktree-prune.sh --keep 3        # prune to 3 newest
 #   bin/worktree-prune.sh -n 5            # show the 5 oldest; don't remove
+#   bin/worktree-prune.sh --except-self -y      # nuke every worktree except this one
 
 set -euo pipefail
 
@@ -59,6 +65,8 @@ SAFE_REMOVE="$SCRIPT_DIR/worktree-remove-safe.sh"
 YES=0
 DRY_RUN=0
 KEEP=0
+EXCEPT_SELF=0
+EXCLUDE_ARGS=()
 POSITIONAL=()
 
 usage() {
@@ -70,15 +78,25 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -y|--yes)     YES=1; shift ;;
-    -n|--dry-run) DRY_RUN=1; shift ;;
-    -k|--keep)    KEEP="${2:-}"; shift 2 || { echo "error: --keep needs an integer" >&2; exit 1; } ;;
-    -h|--help)    usage ;;
-    --)           shift; POSITIONAL+=("$@"); break ;;
-    -*)           echo "error: unknown flag $1 (try --help)" >&2; exit 1 ;;
-    *)            POSITIONAL+=("$1"); shift ;;
+    -y|--yes)       YES=1; shift ;;
+    -n|--dry-run)   DRY_RUN=1; shift ;;
+    -k|--keep)      KEEP="${2:-}"; shift 2 || { echo "error: --keep needs an integer" >&2; exit 1; } ;;
+    --except-self)  EXCEPT_SELF=1; shift ;;
+    -h|--help)      usage ;;
+    --)             shift; POSITIONAL+=("$@"); break ;;
+    -*)             echo "error: unknown flag $1 (try --help)" >&2; exit 1 ;;
+    *)              POSITIONAL+=("$1"); shift ;;
   esac
 done
+
+# Resolve --except-self to the absolute path of the worktree the
+# script is being run from. Falls back to $REPO_ROOT if the caller
+# is in the main checkout (where the git-common-dir discriminator
+# would match anyway — main is already excluded by lib.collect).
+if [[ "$EXCEPT_SELF" == "1" ]]; then
+  SELF_WT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "$REPO_ROOT")"
+  EXCLUDE_ARGS+=("--exclude" "$SELF_WT")
+fi
 
 if [[ "$KEEP" -gt 0 && ${#POSITIONAL[@]} -gt 0 ]]; then
   echo "error: --keep and a positional count are mutually exclusive" >&2
@@ -103,18 +121,22 @@ fi
 # repo; we only want to pay that once per CLI run. We get JSON (the
 # richest form) and synthesize the count + table from it in shell —
 # bash is free, the git call is the bottleneck.
-JSON_OUT="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT")"
+JSON_OUT="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" "${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}")"
 TOTAL="$(printf '%s' "$JSON_OUT" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")"
 
 if [[ -z "$TOTAL" || "$TOTAL" -eq 0 ]]; then
-  echo "No removable worktrees (only the main checkout is registered)."
+  if [[ "$EXCEPT_SELF" == "1" ]]; then
+    echo "No removable worktrees (only the main checkout + the current worktree are registered)."
+  else
+    echo "No removable worktrees (only the main checkout is registered)."
+  fi
   exit 0
 fi
 
 # Use the module's --table mode so the audit table shares the exact
 # rendering path with the "Will remove" preview below (review finding
 # #1 in PR #721: was previously two near-identical Python heredocs).
-TABLE_OUT="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" --table)"
+TABLE_OUT="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" --table "${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}")"
 
 # Print the table.
 printf '%s\n' "$TABLE_OUT"
@@ -157,7 +179,7 @@ fi
 # --table --head N reuses render_table() so the "Will remove" preview
 # format matches the audit table verbatim (review finding #1 in PR
 # #721: was a duplicate Python heredoc).
-SELECTED_TABLE="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" --table --head "$SELECT_COUNT")"
+SELECTED_TABLE="$(python3 -m lib.worktree_prune --repo "$REPO_ROOT" --table --head "$SELECT_COUNT" "${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}")"
 
 echo
 echo "Will remove the following $SELECT_COUNT oldest worktree(s):"
@@ -183,14 +205,27 @@ fi
 # Pull paths straight from the cached JSON with jq (review finding
 # #5: the third inline heredoc was dead-from-the-caller's-perspective
 # code — lib.worktree_prune exposes CLI modes but jq is lighter here).
-# mapfile in the current shell keeps the fail counter alive across
-# iterations (subshell boundaries would swallow it).
-mapfile -t SELECTED < <(printf '%s' "$JSON_OUT" | jq -r --argjson n "$SELECT_COUNT" '.[:$n] | .[].path')
+# The while-read loop keeps the fail counter alive across iterations
+# (subshell boundaries would swallow it). bash 3.2-compatible — mapfile
+# was bash 4+ only and broke on macOS /usr/bin/bash during the
+# /dev-kit:worktree-prune rollout on a multi-thousand-tree repo.
+SELECTED=()
+while IFS= read -r path; do
+  SELECTED+=("$path")
+done < <(printf '%s' "$JSON_OUT" | jq -r --argjson n "$SELECT_COUNT" '.[:$n] | .[].path')
 
 fail_count=0
+# Pass --force through bin/worktree-remove-safe.sh → git worktree
+# remove. Bulk prune on a long-lived repo (issue #689 rollout on
+# 3.9k worktrees) shows ~87% of the oldest candidates have
+# uncommitted or untracked files (developer-abandoned feature work,
+# in-progress test fixtures, etc.). Without --force, every removal
+# fails with "modified or untracked files, use --force to delete
+# it" and the script exits with a partial-success count that
+# masks the fact nothing was actually deleted.
 for path in "${SELECTED[@]}"; do
   echo "→ removing: $path"
-  if ! "$SAFE_REMOVE" "$path"; then
+  if ! "$SAFE_REMOVE" "$path" -- --force; then
     echo "  ! removal failed: $path" >&2
     fail_count=$((fail_count + 1))
   fi

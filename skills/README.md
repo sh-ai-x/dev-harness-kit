@@ -2,7 +2,7 @@
 
 This index lists every skill shipped by the `dev-kit` plugin. Click into any skill to read its full `SKILL.md`; every `SKILL.md` has a back-link at the top to return here.
 
-**41 skills** across 12 categories (36 human-invocable, 5 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
+**42 skills** across 12 categories (37 human-invocable, 5 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
 
 ## By category
 
@@ -95,13 +95,14 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`pr-verify`](pr-verify/SKILL.md) | `enforcement` | Deterministic PR verification — fresh `gh pr view` + check + comment fetches on every call. Catches the "stale CI / LLM-judge still in progress" false positive the babysit flow had. |
 | [`ship`](ship/SKILL.md) | `state` | 0-arg. Release tag emit. Gate check only (hooks auto). Requires Review verdict=Approve + main-block pass. |
 
-### `shortcuts` (3)
+### `shortcuts` (4)
 
 | Skill | α | Description |
 |---|---|---|
 | [`codex-cache-update`](codex-cache-update/SKILL.md) | `analysis` | Refresh the dev-kit Codex marketplace checkout and synchronize the versioned plugin cache. Use when Codex reports the marketplace is current but the installed cache may be stale, or after a dev-kit merge. |
 | [`llm-refresh`](llm-refresh/SKILL.md) | `analysis` | Refresh docs/llm-info/<provider>.json from each vendor's official pricing page via WebFetch extraction. Diff-then-commit; manual like set-provider.sh. |
 | [`log`](log/SKILL.md) | `state` | Toggle /log setup|on|off|status — install/remove loghooks from ~/dev/loghooks into the current project's Claude/Codex settings. |
+| [`worktree-prune`](worktree-prune/SKILL.md) | `state` | 0-arg interactive prune of stale worktrees. Counts registered worktrees, lists them oldest-first by branch-tip age, asks how many to remove, then dispatches `bin/worktree-remove-safe.sh` per row after a y/N gate. |
 
 ### `status` (1)
 
@@ -156,4 +157,5 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 39 | [`status`](status/SKILL.md) | `status` | `state` | human |
 | 40 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
 | 41 | [`valuate`](valuate/SKILL.md) | `design` | `enforcement` | model |
+| 42 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
 
