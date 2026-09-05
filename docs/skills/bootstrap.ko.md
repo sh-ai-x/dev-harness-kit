@@ -6,10 +6,10 @@
 
 `bootstrap`은 새 dev-harness-kit 프로젝트의 정식 원샷 설정이다. 무조건적인
 bootstrap 파이프라인(sanity, codebase-map, hook-matrix, write-claude-md)을
-실행한 다음 운영자에게 CI 템플릿 설치 여부를 묻는다. CI를 자동 수락하려면
-`--yes`를, 거절하려면 `--skip-ci`를 전달. Y(기본)일 경우 디스크의 최종
-상태는 레거시 `/dev-kit:bootstrap-full` 슬래시와 일치 — 세 개의 SSOT 파일
-+ 15개 CI 워크플로 템플릿 + pre-push 훅 + `.dev-kit/ci-config.json` 마커.
+실행한 다음 운영자에게 CI 템플릿 설치 여부를 묻는다(기본은 N; 자동 수락은
+`--yes`, 거절은 `--skip-ci`). 운영자가 Y로 답하면 디스크의 최종 상태는
+레거시 `/dev-kit:bootstrap-full` 슬래시와 일치 — 세 개의 SSOT 파일 + 15개
+CI 워크플로 템플릿 + pre-push 훅 + `.dev-kit/ci-config.json` 마커.
 
 ## 사용 시점
 
@@ -44,7 +44,7 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
    `AGENTS.md`(CLIs가 AGENTS.md를 읽는 경우를 위한 CLAUDE.md로의 1줄
    포인터)를 §1-§5 섹션으로 원자적으로 작성.
 5. **ci-setup prompt** — 무조건적인 bootstrap 세트가 착륙한 후 스킬은
-   `Also install CI templates (ci-setup)? [Y/n]`을 묻는다. 기본은 Y.
+   `Also install CI templates (ci-setup)? [y/N]`을 묻는다. 기본은 N.
    프롬프트를 건너뛰려면 `--yes`(Y 가정), 건너뛰고 불가-기능 리스트를
    출력하려면 `--skip-ci`.
 6. **ci-setup** (Y에 한해) — `lib/ci_setup.py:install_ci_config(force=True)`에
@@ -69,7 +69,7 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
 
 | 플래그 | 효과 |
 |---|---|
-| *(0-인자)* | 전체 파이프라인을 실행하고 ci-setup을 묻는다; 기본은 Y (전체 설정, 레거시 `/dev-kit:bootstrap-full`와 일치). |
+| *(0-인자)* | 전체 파이프라인을 실행하고 ci-setup(기본 N) → git-defaults(기본 Y)를 묻는다. 레거시 `/dev-kit:bootstrap-full` 종단 상태를 원하면 `--yes`, ci-setup을 건너뛰고 불가-기능 리스트를 출력하려면 `--skip-ci`. |
 | `--skip-sanity` | sanity 서브-단계를 건너뜀. |
 | `--skip-map` | codebase-map 서브-단계를 건너뜀. |
 | `--slim` / `--full` | CLAUDE.md 상세도 모드 제어. |

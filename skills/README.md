@@ -40,11 +40,12 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`prune`](prune/SKILL.md) | `analysis` | 0-arg slop-removal chain. One slash wraps inspect → 3-pass delete sweep → review. Gated phases for deleting AI slop and dead features (not refactoring). |
 | [`refactor`](refactor/SKILL.md) | `analysis` | 0-arg cleanup chain. One slash wraps inspect -> build-refactor -> review. 3 gated phases with quoted exit codes between each. |
 
-### `config` (2)
+### `config` (3)
 
 | Skill | α | Description |
 |---|---|---|
 | [`config`](config/SKILL.md) | `state` | skill + hook + methodology picker (multiSelect). |
+| [`gate-select`](gate-select/SKILL.md) | `state` | Unified 3-dimension picker for project / session / AI-judge gates. Shows what's installed and dispatches to the right installer (ci-setup / harness-mode / AI-judge skills). |
 | [`linear`](linear/SKILL.md) | `state` | Optional Linear task tracker. Reconcile the current repository task with a canonical project and non-duplicate issue. Auto-syncs on every Claude Code edit when configured. Owner-gated auto-triggers also fire on worktree… |
 
 ### `design` (6)
@@ -131,7 +132,8 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 17 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `audit` | `analysis` | human |
 | 18 | [`evaluate`](evaluate/SKILL.md) | `eval` | `enforcement` | human |
 | 19 | [`evidence-plan`](evidence-plan/SKILL.md) | `design` | `state` | human |
-| 19a | [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `eval` | `enforcement` | human |
+| 19a | [`gate-select`](gate-select/SKILL.md) | `config` | `state` | human |
+| 19b | [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `eval` | `enforcement` | human |
 | 20 | [`hook-doctor`](hook-doctor/SKILL.md) | `audit` | `enforcement` | model |
 | 21 | [`inspect`](inspect/SKILL.md) | `audit` | `analysis` | human |
 | 22 | [`interview`](interview/SKILL.md) | `design` | `enforcement` | human |
