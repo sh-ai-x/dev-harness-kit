@@ -415,3 +415,6 @@ class PythonMissing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Force DEV_KIT_STAGE=build so the l4 hook is registered in the stage matrix.
+os.environ.setdefault("DEV_KIT_STAGE", "build")

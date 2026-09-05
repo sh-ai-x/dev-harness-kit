@@ -81,3 +81,8 @@ def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ANN001
     except Exception:
         # Telemetry is best-effort — swallow everything.
         pass
+
+# Set DEV_KIT_MODE=full for the test process so subprocess hook
+# invocations inherit the mode that the test fixtures were written
+# against (pre-mode-PR contracts). Per-test overrides still win.
+os.environ.setdefault("DEV_KIT_MODE", "full")
