@@ -55,9 +55,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # Rebase of feat/worktree-prune-skill on origin/main at SKILL_COUNT=46
 # brings in three SKILL.md additions on the same trip: worktree-prune
 # (this branch), guard-mode + gate-select (main). Combined 46 -> 49.
+# Added skills/mode/SKILL.md (unified DEV_KIT_MODE runtime gate + new
+# 'mode' category; docs at docs/scopes/modes.md). 49 -> 50.
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 49
+SKILL_COUNT = 50
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

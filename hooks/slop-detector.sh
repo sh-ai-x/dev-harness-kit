@@ -24,7 +24,7 @@
 # bank and prints a one-shot WARN to stderr. No silent failure.
 
 set -eo pipefail
-source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
 dev_kit_mode_require full
 # harness-mode opt-out (workflow-fast-mode-lean): /dev-kit:harness-mode fast|custom
 # can turn this gate off for the current session. Checked before the jq/stdin

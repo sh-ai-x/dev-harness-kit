@@ -11,7 +11,7 @@
 # silently skipping here is still safe).
 
 set -eo pipefail
-source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
 dev_kit_mode_require full
 ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 if command -v python3 >/dev/null 2>&1; then

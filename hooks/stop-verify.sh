@@ -3,7 +3,7 @@
 # Default fail-open for malformed hook input; completion checklist failures block.
 
 set -eo pipefail
-source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
 dev_kit_mode_require full,lite
 source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 INPUT=$(cat)
