@@ -1,0 +1,31 @@
+name: PR Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ci"
+  review:
+    name: review
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "review"
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "security"
+  gate:
+    name: severity gate (review + security)
+    runs-on: ubuntu-latest
+    needs: [review, security]
+    steps:
+      - run: echo "gate"
+  maintenance:
+    name: maintenance gate (verdict + docs-updated)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "maintenance"

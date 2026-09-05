@@ -38,6 +38,7 @@ from pathlib import Path
 # Centralized dual-import shim (inspect 2026-08-27 dup-5). One helper
 # instead of N hand-copied try/except blocks across ci_setup / ci_doctor
 # / ci_update.
+from lib.ci_ruleset import check_ruleset_contract as _ci_ruleset_check
 from lib.dual_import import from_dual, from_dual_optional
 from lib.gh_cli import gh_available
 
@@ -66,6 +67,7 @@ from lib.gh_cli import gh_available
 # is its own dev environment; tests still run). The check returns SKIP
 # in that case so ci-doctor stays usable.
 (diff_ci_install,) = from_dual_optional("ci_update", ["diff_ci_install"])
+
 
 
 @dataclass
@@ -1140,6 +1142,12 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
     report.checks.extend(_check_workflow_diagnostics(target, source_repo))
     report.checks.append(_check_branch_protection(target, source_repo))
     report.checks.extend(_check_open_pr(target))
+    # Local ruleset workflow-job cross-check (issue #774). The
+    # common-impl helper lives in lib/ci_ruleset.py so the regression
+    # test (`tests/test_ci_ruleset_contract.py`) and the ci-doctor
+    # row stay in lock-step. The wrapper maps the helper's
+    # `_CheckRow` dataclass into the ci-doctor `Check` row shape.
+    report.checks.extend(_check_ruleset_workflow_contract(target, source_repo))
     return report
 
 
@@ -1256,6 +1264,24 @@ def _check_open_pr(target: Path) -> list[Check]:
             "templates/ci/.github/workflows/ci.yml",
         ))
     return rows
+
+
+# ---- Ruleset workflow cross-check (issue #774) -------------------
+# Wraps `lib.ci_ruleset.check_ruleset_contract` so the report emits
+# one `Check` row per ruleset state the helper emits. Identity
+# mapping today (the helper already uses ci-doctor's vocabulary),
+# kept behind a wrapper so a future ci-doctor row-format change
+# (new state values, new check label) doesn't have to touch the
+# shared helper or the regression test.
+
+def _check_ruleset_workflow_contract(
+    target: Path, source_repo: bool = False,
+) -> list[Check]:
+    rows = _ci_ruleset_check(target, source_repo=source_repo)
+    out: list[Check] = []
+    for r in rows:
+        out.append(Check(label=r.label, state=r.state, detail=r.detail))
+    return out
 
 
 if __name__ == "__main__":
