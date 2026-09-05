@@ -52,9 +52,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # SKILL.md for the post-#439 sync (=) vs bump (+) rationale) (42 -> 43).
 # Added skills/ci-update/SKILL.md (dev-kit ⇄ consumer drift apply,
 # PR #684 — backup-before-overwrite + 4-state classifier) (43 -> 44).
+# Added skills/guard-mode/SKILL.md (session-scoped tdd-guard /
+# worktree-guard toggle, mirrors harness-mode's session-reset design) (46 -> 47).
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 46
+SKILL_COUNT = 47
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",
