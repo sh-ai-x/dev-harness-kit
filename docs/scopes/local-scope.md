@@ -10,7 +10,6 @@
 
 ## What belongs here
 
-- **Personal skill overrides** — turn off noisy skills you don't want (`skillOverrides`)
 - **Your personal debug flags** / env vars
 - **Your temporary hotfix mode** — `setup-guard off` for spike work
 - **Extra caution permissions** — `ask: ["Bash(rm -rf:*)"]` beyond team default
@@ -37,9 +36,6 @@ See [`templates/settings.local.json`](templates/settings.local.json). Common fie
 
 ```jsonc
 {
-  "skillOverrides": {
-    "knowledge-manager": "off"            // ← personal: turn off a skill you find noisy
-  },
   "env": {
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000"   // ← personal debug env
   }
