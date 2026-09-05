@@ -4,8 +4,8 @@ Set `DEV_KIT_MODE` in `<proj>/.claude/settings.json` `env` block, or via `/dev-k
 
 | Mode    | When                                          | Skills          | Hooks          | Iron Laws       |
 |---------|-----------------------------------------------|-----------------|----------------|-----------------|
-| `full`  | Multi-session, multi-agent, autonomous        | All 30+         | All 30+        | L1–L5           |
-| `lite`  | 4-hour MVP sprint, 6-person team              | 7 lite subset   | 7 lite subset  | L1–L5 + **L5-R** |
+| `full`  | Multi-session, multi-agent, autonomous        | All 30+         | All 30+        | L1–L9           |
+| `lite`  | 4-hour MVP sprint, 6-person team              | 7 lite subset   | 7 lite subset  | L1–L9 (subset of gates) |
 | `undev` | Non-dev / scratchpad / docs-only / random     | none            | none           | none (silent)   |
 
 ## Resolution order (highest wins)
@@ -21,7 +21,7 @@ Set `DEV_KIT_MODE` in `<proj>/.claude/settings.json` `env` block, or via `/dev-k
 /dev-kit:mode lite                  # writes to .claude/settings.json
 
 # Per-session override (no file change)
-DEV_KIT_MODE=undev claude --plugin-dir /Users/sanghee/dev/dev-harness-kit
+DEV_KIT_MODE=undev claude --plugin-dir <dev-harness-kit-repo>
 
 # Personal override (gitignored)
 /dev-kit:mode lite                  # with --local flag writes to settings.local.json

@@ -4,7 +4,7 @@ Answer in order. Stop at the first "yes".
 
 ## Q1. Am I in the dev-harness-kit source repo itself?
 
-- **YES** → use `claude --plugin-dir /Users/sanghee/dev/dev-harness-kit`. No settings file needed; the source code IS the plugin definition.
+- **YES** → use `claude --plugin-dir <dev-harness-kit-repo>`. No settings file needed; the source code IS the plugin definition.
 - **NO** → continue.
 
 ## Q2. Does this project have code I want to ship?

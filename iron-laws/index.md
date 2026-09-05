@@ -19,7 +19,7 @@
 `DEV_KIT_MODE` is the kit's mode selector — set in `<proj>/.claude/settings.json` `env` block, in `.claude/settings.local.json`, or as a per-session shell env var. The three values map to different scope-of-rigor expectations:
 
 - **`full`** — multi-session, multi-agent, autonomous (default). All iron laws enforced.
-- **`lite`** — 4-hour MVP sprint, 6-person team. Adds L5-R (role non-overlap); OWASP/security gate intentionally excluded by design.
+- **`lite`** — 4-hour MVP sprint, 6-person team. Subset of the full gate stack; intended for greenfield sprints where the 4-person Figma MCP + frontend + backend + PM team fits in one branch-prefix tree.
 - **`undev`** — non-dev repo, plugin not enabled. Silent default.
 
 The single source of truth for scope/mode mechanics is [`docs/scopes/modes.md`](../docs/scopes/modes.md). If you change how modes work, update that file in the same PR.

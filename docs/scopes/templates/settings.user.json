@@ -10,7 +10,11 @@
     "allow": [
       "Edit(.worktrees/**)",
       "Read(.worktrees/**)",
-      "Bash(git -C .worktrees/** *)"
+      "Bash(git -C .worktrees/** status)",
+      "Bash(git -C .worktrees/** log*)",
+      "Bash(git -C .worktrees/** diff*)",
+      "Bash(git -C .worktrees/** rev-parse*)",
+      "Bash(git -C .worktrees/** worktree list)"
     ]
   },
   "extraKnownMarketplaces": {

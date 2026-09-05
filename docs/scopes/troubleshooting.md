@@ -83,7 +83,7 @@ Then disable the duplicate:
 **Fix:** exit Claude Code and restart the session, or use the per-session env var override:
 
 ```bash
-DEV_KIT_MODE=lite claude --plugin-dir /Users/sanghee/dev/dev-harness-kit
+DEV_KIT_MODE=lite claude --plugin-dir <dev-harness-kit-repo>
 ```
 
 ## `find ~/.claude/plugins/cache` shows 5+ versions of dev-kit
