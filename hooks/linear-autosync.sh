@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Mode gate: short-circuit unless DEV_KIT_MODE matches
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full
 # hooks/linear-autosync.sh — PreToolUse Edit|Write|MultiEdit hook.
 #
 # Calls tools/linear_sync.py so that every Claude Code edit is

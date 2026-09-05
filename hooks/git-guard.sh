@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Mode gate: short-circuit unless DEV_KIT_MODE matches
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full,lite
 # git-guard.sh — PreToolUse hook for Bash. Enforces branch strategy.
 #
 # Blocks (exit 2 with deny JSON):

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Mode gate: short-circuit unless DEV_KIT_MODE matches
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full
 # linear-worktree-create.sh — PostToolUse:Bash hook.
 #
 # Catches a `git worktree add` after the Bash tool returns. The

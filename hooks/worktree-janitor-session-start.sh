@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Mode gate: short-circuit unless DEV_KIT_MODE matches
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full
 # worktree-janitor-session-start.sh — SessionStart hook (issue #717).
 #
 # Read-only nudge that surfaces orphan worktrees at session start. Counts

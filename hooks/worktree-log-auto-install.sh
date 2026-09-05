@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Mode gate: short-circuit unless DEV_KIT_MODE matches
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full
 # worktree-log-auto-install.sh — PostToolUse hook for Bash.
 #
 # When `git worktree add ...` succeeds, auto-install /dev-kit:log hooks

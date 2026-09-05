@@ -5,6 +5,8 @@
 # Adapted from dev-harness/.claude/hooks/tdd-guard.sh (sh-ai-x/dev-harness).
 
 set -eo pipefail
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full,lite
 source "${BASH_SOURCE[0]%/*}/lib/payload-parse.sh"
 source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 require_jq "TDD GUARD"

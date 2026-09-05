@@ -28,6 +28,8 @@
 # Fails closed on missing jq (inherited from require_jq).
 
 set -eo pipefail
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full,lite
 # shellcheck source=lib/payload-parse.sh
 source "${BASH_SOURCE[0]%/*}/lib/payload-parse.sh"
 require_jq destructive-confirm

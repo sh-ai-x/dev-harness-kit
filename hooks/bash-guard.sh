@@ -30,6 +30,8 @@
 # cleanup under a user's own directory still works.
 
 set -eo pipefail
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/mode-resolve.sh"
+dev_kit_mode_require full
 # Use %/* parameter expansion (POSIX, no external `dirname` required) so
 # the source line still works when PATH is broken (jq-less test envs
 # strip dirname along with jq — see TestBashGuardRefactor.fails_closed).
