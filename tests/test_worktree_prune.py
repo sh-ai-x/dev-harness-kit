@@ -179,6 +179,39 @@ class TestCollectEndToEnd:
         assert all(r.branch != "" for r in rows)
         assert not any(r.path == str(wt) for r in rows)
 
+    def test_exclude_paths_removes_supplied_worktree(self, wp, tmp_path):
+        # `--except-self` semantics: pass an absolute path to exclude and
+        # verify it disappears from the candidate list while the other
+        # worktrees survive.
+        repo = _make_git_repo(tmp_path)
+        keep_wt = _add_worktree(repo, "feat/keep-me", age_seconds=86_400)
+        drop_wt = _add_worktree(repo, "feat/drop-me", age_seconds=86_400 * 30)
+
+        rows = wp.collect(str(repo), exclude_paths=[str(keep_wt)])
+        paths = [r.path for r in rows]
+        branches = [r.branch for r in rows]
+        assert "feat/keep-me" not in branches
+        assert "feat/drop-me" in branches
+        assert str(keep_wt.resolve()) not in [Path(p).resolve() for p in paths]
+        # The un-excluded path IS still listed.
+        assert any(Path(p).resolve() == drop_wt.resolve() for p in paths)
+
+    def test_exclude_paths_accepts_none(self, wp, tmp_path):
+        # Backward compat: collect(repo) with no exclude_paths should
+        # behave identically to collect(repo, exclude_paths=None).
+        repo = _make_git_repo(tmp_path)
+        _add_worktree(repo, "feat/x")
+        assert wp.collect(str(repo)) == wp.collect(str(repo), exclude_paths=None)
+
+    def test_exclude_paths_with_invalid_path_keeps_valid_candidates(self, wp, tmp_path):
+        # A non-existent path passed as exclude should not blow up
+        # the call — it just won't match anything, real candidates
+        # still flow through.
+        repo = _make_git_repo(tmp_path)
+        _add_worktree(repo, "feat/x")
+        rows = wp.collect(str(repo), exclude_paths=["/nonexistent/path/xyz"])
+        assert [r.branch for r in rows] == ["feat/x"]
+
 
 class TestCliModes:
     """End-to-end against `python3 -m lib.worktree_prune` as a subprocess.
@@ -228,6 +261,37 @@ class TestCliModes:
         assert len(rows) == 1
         assert rows[0]["branch"] == "feat/json"
         assert set(rows[0].keys()) == {"path", "branch", "epoch", "sha"}
+
+    def test_exclude_flag_drops_matching_worktree(self, wp, tmp_path):
+        # `--exclude PATH` (repeatable) is what `--except-self` threads
+        # through bin/worktree-prune.sh. Verify the JSON mode honors it.
+        repo = _make_git_repo(tmp_path)
+        keep_wt = _add_worktree(repo, "feat/keep", age_seconds=86_400)
+        drop_wt = _add_worktree(repo, "feat/drop", age_seconds=86_400 * 30)
+
+        result = self._run(repo, "--exclude", str(keep_wt))
+        assert result.returncode == 0
+        rows = json.loads(result.stdout)
+        branches = [r["branch"] for r in rows]
+        paths = [r["path"] for r in rows]
+        assert "feat/keep" not in branches
+        assert "feat/drop" in branches
+        assert str(keep_wt.resolve()) not in [Path(p).resolve() for p in paths]
+        assert any(Path(p).resolve() == drop_wt.resolve() for p in paths)
+
+    def test_exclude_flag_repeated_accumulates(self, wp, tmp_path):
+        # Multiple --exclude flags accumulate (the bin script passes one
+        # per SELF resolution; future bulk-exclude workflows may pass more).
+        repo = _make_git_repo(tmp_path)
+        a = _add_worktree(repo, "feat/a", age_seconds=86_400 * 30)
+        b = _add_worktree(repo, "feat/b", age_seconds=86_400 * 20)
+        _add_worktree(repo, "feat/c", age_seconds=86_400 * 10)
+
+        result = self._run(repo, "--exclude", str(a), "--exclude", str(b))
+        assert result.returncode == 0
+        rows = json.loads(result.stdout)
+        branches = sorted(r["branch"] for r in rows)
+        assert branches == ["feat/c"]
 
     def test_table_head_mode_renders_first_n_rows(self, wp, tmp_path):
         # Regression for review finding #1 (PR #721): the shell script
