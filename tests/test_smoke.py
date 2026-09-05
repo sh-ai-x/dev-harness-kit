@@ -54,7 +54,10 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # PR #684 — backup-before-overwrite + 4-state classifier) (43 -> 44).
 # On-disk `find . -path ./.worktrees -prune -o -name SKILL.md -print | wc -l`
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
-SKILL_COUNT = 46
+# Added skills/gate-select/SKILL.md (unified 3-dimension picker for project /
+# session / AI-judge gates; dispatches to /dev-kit:ci-setup, /dev-kit:harness-mode,
+# and the AI-judge skills). (46 -> 47).
+SKILL_COUNT = 47
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

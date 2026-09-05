@@ -24,7 +24,7 @@ If Y: also runs `lib/ci_setup.py:install_ci_config()` to install the 15 CI workf
 If N (or `--skip-ci`): prints the unavailable-features list below and exits with code 0. CI can be added later via `/dev-kit:ci-setup --force`.
 
 ## Iron Law (no exceptions)
-**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the prompt, default `Y`), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
+**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the prompt, default `Y`), `--with-ci` (skip the ci-setup prompt and assume `Y`; preserves the legacy default for operators who always want CI gates), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
 
 ## 9-Step Orchestration (4 auto + 1 prompt + 1 ci-setup + 2 git-defaults + 1 user review)
 
@@ -37,8 +37,8 @@ If N (or `--skip-ci`): prints the unavailable-features list below and exits with
        | (auto)
 [4] write-claude-md lib/write_project_md.py -> CLAUDE.md + AGENTS.md + 4 index.md files
        | (auto)
-[5] ci-setup prompt       -> "Also install CI templates (ci-setup)? [Y/n]"
-       | (Y default; auto if --yes; skip if --skip-ci)
+[5] ci-setup prompt       -> "Also install CI templates (ci-setup)? [y/N]"
+       | (N default; auto if --yes/--with-ci; skip if --skip-ci)
 [6] ci-setup              -> lib/ci_setup.py:install_ci_config() (only if Y/--yes)
        |-- 1.5 pre-flight probe
        |-- 15 EXPECTED_PATHS + .dev-kit/ci-config.json marker
@@ -178,10 +178,10 @@ full codebase map to `docs/CODEBASE-MAP.md` instead of relying on lazy reads.
 After the unconditional bootstrap set lands on disk, the skill prompts:
 
 ```
-Also install CI templates (ci-setup)? [Y/n]
+Also install CI templates (ci-setup)? [y/N]
 ```
 
-### Y branch (default)
+### y branch (default)
 
 Delegates to `lib/ci_setup.py:install_ci_config(force=<--force>)` -- the default is **idempotent** (re-runs on an already-installed repo are no-op). Pass `--force` to overwrite customized CI workflows and the pre-push hook (same code path as `/dev-kit:ci-setup --force`):
 
@@ -195,11 +195,20 @@ If `--skip-verify` is passed, Phase 3 verify (bash -n, ast.parse, scripts/valida
 
 End state matches the legacy `/dev-kit:bootstrap-full` slash exactly.
 
-### n branch
+### n branch (default)
 
 Skips `install_ci_config()`. Prints the unavailable-features list (below) and exits 0. Operators can add CI later via `/dev-kit:ci-setup --force`.
 
 Equivalent to passing `--skip-ci` (no prompt, assume `n`).
+
+### Gate installers available (post-bootstrap)
+
+Run any of these in any order to layer additional gates on top of the minimal bootstrap set:
+
+- `/dev-kit:ci-setup [--force]`               — install project gates (CI workflow templates + pre-push + scripts + `.dev-kit/ci-config.json` marker)
+- `/dev-kit:harness-mode fast|full|custom|show` — adjust session local-hook gates (`.dev-kit/harness-mode.session.json`)
+- `/dev-kit:gate-select show|pick`            — unified 3-dimension picker (project + session + AI-judge); one-shot read or interactive multi-question install
+- `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` — AI-judge skills (run locally via Skill; wire into CI via ci-setup's `review.yml`)
 
 ## git-defaults prompt (sub-stage 7)
 
@@ -238,7 +247,7 @@ Skips `bin/setup-git-defaults.sh`. Operators can run it manually any time using 
 
 ## What is unavailable without ci-setup
 
-If you answer `n` (or pass `--skip-ci`), the following features are unavailable until ci-setup runs separately:
+If you answer `n` (or pass `--skip-ci`), the following features are unavailable until ci-setup runs separately. Install any of these later via `/dev-kit:ci-setup [--force]`, `/dev-kit:harness-mode`, `/dev-kit:gate-select pick`, or the relevant AI-judge skill.
 
 - `/dev-kit:ci-doctor` (drift detection) -- requires `.dev-kit/ci-config.json` marker
 - `/dev-kit:bump` version-bump workflow -- requires pre-push hook
@@ -246,6 +255,8 @@ If you answer `n` (or pass `--skip-ci`), the following features are unavailable 
 - Pre-push hook (`.git/hooks/pre-push`)
 - `PreCompletionChecklistMiddleware` (PR-level cost flag aggregation)
 - `/dev-kit:evaluate` harness-quality gate (depends on ci-setup-installed workflows)
+
+For a single-pane view of all three gate dimensions (project, session, AI-judge) plus a one-shot install command, run `/dev-kit:gate-select show` and then `/dev-kit:gate-select pick`.
 
 ## Rules (no exceptions)
 
