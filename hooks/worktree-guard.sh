@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full,lite
 # worktree-guard.sh — PreToolUse hook for Write|Edit|MultiEdit.
 #
 # Enforces .claude/rules/git-workflow.md "every task = new worktree" rule.
@@ -49,13 +45,6 @@ fi
 FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)"
 [ -z "$FILE_PATH" ] && exit 0
 
-# Session-scoped bypass via /dev-kit:guard-mode. Reset to "on" at every
-# SessionStart (hooks/session-start-guard-mode-reset.sh) — never persists
-# across sessions. Fails to "on" (enforced) if python3 is unavailable.
-if [ "$(python3 -m lib.guard_mode_state get worktree_guard 2>/dev/null)" = "off" ]; then
-  exit 0
-fi
-
 # Orchestration branches (orch/*) are routing/analysis-only worktrees.
 # Edits to protected paths (code, hooks, tests, manifests, plugins,
 # and source extensions) are denied here so any code change still
@@ -101,7 +90,7 @@ fi
 # function never returns 1 here because we just verified jq exists;
 # $WORKTREE_DETECT was already populated by the preamble.
 case "$WORKTREE_DETECT" in
-  worktree|outside|"") emit_guard_event "WORKTREE GUARD" "allowed" allowed; exit 0 ;;
+  worktree|outside|"") exit 0 ;;
   main) ;;
   *) exit 0 ;;
 esac

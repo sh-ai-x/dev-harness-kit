@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 # linear-worktree-create.sh — PostToolUse:Bash hook.
 #
 # Catches a `git worktree add` after the Bash tool returns. The

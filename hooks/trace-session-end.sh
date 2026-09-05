@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 # trace-session-end.sh — emit step.completed for the session-scoped
 # subject so the harness-effectiveness reducer's event_coverage metric
 # has a clean lifecycle pair. Issue #702.

@@ -3,8 +3,6 @@
 # Default advisory (exit 0).
 
 set -eo pipefail
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full,lite
 # Use %/* parameter expansion (POSIX, no external `dirname` required) so
 # the source line still works when PATH is broken (jq-less test envs
 # strip dirname along with jq — see TestSecretScanRefactor.fails_closed).

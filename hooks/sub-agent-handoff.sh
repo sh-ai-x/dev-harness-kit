@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 # sub-agent-handoff.sh — PostToolUse Agent hook. SHO-154.
 #
 # Advisory check that the sub-agent response shape can support the

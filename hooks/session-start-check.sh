@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full,lite
 # session-start-check.sh — SessionStart hook.
 #
 # Gentle reminder layer for the "every task = new worktree" rule.
@@ -41,49 +37,7 @@ if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || true
 fi
 
-# Re-derive an effective cwd after the cd: an empty HOOK_CWD above
-# would otherwise leave us with the bare "/.dev-kit/logs" path below
-# and `mkdir -p` would target the filesystem root in containers /
-# CI images running as root. Issue #676 review finding (CC-4).
-EFFECTIVE_CWD="${HOOK_CWD:-$PWD}"
-
-# Regenerate .dev-kit/.active-hooks.json (MUST-13 SSOT) so any
-# downstream check that consumes the matrix sees a fresh snapshot.
-# This MUST run before any check that depends on the matrix. Cheap
-# (Python over hooks/hooks.json, ~50ms) and idempotent. Best-effort:
-# if python3 or hooks/hooks.json is missing, skip silently — this hook
-# never blocks. Regen failures are routed to .dev-kit/logs/ (the dev-kit
-# error sink, alongside hand-off/) so the next SessionStart or
-# /dev-kit:hook-doctor has something to read instead of a silent
-# /dev/null swallowing.
-if command -v python3 >/dev/null 2>&1; then
-  DEV_KIT_LOGS="${EFFECTIVE_CWD}/.dev-kit/logs"
-  if [ ! -d "$DEV_KIT_LOGS" ] && command -v mkdir >/dev/null 2>&1; then
-    mkdir -p "$DEV_KIT_LOGS" 2>/dev/null || DEV_KIT_LOGS=""
-  fi
-  if [ -d "$DEV_KIT_LOGS" ]; then
-    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>>"$DEV_KIT_LOGS/session-start-check.log" || true
-  else
-    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>/dev/null || true
-  fi
-fi
-
 # Discriminator: already populated by the preamble.
-# Issue #702: emit a session-scoped step.started so the harness-effectiveness
-# reducer's event_coverage denominator is non-zero in every worktree.
-# Best-effort: never blocks session start. Mirrors the append-event
-# pattern at hooks/lib/payload-parse.sh:108.
-SESSION_ID=$(printf '%s' "${INPUT:-}" | jq -r '.session_id // .sessionId // empty' 2>/dev/null || true)
-if [ -n "$SESSION_ID" ] && [ -n "$EFFECTIVE_CWD" ]; then
-  python3 -m lib.trace_log append-event \
-    --root "$EFFECTIVE_CWD" --type step.started \
-    --run-id "session:${SESSION_ID}" --workflow-id "session-lifecycle" \
-    --stage session --subject-id "session:${SESSION_ID}" \
-    --outcome started --source "hook:trace-session-start" \
-    --evidence-json "$(jq -nc --arg sid "$SESSION_ID" '{session_id:$sid, hook_event:"SessionStart"}')" \
-    >/dev/null 2>&1 || true
-fi
-
 case "$WORKTREE_DETECT" in
   worktree|outside|"") exit 0 ;;
   main) ;;

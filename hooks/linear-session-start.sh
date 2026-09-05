@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 # linear-session-start.sh — SessionStart hook.
 #
 # Fires once at every session start inside a Linear-configured

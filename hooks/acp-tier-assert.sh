@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 # acp-tier-assert.sh — PreToolUse hook for any matcher (`*`).
 #
 # Enforces docs/architecture/acp-harness.md §2.3 — every dispatched ACP agent (M, T, or

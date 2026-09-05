@@ -88,4 +88,4 @@ DEV_KIT_MODE=undev claude
 - [`docs/scopes/modes.md`](../../docs/scopes/modes.md) — full mode reference
 - [`hooks/lib/mode-resolve.sh`](../../hooks/lib/mode-resolve.sh) — single source of truth for resolution logic
 - [`tests/test_mode_resolution.py`](../../tests/test_mode_resolution.py) — 15 pinned resolution cases
-- [`tests/test_hook_filtering.py`](../../tests/test_hook_filtering.py) — per-hook gate verification
+- Hook integration (per-hook `dev_kit_mode_require`) — see follow-up PR; current PR ships the resolver + skill only

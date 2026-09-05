@@ -11,8 +11,6 @@
 # silently skipping here is still safe).
 
 set -eo pipefail
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 if command -v python3 >/dev/null 2>&1; then
   (cd "$ROOT" && python3 -m lib.guard_mode_state reset) 2>/dev/null || true

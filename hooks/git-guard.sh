@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full,lite
 # git-guard.sh — PreToolUse hook for Bash. Enforces branch strategy.
 #
 # Blocks (exit 2 with deny JSON):

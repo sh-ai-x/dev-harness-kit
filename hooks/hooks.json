@@ -8,8 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/acp-tier-assert.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/acp-tier-assert.sh"
           }
         ]
       },
@@ -18,23 +17,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-guard.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-guard.sh"
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-guard.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-guard.sh"
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/destructive-confirm.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-autosync.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-autosync.sh"
           }
         ]
       },
@@ -43,23 +34,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.sh"
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/git-guard.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/git-guard.sh"
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/review-yml-isolation.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/destructive-confirm.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/review-yml-isolation.sh"
           }
         ]
       }
@@ -69,32 +52,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
-            "timeout": 60,
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
+            "timeout": 120
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-auto-cut.sh",
-            "timeout": 60,
-            "fail_closed": false
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-task-change.sh",
-            "fail_closed": false
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/notification-collapse.sh",
-            "timeout": 10,
-            "fail_closed": false
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/context-window-guard.sh",
-            "timeout": 30,
-            "fail_closed": false
+            "timeout": 120
           }
         ]
       }
@@ -104,8 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start-check.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start-check.sh"
           }
         ]
       },
@@ -113,8 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/log-on-session-start.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/log-on-session-start.sh"
           }
         ]
       },
@@ -122,44 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/provider-divergence-check.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-session-start.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-janitor-session-start.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start-harness-mode-reset.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start-guard-mode-reset.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/provider-divergence-check.sh"
           }
         ]
       }
@@ -170,18 +95,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/secret-scan.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/secret-scan.sh"
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/slop-detector.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/l4-todo-scan.sh",
-            "fail_closed": true
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/slop-detector.sh"
           }
         ]
       },
@@ -190,18 +108,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-log-auto-install.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-log-auto-install.sh"
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/loop-detect.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-worktree-create.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/loop-detect.sh"
           }
         ]
       },
@@ -210,23 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/sub-agent-handoff.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/injection-content-guard.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "matcher": "WebFetch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/injection-content-guard.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/sub-agent-handoff.sh"
           }
         ]
       }
@@ -236,28 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-verify.sh",
-            "fail_closed": true
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/trace-session-end.sh",
-            "fail_closed": false
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/trace-session-end.sh",
-            "fail_closed": false
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-verify.sh"
           }
         ]
       }

@@ -92,83 +92,11 @@ extract_content() {
 # Emits to stderr per Claude Code hook contract (deny JSON via stderr +
 # exit 2). Fails closed if jq is missing — callers must source this file
 # AFTER require_jq.
-emit_guard_event() {
-    local hook_prefix="$1"
-    local reason="$2"
-    local outcome="${3:-blocked}"
-    local root subject run_id workflow_id evidence
-    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    subject="$(printf '%s' "${INPUT_JSON:-}" | jq -r '.tool_name // .tool_input.file_path // "unknown"' 2>/dev/null || printf 'unknown')"
-    run_id="${DEV_KIT_RUN_ID:-hook-$(date -u +%Y%m%d)}"
-    workflow_id="${DEV_KIT_WORKFLOW_ID:-hook:${hook_prefix}}"
-    # Policy-driven default ground_truth (issue #663).
-    #
-    # Earlier revisions defaulted `blocked→unsafe` and `allowed→legitimate`,
-    # which made the prevention_quality reducer trivially score 100%
-    # precision/recall against the same hook that emits the event — the
-    # metric's definition was circular (Review Critical #1). Now the policy
-    # default is `unknown` (no claim about correctness); the reducer skips
-    # `unknown` events entirely, so the metric only scores guards that the
-    # operator has explicitly classified via DEV_KIT_GROUND_TRUTH (golden
-    # / adversarial runs).
-    #
-    # The override is validated against an allowed set so a stray
-    # `DEV_KIT_GROUND_TRUTH=bogus` cannot silently become a TP/FP
-    # misclassification (A10-5). Unknown values degrade to `unknown`.
-    #
-    # NOTE: every line in this block must stay commented. A bare
-    # `DEV_KIT_GROUND_TRUTH ...` line here parses fine under `bash -n`
-    # but executes as a command at runtime (exit 127), and the callers
-    # (bash-guard.sh, destructive-confirm.sh, secret-scan.sh) run under
-    # `set -eo pipefail` — the shell would die here, before deny() writes
-    # its permissionDecision envelope, making every guard fail OPEN.
-    local default_gt="unknown"
-    local explicit_gt="${DEV_KIT_GROUND_TRUTH:-$default_gt}"
-    case "$explicit_gt" in
-        unsafe|legitimate|pending|unknown) ;;
-        *) explicit_gt="unknown" ;;
-    esac
-    evidence="$(jq -cn --arg policy "$hook_prefix" --arg why "$reason" --arg gt "$explicit_gt" \
-        '{policy_id:$policy, reason:$why, ground_truth:$gt}' 2>/dev/null || printf '{}')"
-    local event_type="guard.blocked"
-    [ "$outcome" = "allowed" ] && event_type="guard.allowed"
-    [ "$outcome" = "ask" ] && event_type="guard.ask"
-    python3 -m lib.trace_log append-event \
-        --root "$root" --type "$event_type" --run-id "$run_id" \
-        --workflow-id "$workflow_id" --stage guard --subject-id "$subject" \
-        --outcome "$outcome" --source "hook:${hook_prefix}" --evidence-json "$evidence" \
-        >/dev/null 2>&1 || true
-}
-
 deny() {
     local hook_prefix="$1"
     local reason="$2"
-    emit_guard_event "$hook_prefix" "$reason"
     jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
         '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:($hp + ": " + $r)}}' \
         >&2
     exit 2
-}
-
-# ask HOOK_PREFIX REASON — emit PreToolUse "ask" envelope and exit 0.
-#
-# The third permission tier, alongside `deny` (hard block, exit 2) and
-# plain `exit 0` (silent allow). `ask` surfaces a confirmation prompt to
-# the human before the tool runs — the only Claude Code mechanism that
-# does so. Use it for destructive-but-legitimate operations where a hard
-# deny would be wrong (the agent genuinely needs to push a branch, remove
-# a worktree, or write a credential file) but silent execution is worse.
-#
-# Contract difference from `deny`: the envelope goes to STDOUT with exit
-# 0, not stderr with exit 2. Claude Code reads a PreToolUse decision from
-# stdout JSON; an exit-2 "ask" would be coerced to a block. Emitting to
-# stderr here would make the hook fail open (decision ignored, tool runs
-# unconfirmed) — that is the bug this contract exists to prevent.
-ask() {
-    local hook_prefix="$1"
-    local reason="$2"
-    emit_guard_event "$hook_prefix" "$reason" ask
-    jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
-        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:($hp + ": " + $r)}}'
-    exit 0
 }

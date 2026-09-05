@@ -5,8 +5,6 @@
 # Adapted from dev-harness/.claude/hooks/tdd-guard.sh (sh-ai-x/dev-harness).
 
 set -eo pipefail
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full,lite
 source "${BASH_SOURCE[0]%/*}/lib/payload-parse.sh"
 source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 require_jq "TDD GUARD"
@@ -14,13 +12,6 @@ INPUT=$(cat)
 FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)
 [ -z "$FILE" ] && exit 0
 hook_stage_active tdd-guard || exit 0
-
-# Session-scoped bypass via /dev-kit:guard-mode. Reset to "on" at every
-# SessionStart (hooks/session-start-guard-mode-reset.sh) — never persists
-# across sessions. Fails to "on" (enforced) if python3 is unavailable.
-if [ "$(python3 -m lib.guard_mode_state get tdd_guard 2>/dev/null)" = "off" ]; then
-  exit 0
-fi
 case "$FILE" in
   *.md|*.mdx|*.txt|*.rst|*.adoc|*.html|*.json|*.yaml|*.yml|*.toml|*.cfg|*.ini|*.sh) exit 0 ;;
   */docs/*|*/tools/*|*/scripts/*|*/bin/*|*/hooks/*|*/fixtures/*|*/eval/*) exit 0 ;;

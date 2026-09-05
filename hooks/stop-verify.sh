@@ -3,8 +3,6 @@
 # Default fail-open for malformed hook input; completion checklist failures block.
 
 set -eo pipefail
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full,lite
 source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 INPUT=$(cat)
 LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null)

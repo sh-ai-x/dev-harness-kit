@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# Mode gate: short-circuit unless DEV_KIT_MODE matches
-source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/mode-resolve.sh"
-dev_kit_mode_require full
 # worktree-auto-cut.sh — UserPromptSubmit hook (advisory, never blocks).
 #
 # Auto-derives a `<type>/<verb>-<word1>-<hash>` slug from the prompt, cuts
@@ -278,21 +274,6 @@ if [ -f "$LOG_SETUP" ]; then
 fi
 if [ -f "$LOG_ON" ]; then
   (cd "$WT_PATH" && TARGET_DIR="$WT_PATH" bash "$LOG_ON" >/dev/null 2>&1) || true
-fi
-
-# Linear bootstrap: trigger one auto-sync round in the new worktree
-# so the new branch's handoff is registered before the first
-# SessionStart or Edit|Write. The owner gate inside `auto_sync`
-# bails silently for non-owners (per the owner-only auto-trigger
-# contract from PR #linear-auto-sync-owner-gated). Falls through
-# silently if tools/linear_sync.py is missing.
-if [ -f "$WT_PATH/tools/linear_sync.py" ]; then
-  for py in python3 python py; do
-    if command -v "$py" >/dev/null 2>&1; then
-      (cd "$WT_PATH" && "$py" "$WT_PATH/tools/linear_sync.py" auto-sync) || true
-      break
-    fi
-  done
 fi
 
 # Build additionalContext — the harness consumes this as a client-specific
