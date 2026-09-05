@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "dev-kit@dev-kit": true
+  },
+  "env": {
+    "DEV_KIT_MODE": "full"
+  }
+}

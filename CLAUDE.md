@@ -14,6 +14,7 @@
 - **Coding guidelines** → [`guidelines/index.md`](guidelines/index.md) (Karpathy-style, abbreviated)
 - **Codebase map** → [`docs/CODEBASE-MAP.md`](docs/CODEBASE-MAP.md) (regenerate via `/dev-kit:bootstrap --full-claude-md`)
 - **Hook matrix** → [`hooks/index.md`](hooks/index.md) (MUST-13 SSOT; state in `.dev-kit/.active-hooks.json`)
+- **Scope reference** → [`docs/scopes/README.md`](docs/scopes/README.md) (user / project / local scopes + `full` / `lite` / `undev` modes)
 - **Hand-off** → `.dev-kit/hand-off/`
 - **Shared rules** → [`rules/index.md`](rules/index.md) (only if `rules/` exists)
 
