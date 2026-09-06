@@ -714,7 +714,7 @@ fi
 # 4. Resolve PR metadata + bump-PR skip (mirrors review.yml:75).
 # ---------------------------------------------------------------------------
 PR_JSON="$(gh pr view "$PR_NUMBER" --json number,state,title,reviewDecision,body,files \
-  --jq '{number, state, title, reviewDecision, body, files: [.files[].path], files_with_status: [.files[] | "\(.status)\t\(.path)"]}' \
+  --jq '{number, state, title, reviewDecision, body, files: [.files[].path], files_with_status: [.files[] | [.changeType, .path] | @tsv]}' \
   2>/dev/null)" || die "gh pr view $PR_NUMBER failed (is gh authenticated? is the PR open?)"
 
 # One python call returns all six fields, NUL-separated, so the

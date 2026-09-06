@@ -137,30 +137,52 @@ class TestMaintenanceGateFileStatusExtraction(unittest.TestCase):
         self.assertTrue(MAINTENANCE_YML.exists(), f"missing: {MAINTENANCE_YML}")
         self.assertTrue(REVIEW_LOCAL_SH.exists(), f"missing: {REVIEW_LOCAL_SH}")
 
-    def test_workflow_jq_emits_status_and_path(self) -> None:
+    def test_workflow_jq_emits_changeType_and_path(self) -> None:
         """The ``gh pr view --json files --jq`` projection must emit
-        the per-file ``status`` field — not just the legacy
-        ``.files[].path``. Pin the jq pattern so a future refactor
-        that drops ``status`` (and silently regresses the
-        registry-index check) fails CI.
+        the per-file ``changeType`` field (GitHub's actual field name)
+        — not just the legacy ``.files[].path``. Pin the jq pattern
+        so a future refactor that drops ``changeType`` (and silently
+        regresses the registry-index check) fails CI.
+
+        NOTE: GitHub's field is ``changeType`` (NOT ``status``) — the
+        original implementation used ``status`` which doesn't exist
+        on ``--json files``, so the jq projection emitted ``null``
+        rows and the Python helper parsed ``null`` as a literal path.
+        Discovered live in PR #802 (first babysit iteration).
         """
-        # Specifically the changed-files extraction — not the body
-        # extraction earlier in the same workflow. The pattern is:
-        #   gh pr view "$PR_NUMBER" --repo "..." \
-        #     --json files --jq -r '<projection>'
         m = re.search(
-            r"--json files\s+--jq\s+-r\s+'([^']+)'",
+            r"--json files\s+--jq\s+'([^']+)'",
             self.workflow_text,
         )
         self.assertIsNotNone(
             m, "could not find gh pr view --json files --jq projection in maintenance.yml"
         )
         jq = m.group(1)
-        self.assertIn(".status", jq, f"jq projection missing .status: {jq!r}")
+        self.assertIn(".changeType", jq, f"jq projection missing .changeType: {jq!r}")
         self.assertIn(".path", jq, f"jq projection missing .path: {jq!r}")
-        # Tab delimiter keeps the receiving Python parser (which uses
-        # `:` as separator) free from ambiguity.
-        self.assertIn("\\t", jq, f"jq projection missing tab delimiter: {jq!r}")
+        # Tab-delimiter via jq's `@tsv` keeps the receiving Python parser
+        # (which uses `:` as separator) free from ambiguity. A literal
+        # `\t` inside jq's double-quoted string is the two chars `\` and
+        # `t` — NOT a tab. Use `@tsv` instead.
+        self.assertIn("@tsv", jq, f"jq projection missing @tsv delimiter: {jq!r}")
+        self.assertNotIn(
+            "\\t", jq,
+            f"jq projection uses literal '\\t' instead of @tsv — produces "
+            f"literal backslash-t instead of a tab character: {jq!r}",
+        )
+
+    def test_workflow_jq_does_not_use_dash_r(self) -> None:
+        """The ``--jq`` flag MUST NOT be followed by ``-r`` — gh parses
+        ``-r`` as a separate positional arg, failing with
+        ``accepts at most 1 arg(s), received 2``. gh already emits raw
+        strings for ``--jq`` output (no quoting), so the ``-r`` flag is
+        unnecessary and breaks the call entirely.
+        """
+        self.assertNotIn(
+            "--jq -r ",
+            self.workflow_text,
+            "expected --jq without -r (gh parses -r as a separate positional arg)",
+        )
 
     def test_workflow_bash_loop_splits_on_tab(self) -> None:
         """The bash loop that consumes the tab-delimited status/path
@@ -198,17 +220,16 @@ class TestMaintenanceGateFileStatusExtraction(unittest.TestCase):
             "files_with_status",
             self.review_local_text,
             "expected bin/review-local.sh to extract files_with_status "
-            "(tab-delimited '<status>\\t<path>')",
+            "(tab-delimited '<changeType>\\t<path>')",
         )
 
-    def test_review_local_jq_uses_tab_delimiter(self) -> None:
-        """The ``files_with_status`` field MUST use tab as the inner
-        delimiter (mirroring maintenance.yml). A different delimiter
-        here (newline, space) would silently corrupt the per-line
-        ``<status>\\t<path>`` rows that consumers iterate over.
+    def test_review_local_jq_uses_changeType_and_tsv(self) -> None:
+        """The ``files_with_status`` field MUST use ``.changeType``
+        (not ``.status``) and jq's ``@tsv`` (not literal ``\\t``) for
+        the inner delimiter. Mirrors ``maintenance.yml``.
         """
         m = re.search(
-            r"files_with_status:\s*\[\.files\[\][^]]+\]",
+            r"files_with_status:\s*\[[^\n]+",
             self.review_local_text,
         )
         self.assertIsNotNone(
@@ -216,9 +237,14 @@ class TestMaintenanceGateFileStatusExtraction(unittest.TestCase):
         )
         projection = m.group(0)
         self.assertIn(
-            "\\t",
+            ".changeType",
             projection,
-            f"files_with_status projection missing tab delimiter: {projection!r}",
+            f"files_with_status projection missing .changeType: {projection!r}",
+        )
+        self.assertIn(
+            "@tsv",
+            projection,
+            f"files_with_status projection missing @tsv delimiter: {projection!r}",
         )
 
 

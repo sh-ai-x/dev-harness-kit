@@ -149,8 +149,10 @@ def parse_file_entry(entry: str) -> Tuple[str, str]:
 
     - Status-aware: ``"lib/foo.py:added"`` →
       ``("lib/foo.py", "added")``. Status comes from
-      ``gh pr view --json files`` (one of ``added`` | ``modified`` |
-      ``removed`` | ``renamed``).
+      ``gh pr view --json files``'s ``changeType`` field (one of
+      ``ADDED`` | ``MODIFIED`` | ``DELETED`` | ``RENAMED`` | ``COPIED``)
+      — uppercased by GitHub, lowercased here so internal comparisons
+      stay consistent.
 
     Path components in this repo never contain ``:`` (flat layout, no
     Windows drive letters), so we use the FIRST ``:`` as the
@@ -175,7 +177,7 @@ def parse_file_entry(entry: str) -> Tuple[str, str]:
             f"file entry has ambiguous multi-colon shape: {entry!r} "
             f"(paths in this repo never contain ':')"
         )
-    return path, status
+    return path, status.lower()
 
 
 def _is_new_skill(path: str, status: str) -> bool:

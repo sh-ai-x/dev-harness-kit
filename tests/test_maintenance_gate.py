@@ -675,6 +675,31 @@ class TestParseFileEntry(unittest.TestCase):
             ("skills/foo/SKILL.md", "added"),
         )
 
+    def test_uppercase_status_normalized(self):
+        # GitHub's `gh pr view --json files --jq` emits
+        # `.changeType` values in UPPERCASE (ADDED, MODIFIED,
+        # DELETED, RENAMED, COPIED). The parser MUST lowercase them
+        # so internal comparisons stay consistent (the registry
+        # check matches against lowercase frozensets). Discovered
+        # live in PR #802 babysit iter 1 — uppercase values were
+        # silently failing the registry check (no lowercase match).
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:ADDED"),
+            ("skills/foo/SKILL.md", "added"),
+        )
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:MODIFIED"),
+            ("skills/foo/SKILL.md", "modified"),
+        )
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:DELETED"),
+            ("skills/foo/SKILL.md", "deleted"),
+        )
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:RENAMED"),
+            ("skills/foo/SKILL.md", "renamed"),
+        )
+
     def test_rejects_multi_colon(self):
         with self.assertRaises(ValueError):
             maintenance_gate.parse_file_entry("weird:path:added")

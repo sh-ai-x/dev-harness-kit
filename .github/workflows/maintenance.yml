@@ -396,12 +396,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          # Emit "<status>\t<path>" per line so the registry-index sub-
-          # gate can detect newly-added (status=added) skills and
-          # commands. Tab-delimiter avoids the `:` ambiguity that the
-          # Python parser handles on the receiving end.
+          # Emit "<changeType>\t<path>" per line so the registry-index
+          # sub-gate can detect newly-added (changeType=ADDED) skills
+          # and commands. Tab-delimiter via jq's `@tsv` avoids the `:`
+          # ambiguity that the Python parser handles on the receiving
+          # end. NOTE: GitHub's API field is `changeType` (not
+          # `status`), with values ADDED / MODIFIED / DELETED /
+          # RENAMED / COPIED (uppercase). The Python
+          # `parse_file_entry` lowercases the status so internal
+          # comparisons stay lowercase.
+          #
+          # Do NOT add `-r` after `--jq` — gh parses `-r` as a separate
+          # positional arg ("accepts at most 1 arg(s), received 2"),
+          # and gh already emits raw strings for `--jq` output.
           files="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" \
-            --json files --jq -r '.files[] | "\(.status)\t\(.path)"' 2>/dev/null || true)"
+            --json files --jq '.files[] | [.changeType, .path] | @tsv' 2>/dev/null || true)"
           if [ -z "$files" ]; then
             echo "::error::Could not read PR $PR_NUMBER changed-files list."
             exit 1
