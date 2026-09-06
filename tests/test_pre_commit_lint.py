@@ -95,6 +95,48 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("staged.py", result.stderr)
             self.assertIn("F401", result.stderr)
 
+    def test_blocks_indented_conflict_markers_in_staged_blob(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text(
+                "def render():\n    <<<<<<< HEAD\n    =======\n    >>>>>>> branch\n"
+            )
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+            (root / "notes.txt").write_text("clean\n")
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertIn("notes.txt", result.stderr)
+
+    def test_blocks_diff3_merge_base_marker(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text("ours\n||||||| merge base\nbase\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+            (root / "notes.txt").write_text("clean\n")
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertIn("notes.txt", result.stderr)
+
+    def test_fails_closed_when_index_is_invalid(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            env = os.environ.copy()
+            invalid_index = root / "invalid-index"
+            invalid_index.write_bytes(b"not a git index")
+            env["GIT_INDEX_FILE"] = str(invalid_index)
+
+            result = _run_hook(root, env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to inspect staged content", result.stderr)
+            self.assertIn("git grep exited", result.stderr)
+
     def test_blocks_conflict_markers_in_any_staged_blob(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
