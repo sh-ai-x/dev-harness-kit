@@ -274,6 +274,40 @@ class TestWorktreeJanitorHook(unittest.TestCase):
         self.assertNotIn("auto-pruned", ctx,
             f"YES-only must not trigger auto-prune; got: {ctx!r}")
 
+    def test_auto_prune_max_validates_non_numeric(self) -> None:
+        """DEV_KIT_JANITOR_AUTO_PRUNE_MAX=abc must NOT produce a
+        `set -u`-triggered `[ -lt abc ]` integer expression error per
+        record (the security review's 🟡 M3 finding). The hook must
+        silently fall back to 50 and exit 0 cleanly."""
+        wt = self.runner.make_main_or_worktree("worktree")
+        self.runner.write_fake_porcelain(
+            "worktree /tmp/wt-merged\nHEAD abc\nbranch refs/heads/feat-merged\n\n"
+            "worktree /tmp/wt-fresh\nHEAD def\nbranch refs/heads/feat-fresh\n\n"
+        )
+        r = self.runner.run_hook(
+            wt,
+            env_extra={
+                "DEV_KIT_JANITOR_AUTO_PRUNE": "1",
+                "DEV_KIT_JANITOR_AUTO_PRUNE_YES": "1",
+                "DEV_KIT_JANITOR_AUTO_PRUNE_MAX": "abc",
+            },
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        # No `integer expression expected` should leak to stderr.
+        self.assertNotIn("integer expression expected", r.stderr,
+            f"non-numeric MAX must not leak per-record syntax errors; "
+            f"got stderr: {r.stderr!r}")
+        # And empty MAX should also be tolerated (not crash).
+        r = self.runner.run_hook(
+            wt,
+            env_extra={
+                "DEV_KIT_JANITOR_AUTO_PRUNE": "1",
+                "DEV_KIT_JANITOR_AUTO_PRUNE_YES": "1",
+                "DEV_KIT_JANITOR_AUTO_PRUNE_MAX": "",
+            },
+        )
+        self.assertEqual(r.returncode, 0, f"empty MAX crashed; stderr={r.stderr}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
