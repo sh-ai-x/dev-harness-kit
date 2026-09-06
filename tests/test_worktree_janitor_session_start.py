@@ -239,6 +239,41 @@ class TestWorktreeJanitorHook(unittest.TestCase):
         self.assertIn("≥3 orphan", ctx,
             f"cap should render as floor ≥3; got: {ctx!r}")
 
+    def test_auto_prune_requires_double_gate(self) -> None:
+        """Auto-apply must require BOTH DEV_KIT_JANITOR_AUTO_PRUNE=1 AND
+        DEV_KIT_JANITOR_AUTO_PRUNE_YES=1. A single flag (typo, partial
+        config) must keep the nudge-only path; the additionalContext
+        must NOT mention 'auto-pruned'."""
+        wt = self.runner.make_main_or_worktree("worktree")
+        # Two records so the porcelain terminator survives the fake
+        # git's `printf '%s\\n' $(...)` (which strips one trailing
+        # newline — see _HookRunner.write_fake_porcelain for the
+        # workaround that produces the nudge in test_merged_branch_emit
+        # s_additional_context above).
+        self.runner.write_fake_porcelain(
+            "worktree /tmp/wt-merged\nHEAD abc\nbranch refs/heads/feat-merged\n\n"
+            "worktree /tmp/wt-fresh\nHEAD def\nbranch refs/heads/feat-fresh\n\n"
+        )
+        # Only one flag set → no auto-apply.
+        r = self.runner.run_hook(
+            wt, env_extra={"DEV_KIT_JANITOR_AUTO_PRUNE": "1"},
+        )
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        out = json.loads(r.stdout)
+        ctx = out["hookSpecificOutput"].get("additionalContext", "")
+        self.assertNotIn("auto-pruned", ctx,
+            f"single gate must not trigger auto-prune; got: {ctx!r}")
+        self.assertIn("worktree-prune.sh", ctx,
+            "should still surface the nudge when auto-prune is off")
+        # Same with the YES flag alone (typo).
+        r = self.runner.run_hook(
+            wt, env_extra={"DEV_KIT_JANITOR_AUTO_PRUNE_YES": "1"},
+        )
+        out = json.loads(r.stdout)
+        ctx = out["hookSpecificOutput"].get("additionalContext", "")
+        self.assertNotIn("auto-pruned", ctx,
+            f"YES-only must not trigger auto-prune; got: {ctx!r}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
