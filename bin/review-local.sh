@@ -714,22 +714,27 @@ fi
 # 4. Resolve PR metadata + bump-PR skip (mirrors review.yml:75).
 # ---------------------------------------------------------------------------
 PR_JSON="$(gh pr view "$PR_NUMBER" --json number,state,title,reviewDecision,body,files \
-  --jq '{number, state, title, reviewDecision, body, files: [.files[].path]}' \
+  --jq '{number, state, title, reviewDecision, body, files: [.files[].path], files_with_status: [.files[] | "\(.status)\t\(.path)"]}' \
   2>/dev/null)" || die "gh pr view $PR_NUMBER failed (is gh authenticated? is the PR open?)"
 
-# One python call returns all five fields, NUL-separated, so the
-# five callers below each capture exactly one field regardless of how
-# many newlines it contains internally. Single python startup vs five.
+# One python call returns all six fields, NUL-separated, so the
+# callers below each capture exactly one field regardless of how
+# many newlines it contains internally. Single python startup vs six.
 #
 # NUL (not newline) delimiting is required: `body` (a PR description)
 # and the files-join can each legitimately span many lines -- which
 # is virtually every real-world PR. A newline-counting parser that
-# caps at "first 5 lines total" cannot tell "line 4 of the body" from
-# "field 5, the files list" -- it silently truncates/misaligns BODY
+# caps at "first N lines total" cannot tell "line 4 of the body" from
+# "field N, the files list" -- it silently truncates/misaligns BODY
 # and FILES for any body longer than ~1 line, which downgrades a
 # production-code PR's touch-probe to "docs/infra-only" and lets
 # --auto-approve pass without the required L3 evidence (a
 # false-positive approval; discovered live against a real PR).
+#
+# `files_with_status` is a tab-delimited "<status>\t<path>" list per
+# line; consumers (e.g. a future local --docs-check call) pass each
+# line through `lib.maintenance_gate`'s `parse_file_entry` (the
+# `<path>:<status>` form is one-to-one with the tab-delimited form).
 read_pr_fields() {
   python3 -c "
 import json, sys
@@ -740,6 +745,7 @@ parts = [
     str(d.get('reviewDecision') or ''),
     str(d.get('body') or ''),
     '\n'.join(d.get('files') or []),
+    '\n'.join(d.get('files_with_status') or []),
 ]
 sys.stdout.write('\0'.join(parts))
 "
