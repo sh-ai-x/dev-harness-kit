@@ -523,12 +523,36 @@ def cli_main(argv=None) -> int:
         sys.stdout.write("\n")
         return 0
     if args.docs_check:
-        ok, reason = docs_updated_ok(args.changed_files, args.pr_body)
+        try:
+            ok, reason = docs_updated_ok(args.changed_files, args.pr_body)
+        except ValueError as exc:
+            # Malformed --changed-files entry (multi-colon, empty
+            # path/status, non-string). The bash loop in
+            # `.github/workflows/maintenance.yml` should never
+            # produce these, but a hand-rolled caller can. Surface a
+            # clean JSON failure rather than a Python traceback so
+            # the workflow's `jq -r .reason` extraction gets a
+            # human-readable string and the gate stays
+            # fail-closed-but-actionable.
+            sys.stdout.write(json.dumps({
+                "docs_ok": False,
+                "reason": f"malformed changed-files entry: {exc}",
+            }))
+            sys.stdout.write("\n")
+            return 1
         sys.stdout.write(json.dumps({"docs_ok": ok, "reason": reason}))
         sys.stdout.write("\n")
         return 0 if ok else 1
     if args.registry_only:
-        ok, reason = registry_index_updated_ok(args.changed_files, args.pr_body)
+        try:
+            ok, reason = registry_index_updated_ok(args.changed_files, args.pr_body)
+        except ValueError as exc:
+            sys.stdout.write(json.dumps({
+                "registry_ok": False,
+                "reason": f"malformed changed-files entry: {exc}",
+            }))
+            sys.stdout.write("\n")
+            return 1
         sys.stdout.write(json.dumps({"registry_ok": ok, "reason": reason}))
         sys.stdout.write("\n")
         return 0 if ok else 1

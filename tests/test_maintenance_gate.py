@@ -406,6 +406,46 @@ class TestCLISubprocess(unittest.TestCase):
         out = json.loads(result.stdout)
         self.assertTrue(out["docs_ok"])
 
+    def test_cli_docs_check_malformed_entry_returns_clean_json(self):
+        # Multi-colon path triggers parse_file_entry's ValueError.
+        # The CLI MUST catch it and emit a clean JSON failure
+        # (the workflow's `jq -r .reason` extraction depends on this)
+        # rather than a Python traceback on stderr.
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--docs-check",
+             "--changed-files", "weird:path:added",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        # stdout MUST be parseable JSON (not a traceback).
+        out = json.loads(result.stdout)
+        self.assertFalse(out["docs_ok"])
+        self.assertIn("malformed", out["reason"])
+        # stderr may have a traceback too, but stdout is the contract.
+
+    def test_cli_registry_only_malformed_entry_returns_clean_json(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--registry-only",
+             "--changed-files", ":added",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertFalse(out["registry_ok"])
+        self.assertIn("malformed", out["reason"])
+
     def test_cli_format_audit_gh_shape(self):
         py = sys.executable
         result = subprocess.run(
