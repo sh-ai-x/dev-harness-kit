@@ -17,6 +17,14 @@
 
 set -euo pipefail
 
+# Inspect the index before any tool-specific check.  A clean worktree can hide
+# conflict markers or other invalid bytes that are already staged for commit.
+if conflict_markers=$(git grep --cached -n -E '^(<<<<<<<|=======|>>>>>>>)' -- . 2>/dev/null); then
+  echo "[pre-commit] BLOCKED: staged conflict marker found." >&2
+  printf '%s\n' "$conflict_markers" >&2
+  exit 1
+fi
+
 staged_files=()
 while IFS= read -r file; do
   if [ -n "$file" ]; then
@@ -36,7 +44,13 @@ if ! command -v ruff >/dev/null 2>&1; then
 fi
 
 ruff_status=0
-ruff check --no-fix --quiet -- "${staged_files[@]}" >&2 || ruff_status=$?
+for file in "${staged_files[@]}"; do
+  file_status=0
+  git show ":$file" | ruff check --no-fix --quiet --stdin-filename "$file" - >&2 || file_status=$?
+  if [ "$file_status" -ne 0 ]; then
+    ruff_status=$file_status
+  fi
+done
 if [ "$ruff_status" -ne 0 ]; then
   echo "[pre-commit] BLOCKED: commit blocked by Ruff findings." >&2
   echo "[pre-commit] Run: ruff check --fix -- ${staged_files[*]}" >&2
