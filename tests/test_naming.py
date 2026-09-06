@@ -18,7 +18,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 ALLOWED_CATEGORIES = frozenset({
     "bootstrap", "plan", "design", "build", "review", "security", "audit", "shortcuts", "ship",
-    "config", "eval", "status",
+    "config", "eval", "status", "mode",
 })
 KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
 
