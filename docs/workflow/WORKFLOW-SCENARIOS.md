@@ -22,10 +22,9 @@ section has a 2-4 sentence pointer for each case.
 | Situation | What to do | Where the detail is |
 |---|---|---|
 | Build stopped partway (you closed the terminal, hit an error, or paused) | Re-run `/dev-kit:build` — it resumes from the first unfinished step | [Case 1](#case-1-a-build-that-stopped-partway) |
-| The plan was wrong and you noticed while a build step was running | `/dev-kit:adapt`, approve one small patch, build continues | [Case 2](#case-2-the-plan-turned-out-wrong-mid-build) |
-| You're back on a different day or a different terminal and lost your place | `python3 tools/session_monitor.py` finds the session and prints the resume command | [Case 3](#case-3-coming-back-from-a-different-terminal-or-day) |
-| You don't want to run the Valuate step | Just skip it — it's advisory, nothing blocks the build | [Case 4](#case-4-skipping-the-valuate-step) |
-| You want to go straight to Build without a full Plan | Scope Plan tightly, or hand-seed a one-step phase file — there is no bypass flag | [Case 5](#case-5-skipping-straight-to-build-without-a-full-plan) |
+| You're back on a different day or a different terminal and lost your place | `python3 tools/session_monitor.py` finds the session and prints the resume command | [Case 2](#case-2-coming-back-from-a-different-terminal-or-day) |
+| You don't want to run the Valuate step | Just skip it — it's advisory, nothing blocks the build | [Case 3](#case-3-skipping-the-valuate-step) |
+| You want to go straight to Build without a full Plan | Scope Plan tightly, or hand-seed a one-step phase file — there is no bypass flag | [Case 4](#case-4-skipping-straight-to-build-without-a-full-plan) |
 
 ---
 
@@ -47,7 +46,7 @@ unimplemented  →  pending  →  in_progress  →  completed
 ```
 
 Plus two states for runtime trouble: `error` (a step failed) and `blocked` (a
-step was paused on purpose, e.g. by `/dev-kit:adapt`).
+step was paused on purpose).
 
 `/dev-kit:build` always starts at **the first step that isn't `completed`.** That
 one fact is what makes every "I got interrupted" case below just work.
@@ -90,61 +89,7 @@ cat phases/<name>/index.json      # look at each step's "status"
 
 ---
 
-## Case 2: the plan turned out wrong mid-build
-
-Sometimes you only discover the plan was wrong *after* you start building against
-it. Step 3 assumes an API shape that doesn't exist, or an acceptance criterion
-contradicts what step 2 actually produced. You don't want to throw away steps 1
-and 2 and re-plan from scratch — you want a small correction and then to keep
-going.
-
-That's what `/dev-kit:adapt` is for.
-
-**Example.** You ran `/dev-kit:plan`, then `/dev-kit:build`. Steps 1 and 2
-completed. Step 3 is `in_progress`, and while working it you realize the plan
-told the step to call a function that the earlier steps never created. The step
-as written cannot pass its acceptance check.
-
-Run:
-
-```bash
-/dev-kit:adapt
-```
-
-What it does, in order (from `commands/adapt.md`):
-
-1. **Pause.** It marks the in-flight step as `blocked` in `index.json` so the
-   build stops touching it.
-2. **Diff.** It shows you the exact contradiction — the planned acceptance
-   criterion or spec line versus what the step actually produced
-   (`phases/<name>/step<N>-output.json`).
-3. **Propose.** It proposes **one** minimal patch to `PRD.md` and/or the step
-   file — the smallest change that resolves that specific contradiction. It will
-   not add new scope or "while I'm here" improvements.
-4. **Apply.** Only after you explicitly approve, it writes the patch, flips the
-   step from `blocked` back to `pending`, and hands back to `/dev-kit:build`,
-   which resumes from that step.
-
-**Important limits, so you use it correctly:**
-
-- It only works while a build step is actually in flight (a
-  `step<N>-output.json` exists with status `in_progress` or `error`). If no build
-  is running, `adapt` refuses and points you to `/dev-kit:plan` — because
-  fixing a plan *before* any building has started is a plain re-plan, not an
-  adapt.
-- One patch per call. If two things are wrong, fix the first, let the build
-  continue, and call `/dev-kit:adapt` again for the second.
-- If you find yourself calling `adapt` three times on the same step, stop. That's
-  the signal the plan itself is unstable — go back to `/dev-kit:plan` and redo
-  it properly.
-
-**Adapt vs. re-plan, in one line:** `adapt` = a small correction to keep an
-in-progress build moving; `/dev-kit:plan` = the plan is wrong at the root and you
-want a fresh one.
-
----
-
-## Case 3: coming back from a different terminal or day
+## Case 2: coming back from a different terminal or day
 
 You paused a build yesterday. Today you open a fresh terminal and you're not sure
 which worktree the build was in, or what the session id was.
@@ -192,7 +137,7 @@ section.
 
 ---
 
-## Case 4: skipping the Valuate step
+## Case 3: skipping the Valuate step
 
 `valuate` scores a plan on six axes and returns a verdict —
 `proceed`, `revise`, `hold`, or `kill`. It's a sanity check on *whether the plan
@@ -218,7 +163,7 @@ ones.
 
 ---
 
-## Case 5: skipping straight to Build without a full Plan
+## Case 4: skipping straight to Build without a full Plan
 
 A common wish: "this is tiny, I don't want a whole PRD, let me just build."
 
@@ -235,7 +180,7 @@ to build. So your honest options are:
 produce a large PRD. For a small task, give it a narrow prompt and let it emit a
 short plan with one or two steps. This is the normal, supported path and it's
 fast for small work. You still get the step tracking that makes Case 1 (resume)
-and Case 2 (adapt) work.
+and Case 1 (resume) work.
 
 **Option B — hand-seed a minimal phase file.** If you genuinely want to skip the
 planning conversation, you can create a minimal `phases/<name>/index.json` with a
@@ -260,7 +205,6 @@ is nothing to verify against, which is the whole point of the harness.
 - [`docs/stages/STAGES.md`](../stages/STAGES.md) — the full per-stage spec (what
   each of bootstrap / plan / valuate / build / review / security / ship must do).
 - [`docs/skills/build.md`](../skills/build.md) — the Build skill in detail.
-- [`commands/adapt.md`](../../commands/adapt.md) — the exact `adapt` mechanics.
 - [`docs/skills/log.md`](../skills/log.md) — turning session logging on so the
   session monitor has data.
 - Main [`README.md`](../../README.md) — install, quickstart, and the short

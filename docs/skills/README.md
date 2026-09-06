@@ -93,7 +93,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`log`](log.md) | `state` | Toggle session loghooks (`setup`/`on`/`off`/`status`) per project. |
 | [`codex-cache-update`](codex-cache-update.md) | `analysis` | Refresh the Codex marketplace checkout + versioned plugin cache. |
 | [`llm-refresh`](llm-refresh.md) | `analysis` | Refresh `docs/llm-info/<provider>.json` from each vendor's pricing page. |
-| [`adapt`](../../commands/adapt.md) | `state` | Mid-build plan/spec amendment — pauses the current step, proposes a minimal patch, resumes after approval. |
 | [`review-local`](../../commands/review-local.md) | `state` | Local equivalent of the GH-Actions review chain (`/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance`) via `bin/review-local.sh`. |
 | [`skill-usage`](../../commands/skill-usage.md) | `analysis` | Skill-usage telemetry CLI — turns + invocations per project, from `tools/skill_usage.py`. |
 
@@ -128,7 +127,6 @@ step inside their parent skill's flow; you never type them directly.
 
 | Skill | Category | Alpha | Invocable |
 |---|---|---|---|
-| [`adapt`](../../commands/adapt.md) | `shortcuts` | `state` | human |
 | [`babysit-pr`](babysit-pr.md) | `ship` | `state` | human |
 | [`babysit-pr-local`](babysit-pr-local.md) | `ship` | `state` | human |
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
