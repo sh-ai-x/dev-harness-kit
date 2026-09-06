@@ -24,45 +24,62 @@ MODE_LIB = REPO_ROOT / "hooks" / "lib" / "mode-resolve.sh"
 
 
 def _resolve_mode(cwd: Path) -> tuple[str, str]:
-    """Return (mode, source). Source is one of: shell, project, local, default, outside-git."""
-    if os.environ.get("DEV_KIT_MODE"):
-        # Let the bash helper resolve fully (still consistent with the
-        # shell-env-wins rule, even if a project or local file is set).
-        return _bash_resolve(cwd), "shell"
+    """Return (mode, source). Always delegates to hooks/lib/mode-resolve.sh
+    via _bash_resolve so the 4-layer precedence rule lives in exactly one
+    place. Source is reported separately via _resolve_source for the
+    `show` subcommand.
 
-    proj_root = _project_root(cwd)
-    if proj_root is None or not (proj_root / ".claude").is_dir():
-        return "undev", "outside-git"
-
-    proj_settings = proj_root / ".claude" / "settings.json"
-    proj_mode = _read_env(proj_settings)
-    if proj_mode:
-        return proj_mode, "project"
-
-    local_settings = proj_root / ".claude" / "settings.local.json"
-    local_mode = _read_env(local_settings)
-    if local_mode:
-        return local_mode, "local"
-
-    # Conditional default
-    enabled = _enabled_plugins(proj_settings)
-    if enabled:
-        return "full", "default"
-    return "undev", "default"
+    Fallback: if bash delegation fails (jq missing, etc.), fall back to
+    a minimal Python-side resolution so the CLI stays usable. The
+    fallback is intentionally simple (Layer 1 + Layer 4 only) — the
+    authoritative contract is in mode-resolve.sh.
+    """
+    try:
+        return _bash_resolve_full(cwd)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        # Fallback: Layer 1 (shell) + Layer 4 (default).
+        shell_mode = os.environ.get("DEV_KIT_MODE", "")
+        if shell_mode in {"full", "lite", "undev"}:
+            return shell_mode, "shell"
+        return _default_for_cwd(cwd), "default"
 
 
-def _bash_resolve(cwd: Path) -> str:
-    """Delegate to the bash helper — keeps the rule single-sourced."""
+def _bash_resolve_full(cwd: Path) -> tuple[str, str]:
+    """Delegate fully to mode-resolve.sh. Returns (mode, source)."""
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(cwd)
+    script = (
+        f'source "{MODE_LIB}"; '
+        'dev_kit_mode_resolve; '
+        'printf "%s\\t%s\\n" "${DEV_KIT_MODE}" "${DEV_KIT_MODE_SOURCE:-default}"'
+    )
     result = subprocess.run(
-        ["bash", "-c", f'source "{MODE_LIB}"; dev_kit_mode_resolve; printf "%s" "$DEV_KIT_MODE"'],
+        ["bash", "-c", script],
         capture_output=True, text=True, timeout=10, cwd=str(cwd), env=env,
     )
     if result.returncode != 0:
-        print(f"mode-resolve.sh failed: {result.stderr}", file=sys.stderr)
-        sys.exit(result.returncode or 1)
-    return result.stdout.strip()
+        raise subprocess.CalledProcessError(result.returncode, result.args,
+                                           output=result.stdout, stderr=result.stderr)
+    out = result.stdout.strip().split("\t")
+    if len(out) >= 2:
+        return out[0], out[1]
+    return out[0], "default"
+
+
+def _default_for_cwd(cwd: Path) -> str:
+    """Layer 4 conditional default — used as fallback only."""
+    proj_root = _project_root(cwd)
+    if proj_root is None:
+        return "undev"
+    proj_settings = proj_root / ".claude" / "settings.json"
+    return "full" if _enabled_plugins(proj_settings) else "undev"
+
+
+def _bash_resolve(cwd: Path) -> str:
+    """Delegate to the bash helper — returns mode only. Used by older
+    call sites and as a thin wrapper around _bash_resolve_full."""
+    mode, _source = _bash_resolve_full(cwd)
+    return mode
 
 
 def _project_root(cwd: Path) -> Path | None:

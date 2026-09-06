@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""test_mode_resolution.py — DEV_KIT_MODE resolution order regression tests.
+"""test_dev_kit_mode_cli.py — regression tests for bin/dev_kit_mode.py.
 
-Pins the resolution order documented in docs/scopes/modes.md:
+The Python CLI must agree with the bash resolver (hooks/lib/mode-resolve.sh)
+on every case. The bash side is tested in test_mode_resolution.py; this
+file pins the Python side to the same 15 outcomes so any drift in
+bin/dev_kit_mode.py (or its delegates) is caught by CI.
 
-  1. $DEV_KIT_MODE shell env var      — wins over everything (per-session)
-  2. <proj>/.claude/settings.json    — committed project choice
-  3. <proj>/.claude/settings.local.json — personal override (this checkout)
-  4. Default = "full" ONLY when enabledPlugins.dev-kit@dev-kit: true;
-     otherwise "undev" (silent — plugin not loaded)
-
-Fifteen cases (3 layer-1 shell-env wins + 3 layer-2 project wins + 3
-layer-3 local kicks in + 2 precedence (project > local) + 3 conditional
-default + 1 outside-git). Each runs in a temp git repo with synthetic
-`.claude/settings*.json` so we can assert precedence without depending
-on the host filesystem.
+Test matrix mirrors test_mode_resolution.py:
+  - 3 layer-1 (shell-env wins)
+  - 3 layer-2 (project wins)
+  - 3 layer-3 (local kicks in when project unset)
+  - 2 precedence (project > local)
+  - 3 conditional default
+  - 1 outside-git
 """
 from __future__ import annotations
 
@@ -21,43 +20,23 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-MODE_LIB = REPO_ROOT / "hooks" / "lib" / "mode-resolve.sh"
-
-
-def _resolve(cwd: Path, env_override: dict | None = None) -> str:
-    """Run dev_kit_mode_resolve in a child shell with the given env."""
-    env = os.environ.copy()
-    env["CLAUDE_PROJECT_DIR"] = str(cwd)
-    env.pop("DEV_KIT_MODE", None)  # ensure clean baseline unless overridden
-    if env_override:
-        env.update(env_override)
-    script = f"""
-      source "{MODE_LIB}"
-      dev_kit_mode_resolve
-      printf '%s' "$DEV_KIT_MODE"
-    """
-    result = subprocess.run(
-        ["bash", "-c", script],
-        capture_output=True, text=True, timeout=10,
-        cwd=str(cwd), env=env,
-    )
-    return result.stdout.strip()
+CLI = REPO_ROOT / "bin" / "dev_kit_mode.py"
 
 
 def _make_proj(tmp: Path, *, project_mode: str | None, local_mode: str | None,
-               enabled_plugins: dict | None) -> Path:
-    """Build a synthetic project root with .git and .claude/."""
+              enabled_plugins: dict | None) -> Path:
     proj = tmp / "proj"
     proj.mkdir()
     (proj / ".claude").mkdir()
     subprocess.run(["git", "init", "-q"], cwd=str(proj), check=True)
     if project_mode is not None or enabled_plugins is not None:
-        body = {}
+        body: dict = {}
         if enabled_plugins is not None:
             body["enabledPlugins"] = enabled_plugins
         if project_mode is not None:
@@ -70,8 +49,27 @@ def _make_proj(tmp: Path, *, project_mode: str | None, local_mode: str | None,
     return proj
 
 
-class TestModeResolution(unittest.TestCase):
-    """3 explicit-mode sources × 3 project-scope configs = 9 cases."""
+def _run_cli(proj: Path, *, env_override: dict | None = None) -> str:
+    """Run `dev_kit_mode.py resolve` and return the printed mode."""
+    env = os.environ.copy()
+    env.pop("DEV_KIT_MODE", None)  # baseline
+    if env_override:
+        env.update(env_override)
+    result = subprocess.run(
+        [sys.executable, str(CLI), "resolve"],
+        capture_output=True, text=True, timeout=10,
+        cwd=str(proj), env=env,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"CLI exited {result.returncode}\nstdout: {result.stdout}\n"
+            f"stderr: {result.stderr}"
+        )
+    return result.stdout.strip()
+
+
+class TestDevKitModeCLI(unittest.TestCase):
+    """The Python CLI must agree with mode-resolve.sh on every case."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -84,107 +82,88 @@ class TestModeResolution(unittest.TestCase):
     def test_shell_env_full_overrides_project_unset(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "full"}), "full")
+        self.assertEqual(_run_cli(proj, env_override={"DEV_KIT_MODE": "full"}), "full")
 
     def test_shell_env_lite_overrides_project_full(self):
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "lite"}), "lite")
+        self.assertEqual(_run_cli(proj, env_override={"DEV_KIT_MODE": "lite"}), "lite")
 
     def test_shell_env_undev_overrides_project_full_and_local_lite(self):
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode="lite", enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "undev"}), "undev")
+        self.assertEqual(_run_cli(proj, env_override={"DEV_KIT_MODE": "undev"}), "undev")
 
     # ----- Layer 2: project-scope wins when shell env is unset -----
 
     def test_project_full_when_plugin_enabled(self):
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "full")
+        self.assertEqual(_run_cli(proj), "full")
 
     def test_project_lite_when_plugin_enabled(self):
         proj = _make_proj(Path(self.tmp), project_mode="lite",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "lite")
+        self.assertEqual(_run_cli(proj), "lite")
 
     def test_project_undev_when_plugin_enabled(self):
         proj = _make_proj(Path(self.tmp), project_mode="undev",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "undev")
+        self.assertEqual(_run_cli(proj), "undev")
 
     # ----- Layer 3: local-scope kicks in when project-scope is unset -----
 
     def test_local_full_used_when_project_unset(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode="full", enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "full")
+        self.assertEqual(_run_cli(proj), "full")
 
     def test_local_lite_used_when_project_unset(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode="lite", enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "lite")
+        self.assertEqual(_run_cli(proj), "lite")
 
     def test_local_undev_used_when_project_unset(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode="undev", enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "undev")
+        self.assertEqual(_run_cli(proj), "undev")
 
     # ----- Layer 2 precedence over Layer 3: project-scope wins when set -----
 
     def test_project_full_wins_over_local_lite(self):
-        """Project scope is team-committed; personal local override does
-        NOT override a team decision. The user can still pin mode via the
-        shell env var (Layer 1) for a one-session override."""
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode="lite", enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "full")
+        self.assertEqual(_run_cli(proj), "full")
 
     def test_project_undev_wins_over_local_full(self):
         proj = _make_proj(Path(self.tmp), project_mode="undev",
                           local_mode="full", enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "undev")
+        self.assertEqual(_run_cli(proj), "undev")
 
     # ----- Layer 4: conditional default -----
 
     def test_default_full_when_plugin_enabled_no_mode_set(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "full")
+        self.assertEqual(_run_cli(proj), "full")
 
     def test_default_undev_when_plugin_not_enabled_no_mode_set(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode=None, enabled_plugins={})
-        self.assertEqual(_resolve(proj), "undev")
+        self.assertEqual(_run_cli(proj), "undev")
 
     def test_default_undev_when_no_settings_file_at_all(self):
         proj = Path(self.tmp) / "bare"
         proj.mkdir()
         subprocess.run(["git", "init", "-q"], cwd=str(proj), check=True)
-        self.assertEqual(_resolve(proj), "undev")
+        self.assertEqual(_run_cli(proj), "undev")
 
     # ----- Outside any git repo -----
 
     def test_outside_git_repo_returns_undev(self):
         non_git = Path(self.tmp) / "no-git"
         non_git.mkdir()
-        self.assertEqual(_resolve(non_git), "undev")
-
-    # ----- Value validation (typo -> falls through + stderr warning) -----
-
-    def test_invalid_shell_value_falls_through(self):
-        """A shell-side typo ("ful") must not silently fail-open. The
-        resolver should warn to stderr and treat as unset, so the
-        project layer takes over."""
-        proj = _make_proj(Path(self.tmp), project_mode="lite",
-                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "ful"}), "lite")
-
-    def test_invalid_project_value_falls_through_to_local(self):
-        proj = _make_proj(Path(self.tmp), project_mode="ful",
-                          local_mode="undev",
-                          enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "undev")
+        self.assertEqual(_run_cli(non_git), "undev")
 
 
 if __name__ == "__main__":

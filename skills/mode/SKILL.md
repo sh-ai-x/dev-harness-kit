@@ -3,6 +3,7 @@ name: mode
 category: mode
 description: Read or write the active DEV_KIT_MODE (full | lite | undev) for the current project. Picker by default; --show to display current mode; --scope=local to write to .claude/settings.local.json instead of .claude/settings.json.
 alpha: state
+user-invocable: true
 when_to_use: |
   - User types `/dev-kit:mode` and wants to pick a mode
   - User types `/dev-kit:mode --show` to see current mode
