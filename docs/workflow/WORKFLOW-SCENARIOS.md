@@ -180,7 +180,7 @@ to build. So your honest options are:
 produce a large PRD. For a small task, give it a narrow prompt and let it emit a
 short plan with one or two steps. This is the normal, supported path and it's
 fast for small work. You still get the step tracking that makes Case 1 (resume)
-and Case 1 (resume) work.
+work.
 
 **Option B — hand-seed a minimal phase file.** If you genuinely want to skip the
 planning conversation, you can create a minimal `phases/<name>/index.json` with a
