@@ -1535,5 +1535,245 @@ class MigrateTests(unittest.TestCase):
             )
 
 
+# ----- Timeline fields (started / shipped) ---------------------------------
+
+
+class TimelineFieldsTests(unittest.TestCase):
+    """`started:` / `shipped:` are optional YYYY-MM-DD strings on the
+    proposal YAML. They never change BUCKETS, the path shape, or the
+    list ordering by default; they only render as timeline chips in the
+    HTML header and surface under the `--in-flight` CLI filter.
+
+    Why this exists: tracking "an accepted proposal whose work has
+    begun" is a time-bound property, not a categorical bucket. Adding
+    a fourth bucket (`in-progress/`) would mean a 4-state whitelist,
+    a new bucket name to maintain, and a new status-to-bucket mapping.
+    Storing the dates directly lets the renderer compose the
+    "currently being shipped" view from data that's already there,
+    with zero bucket churn.
+    """
+
+    def test_started_and_shipped_default_to_none(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\nsections: []\n"
+        )
+        self.assertIsNone(p.started)
+        self.assertIsNone(p.shipped)
+
+    def test_started_parsed_when_iso_date(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\n"
+            "started: 2026-09-01\n"
+            "sections: []\n"
+        )
+        self.assertEqual(p.started, "2026-09-01")
+
+    def test_shipped_parsed_when_iso_date(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\n"
+            "started: 2026-09-01\n"
+            "shipped: 2026-09-05\n"
+            "sections: []\n"
+        )
+        self.assertEqual(p.started, "2026-09-01")
+        self.assertEqual(p.shipped, "2026-09-05")
+
+    def test_started_must_match_iso_date(self):
+        with self.assertRaises(ValueError):
+            rph.parse_proposal_yaml(
+                "title: T\nstatus: accepted\nstarted: 2026/09/01\nsections: []\n"
+            )
+
+    def test_started_non_string_raises(self):
+        with self.assertRaises(ValueError):
+            rph.parse_proposal_yaml(
+                "title: T\nstatus: accepted\nstarted: 20260901\nsections: []\n"
+            )
+
+    def test_shipped_must_match_iso_date(self):
+        with self.assertRaises(ValueError):
+            rph.parse_proposal_yaml(
+                "title: T\nstatus: accepted\nshipped: tomorrow\nsections: []\n"
+            )
+
+    def test_render_emits_started_chip_when_set(self):
+        import re as _re
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n"
+        )
+        html_doc = rph.render(p, now="2026-09-07")
+        # Match the chip <span> in the body (CSS class names live in the
+        # always-emitted <style> block, so a bare substring search is
+        # too coarse).
+        body_match = _re.search(
+            r'<span class="timeline-chip timeline-started">started 2026-09-01</span>',
+            html_doc,
+        )
+        self.assertIsNotNone(body_match, "expected started chip span in body")
+        self.assertNotRegex(
+            html_doc.split("</style>", 1)[-1],
+            r'<span class="timeline-chip timeline-shipped">',
+        )
+
+    def test_render_emits_shipped_chip_when_set(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\n"
+            "started: 2026-09-01\nshipped: 2026-09-05\n"
+            "sections: []\n"
+        )
+        html_doc = rph.render(p, now="2026-09-07")
+        body = html_doc.split("</style>", 1)[-1]
+        for needle in (
+            r'<span class="timeline-chip timeline-started">started 2026-09-01</span>',
+            r'<span class="timeline-chip timeline-shipped">shipped 2026-09-05</span>',
+        ):
+            self.assertRegex(body, needle, f"missing chip: {needle}")
+
+    def test_render_omits_timeline_chips_when_unset(self):
+        """Legacy/back-compat: a proposal without started/shipped renders
+        with no timeline chip <span> in the body (CSS selectors in the
+        <style> block are always emitted, so the check is scoped to
+        the post-</style> body)."""
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\nsections: []\n"
+        )
+        html_doc = rph.render(p, now="2026-09-07")
+        body = html_doc.split("</style>", 1)[-1]
+        self.assertNotRegex(
+            body, r'<span class="timeline-chip '
+        )
+
+    # ----- CLI filter ------------------------------------------------------
+
+    def _plant(
+        self, root: Path, bucket: str, main: str, sub: str,
+        body: str = "title: T\nstatus: accepted\nsections: []\n",
+    ) -> None:
+        d = root / "docs" / "proposals" / bucket / main
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sub}.yaml").write_text(body, encoding="utf-8")
+
+    def test_in_flight_lists_accepted_with_started_no_shipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "alive1",
+                        "title: A1\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n")
+            self._plant(root, "accepted", "a", "alive2",
+                        "title: A2\nstatus: accepted\nstarted: 2026-09-02\nsections: []\n")
+            self._plant(root, "accepted", "a", "done",
+                        "title: D\nstatus: accepted\nstarted: 2026-08-01\nshipped: 2026-09-01\nsections: []\n")
+            self._plant(root, "accepted", "a", "waiting",
+                        "title: W\nstatus: accepted\nsections: []\n")
+            self._plant(root, "review", "b", "draft",
+                        "title: D\nstatus: draft\nstarted: 2026-09-01\nsections: []\n")
+            names = rph._in_flight(root)
+            self.assertEqual(
+                names,
+                [
+                    "a/alive2",  # bucketed -> no `accepted/` prefix (matches --list)
+                    "a/alive1",
+                ],
+            )
+
+    def test_in_flight_empty_when_no_matches(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "done",
+                        "title: D\nstatus: accepted\nstarted: 2026-08-01\nshipped: 2026-09-01\nsections: []\n")
+            self.assertEqual(rph._in_flight(root), [])
+
+    def test_cli_main_in_flight_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "alive",
+                        "title: A\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n")
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = rph.main(["--project-root", str(root), "--in-flight"])
+            self.assertEqual(rc, 0)
+            self.assertIn("a/alive", buf.getvalue(),
+                          "in-flight output must list the accepted proposal "
+                          "whose started: is set and shipped: is unset")
+
+    def test_started_calendar_invalid_raises(self):
+        r"""M1 reviewer (PR #804): the regex \d{4}-\d{2}-\d{2} accepts
+        calendar-invalid dates like `2026-13-01` (month 13) and
+        `2026-02-30` (Feb 30). The dates must be quoted in the YAML so
+        PyYAML doesn't reject them upstream -- only the parser sees
+        the bare string."""
+        for bad in ("2026-13-01", "2026-02-30", "2025-02-29"):
+            with self.assertRaises(ValueError, msg=f"expected reject for {bad}"):
+                rph.parse_proposal_yaml(
+                    f'title: T\nstatus: accepted\nstarted: "{bad}"\nsections: []\n'
+                )
+
+    def test_in_flight_walks_legacy_flat_layout(self):
+        """M2 reviewer (PR #804): pre-migration proposals live at
+        `docs/proposals/<main>/<sub>.yaml` (no bucket prefix). The
+        filter MUST see them too -- otherwise `--in-flight` reads as
+        empty against every pre-migration repo."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Accepted proposal in the legacy flat layout (no bucket dir).
+            d_legacy = root / "docs" / "proposals" / "legacy-flat"
+            d_legacy.mkdir(parents=True, exist_ok=True)
+            (d_legacy / "alive.yaml").write_text(
+                "title: A\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n",
+                encoding="utf-8",
+            )
+            # Sanity: also a bucketed one to verify both layouts surface.
+            self._plant(root, "accepted", "bucketed", "alive",
+                        "title: B\nstatus: accepted\nstarted: 2026-09-02\nsections: []\n")
+            names = rph._in_flight(root)
+            self.assertEqual(
+                names,
+                [
+                    "bucketed/alive",  # newer started first (no `accepted/` prefix; mirrors --list)
+                    "legacy-flat/alive",
+                ],
+            )
+
+    def test_in_flight_skips_reserved_slugs(self):
+        """m3 reviewer (PR #804): `proposal.yaml` and `index.yaml` are
+        legacy canonical filenames that the renderer treats as leftover
+        refactor artifacts. They must NOT surface in the in-flight list
+        even when they carry `started:`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "main1", "proposal",
+                        "title: R1\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n")
+            self._plant(root, "accepted", "main1", "index",
+                        "title: R2\nstatus: accepted\nstarted: 2026-09-02\nsections: []\n")
+            self._plant(root, "accepted", "main1", "real",
+                        "title: R3\nstatus: accepted\nstarted: 2026-09-03\nsections: []\n")
+            names = rph._in_flight(root)
+            self.assertEqual(names, ["main1/real"])
+
+    def test_in_flight_survives_unreadable_file(self):
+        """m2 reviewer (PR #804): a single broken/permission-denied
+        file must NOT abort the filter walk. The `is_file()` guard
+        hides directory-named-with-yaml-suffix from `read_text`, so the
+        test plants a real file and patches `read_text` to raise
+        OSError, exercising the except clause directly."""
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "alive",
+                        "title: A\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n")
+            self._plant(root, "accepted", "b", "broken",
+                        "title: B\nstatus: accepted\nstarted: 2026-09-02\nsections: []\n")
+            real_read_text = Path.read_text
+            def boom(self, *a, **kw):  # noqa: ANN001, ANN201
+                if self.name == "broken.yaml":
+                    raise OSError("simulated unreadable file")
+                return real_read_text(self, *a, **kw)
+            with patch.object(Path, "read_text", boom):
+                names = rph._in_flight(root)
+            self.assertIn("a/alive", names)
+            self.assertNotIn("b/broken", names)
+
+
 if __name__ == "__main__":
     unittest.main()
