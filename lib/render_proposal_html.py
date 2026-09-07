@@ -557,20 +557,30 @@ def _parse_string_list(raw: object, field_name: str) -> List[str]:
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 def _parse_optional_date(raw: object, field_name: str) -> Optional[str]:
-    """Strict YYYY-MM-DD parser for the optional `started:` / `shipped:`
+    r"""Strict YYYY-MM-DD parser for the optional `started:` / `shipped:`
     timeline fields. Returns None when unset; raises ValueError for any
-    non-string, non-date, or non-ISO value.
+    non-string, non-date, or non-ISO value, OR a string that looks
+    YYYY-MM-DD-shaped but isn't a real calendar date (M1 reviewer,
+    PR #804: the prior regex \d{4}-\d{2}-\d{2} accepted
+    `2026-13-01` and `2026-02-30`).
 
     YAML auto-parses bare ISO-8601 literals like `started: 2026-09-01`
-    into `datetime.date` objects (not strings), so we accept both and
-    normalise to ISO format. Anything else -- `2026/09/01`, `Sep 1`,
-    a datetime object, a free-form string -- is rejected so a typo
-    can't silently produce a broken chip in the rendered HTML."""
+    into `datetime.date` objects, so we accept those directly. Quoted
+    strings (`started: "2026-13-01"`) bypass YAML's timestamp
+    validation and reach us as plain text -- those go through
+    `datetime.date.fromisoformat`, which rejects month-out-of-range
+    and Feb-30-style calendar typos. Anything else is rejected so a
+    typo can't silently produce a broken chip in the rendered HTML."""
     if raw is None:
         return None
-    # `datetime` is imported at module top; check `date` first so the
-    # subclass match doesn't shadow plain dates.
+    # The module-level `from datetime import datetime` binds only the
+    # `datetime` *class*, not the `datetime` *module*. Reach for the
+    # module so `_dt.date` (the type) and `_dt.datetime` (the
+    # subclass) are both available.
     import datetime as _dt
     if isinstance(raw, _dt.datetime):
         # YAML only produces `date` for bare ISO dates; `datetime`
@@ -587,10 +597,16 @@ def _parse_optional_date(raw: object, field_name: str) -> Optional[str]:
             f"`{field_name}` must be a YYYY-MM-DD date string "
             f"(got {type(raw).__name__}: {raw!r})"
         )
+    # Shape check first (cheap), then calendar validity (real check).
+    # The shape branch catches obvious typos like `2026/09/01` without
+    # spending the parser call on them.
     if not _ISO_DATE_RE.fullmatch(raw):
         raise ValueError(
             f"`{field_name}` must match YYYY-MM-DD (got {raw!r})"
         )
+    # Calendar-validity: rejects `2026-13-01` (month 13), `2026-02-30`
+    # (Feb 30), and `2025-02-29` (Feb 29 in a non-leap year).
+    _dt.date.fromisoformat(raw)
     return raw
 
 
@@ -1214,41 +1230,85 @@ def _parse_topic_slug(topic: str) -> tuple[Optional[str], str, str]:
 def _in_flight(project_root: Path) -> list[str]:
     """Return accepted proposals currently being shipped, newest started first.
 
-    A proposal is "in flight" iff it is in the `accepted/` bucket AND
-    has a `started:` date set AND has no `shipped:` date. This is a
-    derived view over data the proposal YAML already carries -- it does
-    NOT move files, does NOT require a new bucket, and does NOT depend
-    on git history. The 00-index page for an umbrella counts as any
-    other sub-topic and is included if it has timeline data set
-    (typically it won't, but we don't special-case it).
+    A proposal is "in flight" iff it has `status: accepted` (whether or
+    not it has been routed into the `accepted/` bucket yet), has a
+    `started:` date set, AND has no `shipped:` date. This is a derived
+    view over data the proposal YAML already carries -- it does NOT
+    move files, does NOT require a new bucket, and does NOT depend on
+    git history.
+
+    Both layouts are walked (status-routed bucket dir + legacy flat
+    layout) and deduped by `(main, sub)`, mirroring `_list_proposals`.
+    Pre-migration repos -- where the 16 umbrella dirs are still at the
+    flat layout -- would otherwise return `(no proposals in flight)`
+    for every proposal they hold (M2 reviewer, PR #804).
 
     Sort key: `started` desc, then `(main, sub)` lexicographic to keep
-    ties deterministic. Malformed YAMLs are skipped (the renderer is
-    the right place to error on those, not the filter).
+    ties deterministic. Malformed YAMLs and unreadable files are skipped
+    so a single broken file does not abort the filter walk (m2
+    reviewer, PR #804).
     """
-    pdir = project_root / "docs" / "proposals" / "accepted"
+    pdir = project_root / "docs" / "proposals"
     if not pdir.is_dir():
         return []
     candidates: list[tuple[str, str, str]] = []  # (started, main, sub)
-    for main_dir in sorted(pdir.iterdir()):
-        if not main_dir.is_dir():
+    seen: set[tuple[str, str]] = set()
+
+    # Status-routed shape first -- these win on collision.
+    bucket_dir = pdir / "accepted"
+    if bucket_dir.is_dir():
+        for main_dir in sorted(bucket_dir.iterdir()):
+            if not main_dir.is_dir():
+                continue
+            for sub_entry in sorted(main_dir.iterdir()):
+                if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
+                    continue
+                sub = sub_entry.name[: -len(".yaml")]
+                if sub in RESERVED_SLUGS:
+                    continue
+                if _collect_in_flight(sub_entry, main_dir.name, candidates, seen):
+                    seen.add((main_dir.name, sub))
+
+    # Legacy flat shape (skipping any bucket dir). Only emit a legacy
+    # slug if no bucket copy exists for the same (main, sub).
+    for entry in sorted(pdir.iterdir()):
+        if not entry.is_dir():
             continue
-        for sub_entry in sorted(main_dir.iterdir()):
+        if entry.name in BUCKETS:
+            continue
+        for sub_entry in sorted(entry.iterdir()):
             if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
                 continue
             sub = sub_entry.name[: -len(".yaml")]
             if sub in RESERVED_SLUGS:
                 continue
-            try:
-                text = sub_entry.read_text(encoding="utf-8")
-                p = parse_proposal_yaml(text)
-            except (ValueError, KeyError, yaml.YAMLError):
+            if (entry.name, sub) in seen:
                 continue
-            if not p.started or p.shipped:
-                continue
-            candidates.append((p.started, main_dir.name, sub))
+            if _collect_in_flight(sub_entry, entry.name, candidates, seen):
+                seen.add((entry.name, sub))
+
     candidates.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
-    return [f"accepted/{main}/{sub}" for _started, main, sub in candidates]
+    return [f"{main}/{sub}" for _started, main, sub in candidates]
+
+
+def _collect_in_flight(
+    sub_entry: Path,
+    main: str,
+    candidates: list[tuple[str, str, str]],
+    seen: set[tuple[str, str]],
+) -> bool:
+    """Try to add one YAML to the in-flight candidates. Returns True
+    when the entry was added (or considered and rejected). Swallows
+    parse / IO errors so a single broken file does not abort the walk
+    (m2 reviewer, PR #804)."""
+    try:
+        p = parse_proposal_yaml(sub_entry.read_text(encoding="utf-8"))
+    except (ValueError, KeyError, yaml.YAMLError, OSError):
+        return False
+    if p.status != "accepted" or not p.started or p.shipped:
+        return False
+    candidates.append((p.started, main, sub_entry.name[: -len(".yaml")]))
+    return True
 
 
 def _list_proposals(project_root: Path) -> list[str]:
