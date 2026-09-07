@@ -56,7 +56,7 @@ def _run_cli(proj: Path, *, env_override: dict | None = None) -> str:
     if env_override:
         env.update(env_override)
     result = subprocess.run(
-        [sys.executable, str(CLI), "resolve"],
+        [sys.executable, str(CLI), "--target", str(proj), "resolve"],
         capture_output=True, text=True, timeout=10,
         cwd=str(proj), env=env,
     )
@@ -66,6 +66,17 @@ def _run_cli(proj: Path, *, env_override: dict | None = None) -> str:
             f"stderr: {result.stderr}"
         )
     return result.stdout.strip()
+
+
+def _run_cli_write(proj: Path, *, mode: str, scope: str = "project"):
+    """Run `dev_kit_mode.py write --mode <mode>` and return CompletedProcess."""
+    env = os.environ.copy()
+    env.pop("DEV_KIT_MODE", None)
+    return subprocess.run(
+        [sys.executable, str(CLI), "--target", str(proj), "write",
+         "--mode", mode, "--scope", scope],
+        capture_output=True, text=True, env=env, timeout=10,
+    )
 
 
 class TestDevKitModeCLI(unittest.TestCase):
@@ -164,6 +175,46 @@ class TestDevKitModeCLI(unittest.TestCase):
         non_git = Path(self.tmp) / "no-git"
         non_git.mkdir()
         self.assertEqual(_run_cli(non_git), "undev")
+
+    # ----- `team` value (4th mode, multi-role + dependency-aware plan) -----
+    # The CLI must round-trip team across all 4 resolution layers the same
+    # way it round-trips full/lite/undev. The Python fallback in
+    # `bin/dev_kit_mode.py:_resolve_mode` is updated to whitelist `team`
+    # alongside the existing 3 values.
+
+    def test_shell_env_team_overrides_project_full(self):
+        proj = _make_proj(Path(self.tmp), project_mode="full",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_run_cli(proj, env_override={"DEV_KIT_MODE": "team"}), "team")
+
+    def test_project_team_when_plugin_enabled(self):
+        proj = _make_proj(Path(self.tmp), project_mode="team",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_run_cli(proj), "team")
+
+    def test_local_team_used_when_project_unset(self):
+        proj = _make_proj(Path(self.tmp), project_mode=None,
+                          local_mode="team",
+                          enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_run_cli(proj), "team")
+
+    def test_project_team_wins_over_local_lite(self):
+        proj = _make_proj(Path(self.tmp), project_mode="team",
+                          local_mode="lite",
+                          enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_run_cli(proj), "team")
+
+    def test_cli_write_team_writes_settings(self):
+        """`bin/dev_kit_mode.py write --mode team` must succeed (not be
+        rejected by the argparse `choices=` list) and write the value
+        into settings.json. This is the path `/dev-kit:mode team` takes."""
+        proj = _make_proj(Path(self.tmp), project_mode=None,
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        result = _run_cli_write(proj, mode="team")
+        self.assertEqual(result.returncode, 0)
+        import json as _json
+        body = _json.loads((proj / ".claude" / "settings.json").read_text())
+        self.assertEqual(body["env"]["DEV_KIT_MODE"], "team")
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@
 |---|---|
 | Multi-session dev / autonomous work | [`templates/settings.project.full.json`](templates/settings.project.full.json) |
 | 4-hour MVP sprint / 6-person team | [`templates/settings.project.lite.json`](templates/settings.project.lite.json) |
+| Multi-role team / dependency-aware plan | [`templates/settings.project.team.json`](templates/settings.project.team.json) |
 | Non-dev repo (silent default) | [`templates/settings.project.undev.json`](templates/settings.project.undev.json) |
 
 ## Created by

@@ -14,7 +14,7 @@
 #
 # Public API:
 #   dev_kit_mode_resolve            — sets $DEV_KIT_MODE to one of
-#                                    "full", "lite", "undev".
+#                                    "full", "lite", "undev", "team".
 #   dev_kit_mode_active             — echo the active mode (no-op if
 #                                    not yet resolved).
 #   dev_kit_mode_require <required> — GATE helper (NOT a boolean). See
@@ -44,12 +44,17 @@ require_jq_mode() {
   fi
 }
 
-# _is_valid_mode <value> — returns 0 iff <value> ∈ {full,lite,undev}.
+# _is_valid_mode <value> — returns 0 iff <value> ∈ {full,lite,undev,team}.
 # Used to reject typos before they silently fail-open every gating hook
 # (a missing match in dev_kit_mode_require's loop silently exits 0).
+# `team` is the user-defined-role + dependency-aware-plan mode; see
+# docs/scopes/modes.md for the semantics. The allow-list intentionally
+# ships without any pre-defined `team` subset — roles are operator-
+# declared at /dev-kit:mode team time, and the mode value alone is the
+# gate (no extra hook surface wired here yet).
 _is_valid_mode() {
   case "${1:-}" in
-    full|lite|undev) return 0 ;;
+    full|lite|undev|team) return 0 ;;
     *) return 1 ;;
   esac
 }
