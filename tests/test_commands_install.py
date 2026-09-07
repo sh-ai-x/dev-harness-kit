@@ -6,8 +6,8 @@ Covers:
 - commands/*.md exists with valid frontmatter for each wrapper
 - bin/install-commands.sh installs to both .claude/commands and .codex/commands
 - bin/install-commands.sh --verify is idempotent
-- claude runtime: `/dev-kit:adapt foo bar` ⇒ $ARGUMENTS = "foo bar"
-- codex runtime : `/dev-kit:adapt foo bar` ⇒ positional ["foo", "bar"]
+- claude runtime: `/dev-kit:skill-usage foo bar` ⇒ $ARGUMENTS = "foo bar"
+- codex runtime : `/dev-kit:skill-usage foo bar` ⇒ positional ["foo", "bar"]
                   (verified by reading the installed codex variant and
                    asserting $ARGUMENTS was rewritten into "$@")
 """
@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
-COMMAND_FILES = ("adapt", "skill-usage", "review-local")
+COMMAND_FILES = ("skill-usage", "review-local")
 SRC_DIR = PROJECT_ROOT / "commands"
 INSTALL_SH = PROJECT_ROOT / "bin" / "install-commands.sh"
 
@@ -143,7 +143,7 @@ class TestCommandsInstall(unittest.TestCase):
 
         # Sanity-check against the installed claude variant.
         self._run_install()
-        installed = _read_text(self.root / ".claude" / "commands" / "adapt.md")
+        installed = _read_text(self.root / ".claude" / "commands" / "skill-usage.md")
         body = _strip_frontmatter(installed)
         self.assertIn("$ARGUMENTS", body)
         # The installed body still contains the literal `$ARGUMENTS`
@@ -151,9 +151,9 @@ class TestCommandsInstall(unittest.TestCase):
         self.assertNotIn('"$@"', body, "claude install must NOT transform $ARGUMENTS")
 
     def test_claude_install_preserves_dollar_arguments(self):
-        # Run install once, then read the .claude/commands/adapt.md.
+        # Run install once, then read the .claude/commands/skill-usage.md.
         self._run_install()
-        installed = _read_text(self.root / ".claude" / "commands" / "adapt.md")
+        installed = _read_text(self.root / ".claude" / "commands" / "skill-usage.md")
         self.assertIn("$ARGUMENTS", installed,
                       "claude install path must retain $ARGUMENTS verbatim")
 
@@ -164,7 +164,7 @@ class TestCommandsInstall(unittest.TestCase):
 
     def test_codex_install_rewrites_dollar_arguments_to_dollar_at(self):
         self._run_install()
-        installed = _read_text(self.root / ".codex" / "commands" / "adapt.md")
+        installed = _read_text(self.root / ".codex" / "commands" / "skill-usage.md")
         # Codex variant must rewrite $ARGUMENTS → "$@" so the runtime
         # positional expansion yields the same argv Claude interpolates.
         self.assertNotIn("$ARGUMENTS", installed,

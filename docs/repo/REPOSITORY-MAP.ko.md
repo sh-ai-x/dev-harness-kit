@@ -13,7 +13,7 @@ dev-harness-kit/
 ├── .codex-plugin/    # plugin.json + 번들 훅 (Codex 매니페스트)
 ├── skills/           # 사용자 호출 / 내부 스킬별 SKILL.md 1개
 │   └── README.md     # 모든 스킬의 정식 사람이 읽을 수 있는 인덱스
-├── commands/         # 슬래시 명령 래퍼 (adapt, skill-usage)
+├── commands/         # 슬래시 명령 래퍼 (skill-usage, review-local, …)
 ├── hooks/            # 훅 스크립트 + lib/ + hooks.json + references/slop/
 ├── lib/              # Python 엔진 (state, execute, ci_setup, eval, cost_gate, …)
 ├── bin/              # devkit-refresh.sh + set-provider.sh + dev-kit-* 상태 스크립트
