@@ -334,7 +334,7 @@ table — HTML / MD / 한국어 sibling / what each doc gives you — lives in
 | Recover from a broken flow | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | Audit cost or back a factual claim | [`docs/observability/token-efficiency.md`](docs/observability/token-efficiency.md) |
 | Pick up a session from a new shell | [`docs/observability/session-monitor.md`](docs/observability/session-monitor.md) |
-| See what custom subagents this repo ships | [`docs/proposals/agent-architecture/multi-agent-design.md`](docs/proposals/agent-architecture/multi-agent-design.md) |
+| See what custom subagents this repo ships | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
 
 Everything else — HTML siblings, Korean docs, deep reference — is in
 [`docs/home/DOC-MAP.md`](docs/home/DOC-MAP.md). If you have five minutes, open

@@ -552,7 +552,7 @@ sections:
       - Playbook source: https://github.com/sh-ai-x/agent-harness-playbook
       - Project principles: `iron-laws/index.md`
       - Hook matrix: `hooks/index.md`
-      - Subagent proposal: `docs/proposals/agent-architecture/multi-agent-design.md`
+      - Subagent proposal: `docs/proposals/review/agent-architecture/multi-agent-design.md`
       - Skill registry: `skills/README.md`
       - Codebase map: `docs/CODEBASE-MAP.md`
 

@@ -87,7 +87,7 @@ Three reasons, each tied to a citation:
 
 The decision gate, candidates table, and recommended subagent build
 for this repo live in
-[`../proposals/agent-architecture/multi-agent-design.md`](../proposals/agent-architecture/multi-agent-design.md)
+[`../proposals/review/agent-architecture/multi-agent-design.md`](../proposals/review/agent-architecture/multi-agent-design.md)
 (a short orientation, with the substantive proposal YAML at
 `multi-agent-design.yaml`). The hand-off envelopes
 (dispatch + report) that this research informed are documented inline

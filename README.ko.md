@@ -556,7 +556,7 @@ git worktree add -b feat/my-task .worktrees/feat-my-task origin/main
 | 망가진 흐름에서 복구 | [`docs/workflow/WORKFLOW-SCENARIOS.ko.md`](docs/workflow/WORKFLOW-SCENARIOS.ko.md) |
 | 비용 감사 또는 사실 주장 검증 | [`docs/observability/token-efficiency.ko.md`](docs/observability/token-efficiency.ko.md) |
 | 새 셸에서 세션 재개 | [`docs/observability/session-monitor.ko.md`](docs/observability/session-monitor.ko.md) |
-| 이 저장소가 제공하는 커스텀 서브에이전트 보기 | [`docs/proposals/agent-architecture/multi-agent-design.md`](docs/proposals/agent-architecture/multi-agent-design.md) |
+| 이 저장소가 제공하는 커스텀 서브에이전트 보기 | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
 
 나머지 — HTML 형제, 한국어 문서, 깊은 레퍼런스 — 는
 [`docs/home/DOC-MAP.md`](docs/home/DOC-MAP.md)에 있다. 5분이 있다면
@@ -883,7 +883,7 @@ classify_all_worktrees()` 경유) `live`/`unknown`에 한해 제거 후보만
    에이전트 파일에 재구현하지 말 것.
 
 `worktree-janitor`의 제안 + 디스패치 컨텍스트 계약(배치를 오케스트레이터에
-넘기는 측) 은 [`docs/proposals/agent-architecture/multi-agent-design.md`](docs/proposals/agent-architecture/multi-agent-design.md).
+넘기는 측) 은 [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md).
 에이전트 도구 핸드오프 계약(디스패치 + 보고 두 봉투) 은
 [`docs/architecture/multi-agent-orchestration-research.md`](docs/architecture/multi-agent-orchestration-research.md).
 
