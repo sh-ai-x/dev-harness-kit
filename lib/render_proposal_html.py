@@ -328,6 +328,98 @@ a:hover { text-decoration: underline; }
 .pcl-pros h3    { color: var(--ok); }
 .pcl-cons h3    { color: var(--bad); }
 .pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
 /* ----- Timeline chips -------------------------------------------------------
  * Emitted by `_meta_line` when the proposal YAML declares
  * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
@@ -396,6 +488,54 @@ class AfterState:
 
 
 @dataclass(frozen=True)
+class AmbiguityItem:
+    """One open question in the proposal's `ambiguity:` list.
+
+    Stable ids (`A1`, `A2`, ...) let the reviewer reply in the
+    Edit-then-approve message by id, e.g. `A2=no, use pytest parametrize`.
+    `blocking: bool` flags items where the proposal cannot proceed
+    without an explicit answer; non-blocking items accept the
+    `default` if the reviewer does not respond.
+    """
+
+    id: str
+    question: str
+    default: str
+    blocking: bool = False
+
+
+@dataclass(frozen=True)
+class ScopeBlock:
+    """Optional structured in-scope / out-of-scope enumeration.
+
+    Both fields are lists of citable boundaries. Anything not listed
+    is implicitly out-of-scope. Ralph-style proposals populate this
+    so the reviewer can flag drift BEFORE the implementation starts.
+    """
+
+    in_scope: List[str] = field(default_factory=list)
+    out_of_scope: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GateContractItem:
+    """One entry in the `gate_contract:` table.
+
+    Each interactive gate in the Ralph chain has a row: which
+    artifact the user reviews, the AskUserQuestion text, the
+    available options, and the rewind target on Edit-then-approve.
+    `ATTENDED_RUN` rows set `artifact=""` and `question=""` because
+    no Ask is emitted there (the lock forbids it).
+    """
+
+    gate: str
+    artifact: str
+    question: str
+    options: List[str] = field(default_factory=list)
+    rewind_on_edit: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class Proposal:
     title: str
     status: str
@@ -411,6 +551,11 @@ class Proposal:
     pros: List[str] = field(default_factory=list)
     cons: List[str] = field(default_factory=list)
     limitations: List[str] = field(default_factory=list)
+    # ralph-style additions: ambiguity, scope, gate_contract. All
+    # optional; old proposals render unchanged when absent.
+    ambiguity: List[AmbiguityItem] = field(default_factory=list)
+    scope: Optional[ScopeBlock] = None
+    gate_contract: List[GateContractItem] = field(default_factory=list)
     # Implementation timeline (additive, both YYYY-MM-DD or unset).
     # `started` is the date implementation began on an accepted
     # proposal. `shipped` is the date the implementation landed
@@ -469,6 +614,9 @@ def parse_proposal_yaml(text: str) -> Proposal:
     limitations = _parse_string_list(raw.get("limitations"), "limitations")
     started = _parse_optional_date(raw.get("started"), "started")
     shipped = _parse_optional_date(raw.get("shipped"), "shipped")
+    ambiguity = _parse_ambiguity(raw.get("ambiguity"))
+    scope = _parse_scope(raw.get("scope"))
+    gate_contract = _parse_gate_contract(raw.get("gate_contract"))
 
     return Proposal(
         title=raw["title"],
@@ -484,6 +632,9 @@ def parse_proposal_yaml(text: str) -> Proposal:
         limitations=limitations,
         started=started,
         shipped=shipped,
+        ambiguity=ambiguity,
+        scope=scope,
+        gate_contract=gate_contract,
     )
 
 
@@ -555,6 +706,102 @@ def _parse_string_list(raw: object, field_name: str) -> List[str]:
 
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_ambiguity(raw: object) -> List[AmbiguityItem]:
+    """Parse the optional `ambiguity:` list of open questions.
+
+    Each entry must include `id`, `question`, `default`. `blocking`
+    is optional (defaults to False). Stable ids let reviewers reply
+    by id in the Edit-then-approve message.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("`ambiguity` must be a list of {id, question, default} mappings")
+    out: List[AmbiguityItem] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"ambiguity[{i}] must be a mapping")
+        if "id" not in item or not isinstance(item["id"], str):
+            raise ValueError(f"ambiguity[{i}] must include a string `id`")
+        if "question" not in item or not isinstance(item["question"], str):
+            raise ValueError(f"ambiguity[{i}] must include a string `question`")
+        if "default" not in item or not isinstance(item["default"], str):
+            raise ValueError(f"ambiguity[{i}] must include a string `default`")
+        blocking_raw = item.get("blocking", False)
+        if not isinstance(blocking_raw, bool):
+            raise ValueError(f"ambiguity[{i}].blocking must be a boolean")
+        out.append(
+            AmbiguityItem(
+                id=item["id"],
+                question=item["question"],
+                default=item["default"],
+                blocking=blocking_raw,
+            )
+        )
+    return out
+
+
+def _parse_scope(raw: object) -> Optional[ScopeBlock]:
+    """Parse the optional `scope:` mapping with `in_scope:` / `out_of_scope:`."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("`scope` must be a mapping with optional `in_scope` / `out_of_scope` lists")
+    in_scope_raw = raw.get("in_scope", [])
+    out_of_scope_raw = raw.get("out_of_scope", [])
+    if not isinstance(in_scope_raw, list):
+        raise ValueError("`scope.in_scope` must be a list of strings")
+    if not isinstance(out_of_scope_raw, list):
+        raise ValueError("`scope.out_of_scope` must be a list of strings")
+    return ScopeBlock(
+        in_scope=_parse_string_items(in_scope_raw, "scope.in_scope"),
+        out_of_scope=_parse_string_items(out_of_scope_raw, "scope.out_of_scope"),
+    )
+
+
+def _parse_gate_contract(raw: object) -> List[GateContractItem]:
+    """Parse the optional `gate_contract:` list of {gate, artifact, question, options, rewind_on_edit}.
+
+    Each row documents one interactive gate in the Ralph chain
+    (or the attended execution row, which has empty artifact /
+    question because the lock forbids Ask).
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("`gate_contract` must be a list of mappings")
+    out: List[GateContractItem] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"gate_contract[{i}] must be a mapping")
+        gate = item.get("gate", "")
+        if not isinstance(gate, str) or not gate:
+            raise ValueError(f"gate_contract[{i}] must include a string `gate`")
+        artifact = item.get("artifact", "")
+        question = item.get("question", "")
+        if not isinstance(artifact, str):
+            raise ValueError(f"gate_contract[{i}].artifact must be a string")
+        if not isinstance(question, str):
+            raise ValueError(f"gate_contract[{i}].question must be a string")
+        options_raw = item.get("options", [])
+        if not isinstance(options_raw, list):
+            raise ValueError(f"gate_contract[{i}].options must be a list of strings")
+        options = _parse_string_items(options_raw, f"gate_contract[{i}].options")
+        rewind_raw = item.get("rewind_on_edit", None)
+        if rewind_raw is not None and not isinstance(rewind_raw, str):
+            raise ValueError(f"gate_contract[{i}].rewind_on_edit must be a string or null")
+        out.append(
+            GateContractItem(
+                gate=gate,
+                artifact=artifact,
+                question=question,
+                options=options,
+                rewind_on_edit=rewind_raw,
+            )
+        )
+    return out
 
 
 def _parse_optional_date(raw: object, field_name: str) -> Optional[str]:
@@ -951,11 +1198,19 @@ def _toc(p: Proposal) -> str:
     Includes the structured sections (`Before / After`, `Pros`, `Cons`,
     `Limitations`) when they are populated so reviewers can jump to them
     directly. The anchor names are stable: `ba-section`, `pcl-pros`,
-    `pcl-cons`, `pcl-limit`.
+    `pcl-cons`, `pcl-limit`. The Ralph-style sections
+    (`amb-section`, `scope-section`, `gate-contract-section`) are
+    appended after the structured PCL when present.
     """
     items: List[str] = []
     for i, s in enumerate(p.sections):
         items.append(f'<li><a href="#sec-{i}">{html.escape(s.title)}</a></li>')
+    if p.ambiguity:
+        items.append('<li><a href="#amb-section">Ambiguities (open questions)</a></li>')
+    if p.scope is not None:
+        items.append('<li><a href="#scope-section">Scope</a></li>')
+    if p.gate_contract:
+        items.append('<li><a href="#gate-contract-section">Gate contract</a></li>')
     if p.before or p.after:
         items.append('<li><a href="#ba-section">Before / After</a></li>')
     if p.pros:
@@ -1066,6 +1321,132 @@ def _render_pros_cons_limitations(p: Proposal) -> str:
     return "".join(parts)
 
 
+def _render_ambiguity(p: Proposal) -> str:
+    """Render the structured `ambiguity:` list of open questions.
+
+    Each item gets a stable id (`A1`, `A2`, ...) the reviewer can
+    reference in the Edit-then-approve reply. Blocking items get a
+    red badge; non-blocking items get a muted badge so the reviewer
+    knows which need an explicit answer.
+    """
+    if not p.ambiguity:
+        return ""
+    rows: List[str] = []
+    for a in p.ambiguity:
+        badge_class = "amb-badge-blocking" if a.blocking else "amb-badge-default"
+        badge_text = "blocking" if a.blocking else "default"
+        badge = (
+            f'<span class="amb-badge {badge_class}">{badge_text}</span>'
+        )
+        default_html = (
+            f'<div class="amb-default"><strong>Default:</strong> '
+            f'{_render_inline(a.default)}</div>'
+        )
+        rows.append(
+            f'<li id="amb-{html.escape(a.id)}" class="amb-item">'
+            f'<div class="amb-header">'
+            f'<code class="amb-id">{html.escape(a.id)}</code>'
+            f'{badge}'
+            f'</div>'
+            f'<div class="amb-question">{_render_inline(a.question)}</div>'
+            f'{default_html}'
+            f'</li>'
+        )
+    return (
+        '<section id="amb-section" class="amb-section">'
+        '<h3>Ambiguities (open questions)</h3>'
+        f'<ol class="amb-list">{"".join(rows)}</ol>'
+        '</section>'
+    )
+
+
+def _render_scope(p: Proposal) -> str:
+    """Render the structured `scope:` block as a 2-column in-scope / out-of-scope layout."""
+    if p.scope is None:
+        return ""
+    in_items = "".join(f"<li>{_render_inline(s)}</li>" for s in p.scope.in_scope)
+    out_items = "".join(f"<li>{_render_inline(s)}</li>" for s in p.scope.out_of_scope)
+    in_html = (
+        '<div class="scope-card scope-in-card">'
+        '<h4>In scope</h4>'
+        f'<ul class="scope-list">{in_items}</ul>'
+        '</div>'
+        if in_items
+        else ""
+    )
+    out_html = (
+        '<div class="scope-card scope-out-card">'
+        '<h4>Out of scope</h4>'
+        f'<ul class="scope-list">{out_items}</ul>'
+        '</div>'
+        if out_items
+        else ""
+    )
+    if not in_html and not out_html:
+        return ""
+    return (
+        '<section id="scope-section" class="scope-section">'
+        '<h3>Scope</h3>'
+        f'<div class="scope-grid">{in_html}{out_html}</div>'
+        '</section>'
+    )
+
+
+def _render_gate_contract(p: Proposal) -> str:
+    """Render the structured `gate_contract:` as a table.
+
+    Each row shows: gate name, artifact, question, options,
+    rewind_on_edit. The ATTENDED_RUN row has a struck-through cell
+    to signal "no Ask is emitted here".
+    """
+    if not p.gate_contract:
+        return ""
+    head = (
+        "<thead><tr>"
+        "<th>Gate</th>"
+        "<th>Artifact</th>"
+        "<th>Question</th>"
+        "<th>Options</th>"
+        "<th>Rewind on Edit</th>"
+        "</tr></thead>"
+    )
+    rows: List[str] = []
+    for g in p.gate_contract:
+        is_attended = g.gate == "ATTENDED_RUN"
+        row_class = "gate-row-attended" if is_attended else ""
+        artifact_cell = (
+            '<span class="muted">(no artifact; lock forbids Ask)</span>'
+            if is_attended
+            else f'<code>{html.escape(g.artifact)}</code>'
+        )
+        question_cell = (
+            '<span class="muted">(no Ask emitted)</span>'
+            if is_attended
+            else _render_inline(g.question)
+        )
+        options_cell = ", ".join(g.options) if g.options else "—"
+        rewind_cell = (
+            f'<code>{html.escape(g.rewind_on_edit)}</code>'
+            if g.rewind_on_edit
+            else '<span class="muted">n/a</span>'
+        )
+        rows.append(
+            f'<tr class="{row_class}">'
+            f'<td><code>{html.escape(g.gate)}</code></td>'
+            f'<td>{artifact_cell}</td>'
+            f'<td>{question_cell}</td>'
+            f'<td>{html.escape(options_cell)}</td>'
+            f'<td>{rewind_cell}</td>'
+            '</tr>'
+        )
+    return (
+        '<section id="gate-contract-section" class="gate-section">'
+        '<h3>Gate contract</h3>'
+        f'<table class="gate-table">{head}<tbody>{"".join(rows)}</tbody></table>'
+        '</section>'
+    )
+
+
 def render(
     p: Proposal,
     now: Optional[str] = None,
@@ -1126,7 +1507,20 @@ def render(
     # only one, matching the pre-extension byte shape. 3-dim reviewer
     # (PR #595): the prior version emitted two consecutive dividers in
     # the empty case, breaking byte-level backward compatibility.
-    structured_html = _render_before_after(p) + _render_pros_cons_limitations(p)
+    # Ralph-style structured blocks (ambiguity / scope / gate_contract)
+    # are emitted before the BA + PCL blocks so they appear early in
+    # the review surface (gates are the contract surface).
+    ralph_structured_html = (
+        _render_ambiguity(p)
+        + _render_scope(p)
+        + _render_gate_contract(p)
+    )
+    ralph_structured_prefix = (
+        "\n<hr class=\"section-divider\">\n\n" + ralph_structured_html
+        if ralph_structured_html
+        else ""
+    )
+    structured_html = ralph_structured_prefix + _render_before_after(p) + _render_pros_cons_limitations(p)
     structured_prefix = (
         "\n<hr class=\"section-divider\">\n\n" + structured_html
         if structured_html

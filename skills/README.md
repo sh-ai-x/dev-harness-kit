@@ -2,11 +2,11 @@
 
 This index lists every skill shipped by the `dev-kit` plugin. Click into any skill to read its full `SKILL.md`; every `SKILL.md` has a back-link at the top to return here.
 
-**49 skills** across 12 categories. The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
+**50 skills** across 12 categories. The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
 
 ## By category
 
-### `audit` (10)
+### `audit` (11)
 
 | Skill | α | Description |
 |---|---|---|
@@ -19,6 +19,7 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`inspect`](inspect/SKILL.md) | `analysis` | 0-arg read-only code health audit. 8-dim fan-out (dead, dup, smell, overeng, overarch, cleancode, tokenbudget, slop) + --secrets/--slop aliases to the audit family (lib/analysis_core/dimensions.py). |
 | [`learn`](learn/SKILL.md) | `state` | Distill source text into a new SKILL.md with approval gate. |
 | [`prune-propose`](prune-propose/SKILL.md) | `state` | 0-arg skill — usage telemetry dump + per-skill delete proposal. User approves each deletion explicitly. |
+| [`ralph`](ralph/SKILL.md) | `state` | End-to-end autonomous loop with 4 user gates + unattended build/babysit/ship. Once SHIP_CONFIRM_GATE approves, attended_lock is set and AskUserQuestion is invariant-forbidden during ATTENDED_RUN. Linear is OUT OF SCOPE. |
 | [`token-analyzer`](token-analyzer/SKILL.md) | `analysis` | 0-arg token-efficiency dashboard. Runs tools/token_efficiency_analyzer.py over logs/{claude-code,codex}/*.jsonl to produce an HTML report (+ lazy per-worktree transcript sidecars) -- 4-dim session scoring, 6 anti-patter… |
 
 ### `bootstrap` (2)
@@ -147,6 +148,7 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 29 | [`proposal`](proposal/SKILL.md) | `design` | `state` | human |
 | 30 | [`prune`](prune/SKILL.md) | `build` | `analysis` | human |
 | 31 | [`prune-propose`](prune-propose/SKILL.md) | `audit` | `state` | human |
+| 31a | [`ralph`](ralph/SKILL.md) | `audit` | `state` | human |
 | 32 | [`refactor`](refactor/SKILL.md) | `build` | `analysis` | human |
 | 33 | [`research`](research/SKILL.md) | `design` | `enforcement` | human |
 | 34 | [`review`](review/SKILL.md) | `review` | `analysis` | human |
