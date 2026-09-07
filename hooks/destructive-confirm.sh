@@ -93,7 +93,7 @@ if command -v python3 >/dev/null 2>&1; then
   _PUSH_CONFIRM_STATE="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && python3 -m lib.guard_mode_state get push_confirm 2>/dev/null || echo on)"
   case "$_PUSH_CONFIRM_STATE" in
     on|off) ;;
-    *) _PUSH_CONFIRM_STATE=on ;;
+    *) _PUSH_CONFIRM_STATE=on ;;  # unknown value → fail closed
   esac
 fi
 _PUSH_CONFIRM_STATE="$_PUSH_CONFIRM_STATE"  # local; not exported
