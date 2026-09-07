@@ -19,11 +19,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 from plan_dependency import compute_dag  # noqa: E402
 
 
-def _step(n: int, *, dependencies: list[int] | None = None) -> dict:
+def _step(n: int, *, depends_on: list[int] | None = None) -> dict:
     """Build a minimal step dict shaped like `phases/<phase>/index.json`."""
     out: dict = {"step": n, "name": f"step{n}", "status": "pending"}
-    if dependencies is not None:
-        out["dependencies"] = list(dependencies)
+    if depends_on is not None:
+        out["depends_on"] = list(depends_on)
     return out
 
 
@@ -45,8 +45,8 @@ class TestComputeDagHappyPath(unittest.TestCase):
         # 3 depends on 2; 2 depends on 1.
         steps = [
             _step(1),
-            _step(2, dependencies=[1]),
-            _step(3, dependencies=[2]),
+            _step(2, depends_on=[1]),
+            _step(3, depends_on=[2]),
         ]
         result = compute_dag(steps)
         self.assertTrue(result["valid"])
@@ -58,9 +58,9 @@ class TestComputeDagHappyPath(unittest.TestCase):
         # 4 depends on 2 and 3; 2 and 3 both depend on 1.
         steps = [
             _step(1),
-            _step(2, dependencies=[1]),
-            _step(3, dependencies=[1]),
-            _step(4, dependencies=[2, 3]),
+            _step(2, depends_on=[1]),
+            _step(3, depends_on=[1]),
+            _step(4, depends_on=[2, 3]),
         ]
         result = compute_dag(steps)
         self.assertTrue(result["valid"])
@@ -73,8 +73,8 @@ class TestComputeDagCycles(unittest.TestCase):
     def test_two_node_cycle(self):
         # 2 depends on 1, 1 depends on 2 -> cycle.
         steps = [
-            _step(1, dependencies=[2]),
-            _step(2, dependencies=[1]),
+            _step(1, depends_on=[2]),
+            _step(2, depends_on=[1]),
         ]
         result = compute_dag(steps)
         self.assertFalse(result["valid"])
@@ -83,9 +83,9 @@ class TestComputeDagCycles(unittest.TestCase):
 
     def test_three_node_cycle(self):
         steps = [
-            _step(1, dependencies=[3]),
-            _step(2, dependencies=[1]),
-            _step(3, dependencies=[2]),
+            _step(1, depends_on=[3]),
+            _step(2, depends_on=[1]),
+            _step(3, depends_on=[2]),
         ]
         result = compute_dag(steps)
         self.assertFalse(result["valid"])
@@ -93,7 +93,7 @@ class TestComputeDagCycles(unittest.TestCase):
         self.assertTrue(len(result["cycles"]) >= 1)
 
     def test_self_loop(self):
-        steps = [_step(1, dependencies=[1])]
+        steps = [_step(1, depends_on=[1])]
         result = compute_dag(steps)
         self.assertFalse(result["valid"])
         self.assertTrue(len(result["cycles"]) >= 1)
@@ -103,14 +103,14 @@ class TestComputeDagMissing(unittest.TestCase):
     def test_reference_to_unknown_step(self):
         steps = [
             _step(1),
-            _step(2, dependencies=[1, 99]),  # 99 doesn't exist
+            _step(2, depends_on=[1, 99]),  # 99 doesn't exist
         ]
         result = compute_dag(steps)
         self.assertFalse(result["valid"])
         self.assertIn(99, result["missing"])
 
     def test_only_unknown_reference(self):
-        steps = [_step(1, dependencies=[7])]
+        steps = [_step(1, depends_on=[7])]
         result = compute_dag(steps)
         self.assertFalse(result["valid"])
         self.assertIn(7, result["missing"])
@@ -124,8 +124,8 @@ class TestComputeDagShape(unittest.TestCase):
         for steps in (
             [],
             [_step(1)],
-            [_step(1, dependencies=[1])],
-            [_step(1, dependencies=[99])],
+            [_step(1, depends_on=[1])],
+            [_step(1, depends_on=[99])],
         ):
             result = compute_dag(steps)
             self.assertEqual(

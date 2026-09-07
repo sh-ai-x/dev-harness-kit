@@ -2,17 +2,17 @@
 """plan_dependency.py — DAG validator for plan-skill Gate 4/5 (team mode).
 
 When `DEV_KIT_MODE=team`, the plan skill prompts the operator for
-upstream `dependencies:` edges between `phases/<phase>/step<N>.md`
-files and writes them into each step body. Before writing, it calls
+upstream dependency edges between `phases/<phase>/step<N>.md` files
+and writes them into each step dict via `lib/execute.py:register_step(
+..., depends_on=[...])`. Before writing, the plan skill calls
 `compute_dag(steps)` to surface any cycles or references to unknown
 steps so the operator can fix them before the build runner consumes
 the index.
 
 The validator is intentionally small + pure (no I/O, no subprocess).
-`lib/dispatch_classifier.py:_has_dependency_edge` and
-`lib/intent_integrity.py` IC-3 consume the same `dependencies` field at
-runtime; this module is the pre-write gate the plan skill uses to refuse
-to emit a broken graph.
+`lib/dispatch_classifier.py:_has_dependency_edge` consumes the same
+`depends_on` field at runtime; this module is the pre-write gate the
+plan skill uses to refuse to emit a broken graph.
 
 Public API
 ----------
@@ -31,24 +31,26 @@ Algorithm
 Two passes:
 
   1. **Missing**: collect the set of step numbers, then check each step's
-     `dependencies:` list for refs that are absent. Missing -> invalid;
+     `depends_on` list for refs that are absent. Missing -> invalid;
      topo is empty.
 
   2. **Cycles**: Kahn's algorithm (BFS over in-degree-zero nodes).
      - If every node is consumed, the graph is acyclic; topo is the order.
      - If nodes are left unconsumed, they form the cycle set; emit each
-       strongly-connected component as one cycle entry.
+     strongly-connected component as one cycle entry.
 
 Input shape
 -----------
 
-Each `step` dict is the shape `phases/<phase>/index.json` stores:
+Each `step` dict is the shape `phases/<phase>/index.json` stores (the
+runtime shape — the build runner + dispatch_classifier consume this
+dict directly, NOT the human-readable `step<N>.md` mirror):
 
     {
       "step": int,                # required
       "name": str,
       "status": "pending" | ...,
-      "dependencies": [int, ...]  # optional; absent = leaf
+      "depends_on": [int, ...]    # optional; absent = leaf
     }
 
 Missing or malformed fields are tolerated (treated as empty / 0);
@@ -80,12 +82,16 @@ def _step_number(step: dict) -> int | None:
 def _step_dependencies(step: dict) -> list[int]:
     """Extract the integer dependency list from a step dict.
 
-    Tolerates `dependencies:` absent, None, or wrong type. Non-integer
-    entries are skipped (and surfaced via the `missing` list when they
-    reference unknown steps — but here we only return the known-int
-    subset).
+    Canonical field name is `depends_on` (matches `lib/execute.py:
+    register_step(..., depends_on=[...])` and `lib/dispatch_classifier.py:
+    _has_dependency_edge`). Tolerates absent, None, or wrong type;
+    non-integer entries are skipped. The legacy `dependencies` field
+    (used by the plan skill's optional human-readable write to
+    `step<N>.md` body) is NOT read here — `compute_dag` operates on
+    the runtime shape (the step dict that `register_step` persists),
+    not on the human-readable mirror.
     """
-    deps = step.get("dependencies")
+    deps = step.get("depends_on")
     if not isinstance(deps, list):
         return []
     out: list[int] = []
