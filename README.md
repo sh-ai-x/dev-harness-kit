@@ -557,7 +557,7 @@ obvious work; rely on it as a sanity check on bigger bets.
 one-command bypass** today. Your honest options are to scope `/dev-kit:plan` very
 tightly (it can emit a one- or two-step plan quickly) or to hand-seed a minimal
 `phases/<name>/index.json` yourself. The [workflow scenarios
-doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-5-skipping-straight-to-build-without-a-full-plan)
+doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-straight-to-build-without-a-full-plan)
 explains both, and why the removed `tdd-fast` / `quick-fix` shortcuts are not an
 option anymore.
 
@@ -925,7 +925,7 @@ architecture (termios + ANSI, no curses), the full key table, and the
 [`docs/observability/session-monitor.md`](docs/observability/session-monitor.md).
 For the narrative of *when* you'd reach for it (resuming from a different
 terminal or a different day), see
-[workflow scenarios, Case 3](docs/workflow/WORKFLOW-SCENARIOS.md#case-3-coming-back-from-a-different-terminal-or-day).
+[workflow scenarios, Case 2](docs/workflow/WORKFLOW-SCENARIOS.md#case-2-coming-back-from-a-different-terminal-or-day).
 
 ### Skill usage (`/dev-kit:skill-usage`)
 
@@ -1008,7 +1008,7 @@ The verdict envelope `/dev-kit:valuate` writes (`decision` / `rationale` /
 `blocking_findings`) is pinned by
 `lib/valuation_engine.py:decision_is_canonical_envelope`. There used to be an
 auto-gate that hard-blocked Build on a non-`proceed` verdict; it was removed in
-PR #463 — see [Case 4 of the workflow scenarios doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-the-valuate-step)
+PR #463 — see [Case 3 of the workflow scenarios doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-3-skipping-the-valuate-step)
 for what that means in practice.
 
 **Agent-behavior and harness-effectiveness eval** — `/dev-kit:evaluate` keeps
