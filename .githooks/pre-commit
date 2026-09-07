@@ -17,12 +17,35 @@
 
 set -euo pipefail
 
+# Inspect the index before any tool-specific check.  A clean worktree can hide
+# conflict markers or other invalid bytes that are already staged for commit.
+# Exit 1 means no match; every other non-zero status is an index/read error.
+if conflict_markers=$(git grep --cached -n -E '(<{7}|={7}|\|{7}|>{7})' -- .); then
+  echo "[pre-commit] BLOCKED: staged conflict marker found." >&2
+  printf '%s\n' "$conflict_markers" >&2
+  exit 1
+else
+  grep_status=$?
+  if [ "$grep_status" -ne 1 ]; then
+    echo "[pre-commit] ERROR: unable to inspect staged content (git grep exited $grep_status)." >&2
+    exit "$grep_status"
+  fi
+fi
+
+if staged_file_list=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py'); then
+  :
+else
+  diff_status=$?
+  echo "[pre-commit] ERROR: unable to list staged Python files (git diff exited $diff_status)." >&2
+  exit "$diff_status"
+fi
+
 staged_files=()
 while IFS= read -r file; do
   if [ -n "$file" ]; then
     staged_files+=("$file")
   fi
-done < <(git diff --cached --name-only --diff-filter=ACMR | grep '\.py$' || true)
+done <<< "$staged_file_list"
 
 # Non-Python commits remain a no-op, even when Ruff is not installed.
 if [ "${#staged_files[@]}" -eq 0 ]; then
@@ -36,7 +59,39 @@ if ! command -v ruff >/dev/null 2>&1; then
 fi
 
 ruff_status=0
-ruff check --no-fix --quiet -- "${staged_files[@]}" >&2 || ruff_status=$?
+if repo_root=$(git rev-parse --show-toplevel); then
+  :
+else
+  root_status=$?
+  echo "[pre-commit] ERROR: unable to locate the repository root (git rev-parse exited $root_status)." >&2
+  exit "$root_status"
+fi
+
+staged_dir=$(mktemp -d "${TMPDIR:-/tmp}/pre-commit-staged.XXXXXX")
+cleanup() {
+  rm -rf -- "$staged_dir"
+}
+trap cleanup EXIT
+
+# Materialize the selected index entries once so Ruff can inspect all staged
+# Python blobs in one process.  Keeping this separate from Ruff preserves the
+# source of failures: an unreadable index entry is not reported as a lint fix.
+if git checkout-index --prefix="$staged_dir/" -- "${staged_files[@]}"; then
+  :
+else
+  checkout_status=$?
+  echo "[pre-commit] ERROR: unable to read staged Python blobs (git checkout-index exited $checkout_status)." >&2
+  exit "$checkout_status"
+fi
+
+if (
+  cd "$staged_dir"
+  ruff check --no-fix --quiet --config "$repo_root/.ruff.toml" -- .
+) >&2; then
+  ruff_status=0
+else
+  ruff_status=$?
+fi
 if [ "$ruff_status" -ne 0 ]; then
   echo "[pre-commit] BLOCKED: commit blocked by Ruff findings." >&2
   echo "[pre-commit] Run: ruff check --fix -- ${staged_files[*]}" >&2
