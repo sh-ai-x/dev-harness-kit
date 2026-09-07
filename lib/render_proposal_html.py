@@ -557,9 +557,6 @@ def _parse_string_list(raw: object, field_name: str) -> List[str]:
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
 def _parse_optional_date(raw: object, field_name: str) -> Optional[str]:
     r"""Strict YYYY-MM-DD parser for the optional `started:` / `shipped:`
     timeline fields. Returns None when unset; raises ValueError for any
@@ -932,8 +929,9 @@ def _meta_line(p: Proposal) -> str:
         parts.append(f'<span class="tag {p.status_class}">{html.escape(p.status)}</span>')
     # Timeline chips appear AFTER the status chip so the visual
     # reading order is `when proposed · status · implementing since ·
-    # shipped`. Both are html.escape'd twice-once-via-tag-wrap plus the
-    # attr-quote escape below.
+    # shipped`. Each date is html.escape()'d exactly once; the span
+    # tag and its `class=` value are string literals with no user
+    # input interpolated.
     if p.started:
         parts.append(
             f'<span class="timeline-chip timeline-started">started '
@@ -1243,10 +1241,10 @@ def _in_flight(project_root: Path) -> list[str]:
     flat layout -- would otherwise return `(no proposals in flight)`
     for every proposal they hold (M2 reviewer, PR #804).
 
-    Sort key: `started` desc, then `(main, sub)` lexicographic to keep
-    ties deterministic. Malformed YAMLs and unreadable files are skipped
-    so a single broken file does not abort the filter walk (m2
-    reviewer, PR #804).
+    Sort key: `started` desc, then `(main, sub)` ascending -- ties
+    stay deterministic and the secondary key remains easy to scan.
+    Malformed YAMLs and unreadable files are skipped so a single
+    broken file does not abort the filter walk (m2 reviewer, PR #804).
     """
     pdir = project_root / "docs" / "proposals"
     if not pdir.is_dir():
@@ -1254,7 +1252,11 @@ def _in_flight(project_root: Path) -> list[str]:
     candidates: list[tuple[str, str, str]] = []  # (started, main, sub)
     seen: set[tuple[str, str]] = set()
 
-    # Status-routed shape first -- these win on collision.
+    # Status-routed shape first -- these win on collision. We
+    # register the (main, sub) pair in `seen` BEFORE evaluating the
+    # in-flight predicate, so a bucketed SSOT that has `shipped:` set
+    # (and therefore isn't in flight) still shadows any stale
+    # legacy-flat copy (M3 reviewer, PR #804 2nd round).
     bucket_dir = pdir / "accepted"
     if bucket_dir.is_dir():
         for main_dir in sorted(bucket_dir.iterdir()):
@@ -1266,8 +1268,8 @@ def _in_flight(project_root: Path) -> list[str]:
                 sub = sub_entry.name[: -len(".yaml")]
                 if sub in RESERVED_SLUGS:
                     continue
-                if _collect_in_flight(sub_entry, main_dir.name, candidates, seen):
-                    seen.add((main_dir.name, sub))
+                seen.add((main_dir.name, sub))
+                _collect_in_flight(sub_entry, main_dir.name, candidates)
 
     # Legacy flat shape (skipping any bucket dir). Only emit a legacy
     # slug if no bucket copy exists for the same (main, sub).
@@ -1284,10 +1286,9 @@ def _in_flight(project_root: Path) -> list[str]:
                 continue
             if (entry.name, sub) in seen:
                 continue
-            if _collect_in_flight(sub_entry, entry.name, candidates, seen):
-                seen.add((entry.name, sub))
+            _collect_in_flight(sub_entry, entry.name, candidates)
 
-    candidates.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+    candidates.sort(key=lambda row: (-int(row[0].replace("-", "")), row[1], row[2]))
     return [f"{main}/{sub}" for _started, main, sub in candidates]
 
 
@@ -1295,20 +1296,18 @@ def _collect_in_flight(
     sub_entry: Path,
     main: str,
     candidates: list[tuple[str, str, str]],
-    seen: set[tuple[str, str]],
-) -> bool:
-    """Try to add one YAML to the in-flight candidates. Returns True
-    when the entry was added (or considered and rejected). Swallows
+) -> None:
+    """Try to add one YAML to the in-flight candidates. Swallows
     parse / IO errors so a single broken file does not abort the walk
-    (m2 reviewer, PR #804)."""
+    (m2 reviewer, PR #804). The caller owns dedup state; this function
+    only appends on a successful match."""
     try:
         p = parse_proposal_yaml(sub_entry.read_text(encoding="utf-8"))
     except (ValueError, KeyError, yaml.YAMLError, OSError):
-        return False
+        return
     if p.status != "accepted" or not p.started or p.shipped:
-        return False
+        return
     candidates.append((p.started, main, sub_entry.name[: -len(".yaml")]))
-    return True
 
 
 def _list_proposals(project_root: Path) -> list[str]:

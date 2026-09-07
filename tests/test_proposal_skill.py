@@ -1774,6 +1774,28 @@ class TimelineFieldsTests(unittest.TestCase):
             self.assertIn("a/alive", names)
             self.assertNotIn("b/broken", names)
 
+    def test_in_flight_dedupes_shadowed_legacy_flat(self):
+        """M3 reviewer (PR #804 2nd round): when a bucketed proposal
+        exists but is NOT in flight (e.g. `shipped` set), the legacy
+        flat copy must NOT leak through as a separate entry. The
+        bucketed SSOT still owns the (main, sub) namespace."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Bucketed SSOT: shipped, so it is NOT in flight.
+            self._plant(root, "accepted", "foo", "bar",
+                        "title: F\nstatus: accepted\n"
+                        "started: 2026-08-01\nshipped: 2026-09-01\n"
+                        "sections: []\n")
+            # Stale legacy-flat copy that also says it's in flight.
+            d_legacy = root / "docs" / "proposals" / "foo"
+            d_legacy.mkdir(parents=True, exist_ok=True)
+            (d_legacy / "bar.yaml").write_text(
+                "title: F\nstatus: accepted\nstarted: 2026-08-01\nsections: []\n",
+                encoding="utf-8",
+            )
+            names = rph._in_flight(root)
+            self.assertEqual(names, [])
+
 
 if __name__ == "__main__":
     unittest.main()
