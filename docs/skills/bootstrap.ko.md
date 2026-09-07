@@ -55,7 +55,7 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
    사후-설치 드리프트 검증을 하려면 `/dev-kit:ci-doctor`로의 포인터.
 
 숨겨진 플래그(보이는 옵션 프롬프트 없음 — MUST-NOT-13): `--skip-sanity`,
-`--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`,
+`--skip-map`, `--slim|--full`, `--strict`, `--persist-audit`,
 `--skip-ci`(ci-setup 건너뛰기, `n` 응답과 등가), `--yes`(프롬프트 건너뛰기,
 `Y` 기본), `--force`(ci-setup 중 기존 CI 템플릿 덮어쓰기), `--skip-verify`
 (ci-setup Phase 3 verify 건너뛰기). `--strict`와 함께면 모든 훅이 `exit 0`
@@ -64,7 +64,7 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
 ## 사용법
 
 ```bash
-/dev-kit:bootstrap [--skip-sanity] [--skip-map] [--slim|--full] [--team] [--strict] [--persist-audit]
+/dev-kit:bootstrap [--skip-sanity] [--skip-map] [--slim|--full] [--strict] [--persist-audit]
 ```
 
 | 플래그 | 효과 |
@@ -74,7 +74,6 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
 | `--skip-map` | codebase-map 서브-단계를 건너뜀. |
 | `--slim` / `--full` | CLAUDE.md 상세도 모드 제어. |
 | `--full-claude-md` | 지연-로딩 인덱스 대신 전체 4-섹션 codebase 맵을 `docs/CODEBASE-MAP.md`에 작성. |
-| `--team` | 팀-모드 변형 (숨겨진 플래그). |
 | `--strict` | 모든 훅이 기본 `exit 0` 대신 `exit 2`. |
 | `--persist-audit` | `.dev-kit/sanity-report.md`도 작성. |
 | `--skip-ci` | ci-setup을 건너뜀. 불가-기능 리스트를 출력. |

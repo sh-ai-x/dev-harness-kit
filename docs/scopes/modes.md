@@ -5,7 +5,7 @@ Set `DEV_KIT_MODE` in `<proj>/.claude/settings.json` `env` block, or via `/dev-k
 | Mode    | When                                          | Skills          | Hooks          | Iron Laws       |
 |---------|-----------------------------------------------|-----------------|----------------|-----------------|
 | `full`  | Multi-session, multi-agent, autonomous        | All 30+         | All 30+        | L1–L9           |
-| `lite`  | 4-hour MVP sprint, 6-person team              | 7 lite subset   | 7 lite subset  | L1–L9 (subset of gates) |
+| `lite`  | 4-hour MVP sprint                              | 7 lite subset   | 7 lite subset  | L1–L9 (subset of gates) |
 | `undev` | Non-dev / scratchpad / docs-only / random     | none            | none           | none (silent)   |
 | `team`   | Multi-role team / dependency-aware plan       | All 30+ (gated by role) | All 30+ (team subset) | L1–L9 |
 
@@ -36,7 +36,7 @@ DEV_KIT_MODE=undev claude --plugin-dir <dev-harness-kit-repo>
 | Need | Mode |
 |---|---|
 | Long-running autonomous work, GH-Actions babysit, full OWASP review | `full` |
-| Greenfield MVP, 6-person team, 4-hour sprint, manual merges | `lite` |
+| Greenfield MVP, 4-hour sprint, manual merges | `lite` |
 | Random project that has nothing to do with dev-kit | `undev` (no plugin) |
 | Multi-role team where you need a named persona per session and explicit step dependencies in your plan output | `team` |
 
@@ -75,3 +75,62 @@ The third mode is the one that makes the silent default intentional instead of a
 ```
 
 The resolution-order table above already encodes this: the default-conditional-on-plugin-enabled row is the same "silent undev" rule the conditional default implements.
+
+## Team toggle (`DEV_KIT_TEAM`) — orthogonal to mode
+
+`DEV_KIT_MODE` and `DEV_KIT_TEAM` are independent env-vars. The mode
+decides **which skills/hooks fire**; the team toggle decides **whether
+`.dev-kit/` is tracked in git**. Both can be set independently and
+combine freely.
+
+| Mode | team OFF (default) | team ON |
+|---|---|---|
+| `full` | full dev-kit (30+ skills/hooks), `.dev-kit/` gitignored | full dev-kit, `.dev-kit/` tracked |
+| `lite` | lite 7/7 subset, `.dev-kit/` gitignored | lite 7/7 subset, `.dev-kit/` tracked |
+| `undev` | plugin off (team toggle is a no-op since plugin disabled) | plugin off (same — team tracking requires bootstrap) |
+
+### Resolution order (highest wins)
+
+| Source | Effective value | Notes |
+|---|---|---|
+| `$DEV_KIT_TEAM` shell env var | wins over everything | per-session override |
+| `<proj>/.claude/settings.json` `env.DEV_KIT_TEAM` | wins over default | committed project choice |
+| `<proj>/.claude/settings.local.json` `env.DEV_KIT_TEAM` | wins over default | this checkout only |
+| not set | `off` (silent default — team toggle is opt-in) | unconditional default |
+
+### Switching team toggle
+
+```bash
+# Project scope (committed)
+/dev-kit:team on                   # writes DEV_KIT_TEAM=1 to .claude/settings.json
+
+# Personal override (gitignored)
+/dev-kit:team on --scope local      # writes to .claude/settings.local.json
+
+# Per-session override (no file change)
+DEV_KIT_TEAM=on claude --plugin-dir <dev-harness-kit-repo>
+
+# Inspect
+/dev-kit:team --show
+```
+
+### Why a separate toggle, not a 4th mode
+
+`team` as a `DEV_KIT_MODE` value already exists for the
+multi-role + dependency-aware plan use case (see `## team mode
+specifics` above). The two concepts share a name but answer different
+questions:
+
+- **`DEV_KIT_MODE=team`** — "I want a multi-role team plan with named
+  personas and explicit step dependencies."
+- **`DEV_KIT_TEAM=on`** — "I want `.dev-kit/` (sanity reports, eval
+  cache, hand-off notes) tracked in git so my team can pull them."
+
+Collapsing them into one switch would force every team-tracking user
+into the role-aware plan semantics (and vice versa). Keeping them
+separate means a 4-hour MVP sprint can be `lite + team=on` (lite
+hooks, shared hand-off notes) without inheriting role-plan overhead.
+
+See [`skills/team/SKILL.md`](../../skills/team/SKILL.md) and
+[`hooks/lib/team-resolve.sh`](../../hooks/lib/team-resolve.sh) for the
+implementation.
