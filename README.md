@@ -205,12 +205,6 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
 | [`/dev-kit:interview`](docs/skills/interview.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
 
-### End-to-end autonomous
-
-| Command | What it does |
-|---|---|
-| [`/dev-kit:ralph`](docs/skills/ralph.md) | Single slash that takes a 1-line idea through 4 user-approval gates (research → proposal → plan → ship-confirm) and then runs build/babysit-pr/ship **unattended** (`attended_lock` is a state-machine invariant that forbids AskUserQuestion mid-run). Linear is OUT OF SCOPE. Each gate supports Approve / Edit-then-approve (rewinds to that gate) / Abort. |
-
 ### Getting a PR over the line
 
 | Command | What it does |
@@ -349,7 +343,7 @@ table — HTML / MD / 한국어 sibling / what each doc gives you — lives in
 | Recover from a broken flow | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | Audit cost or back a factual claim | [`docs/observability/token-efficiency.md`](docs/observability/token-efficiency.md) |
 | Pick up a session from a new shell | [`docs/observability/session-monitor.md`](docs/observability/session-monitor.md) |
-| See what custom subagents this repo ships | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
+| See what custom subagents this repo ships | [`docs/proposals/agent-architecture/multi-agent-design.md`](docs/proposals/agent-architecture/multi-agent-design.md) |
 
 Everything else — HTML siblings, Korean docs, deep reference — is in
 [`docs/home/DOC-MAP.md`](docs/home/DOC-MAP.md). If you have five minutes, open
