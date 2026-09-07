@@ -73,10 +73,20 @@ def run_hook(
     payload: str | None = None,
     env_extra: dict | None = None,
 ) -> subprocess.CompletedProcess:
-    """Invoke the hook with a PostToolUse payload and capture output."""
+    """Invoke the hook with a PostToolUse payload and capture output.
+
+    Pin `DEV_KIT_STAGE=build` so the test is hermetic w.r.t. whatever
+    `.dev-kit/.active-hooks.json` the developer has on disk. Without the
+    pin, a bootstrapped checkout makes the stage gate resolve the stage
+    to `bootstrap`, where `l4-todo-scan` would have been off (and was:
+    the hook was absent from DEFAULT_MATRIX until #803). With it on in
+    build, the hook always runs and the tests assert against the real
+    behavior.
+    """
     _require_jq()
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env.setdefault("DEV_KIT_STAGE", "build")
     if env_extra:
         env.update(env_extra)
     body = payload if payload is not None else _payload(file_path, content)
@@ -197,30 +207,80 @@ class StrictEscalation(unittest.TestCase):
 class BankFallback(unittest.TestCase):
     def test_inline_fallback_when_bank_missing(self) -> None:
         """When references/l4/markers.md is absent, the hook falls back to
-        an inline marker list and still detects the marker. We simulate by
-        pointing CLAUDE_PLUGIN_ROOT at a temp dir without references/l4/."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            tmp_hook = tmp_path / "l4-todo-scan.sh"
-            shutil.copy(str(HOOK), str(tmp_hook))
+        an inline marker list and still detects the marker.
+
+        Build the worktree from a fresh `git init` outside the
+        dev-harness-kit checkout so `git rev-parse --show-toplevel`
+        resolves to a directory with no `.dev-kit/`. This mirrors the
+        fresh-clone state CI runs in, so the stage gate fail-opens via
+        `stage-gate.sh:17` and the inline-fallback path is the only one
+        exercised. The worktree's own .git/ also has to exist (else
+        `git rev-parse` would walk up to dev-harness-kit), and dev-kit's
+        `lib/` must be reachable at the worktree root so the gate's
+        Python import resolves once the matrix file is checked.
+        """
+        wt_dir = Path(tempfile.mkdtemp(prefix="l4-bankfb-"))
+        outer = wt_dir / "outer"
+        wt = wt_dir / "wt"
+        try:
+            outer.mkdir()
+            subprocess.run(["git", "init", "-q", str(outer)], check=True)
+            (outer / ".gitkeep").write_text("placeholder\n")
+            subprocess.run(["git", "add", ".gitkeep"],
+                           cwd=str(outer), check=True)
+            subprocess.run(
+                ["git", "-c", "user.email=x@x", "-c", "user.name=x",
+                 "commit", "-q", "-m", "init"],
+                cwd=str(outer), check=True,
+            )
+            subprocess.run(
+                ["git", "worktree", "add", "--quiet", "--detach",
+                 str(wt), "HEAD"],
+                cwd=str(outer), check=True,
+            )
+            (wt / "hooks").mkdir(exist_ok=True)
+            shutil.copy(str(HOOK), str(wt / "hooks" / "l4-todo-scan.sh"))
             shutil.copytree(
                 REPO_ROOT / "hooks" / "lib",
-                tmp_path / "lib",
+                wt / "hooks" / "lib",
                 symlinks=True,
+            )
+            shutil.copytree(
+                REPO_ROOT / "lib",
+                wt / "lib",
+                symlinks=True,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            (wt / "hooks" / "references" / "l4" / "markers.md").unlink(
+                missing_ok=True,
             )
             content = f"x = 1  # {_T2}: needs review\n"
             payload = json.dumps({"tool_input": {"file_path": "src/x.py", "content": content}})
             proc = subprocess.run(
-                [str(tmp_hook)],
+                [str(wt / "hooks" / "l4-todo-scan.sh")],
                 input=payload,
                 capture_output=True,
                 text=True,
-                env={**os.environ, "CLAUDE_PLUGIN_ROOT": tmp},
+                cwd=str(wt),
+                env={
+                    **os.environ,
+                    "CLAUDE_PLUGIN_ROOT": str(wt),
+                    "CLAUDE_PROJECT_DIR": str(wt),
+                },
                 timeout=10,
             )
             self.assertEqual(proc.returncode, 2, msg=proc.stderr)
             self.assertIn("WARN", proc.stderr)
             self.assertIn(_T2, proc.stderr)
+        finally:
+            # Worktree was created from a temp repo (outer), so the
+            # cleanup must also run from there.
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(wt)],
+                cwd=str(outer),
+                check=False,
+                capture_output=True,
+            )
 
 
 class JqMissing(unittest.TestCase):
