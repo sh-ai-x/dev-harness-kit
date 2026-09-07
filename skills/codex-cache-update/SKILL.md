@@ -32,6 +32,12 @@ the marketplace plugin version and synchronizes the marketplace checkout into
 This second step is required because the marketplace command can report
 “already up to date” while the versioned cache still contains stale files.
 
+> Note: the SessionStart hook `.codex-plugin/hooks/plugin-cache-refresh.sh`
+> runs the same rsync automatically on every session start (with SHA-drift
+> detection, so it no-ops when the cache is already current). Manual
+> invocation is only needed for explicit verification, CI fixups, or
+> out-of-band triggers.
+
 ## Verification
 
 The command prints the marketplace commit, cache directory, and a final
