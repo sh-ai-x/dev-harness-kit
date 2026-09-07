@@ -178,7 +178,7 @@ every transition.
 ## Timeout policy
 
 UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
-`worktree-auto-cut.sh`) carry an explicit `timeout: 60` in
+`worktree-auto-cut.sh`) carry an explicit `timeout: 120` in
 `hooks.json`. The 30s default is insufficient for these because:
 
 - `worktree-auto-cut.sh` runs `git fetch origin main` + `git worktree add`,
@@ -196,7 +196,13 @@ UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
 Both hooks are advisory (exit 0 on failure per the script-level
 contract), so a timeout silently discards the nudge rather than
 breaking correctness — but the user loses the suggestion.
-60s is well above the typical case (<10s) and well below the
-600s default hook ceiling. Other hook groups (PreToolUse,
-SessionStart, PostToolUse, Stop) inherit the 30s default; none
-currently run heavy paths so defaults are fine.
+`tdd-scope-judge.sh` declares `fail_closed: true` and exits non-zero on
+judge-rejected scopes; the timeout fallback only kicks in when the
+process itself stalls, which is distinct from a judge verdict. The
+raised 120s budget sits well above the typical case (<10s) and well
+below the 600s default hook ceiling. `tests/test_worktree_auto_cut.py`
+pins a floor of `>= 60s` for both hooks (timeout assertions at
+`tests/test_worktree_auto_cut.py:398,446`), so 120s stays well above
+the floor. Other hook groups (PreToolUse, SessionStart, PostToolUse,
+Stop) inherit the 30s default; none currently run heavy paths so
+defaults are fine.
