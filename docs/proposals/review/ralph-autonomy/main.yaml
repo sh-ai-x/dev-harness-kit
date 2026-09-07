@@ -1,0 +1,741 @@
+title: "/dev-kit:ralph — End-to-end autonomous loop with intermediate proposal gates (research → proposal → plan → ship-confirm → unattended build/babysit/ship)"
+status: design-discussion
+date: 2026-09-07
+tags: [ralph, autonomy, plan-build-ship, durable-loop, dev-kit-native, multi-gate, iterative-review]
+
+# ============================================================================
+# Structured before / after (per skills/proposal/SKILL.md §Workflow)
+# ============================================================================
+
+before:
+  summary: |
+    The current proposal workflow has ONE approval moment at the proposal HTML
+    (and a hard stop inside evidence-plan's Phase 2). Ambiguities and scope
+    boundaries are inferred from a 584-line YAML that mixes design, scope,
+    edge-cases, token economy, tmux safety, cherry-pick budget, and PR
+    checklist. The user has no way to iterate before plan starts except by
+    re-typing the YAML, and once plan starts the user cannot intervene at
+    intermediate points — they either approve the proposal or they bail.
+
+    Even after approval, the "no more prompts" contract means a single bad
+    gate inside plan or build consumes hours before the next user-visible
+    state, with no opportunity to refine scope or correct a missed
+    ambiguity until the chain surfaces RECOVERY_REQUIRED.
+  evidence:
+    - "`docs/proposals/review/ralph-autonomy/main.yaml` STAGE 3 calls a SINGLE AskUserQuestion at the proposal HTML; STAGE 4 PLAN auto-runs with --best-effort and has no review surface"
+    - "`skills/evidence-plan/SKILL.md` Phase 2 says 'Stop here. Tell the user to open the HTML and confirm before continuing' — research evidence is reviewed only as a YAML's `evidence:` block, not on its own"
+    - "`skills/plan/SKILL.md` Gate 5/5 emits the PRD + phases/<name>/; the user sees the plan result only after phases/<name>/index.json is already committed — no in-flight review"
+    - "`skills/build/SKILL.md` runs per-step sub-agents; per-step review only happens via babysit-pr polling after the PR is open, not before"
+    - "`skills/ralph/...` does not exist — every prior attempt to chain the skills is a re-invocation loop with N mid-stream AskUserQuestion points"
+    - "`docs/proposals/review/ralph-autonomy/main.yaml` `ambiguity` / `scope.in_scope` / `scope.out_of_scope` are not rendered by lib/render_proposal_html.py — the schema has no slot for them, so the reviewer cannot distinguish 'design is fine, scope is unclear' from 'everything is fine'"
+
+after:
+  summary: |
+    A new `/dev-kit:ralph <idea>` slash wraps the existing chain with FOUR
+    intermediate user-approval gates (research evidence → proposal HTML →
+    plan PRD → ship-ready confirmation), then transitions to a single
+    ATTENDED_RUN phase that runs build/babysit/ship without any further
+    AskUserQuestion or interrupt. Each gate surfaces a discrete artifact
+    the user can review, approve, edit-and-re-approve, or reject (which
+    rewinds Ralph to the matching re-render step). The proposal YAML grows
+    an explicit `ambiguity:` list, `scope.in_scope:`, `scope.out_of_scope:`,
+    and a `gate_contract:` block (one entry per gate) so the review
+    surface names the ambiguities and boundaries upfront.
+  files:
+    - path: skills/ralph/SKILL.md
+      change: "New skill. 0-arg orchestrator over the existing 6-skill chain (research → proposal → plan → build → babysit-pr → ship; Linear is OUT OF SCOPE). Drives 4 gates + 1 unattended execution phase. Each gate emits a re-renderable artifact and accepts Approve / Edit-then-approve / Abort."
+    - path: skills/ralph/lib/ralph_state.py
+      change: "Pure state machine. 5 top-level states (RESEARCH_GATE, PROPOSAL_GATE, PLAN_GATE, SHIP_CONFIRM_GATE, ATTENDED_RUN) + 3 terminals (DONE, RECOVERY_REQUIRED, USER_MERGE_REQUIRED). Persists to .dev-kit/ralph/<session>.json on every transition. Includes `rewind_to(stage)` for the Edit-then-approve loop and a hard `attended_lock` once SHIP_CONFIRM_GATE exits — ATTENDED_RUN refuses every AskUserQuestion / interrupt until terminal."
+    - path: skills/ralph/scripts/ralph_drive.sh
+      change: "Bash glue. Calls Skill(research) → Skill(proposal) → Skill(plan --best-effort) → Skill(build --push) → Skill(babysit-pr) → Skill(ship) over 5 transitions, gated by ralph_state.can_enter(stage). Reads/writes durable state at every hop."
+    - path: skills/ralph/templates/ralph_progress.md
+      change: "Per-run progress log. Tracks: Goal, Gate transitions with reviewer signature, Last action, Next action, Blockers, Operator-readable one-liner. Mirrors templates/progress.log.md."
+    - path: tests/test_ralph_skill.py
+      change: "Regression tests for: 5-state chain ordering, 4-gate contract, Edit-then-approve rewinds, attended_lock forbids Ask after SHIP_CONFIRM, --dry-run stable byte-identical re-run, Ralph-loop safety valves (3-cycle no-progress, MAX_ITERS, same-stage-repeat)."
+    - path: skills/proposal/SKILL.md
+      change: "Render schema bump: add `ambiguity:`, `scope.in_scope:`, `scope.out_of_scope:`, and `gate_contract:` slots to the parsed Proposal model; renderer emits an 'Ambiguities (open questions)' section + 'Scope' section + a 'Gate contract' table before the existing Before/After."
+    - path: lib/render_proposal_html.py
+      change: "Render new `ambiguity`, `scope`, `gate_contract` fields. Each ambiguity gets a stable id (`A1`, `A2`, ...) so the user can refer to them in the Edit-then-approve reply."
+    - path: skills/README.md
+      change: "Inventory bump 39→40. Add ralph row in audit cluster; add a one-line note that proposal's renderer now surfaces ambiguity + scope."
+    - path: docs/proposals/review/ralph-autonomy/main.html
+      change: "Rendered HTML review surface (auto-emitted by /dev-kit:proposal after this YAML is written)."
+
+pros:
+  - "Honors the user's two-part ask: (a) intermediate proposal approvals — 4 review surfaces, not 1; (b) once final approval is given, NO further Ask / interrupt until DONE / RECOVERY_REQUIRED / USER_MERGE_REQUIRED."
+  - "Each gate has a re-renderable artifact (research.md → main.html → PRD.md → ship-confirm.html). The user can iterate per-artifact instead of touching the YAML directly."
+  - "Edit-then-approve rewinds Ralph to the matching render step (rewind_to(RESEARCH_GATE) after a proposal edit, etc.) — the user never has to re-author the upstream YAML by hand."
+  - "Explicit `ambiguity:` enumeration forces the proposal author to name unknowns upfront. The renderer prints them with stable ids so reviewers can answer `A2 = no, it's standard pytest parametrize` in the Edit reply."
+  - "Explicit `scope.in_scope:` / `scope.out_of_scope:` lines turn the implicit 'don't change unrelated code' norm into a citable boundary. Reviewers can flag drift before it ships."
+  - "`gate_contract:` table documents each gate's input artifact + the question + the Approve/Edit/Abort semantics + which rewind each Answer triggers. Ralph and the user share the same surface; no hidden state."
+  - "`attended_lock` in ralph_state.py is the hard wall: after SHIP_CONFIRM_GATE exits Approve, the state machine rejects any AskUserQuestion invocation. Tested in test_ralph_skill.py::test_attended_lock_forbids_ask — invariant, not convention."
+  - "Honors MUST-NO-SKIP from babysit-pr: NEVER skips review, NEVER auto-merges, NEVER force-pushes to main. The final gh pr merge is the human-merge boundary — Ralph stops at 'PR green and approved'."
+  - "Honors MUST-36/37/38 (per-step sub-agent, 3-cycle self-fix, per-step worktree isolation) — Ralph never bypasses the per-step harness runner in lib/execute.py."
+  - "Linear is OUT OF SCOPE — Ralph does not create / sync / archive Linear issues. Per the user's request, Linear stays a separate opt-in. Removes 1 stage, 1 side-effect, 1 silent-skip path."
+
+cons:
+  - "4 gates = 4 review surfaces. The user must read 4 artifacts (research.md, proposal HTML, PRD.md, ship-confirm summary) before build runs. Mitigation: research.md is ≤ 1 page; ship-confirm is a 10-line summary; only proposal HTML and PRD.md are full-doc reads."
+  - "Edit-then-approve rewinds upstream artifacts. If the user edits the proposal AND then edits the PRD, Ralph re-renders both — 2 re-render cycles. Mitigation: the rewind step is bounded (rewind_to(stage) only re-renders the changed stage + downstream empties); the state machine refuses double-rewinds inside a single Edit-then-approve response."
+  - "ambiguity / scope / gate_contract fields require a renderer schema bump in skills/proposal/SKILL.md and lib/render_proposal_html.py. Existing proposals without these fields render unchanged (default to empty sections). Mitigation: backward-compatible — old proposals skip the new sections silently."
+  - "attended_lock is a new invariant. If a future PR adds a code path that fires Ask inside ATTENDED_RUN (e.g. a CI-update prompt), the lock will block it — debug surface is the state machine's `last_blocked_ask` field. Mitigation: test_attended_lock_forbids_ask + a debug-log emit when the lock fires."
+  - "Build's --skip-blocked escape is still off by default. Blocked steps halt Ralph. Mitigation: surfaced via ralph_progress.md; the operator resumes from the durable state checkpoint."
+  - "Skipping Linear entirely removes the auto-sync / auto-archive features that some users rely on. Mitigation: explicit Out-of-scope line in this proposal; if a future PR wants Linear back, it lands as a separate proposal under `accepted/`, not as a Ralph amendment."
+
+limitations:
+  - "Cannot replace user judgement at any gate. Each HTML/YAML artifact is reviewed by the human; if the human approves a wrong design at gate 1, all downstream gates inherit the error. This is by design — the gates ARE the contract — but Ralph's correctness ceiling is the human's review quality."
+  - "Cannot detect silent doom loops inside a single build step (3 same Bash calls). build's MUST-37 self-fix + the 3-cycle no-progress guard catch most patterns. Ralph inherits the gap; it does not close it."
+  - "Cannot run without an active Claude Code session. When the session ends mid-chain, Ralph pauses at the last durable checkpoint. The next session resumes from templates/session_handoff.md — ~30-60s cold-start per session re-open."
+  - "Cannot bypass the 'human merges PR' boundary. Even after all 4 gates approve, the final gh pr merge is a human action — Ralph stops at 'PR is green and approved', not 'PR is merged'. This is MUST-NO-SKIP, not a Ralph limitation, but it is the hard wall on full autonomy."
+  - "Cannot re-propose mid-chain during ATTENDED_RUN. If build's 3-cycle guard or babysit-pr's MAX_ITERS surfaces RECOVERY_REQUIRED, Ralph exits; the user resumes via `ralph resume` (rewinds to SHIP_CONFIRM_GATE if state allows, else exits with the failure summary)."
+  - "Cannot operate across repos. The chain is per-repo; multi-repo changes require a separate Ralph run per repo."
+  - "Cannot auto-answer the ambiguities in the Elicit-style `ambiguity:` block. The user must answer them manually (Edit-then-approve reply) or accept the proposal's default (`Open question — answered by plan in --best-effort mode`)."
+  - "Cannot guarantee byte-identical re-runs. Ralph's orchestrator is deterministic (the state machine is pure), but the underlying skills (research citations, build sub-agent outputs, babysit-pr poll timing) are not. `--dry-run` is the only stable mode for the cold sub-agent test."
+
+# ============================================================================
+# Explicit scope boundary (rendered as its own section)
+# ============================================================================
+
+scope:
+  in_scope:
+    - "A new top-level skill `/dev-kit:ralph <idea>` that wraps the existing 6-skill chain (research → proposal → plan → build → babysit-pr → ship)"
+    - "Four intermediate user-approval gates: RESEARCH_GATE, PROPOSAL_GATE, PLAN_GATE, SHIP_CONFIRM_GATE; one unattended execution phase: ATTENDED_RUN"
+    - "Each gate renders a discrete artifact the user can review and re-render"
+    - "Edit-then-approve rewinds Ralph to the matching render step (rewind_to(stage))"
+    - "Explicit `ambiguity:`, `scope.in_scope`, `scope.out_of_scope`, `gate_contract` fields in the proposal schema; renderer emits them as labeled sections"
+    - "Pure state machine in lib/ralph_state.py with attended_lock; persists to .dev-kit/ralph/<session>.json on every transition"
+    - "Bash glue (scripts/ralph_drive.sh) + per-run progress log (templates/ralph_progress.md)"
+    - "Regression tests covering: chain ordering, 4-gate contract, Edit-then-approve rewind, attended_lock forbids Ask, --dry-run determinism, Ralph-loop safety valves"
+    - "Backward-compatible proposal schema: existing proposals without ambiguity/scope/gate_contract render unchanged"
+    - "skills/README.md inventory bump 39→40 + one-line note about new renderer fields"
+  out_of_scope:
+    - "Linear integration (auto-create, auto-archive, sync hooks) — per the user's explicit request. Linear remains a separate opt-in skill (`/dev-kit:linear`) and does not enter the Ralph chain."
+    - "Auto-merging to main, force-push, or any branch-protection bypass — MUST-NO-SKIP from babysit-pr"
+    - "Replacing or forking the underlying 6 skills (research, proposal, plan, build, babysit-pr, ship) — Ralph orchestrates, never re-implements"
+    - "Multi-repo orchestration — Ralph is per-repo; multi-repo work is N Ralph runs"
+    - "Adding new SKILL.md under skills/ralph/scripts/ or skills/ralph/lib/ beyond the 4 files listed (lib + scripts + template + SKILL.md)"
+    - "Cross-platform runtime support beyond macOS / Linux (Windows is unsupported; no testing matrix expansion)"
+    - "Real-time streaming progress UI — Ralph prints to stdout + .dev-kit/ralph/<session>.json; no separate dashboard"
+    - "Replacing templates/progress.log.md — Ralph adds a per-run complement (templates/ralph_progress.md), not a replacement"
+    - "Auto-bumping .claude-plugin/plugin.json on every Ralph-driven PR — version-bump.yml on main handles it as today"
+    - "Inferring ambiguous specs without enumerating them. The proposal author MUST list unknowns in `ambiguity:`; the renderer MUST surface them. No silent inference."
+
+# ============================================================================
+# Open questions (rendered with stable ids A1..A6; user answers in the
+# Edit-then-approve reply by id)
+# ============================================================================
+
+ambiguity:
+  - id: A1
+    question: "How many gates are enough? Proposal picks 4 (research / proposal / plan / ship-confirm). Could go to 5 (insert 'phase-decomposition review' between plan and ship-confirm) or down to 3 (drop ship-confirm; rely on proposal + plan)."
+    default: "4 — research.md is short enough to be a gate; ship-confirm exists so the user sees 'build is about to start unattended, here's the headline' before the lock."
+    blocking: false
+  - id: A2
+    question: "When the user picks Edit-then-approve at PROPOSAL_GATE, does Ralph rewind to RESEARCH_GATE or just re-render the proposal?"
+    default: "Just re-render the proposal layer. Research evidence stays valid; the user is refining the contract, not the evidence."
+    blocking: false
+  - id: A3
+    question: "What is the EXIT surface when ATTENDED_RUN needs to surface a mid-run problem?"
+    default: "RECOVERY_REQUIRED terminal state. Progress log carries the headline; the user reads ralph_progress.md and either resumes (rewind to SHIP_CONFIRM_GATE with state intact) or aborts."
+    blocking: false
+  - id: A4
+    question: "Does the proposal renderer ship as a backward-compatible additive change, or does it require an existing-render audit?"
+    default: "Backward-compatible additive. Proposals without ambiguity/scope/gate_contract render unchanged (those sections are empty + hidden). Existing /docs/proposals/review/*.yaml keeps rendering as today."
+    blocking: false
+  - id: A5
+    question: "Is research.md a real artifact (written to .dev-kit/hand-off/research/<session>.md) or just a stage-marker?"
+    default: "Real artifact. Same shape as today's /dev-kit:research output. Ralph reuses the existing /dev-kit:research skill — no new format."
+    blocking: false
+  - id: A6
+    question: "How does the user invoke Ralph — by name, by --autonomous flag on an existing skill, or both?"
+    default: "Both. `/dev-kit:ralph <idea>` is the standalone slash. `--autonomous` is added as a flag on `/dev-kit:evidence-plan` (Option B in the previous proposal) ONLY after 30 days of Ralph usage data shows which the user prefers. Per feedback-skill-options-vs-new-skill the standalone slash is the canonical entry; the flag is a future cherry-pick."
+    blocking: false
+
+# ============================================================================
+# Gate contract (one row per gate; rendered as a table)
+# ============================================================================
+
+gate_contract:
+  - gate: RESEARCH_GATE
+    artifact: ".dev-kit/hand-off/research/<session>.md (cited evidence)"
+    question: "Does this research evidence give Ralph enough to write the proposal?"
+    options: ["Approve", "Edit-then-approve (rewinds to research)", "Abort"]
+    rewind_on_edit: RESEARCH_GATE
+  - gate: PROPOSAL_GATE
+    artifact: "docs/proposals/review/<main>/ralph-<slug>.html (the current file)"
+    question: "Approve this proposal and let Ralph continue to the plan?"
+    options: ["Approve", "Edit-then-approve (re-render only this layer; rewinds to PROPOSAL_GATE)", "Abort"]
+    rewind_on_edit: PROPOSAL_GATE
+  - gate: PLAN_GATE
+    artifact: "PRD.md + phases/<name>/{index.json, step<N>.md} + auto-rendered plan HTML"
+    question: "Approve the plan and let Ralph proceed to the ship-confirm gate?"
+    options: ["Approve", "Edit-then-approve (rewinds to PLAN_GATE; phase decomposition may shift)", "Abort"]
+    rewind_on_edit: PLAN_GATE
+  - gate: SHIP_CONFIRM_GATE
+    artifact: "ship-confirm.md (10-line summary: phases green, plan locked, build about to start unattended)"
+    question: "This is the last review surface. After Approve, Ralph runs unattended through build / babysit-pr / ship. Proceed?"
+    options: ["Approve (locks attended_lock; ATTENDED_RUN begins)", "Edit-then-approve (rewinds to SHIP_CONFIRM_GATE)", "Abort"]
+    rewind_on_edit: SHIP_CONFIRM_GATE
+  - gate: ATTENDED_RUN
+    artifact: "(none — attended_lock is set; no review surface)"
+    question: "(no AskUserQuestion is emitted; the lock forbids it)"
+    options: ["(none — no AskUserQuestion is emitted; the lock forbids it)"]
+    rewind_on_edit: null
+
+# ============================================================================
+# Body sections
+# ============================================================================
+
+sections:
+
+  - title: Executive summary
+    body: |
+      The user wants:
+
+      1. **Intermediate proposal approvals** — not just ONE approval at
+         the proposal HTML. Review surfaces at research, proposal,
+         plan, and ship-confirm.
+
+      2. **Scope and ambiguity spelled out** — the proposal enumerates
+         in-scope, out-of-scope, and a numbered list of open
+         questions so the reviewer can see the unknowns before
+         approving.
+
+      3. **Iteration loop** — at every gate the user can Approve,
+         Edit-then-approve (Ralph rewinds + re-renders), or Abort
+         (Ralph exits cleanly with state preserved).
+
+      4. **Unattended execution after final approval** — once
+         SHIP_CONFIRM_GATE exits Approve, Ralph locks attended_lock
+         and runs build / babysit-pr / ship with NO further
+         AskUserQuestion or interrupt, until terminal state
+         (DONE / RECOVERY_REQUIRED / USER_MERGE_REQUIRED).
+
+      5. **Linear excluded** — per the user's explicit request,
+         Linear is OUT OF SCOPE for Ralph. It stays a separate
+         opt-in skill (`/dev-kit:linear`) outside the Ralph chain.
+
+      This is the Ralph Wiggum pattern (Geoffrey Huntley,
+      [ghuntley.com/ralph](https://ghuntley.com/ralph/)) adapted
+      to dev-harness-kit's existing 6-skill chain with multiple
+      contract surfaces instead of one. Geoffrey's discipline —
+      *make the loop durable, make the contract explicit at the
+      front, make the failure surface at the end* — is preserved,
+      with the addition that the contract is now multi-stage.
+
+      **Net verdict:** ADOPT. Seven new files, ~+450 lines net.
+      Existing proposal renderer ships a backward-compatible
+      additive schema bump.
+
+  - title: Problem statement
+    body: |
+      The previous proposal had ONE approval gate at the proposal
+      HTML and a hard stop at evidence-plan's Phase 2. That has
+      three gaps the user identified:
+
+      | Gap | Symptom |
+      |---|---|
+      | No intermediate reviews | Once plan starts, the user can't intervene until phases/<name>/index.json is committed — i.e. the plan result is reviewable only AFTER it's a fact |
+      | Ambiguity buried in YAML | Open questions are scattered across 12 sections; no stable id, no rendered 'Ambiguities' surface |
+      | Scope inferred, not enumerated | 'In scope' / 'out of scope' lives in the limitations list, not in a citable boundary block |
+      | Linear hard-wired | Stage 5 of the chain is Linear — the user wants Linear OUT |
+      | No indefinite iteration | Edit-then-approve re-renders once; the user can't drive multi-round negotiation |
+
+      The cold-start templates (templates/init.sh, feature_list.json,
+      progress.log.md, session_handoff.md) already implement
+      Geoffrey Huntley's "resume from durable state" discipline —
+      they are built but unused by any top-level orchestrator.
+
+  - title: Options considered
+    body: |
+      Four options, scored on (a) gate count, (b) interruption
+      collapsed, (c) scope explicitness, (d) reuse, (e) token cost.
+
+      | Option | Form | gates | interrupts collapsed | scope explicit | reuse | +lines |
+      |---|---|---|---|---|---|---|
+      | **A** (recommended) | `/dev-kit:ralph` with 4 gates + attended execution | 4 | 14 → 4 | yes (rendered section) | 6/6 | +450 |
+      | B | Previous single-gate proposal | 1 | 14 → 1 | no | 6/6 | +390 |
+      | C | Flag on `/dev-kit:evidence-plan`: --autonomous | 1 | 14 → 1 | no | 6/6 | +210 |
+      | D | New bash-only Ralph | 1 | 14 → 1 | no | 0/6 | +900 |
+
+      **Option A selection rationale:**
+
+      - **Gate count** (A vs. B/C): the user explicitly asked for
+        *intermediate* approvals. Single-gate (B/C) does not
+        satisfy. The 4-gate count is the minimum that gives a
+        review surface before each irreversible handoff
+        (research → proposal contract, proposal → plan contract,
+        plan → build contract, build → ship contract).
+      - **Scope explicitness** (A vs. all): A is the only option
+        that adds `ambiguity:` + `scope.in_scope` + `scope.out_of_scope`
+        + `gate_contract` to the proposal schema, making them
+        rendered review surfaces, not YAML trivia.
+      - **Skill vs. flag** (A vs. C): per
+        feedback-skill-options-vs-new-skill, the user-facing verb
+        is distinct (`/dev-kit:ralph <idea>` is "go end-to-end";
+        `/dev-kit:evidence-plan --autonomous` is "do evidence-plan
+        plus don't stop"). They are distinct human actions; both
+        deserve distinct entry points. A is the canonical entry;
+        the `--autonomous` flag is a deferred cherry-pick if usage
+        data supports it.
+      - **Reuse** (A vs. D): D re-implements the chain inline.
+        Every refactor of any underlying skill orphans D. A's
+        orchestrator only knows skill names + flags; rename-resilient
+        via the alias smoke test.
+
+  - title: Recommended approach — /dev-kit:ralph <idea>
+    body: |
+      ### Skill metadata (skills/ralph/SKILL.md)
+
+      ```
+      ---
+      name: ralph
+      category: audit
+      alpha: state
+      description: End-to-end autonomous loop with 4 user gates + unattended build/babysit/ship.
+      when_to_use:
+        - User types /dev-kit:ralph <idea>
+        - User wants evidence-plan → proposal → plan → build → babysit-pr → ship with intermediate approval gates
+        - User wants scope, ambiguity, and gate contract spelled out in the proposal
+        - User wants the long-running templates (init.sh / feature_list / progress.log / session_handoff) wired to a top-level orchestrator
+      allowed-tools: Read Write Glob Bash Skill
+      disallowed-tools: Agent Edit WebFetch
+      model: opus
+      disable-model-invocation: false
+      user-invocable: true
+      safety:
+        safety_valve: 8
+        convergence: terminal_state in {DONE, RECOVERY_REQUIRED, USER_MERGE_REQUIRED}
+        dedup_metric: same-stage-repeat=2
+        user_interrupt: gated (false during ATTENDED_RUN; true at every gate)
+      ---
+      ```
+
+      - `user_interrupt: gated` — `true` at every gate (Ralph can
+        AskUserQuestion); `false` during ATTENDED_RUN (lock is set).
+      - `Edit`/`Agent` excluded — Ralph orchestrates, never edits
+        source. Build's per-step sub-agent owns that.
+
+      ### The chain (4 gates + 1 attended execution)
+
+      ```
+      ┌──────────────────────────────────────────────────────────────────┐
+      │  /dev-kit:ralph <idea>                                            │
+      │                                                                   │
+      │  [GATE 1] RESEARCH_GATE       (interactive — AskUserQuestion)    │
+      │     Skill("research", <idea>)                                     │
+      │     → .dev-kit/hand-off/research/<session>.md                    │
+      │     → AskUserQuestion: Approve / Edit-then-approve / Abort        │
+      │     on Edit: rewind to GATE 1, re-render, re-ask                 │
+      │                                                                   │
+      │  [GATE 2] PROPOSAL_GATE      (interactive — AskUserQuestion)    │
+      │     writes docs/proposals/<main>/ralph-<slug>.yaml                │
+      │     Skill("proposal", "<main>/ralph-<slug>")                      │
+      │     → docs/proposals/<main>/ralph-<slug>.html                     │
+      │     → AskUserQuestion: Approve / Edit-then-approve / Abort        │
+      │     on Edit: rewind to GATE 2, re-render, re-ask                 │
+      │                                                                   │
+      │  [GATE 3] PLAN_GATE          (interactive — AskUserQuestion)    │
+      │     Skill("plan", <idea>, --best-effort)                          │
+      │     interview runs in best-effort mode                           │
+      │     → PRD.md + phases/<name>/{index.json, step<N>.md}            │
+      │     → auto-renders plan HTML                                      │
+      │     → AskUserQuestion: Approve / Edit-then-approve / Abort        │
+      │     on Edit: rewind to GATE 3, re-render, re-ask                 │
+      │                                                                   │
+      │  [GATE 4] SHIP_CONFIRM_GATE  (interactive — AskUserQuestion)    │
+      │     Ralph synthesizes a 10-line ship-confirm.md summary:          │
+      │     phases green, plan locked, build about to start unattended   │
+      │     → AskUserQuestion: Approve / Edit-then-approve / Abort        │
+      │     on Approve: SET attended_lock                                 │
+      │     on Edit: rewind to GATE 4, re-ask                             │
+      │                                                                   │
+      │  [PHASE]  ATTENDED_RUN       (LOCKED — no AskUserQuestion)       │
+      │     Skill("build", "--push")   per-step sub-agent loop            │
+      │     MUST-37 3-cycle self-fix guard inherited                      │
+      │     on blocked step: exit Ralph with non-zero                    │
+      │     on all steps done: phases/<name>/index.json all green        │
+      │     │                                                             │
+      │     Skill("babysit-pr")  polls gh pr checks + REVIEW_VERDICT     │
+      │     applies minimal fixes, commits, pushes                       │
+      │     WAIT_FOR_APPROVAL is a healthy long-running state, not exit  │
+      │     │                                                             │
+      │     Skill("ship")   verifies Review verdict=Approve + main-block │
+      │     CHANGELOG entry auto                                          │
+      │     → on tag + push success: DONE                                │
+      │     → on missing review: USER_MERGE_REQUIRED (terminal, not exit)│
+      │                                                                   │
+      │  [TERMINAL] DONE | RECOVERY_REQUIRED | USER_MERGE_REQUIRED        │
+      └──────────────────────────────────────────────────────────────────┘
+      ```
+
+      Linear is **NOT** in the chain (out of scope, per user request).
+
+      ### Iteration loop (Edit-then-approve)
+
+      At every interactive gate the user can:
+
+      - **Approve** → state machine transitions to next gate
+        (or to ATTENDED_RUN if GATE 4)
+      - **Edit-then-approve** → Ralph parses the user's reply,
+        identifies referenced ambiguities (`A1=ok`, `A2=no`),
+        applies the edits, and rewinds to the matching render
+        step. The state machine calls `rewind_to(stage)` which
+        clears downstream state and re-renders only the affected
+        layers.
+      - **Abort** → Ralph exits with state preserved at
+        `.dev-kit/ralph/<session>.json`. Re-invoking
+        `/dev-kit:ralph <idea>` resumes from the last persisted
+        stage.
+
+      The rewind step is bounded — `rewind_to(stage)` only
+      re-renders the changed stage + downstream empties. Double-
+      rewinds inside a single Edit-then-approve response are
+      refused (`rewind_to` accepts one target only).
+
+      ### attended_lock (hard wall)
+
+      Once SHIP_CONFIRM_GATE exits Approve, lib/ralph_state.py
+      sets `attended_lock=True`. From that point forward:
+
+      - `ralph_state.can_ask_question()` returns False
+      - The orchestrator's AskUserQuestion tool calls are
+        rejected at the state-machine layer (NOT just by
+        convention — by invariant)
+      - test_ralph_skill.py::test_attended_lock_forbids_ask
+        asserts the invariant
+      - If a future PR adds a code path that fires Ask inside
+        ATTENDED_RUN (e.g. a CI-update prompt), the lock blocks
+        it. The state machine emits a `last_blocked_ask` field
+        for forensic logging.
+
+      ### State machine (lib/ralph_state.py)
+
+      Pure, no subprocess. Five top-level states + 3 terminals:
+
+      ```python
+      # Gates (interactive — AskUserQuestion allowed)
+      RESEARCH_GATE     = "RESEARCH_GATE"     # Gate 1
+      PROPOSAL_GATE     = "PROPOSAL_GATE"     # Gate 2
+      PLAN_GATE         = "PLAN_GATE"         # Gate 3
+      SHIP_CONFIRM_GATE = "SHIP_CONFIRM_GATE" # Gate 4
+
+      # Locked execution (no Ask)
+      ATTENDED_RUN      = "ATTENDED_RUN"      # build → babysit → ship
+
+      # Terminal (success)
+      DONE              = "DONE"
+
+      # Terminal (blocked)
+      RECOVERY_REQUIRED    = "RECOVERY_REQUIRED"
+      USER_MERGE_REQUIRED  = "USER_MERGE_REQUIRED"
+
+      # Valid transitions
+      RESEARCH_GATE → PROPOSAL_GATE → PLAN_GATE → SHIP_CONFIRM_GATE
+      SHIP_CONFIRM_GATE → ATTENDED_RUN (on Approve; sets attended_lock)
+      any_gate → rewind_to(stage)  (on Edit-then-approve)
+      any → RECOVERY_REQUIRED | USER_MERGE_REQUIRED
+      ```
+
+      Persistence: `.dev-kit/ralph/<session>.json` written
+      atomically on every transition. The schema:
+
+      ```json
+      {
+        "session": "default",
+        "started_at": "<ISO-8601>",
+        "idea": "<original 1-line input>",
+        "current_stage": "PLAN_GATE",
+        "sub_stage": "AWAITING_USER",
+        "attended_lock": false,
+        "iteration": 7,
+        "ambiguity_answers": {"A1": "ok", "A2": "no, use pytest parametrize"},
+        "evidence_hand_off": ".dev-kit/hand-off/research/default.md",
+        "proposal_yaml": "docs/proposals/review/ralph-autonomy/main.yaml",
+        "proposal_html": "docs/proposals/review/ralph-autonomy/main.html",
+        "plan_hand_off": ".dev-kit/hand-off/plan→build.md",
+        "build_state": "phases/ralph-foo/index.json",
+        "babysit_state": ".dev-kit/babysit-state.json",
+        "ship_state": "<tag-or-pending>",
+        "rewind_history": [],
+        "last_blocked_ask": null,
+        "last_action": "PLAN_GATE: rendered PRD.md, awaiting user",
+        "next_action": "PLAN_GATE: parse user reply, transition or rewind",
+        "blockers": []
+      }
+      ```
+
+      ### Ralph-loop safety valves
+
+      Four safety valves (three inherited, one new):
+
+      | Valve | Source | When it fires | What Ralph does |
+      |---|---|---|---|
+      | 3-cycle self-fix | lib/execute.py MUST-37 | build's per-step sub-agent fails 3× on the same step | mark stage=RECOVERY_REQUIRED, exit |
+      | 3-consecutive-no-progress | skills/babysit-pr/SKILL.md | babysit-pr polls 3× with no check-state change | mark stage=RECOVERY_REQUIRED, exit |
+      | MAX_ITERS=1000 | skills/babysit-pr/SKILL.md | babysit-pr hits its watchdog cap | mark stage=RECOVERY_REQUIRED, exit |
+      | **NEW** same-stage-repeat=2 | Ralph itself | same sub-stage re-enters twice without a successful transition | break out, mark stage=RECOVERY_REQUIRED |
+
+      ### Long-running templates wiring
+
+      At Phase 6 (build) the orchestrator runs the same copy
+      pattern the skills/build/SKILL.md "Long-running session
+      templates" section already documents:
+
+      ```bash
+      mkdir -p .worktrees/<phase>-step<N>/templates
+      cp -u templates/init.sh templates/feature_list.json \
+         templates/progress.log.md templates/session_handoff.md \
+         templates/ralph_progress.md \
+         .worktrees/<phase>-step<N>/templates/
+      ```
+
+      Ralph adds `templates/ralph_progress.md` — a per-run
+      progress log complement to the cross-task progress.log.md.
+      It tracks: gate transitions with reviewer signature, last
+      action, next action, blockers, operator-readable one-liner.
+      Each Skill() invocation appends one line. The reviewer
+      signature is the SHA of the user's Approve / Edit reply —
+      gives forensics for the attended_lock transition.
+
+  - title: Scope boundary (rendered)
+    body: |
+      The full `scope:` block is also rendered in YAML form above.
+      The reviewer-readable summary:
+
+      **In scope (10 items):** the ralph skill itself, 4 gates +
+      1 attended phase, gate artifacts, Edit-then-approve rewind,
+      ambiguity/scope/gate_contract schema bump, state machine +
+      attended_lock, bash glue + per-run progress log, regression
+      tests, backward-compat for existing proposals, README bump.
+
+      **Out of scope (10 items):** Linear integration (explicit
+      per user request), auto-merge / force-push, replacing
+      underlying skills, multi-repo orchestration, additional
+      files beyond the 4 listed, Windows support, real-time
+      streaming UI, replacing progress.log.md, auto-bumping
+      plugin.json, inferring ambiguity without enumerating it.
+
+      See the `scope:` block in the YAML for the full list.
+
+  - title: Open questions (rendered with stable ids)
+    body: |
+      Six open questions are listed in the `ambiguity:` block
+      above. Each has a stable id (`A1`..`A6`) so the user can
+      reference them in the Edit-then-approve reply
+      (e.g. `A2=no, use pytest parametrize`).
+
+      The renderer prints them as a labeled list with the
+      question, the proposal's default, and the blocking flag.
+      None of A1..A6 are blocking — the proposal picks reasonable
+      defaults and the user can override per-gate.
+
+  - title: Gate contract (rendered as a table)
+    body: |
+      The full `gate_contract:` is also rendered in YAML form
+      above. Each gate has: artifact, AskUserQuestion text,
+      options, and rewind_on_edit target.
+
+      | Gate | Artifact | Question | Rewind on Edit |
+      |---|---|---|---|
+      | RESEARCH_GATE | research.md | "Does this evidence give Ralph enough?" | RESEARCH_GATE |
+      | PROPOSAL_GATE | main.html | "Approve and let Ralph continue?" | PROPOSAL_GATE |
+      | PLAN_GATE | PRD.md + phases | "Approve and proceed to ship-confirm?" | PLAN_GATE |
+      | SHIP_CONFIRM_GATE | ship-confirm.md (10 lines) | "Approve; ATTENDED_RUN begins?" | SHIP_CONFIRM_GATE |
+      | ATTENDED_RUN | (none) | (no Ask emitted; lock forbids) | null |
+
+  - title: Companion files (7 new + 1 README bump)
+    body: |
+      | Path | Role | Verdict |
+      |---|---|---|
+      | skills/ralph/SKILL.md | Orchestrator skill body (~200 lines) | ADOPT |
+      | skills/ralph/lib/ralph_state.py | Pure state machine + attended_lock (~150 lines) | ADOPT |
+      | skills/ralph/scripts/ralph_drive.sh | Bash glue for the 6-skill chain (~90 lines) | ADOPT |
+      | skills/ralph/templates/ralph_progress.md | Per-run progress log (template + starter) | ADOPT |
+      | tests/test_ralph_skill.py | Chain ordering + 4 gates + attended_lock + smoke (~120 lines) | ADOPT |
+      | skills/proposal/SKILL.md | Renderer schema bump (ambiguity/scope/gate_contract) | ADOPT |
+      | lib/render_proposal_html.py | Render new fields with stable ids | ADOPT |
+      | skills/README.md | Inventory 39→40 + renderer note | ADOPT |
+
+      **Net token delta: +450 lines** (counted against the
+      thin-harness discipline).
+
+  - title: Thin-harness memo
+    body: |
+      ### 항목별 verdict
+
+      - **SKILL.md 본체**: ADOPT — 6 underlying skills already
+        exist; Ralph is pure orchestration.
+      - **lib/ralph_state.py**: ADOPT — pure state machine +
+        attended_lock is testable without subprocess/gh.
+      - **scripts/ralph_drive.sh**: ADOPT — bash glue for the 6
+        Skill() calls + the templates copy step.
+      - **templates/ralph_progress.md**: ADOPT — per-run progress
+        log (complement, not replacement).
+      - **test_ralph_skill.py**: ADOPT — chain + 4 gates +
+        attended_lock + 3 smoke tests.
+      - **skills/proposal/SKILL.md** schema bump: ADOPT —
+        backward-compatible additive; old proposals render
+        unchanged.
+      - **lib/render_proposal_html.py** schema bump: ADOPT —
+        same; old proposals render unchanged.
+
+      ### Token delta
+
+      | 추가 | 줄 수 |
+      |---|---|
+      | SKILL.md (orchestrator) | +200 |
+      | ralph_state.py (state + lock) | +150 |
+      | ralph_drive.sh (bash glue) | +90 |
+      | ralph_progress.md template | +30 |
+      | test_ralph_skill.py | +120 |
+      | proposal SKILL.md (schema bump) | +25 |
+      | render_proposal_html.py (schema bump) | +80 |
+      | skills/README.md 갱신 | +5 |
+      | **순증가** | **+700 lines** (net +700, decrease 0) |
+
+      **Net-zero FAIL** but well under the prior cherry-pick
+      precedent. The +700 buys 4 review surfaces (vs 1), an
+      attended_lock invariant, scope/ambiguity enumerations
+      rendered as labeled sections, and the iteration loop —
+      the only path that respects the user's two-part ask.
+
+      ### Cherry-pick budget
+
+      Q3 2026 (2026-07-01 ~ 2026-09-07) merged 3 PRs. Third-party
+      patterns: **0**. /dev-kit:ralph is cherry-pick #1 — **PASS**
+      (limit 2/quarter).
+
+  - title: Tmux + long-running safety classification
+    body: |
+      Per feedback-tmux-long-running-safety:
+
+      - **훅 추가?** NO — Ralph uses existing hooks.
+      - **Subagent dispatch?** NO — allowed-tools excludes Agent.
+      - **Persistent loop?** YES (loop-yes). Mitigation: durable
+        state on every transition; attended_lock prevents
+        mid-run interrupts; babysit-pr's MUST-RUN-INSIDE-WORKTREE
+        still applies.
+      - **MCP server?** NO.
+      - **Network listener?** NO.
+
+      → **Loop-yes**, tmux-safe. PR description must include:
+      `tmux + long-running classification: loop-yes (attended_lock
+      + durable state)`.
+
+  - title: Risks
+    body: |
+      | 위험 | 출처 | 완화 |
+      |---|---|---|
+      | **4 gates slow the user** | new design | gates are short reads (research.md ≤ 1 page, ship-confirm ≤ 10 lines); proposal + PRD are full reads |
+      | **Edit-then-approve multi-round** | iteration loop | rewind bounded (one target per reply); test forbids double-rewind |
+      | **attended_lock blocks legitimate Asks** | new invariant | debug surface via `last_blocked_ask`; test covers forbidden case |
+      | **Renderer schema bump breaks old proposals** | additive change | backward-compat verified by test_render_old_proposal_unchanged |
+      | **--best-effort over-fires** | interview dedup_metric=2 cap | plan still demands evidence ≥3 + value_score ≥3.0 + ambiguity_score ≤3 |
+      | **Babysit-pr MAX_ITERS burn** | generous cap | 3-consecutive-no-progress guard caps ~45 min |
+      | **Skill frontmatter rename drift** | 6 underlying skills | smoke test on every PR touching any of the 6 |
+      | **Mid-stream phase blocked** | build's blocked-step policy | ralph_progress.md surfaces state; non-zero exit |
+      | **Human-merge boundary at the end** | MUST-NO-SKIP | USER_MERGE_REQUIRED terminal, not exit-0 |
+
+  - title: Verification plan
+    body: |
+      ### Cold determinism gate (feedback-sub-agent-isolated-test)
+
+      1. Spawn a fresh-context sub-agent (Agent tool, no
+         isolation) passing only the path to skills/ralph/SKILL.md.
+      2. Run /dev-kit:ralph "add a hello-world skill" end-to-end
+         with --dry-run (research + proposal-render + plan +
+         ship-confirm + build --dry-run + babysit --dry-run +
+         ship --dry-run).
+      3. Capture stdout + git diff --stat.
+      4. Re-run with identical input — must produce byte-
+         identical stdout + diff (the orchestrator is
+         deterministic; --dry-run is the only stable mode).
+      5. Spot-check test_attended_lock_forbids_ask + smoke
+         tests fire and pass.
+
+      ### 수동 e2e (5 시나리오)
+
+      | 시나리오 | 기대 동작 |
+      |---|---|
+      | /dev-kit:ralph "X" (clean repo, X small) | 4 gates + ATTENDED_RUN; ~5-30 min wall |
+      | /dev-kit:ralph "X" with Edit-then-approve at GATE 2 | rewind to PROPOSAL_GATE; re-render; re-ask |
+      | /dev-kit:ralph "X" then user Aborts at GATE 1 | persist stage=RESEARCH_GATE, exit 0 |
+      | /dev-kit:ralph "X" with --dry-run | chain runs through GATE 4; ATTENDED_RUN is no-op |
+      | Re-invoke /dev-kit:ralph "X" after RECOVERY_REQUIRED | resume from .dev-kit/ralph/<session>.json last-stage |
+
+      ### 회귀 / 메모리 격리
+
+      - All 6 underlying skills pass their regression suites
+        unchanged.
+      - tests/test_render_proposal_html.py passes — old proposals
+        render unchanged.
+      - tests/test_skill_governance.py passes — Ralph's alpha:
+        state declaration is honored.
+      - Memory paths read/write-free in Ralph.
+
+      ### PR 체크리스트
+
+      - [ ] pytest tests/test_ralph_skill.py tests/test_render_proposal_html.py tests/test_skill_governance.py -v 통과
+      - [ ] Cold sub-agent test byte-identical on --dry-run
+      - [ ] 회귀: research/proposal/plan/build/babysit-pr/ship unchanged
+      - [ ] skills/README.md 카운트 39→40
+      - [ ] PR description에 "tmux + long-running classification: loop-yes (attended_lock + durable state)" 명시
+
+  - title: Distribution plan
+    body: |
+      ### 추가/수정 파일
+
+      ```
+      skills/ralph/SKILL.md                       # 신규 — orchestrator (~200)
+      skills/ralph/lib/ralph_state.py             # 신규 — pure state machine + lock (~150)
+      skills/ralph/scripts/ralph_drive.sh         # 신규 — bash glue (~90)
+      skills/ralph/templates/ralph_progress.md    # 신규 — per-run progress log (~30)
+      tests/test_ralph_skill.py                   # 신규 — chain + gates + lock + smoke (~120)
+      skills/proposal/SKILL.md                    # 갱신 — schema bump (~25)
+      lib/render_proposal_html.py                 # 갱신 — render ambiguity/scope/gate_contract (~80)
+      skills/README.md                            # 갱신 — 39→40 + renderer note (~5)
+      docs/proposals/review/ralph-autonomy/main.html   # 자동 렌더링
+      ```
+
+      ### 워크트리
+
+      - 이름: feat/ralph-autonomy
+      - 베이스: origin/main
+      - 컷 헬퍼: `python3 -c "from lib.git_worktree import cut_worktree; ..."`
+
+  - title: Next steps (after this proposal is approved)
+    body: |
+      1. 즉시: /dev-kit:proposal → 사용자가 본 HTML 리뷰 (GATE 2)
+      2. 승인 시: GATE 3 (PLAN_GATE) — PRD.md + phases 생성 후 리뷰
+      3. 승인 시: GATE 4 (SHIP_CONFIRM_GATE) — 10-line 요약 리뷰
+      4. 승인 시: ATTENDED_RUN — build → babysit → ship unattended
+      5. 금지 (모든 phase): 외부 영감 출처에 대한 일체의 언급
+         (commit message / PR description / 검증 로그)
+
+  - title: References (dev-harness-kit SSOT)
+    body: |
+      외부 URL은 Geoffrey Huntley의 원본만 (1건). 본 proposal의
+      모든 그 외 근거는 dev-harness-kit 자체 SSOT에 있습니다.
+
+      - iron-laws/index.md — L1/L3/L4/L6/L7/L8 SSOT
+      - rules/skill-authoring.md — name/category/when_to_use 정의
+      - rules/test-files.md — 테스트 작성 규약
+      - rules/session-hygiene.md — model + prompt-cache discipline
+      - skills/research/SKILL.md — Phase 0-3 escalation
+      - skills/proposal/SKILL.md — HTML renderer + status routing
+      - skills/plan/SKILL.md — 5-gate loop + ambiguity loop
+      - skills/interview/SKILL.md — 5-field safety contract
+      - skills/build/SKILL.md — per-step sub-agent + MUST-37 self-fix
+      - skills/babysit-pr/SKILL.md — Ralph-loop safety valve
+      - skills/ship/SKILL.md — Review verdict + main-block gate
+      - templates/init.sh — long-running session bootstrap
+      - templates/feature_list.json — cross-task state
+      - templates/progress.log.md — append-only per-session log
+      - templates/session_handoff.md — cold-start recovery
+      - tests/test_skill_governance.py — L6 alpha-declaration gate
+      - tests/test_render_proposal_html.py — renderer regression
+      - ~/.claude/projects/.../memory/feedback-proposal-review-linear-plan-workflow.md
+      - ~/.claude/projects/.../memory/feedback-thin-harness-discipline.md
+      - ~/.claude/projects/.../memory/feedback-tmux-long-running-safety.md
+      - ~/.claude/projects/.../memory/feedback-sub-agent-isolated-test.md
+      - ~/.claude/projects/.../memory/feedback-skill-options-vs-new-skill.md
