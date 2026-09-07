@@ -33,14 +33,14 @@ class TestReadWriteRoundTrip(unittest.TestCase):
 
     def test_missing_file_defaults_to_all_on(self):
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on"})
+        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
 
     def test_corrupt_file_defaults_to_all_on(self):
         path = gms._state_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json", encoding="utf-8")
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on"})
+        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
 
     def test_invalid_value_in_file_defaults_that_guard_to_on(self):
         path = gms._state_path(self.root)
@@ -52,18 +52,18 @@ class TestReadWriteRoundTrip(unittest.TestCase):
     def test_write_state_round_trips_one_guard(self):
         gms.write_state({"tdd_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "off", "worktree_guard": "on"})
+        self.assertEqual(state, {"tdd_guard": "off", "worktree_guard": "on", "push_confirm": "on"})
 
     def test_write_state_does_not_disturb_other_guard(self):
         gms.write_state({"tdd_guard": "off"}, root=self.root)
         gms.write_state({"worktree_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "off", "worktree_guard": "off"})
+        self.assertEqual(state, {"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on"})
 
     def test_write_state_drops_unknown_guard_key(self):
         gms.write_state({"git_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on"})
+        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
 
     def test_write_state_drops_non_on_off_value(self):
         gms.write_state({"tdd_guard": "maybe"}, root=self.root)
@@ -71,10 +71,10 @@ class TestReadWriteRoundTrip(unittest.TestCase):
         self.assertEqual(state["tdd_guard"], "on")
 
     def test_reset_state_forces_all_on(self):
-        gms.write_state({"tdd_guard": "off", "worktree_guard": "off"}, root=self.root)
+        gms.write_state({"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on"}, root=self.root)
         gms.reset_state(self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on"})
+        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
 
 
 class TestResolvedGuard(unittest.TestCase):
@@ -151,7 +151,7 @@ class TestCli(unittest.TestCase):
             gms.main(["get", "tdd_guard"])
         self.assertEqual(buf.getvalue().strip(), "on")
 
-    def test_cli_show_json_contains_both_guards(self):
+    def test_cli_show_json_contains_every_guard(self):
         import contextlib
         import io
 
@@ -159,9 +159,12 @@ class TestCli(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             gms.main(["show", "--json"])
         parsed = json.loads(buf.getvalue())
-        self.assertIn("tdd_guard", parsed)
-        self.assertIn("worktree_guard", parsed)
-        self.assertEqual(parsed["tdd_guard"]["value"], "on")
+        for guard in gms.GUARDS:
+            with self.subTest(guard=guard):
+                self.assertIn(guard, parsed)
+                self.assertIn("value", parsed[guard])
+                self.assertIn("description", parsed[guard])
+                self.assertEqual(parsed[guard]["value"], "on")
 
 
 if __name__ == "__main__":

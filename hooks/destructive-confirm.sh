@@ -82,6 +82,22 @@ esac
 
 # ---- Classes 2 & 3: destructive git plumbing (Bash) ----
 [ "$TOOL" = "Bash" ] || exit 0
+
+# Session-scoped bypass during babysit-pr / babysit-pr-local. The
+# non-force first-push ask below is suppressed so the unattended loop
+# is not blocked; force-with-lease stays unchanged. Fail closed (on)
+# when python3 is unavailable or the read fails for any reason — an
+# unrecognized state must never silently bypass the ask gate.
+_PUSH_CONFIRM_STATE=on
+if command -v python3 >/dev/null 2>&1; then
+  _PUSH_CONFIRM_STATE="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && python3 -m lib.guard_mode_state get push_confirm 2>/dev/null || echo on)"
+  case "$_PUSH_CONFIRM_STATE" in
+    on|off) ;;
+    *) _PUSH_CONFIRM_STATE=on ;;
+  esac
+fi
+export _PUSH_CONFIRM_STATE
+
 CMD=$(printf '%s' "$INPUT_JSON" | jq -r '.tool_input.command // ""')
 [ -z "$CMD" ] && exit 0
 
@@ -98,7 +114,10 @@ if echo "$CMD" | grep -qE "git push .*--force-with-lease"; then
     "force-with-lease rewrites remote history on this branch. Per rules/git-workflow.md this is allowed only on your own unmerged branch, never after review has started."
 fi
 
-if echo "$CMD" | grep -qE "git push .*(-u|--set-upstream)"; then
+if [ "$_PUSH_CONFIRM_STATE" = "off" ] && \
+   echo "$CMD" | grep -qE "git push .*(-u|--set-upstream)"; then
+  : # bypassed during babysit-pr / babysit-pr-local loop lifetime
+elif echo "$CMD" | grep -qE "git push .*(-u|--set-upstream)"; then
   ask "DESTRUCTIVE CONFIRM" \
     "first push of this branch to the remote — externally visible. Confirm the branch name and target remote are correct."
 fi
