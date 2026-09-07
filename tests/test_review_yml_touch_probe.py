@@ -18,6 +18,15 @@ aren't unit-testable in this repo's suite, so a content-level
 regression guard is the practical alternative. Mirrors the style of
 tests/test_review_local_sh.py::TestLocalAuthFallback's static
 no-bashism check.
+
+The `TestMaintenanceGateFileStatusExtraction` class pins the file-
+status extraction pattern across `.github/workflows/maintenance.yml`
+and `bin/review-local.sh` — three copies (`gh pr view --json files`
+projection, the bash loop that consumes it, and `bin/review-local.sh`'s
+`read_pr_fields` projection) must all stay in sync, or the
+registry-index sub-gate silently regresses to the legacy path-only
+behavior (new skill/command additions pass without a registry-doc
+update).
 """
 from __future__ import annotations
 
@@ -27,6 +36,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 REVIEW_YML = PROJECT_ROOT / ".github" / "workflows" / "review.yml"
+MAINTENANCE_YML = PROJECT_ROOT / ".github" / "workflows" / "maintenance.yml"
+REVIEW_LOCAL_SH = PROJECT_ROOT / "bin" / "review-local.sh"
 
 # The canonical, already-correct list lives in bin/review-local.sh's
 # own touch-probe regex. review.yml's scope job MUST match it exactly
@@ -95,6 +106,146 @@ class TestReviewYmlTouchProbeRootsMatchCanonical(unittest.TestCase):
         for line in occurrences:
             self.assertIn("bin", line, f"message doesn't mention bin/: {line!r}")
             self.assertIn("commands", line, f"message doesn't mention commands/: {line!r}")
+
+
+class TestMaintenanceGateFileStatusExtraction(unittest.TestCase):
+    """Pins the file-status extraction pattern across the three copies
+    of "extract PR files for the maintenance gate":
+
+      1. `.github/workflows/maintenance.yml` — the CI workflow's
+         ``gh pr view --json files --jq ...`` projection must emit
+         ``<status>\\t<path>`` (tab-delimited) so the bash loop can
+         split it via ``IFS=$'\\t'``.
+      2. The same workflow's bash loop must read with
+         ``IFS=$'\\t' read -r status path`` and pass
+         ``"${path}:${status}"`` to ``--changed-files``.
+      3. ``bin/review-local.sh``'s ``read_pr_fields`` projection must
+         include ``files_with_status`` so a future local
+         ``--docs-check`` call has the per-file status info it needs.
+
+    Drift in any of these copies silently regresses the registry-
+    index sub-gate to legacy path-only behavior — new skill/command
+    additions pass without a registry-doc update, which is the exact
+    bug this class guards against.
+    """
+
+    def setUp(self) -> None:
+        self.workflow_text = MAINTENANCE_YML.read_text(encoding="utf-8")
+        self.review_local_text = REVIEW_LOCAL_SH.read_text(encoding="utf-8")
+
+    def test_workflow_files_exist(self) -> None:
+        self.assertTrue(MAINTENANCE_YML.exists(), f"missing: {MAINTENANCE_YML}")
+        self.assertTrue(REVIEW_LOCAL_SH.exists(), f"missing: {REVIEW_LOCAL_SH}")
+
+    def test_workflow_jq_emits_changeType_and_path(self) -> None:
+        """The ``gh pr view --json files --jq`` projection must emit
+        the per-file ``changeType`` field (GitHub's actual field name)
+        — not just the legacy ``.files[].path``. Pin the jq pattern
+        so a future refactor that drops ``changeType`` (and silently
+        regresses the registry-index check) fails CI.
+
+        NOTE: GitHub's field is ``changeType`` (NOT ``status``) — the
+        original implementation used ``status`` which doesn't exist
+        on ``--json files``, so the jq projection emitted ``null``
+        rows and the Python helper parsed ``null`` as a literal path.
+        Discovered live in PR #802 (first babysit iteration).
+        """
+        m = re.search(
+            r"--json files\s+--jq\s+'([^']+)'",
+            self.workflow_text,
+        )
+        self.assertIsNotNone(
+            m, "could not find gh pr view --json files --jq projection in maintenance.yml"
+        )
+        jq = m.group(1)
+        self.assertIn(".changeType", jq, f"jq projection missing .changeType: {jq!r}")
+        self.assertIn(".path", jq, f"jq projection missing .path: {jq!r}")
+        # Tab-delimiter via jq's `@tsv` keeps the receiving Python parser
+        # (which uses `:` as separator) free from ambiguity. A literal
+        # `\t` inside jq's double-quoted string is the two chars `\` and
+        # `t` — NOT a tab. Use `@tsv` instead.
+        self.assertIn("@tsv", jq, f"jq projection missing @tsv delimiter: {jq!r}")
+        self.assertNotIn(
+            "\\t", jq,
+            f"jq projection uses literal '\\t' instead of @tsv — produces "
+            f"literal backslash-t instead of a tab character: {jq!r}",
+        )
+
+    def test_workflow_jq_does_not_use_dash_r(self) -> None:
+        """The ``--jq`` flag MUST NOT be followed by ``-r`` — gh parses
+        ``-r`` as a separate positional arg, failing with
+        ``accepts at most 1 arg(s), received 2``. gh already emits raw
+        strings for ``--jq`` output (no quoting), so the ``-r`` flag is
+        unnecessary and breaks the call entirely.
+        """
+        self.assertNotIn(
+            "--jq -r ",
+            self.workflow_text,
+            "expected --jq without -r (gh parses -r as a separate positional arg)",
+        )
+
+    def test_workflow_bash_loop_splits_on_tab(self) -> None:
+        """The bash loop that consumes the tab-delimited status/path
+        output MUST split on tab (``IFS=$'\\t' read -r status path``).
+        A line that uses a different delimiter (space, newline, `:`)
+        would silently misalign the two fields, breaking the
+        ``--changed-files "${path}:${status}"`` invocation.
+        """
+        self.assertIn(
+            "IFS=$'\\t' read",
+            self.workflow_text,
+            "expected bash loop with 'IFS=$'\\t' read' to split status/path",
+        )
+
+    def test_workflow_passes_path_colon_status(self) -> None:
+        """The bash loop MUST pass ``--changed-files "${path}:${status}"``
+        (the format ``lib.maintenance_gate.parse_file_entry`` accepts).
+        A plain ``"${path}"`` (legacy) silently strips the status info
+        and the registry-index sub-gate regresses to vacuous pass.
+        """
+        self.assertIn(
+            '--changed-files" "${path}:${status}"',
+            self.workflow_text,
+            'expected --changed-files "${path}:${status}" form in maintenance.yml',
+        )
+
+    def test_review_local_extracts_files_with_status(self) -> None:
+        """``bin/review-local.sh``'s jq projection must include
+        ``files_with_status`` so a future local ``--docs-check``
+        call (or its local-mode parity PR) has the per-file status
+        info. Pinned here so the field doesn't drift back to legacy
+        path-only.
+        """
+        self.assertIn(
+            "files_with_status",
+            self.review_local_text,
+            "expected bin/review-local.sh to extract files_with_status "
+            "(tab-delimited '<changeType>\\t<path>')",
+        )
+
+    def test_review_local_jq_uses_changeType_and_tsv(self) -> None:
+        """The ``files_with_status`` field MUST use ``.changeType``
+        (not ``.status``) and jq's ``@tsv`` (not literal ``\\t``) for
+        the inner delimiter. Mirrors ``maintenance.yml``.
+        """
+        m = re.search(
+            r"files_with_status:\s*\[[^\n]+",
+            self.review_local_text,
+        )
+        self.assertIsNotNone(
+            m, "could not find files_with_status jq projection in bin/review-local.sh"
+        )
+        projection = m.group(0)
+        self.assertIn(
+            ".changeType",
+            projection,
+            f"files_with_status projection missing .changeType: {projection!r}",
+        )
+        self.assertIn(
+            "@tsv",
+            projection,
+            f"files_with_status projection missing @tsv delimiter: {projection!r}",
+        )
 
 
 if __name__ == "__main__":
