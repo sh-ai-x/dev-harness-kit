@@ -205,6 +205,12 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
 | [`/dev-kit:interview`](docs/skills/interview.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
 
+### End-to-end autonomous
+
+| Command | What it does |
+|---|---|
+| [`/dev-kit:ralph`](docs/skills/ralph.md) | Single slash that takes a 1-line idea through 4 user-approval gates (research → proposal → plan → ship-confirm) and then runs build/babysit-pr/ship **unattended** (`attended_lock` is a state-machine invariant that forbids AskUserQuestion mid-run). Linear is OUT OF SCOPE. Each gate supports Approve / Edit-then-approve (rewinds to that gate) / Abort. |
+
 ### Getting a PR over the line
 
 | Command | What it does |
