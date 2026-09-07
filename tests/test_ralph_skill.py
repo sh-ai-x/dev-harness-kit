@@ -9,7 +9,6 @@ module — no subprocess, no gh CLI.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -22,7 +21,7 @@ SKILL_LIB = ROOT / "skills" / "ralph" / "lib"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SKILL_LIB))
 
-import ralph_state as rs  # noqa: E402
+import ralph_state as rs  # noqa: E402, I001
 
 
 # ============================================================================
