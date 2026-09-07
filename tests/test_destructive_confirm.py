@@ -451,11 +451,6 @@ class TestHookIsWired(unittest.TestCase):
         self.assertTrue(found, "destructive-confirm.sh not found in hooks.json")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 class TestPushConfirmBypass(unittest.TestCase):
     """When `push_confirm` is off in `.dev-kit/guard-mode.session.json`,
     the non-force first-push ask is suppressed; force-with-lease still
@@ -469,8 +464,9 @@ class TestPushConfirmBypass(unittest.TestCase):
     def _run_with_state(self, state, cmd):
         """Run the hook with a fresh tempdir whose `.dev-kit/guard-mode.session.json`
         carries the given `push_confirm` value (or is absent, for the
-        default-state case). `CLAUDE_PROJECT_DIR` is forced empty so the
-        hook resolves the cwd-based path of the temp dir."""
+        default-state case). Inherits env from `os.environ` then `pop`s
+        `CLAUDE_PROJECT_DIR` so the hook's `${CLAUDE_PROJECT_DIR:-$PWD}`
+        falls back to the tempdir cwd for the python state read."""
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -481,11 +477,16 @@ class TestPushConfirmBypass(unittest.TestCase):
                 (dev_kit / "guard-mode.session.json").write_text(
                     json.dumps({"push_confirm": state})
                 )
-            return _run(
-                "destructive-confirm.sh",
-                _bash_payload(cmd),
-                env_extra={"CLAUDE_PROJECT_DIR": ""},
-                cwd=tmp_path,
+            hook_path = HOOKS / "destructive-confirm.sh"
+            env = os.environ.copy()
+            env.pop("DEV_KIT_STRICT", None)
+            env.pop("DEV_KIT_NO_CONFIRM", None)
+            env.pop("CLAUDE_PROJECT_DIR", None)
+            return subprocess.run(
+                [_bash(), str(hook_path)],
+                input=json.dumps(_bash_payload(cmd)),
+                capture_output=True, text=True, timeout=10,
+                env=env, cwd=str(tmp_path),
             )
 
     def test_first_push_silent_when_off(self):
@@ -526,3 +527,7 @@ class TestPushConfirmBypass(unittest.TestCase):
             '"ask"', r.stdout,
             f"force-with-lease must still ask: {r.stdout!r}",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
