@@ -57,9 +57,21 @@ class TestActiveHooksCodec(unittest.TestCase):
         self.assertIn("review", data["matrix"])
         self.assertIn("security", data["matrix"])
         self.assertIn("ship", data["matrix"])
-        # 5 hooks per stage
-        for stage in data["matrix"].values():
-            self.assertEqual(len(stage), 5)
+        # Per-stage hook counts:
+        #   bootstrap / plan / design / ship: 5 (l4-todo-scan is off —
+        #     only fires during build / review / security per
+        #     hooks/index.md)
+        #   build / review / security: 6 (l4-todo-scan on top of the
+        #     five always-listed hooks: tdd-guard, bash-guard,
+        #     secret-scan, slop-detector, stop-verify)
+        l4_on_stages = ("build", "review", "security")
+        for stage_name, stage in data["matrix"].items():
+            expected = 6 if stage_name in l4_on_stages else 5
+            self.assertEqual(
+                len(stage), expected,
+                f"stage={stage_name} expected {expected} hooks, "
+                f"got {len(stage)}: {sorted(stage.keys())}",
+            )
 
     def test_is_hook_active_default(self):
         active_hooks_codec.init_matrix(self.root)
