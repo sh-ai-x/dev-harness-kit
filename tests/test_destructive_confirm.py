@@ -451,5 +451,83 @@ class TestHookIsWired(unittest.TestCase):
         self.assertTrue(found, "destructive-confirm.sh not found in hooks.json")
 
 
+class TestPushConfirmBypass(unittest.TestCase):
+    """When `push_confirm` is off in `.dev-kit/guard-mode.session.json`,
+    the non-force first-push ask is suppressed; force-with-lease still
+    asks. Loop lifetime of /dev-kit:babysit-pr[-local] flips this on
+    entry and restores "on" in the EXIT trap."""
+
+    def setUp(self):
+        if not (HOOKS / "destructive-confirm.sh").exists():
+            self.skipTest("destructive-confirm.sh missing")
+
+    def _run_with_state(self, state, cmd):
+        """Run the hook with a fresh tempdir whose `.dev-kit/guard-mode.session.json`
+        carries the given `push_confirm` value (or is absent, for the
+        default-state case). Inherits env from `os.environ` then `pop`s
+        `CLAUDE_PROJECT_DIR` so the hook's `${CLAUDE_PROJECT_DIR:-$PWD}`
+        falls back to the tempdir cwd for the python state read."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            os.symlink(REPO_ROOT / "lib", tmp_path / "lib")
+            if state is not None:
+                dev_kit = tmp_path / ".dev-kit"
+                dev_kit.mkdir()
+                (dev_kit / "guard-mode.session.json").write_text(
+                    json.dumps({"push_confirm": state})
+                )
+            hook_path = HOOKS / "destructive-confirm.sh"
+            env = os.environ.copy()
+            env.pop("DEV_KIT_STRICT", None)
+            env.pop("DEV_KIT_NO_CONFIRM", None)
+            env.pop("CLAUDE_PROJECT_DIR", None)
+            return subprocess.run(
+                [_bash(), str(hook_path)],
+                input=json.dumps(_bash_payload(cmd)),
+                capture_output=True, text=True, timeout=10,
+                env=env, cwd=str(tmp_path),
+            )
+
+    def test_first_push_silent_when_off(self):
+        """The bypass contract: with `push_confirm=off`, a non-force
+        first-push is silent — no ask envelope."""
+        r = self._run_with_state("off", "git push -u origin feat/x")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertNotIn(
+            '"ask"', r.stdout,
+            f"first-push should be silent when push_confirm=off: {r.stdout!r}",
+        )
+
+    def test_first_push_asks_when_on(self):
+        """Explicit `push_confirm=on` is the same as the default: first-push
+        must still ask. Preserves pre-existing behavior outside babysit loops."""
+        r = self._run_with_state("on", "git push -u origin feat/x")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertIn(
+            '"ask"', r.stdout,
+            f"first-push should ask when push_confirm=on: {r.stdout!r}",
+        )
+
+    def test_first_push_asks_when_state_absent(self):
+        """Missing state file → reads as default-on. First-push still asks."""
+        r = self._run_with_state(None, "git push -u origin feat/x")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertIn(
+            '"ask"', r.stdout,
+            f"first-push should ask when state is absent: {r.stdout!r}",
+        )
+
+    def test_force_with_lease_still_asks_when_off(self):
+        """Force-with-lease (history-rewriting) stays destructive-confirm-worthy
+        even when `push_confirm=off`. Only the non-force ask is bypassed."""
+        r = self._run_with_state("off", "git push --force-with-lease origin feat/x")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertIn(
+            '"ask"', r.stdout,
+            f"force-with-lease must still ask: {r.stdout!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

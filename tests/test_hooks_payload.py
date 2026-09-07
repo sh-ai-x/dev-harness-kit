@@ -68,11 +68,21 @@ def _source_helper(payload: str, call: str, env_extra: dict | None = None) -> su
 
 def _run_hook(script: str, payload: dict, cwd: Path | None = None,
               env_extra: dict | None = None) -> subprocess.CompletedProcess:
-    """Invoke a hook script with JSON payload on stdin."""
+    """Invoke a hook script with JSON payload on stdin.
+
+    Pin `DEV_KIT_STAGE=build` so the test is hermetic w.r.t. whatever
+    `.dev-kit/.active-hooks.json` the developer has on disk. Without the
+    pin, a bootstrapped checkout makes the stage gate resolve the stage
+    to `bootstrap`, where `slop-detector` is off, so the hook exits 0
+    silently and the test asserts against a hook that deliberately did
+    nothing. See test_stage_gate_matrix_ssot.py for the underlying
+    matrix contract.
+    """
     p = HOOKS / script
     if not p.exists():
         raise FileNotFoundError(f"hook missing: {p}")
     env = os.environ.copy()
+    env.setdefault("DEV_KIT_STAGE", "build")
     if env_extra:
         env.update(env_extra)
     return subprocess.run(

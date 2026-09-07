@@ -126,7 +126,7 @@ class TestSessionStartGuardModeReset(unittest.TestCase):
             )
             self.assertEqual(r.returncode, 0, r.stderr)
             state = gms.read_state(root)
-            self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on"})
+            self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
 
 
 if __name__ == "__main__":

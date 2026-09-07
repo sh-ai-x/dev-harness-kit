@@ -406,6 +406,27 @@ class TestCLISubprocess(unittest.TestCase):
         out = json.loads(result.stdout)
         self.assertTrue(out["docs_ok"])
 
+    def test_cli_docs_check_fails_new_skill_with_only_secondary_doc(self):
+        # End-to-end through the CLI the workflow actually shells out to:
+        # a new skill + docs/skills/README.md must exit 1 now that the
+        # root README is mandatory.
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--docs-check",
+             "--changed-files", "skills/foo/SKILL.md:added",
+             "--changed-files", "docs/skills/README.md:modified",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertFalse(out["docs_ok"])
+        self.assertIn("README.md", out["reason"])
+
     def test_cli_docs_check_malformed_entry_returns_clean_json(self):
         # Multi-colon path triggers parse_file_entry's ValueError.
         # The CLI MUST catch it and emit a clean JSON failure
@@ -527,7 +548,11 @@ class TestRegistryIndexCheck(unittest.TestCase):
         )
         self.assertTrue(ok, reason)
 
-    def test_passes_when_new_skill_updates_docs_skills_readme(self):
+    def test_fails_when_only_docs_skills_readme_updated(self):
+        # Regression: `/dev-kit:gate-select` shipped in #786 touching
+        # only docs/skills/README.md, so the root README never learned
+        # the skill existed. The root README is now MANDATORY — a
+        # secondary registry doc alone does NOT satisfy the check.
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
                 "skills/foo/SKILL.md:added",
@@ -535,13 +560,29 @@ class TestRegistryIndexCheck(unittest.TestCase):
             ],
             pr_body="",
         )
-        self.assertTrue(ok, reason)
+        self.assertFalse(ok, reason)
+        self.assertIn("README.md", reason)
+        self.assertIn("skills/foo/SKILL.md", reason)
 
-    def test_passes_when_new_skill_updates_docs_skills_readme_ko(self):
+    def test_fails_when_only_docs_skills_readme_ko_updated(self):
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
                 "skills/foo/SKILL.md:added",
                 "docs/skills/README.ko.md:modified",
+            ],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
+        self.assertIn("README.md", reason)
+
+    def test_passes_when_root_readme_and_secondary_both_updated(self):
+        # The recommended shape: root README (mandatory) plus the
+        # per-category index (good practice).
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "skills/foo/SKILL.md:added",
+                "README.md:modified",
+                "docs/skills/README.md:modified",
             ],
             pr_body="",
         )
@@ -587,10 +628,9 @@ class TestRegistryIndexCheck(unittest.TestCase):
         self.assertFalse(ok, reason)
         self.assertIn("commands/foo.md", reason)
 
-    def test_passes_when_commands_readme_added_alongside_new_command(self):
-        # Bootstrap case: first PR that ever adds commands/README.md
-        # AND a new command at the same time. The registry doc + the new
-        # command are both `added` in the same diff.
+    def test_fails_when_new_command_updates_only_commands_readme(self):
+        # `commands/README.md` is a SECONDARY registry doc — updating it
+        # does not exempt the PR from touching the root README.
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
                 "commands/README.md:added",
@@ -598,25 +638,45 @@ class TestRegistryIndexCheck(unittest.TestCase):
             ],
             pr_body="",
         )
-        self.assertTrue(ok, reason)
+        self.assertFalse(ok, reason)
+        self.assertIn("README.md", reason)
 
-    def test_modified_commands_readme_does_not_bypass_check(self):
-        # A `commands/README.md` with status=modified does not by itself
-        # satisfy the registry check — only a NEW skill/command does.
-        # (This is more of a sanity check on the status gating.)
+    def test_passes_when_new_command_updates_root_readme(self):
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
-                "commands/README.md:modified",
+                "README.md:modified",
                 "commands/foo.md:added",
             ],
             pr_body="",
         )
-        # commands/README.md IS in the registry docs set, so this passes.
-        # This test documents the fact that the gate counts any
-        # `commands/README.md` touch as a registry doc update, regardless
-        # of status. If we ever tighten to status=added, this test pins
-        # the behavior change.
         self.assertTrue(ok, reason)
+
+    def test_root_readme_counts_regardless_of_status(self):
+        # A brand-new root README (status=added, e.g. a fresh repo's
+        # first PR) satisfies the check exactly like a modified one.
+        # The gate cares that the file is in the change set, not how it
+        # got there.
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "README.md:added",
+                "commands/foo.md:added",
+            ],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_nested_readme_does_not_satisfy_check(self):
+        # Only the repo-root `README.md` counts. A nested README with a
+        # path that merely ENDS in the same basename must not pass —
+        # guards against a `path.endswith("README.md")` implementation.
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "skills/foo/SKILL.md:added",
+                "skills/foo/README.md:added",
+            ],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
 
     # --- backward compatibility ---------------------------------------------
 
@@ -683,9 +743,12 @@ class TestRegistryIndexCheck(unittest.TestCase):
             pr_body="",
         )
         self.assertFalse(ok, reason)
-        # Registry reason mentions the new skill + the registry doc.
+        # Registry reason names the new skill + the mandatory root
+        # README; the path-level message would have named lib/bar.py and
+        # asked for a `docs/` file instead.
         self.assertIn("skills/foo/SKILL.md", reason)
-        self.assertIn("registry", reason.lower())
+        self.assertIn("README.md", reason)
+        self.assertNotIn("lib/bar.py", reason)
 
     def test_docs_updated_ok_path_level_failure_when_no_registry_issue(self):
         # lib/foo.py changed (path-level fail) but no new skill/command

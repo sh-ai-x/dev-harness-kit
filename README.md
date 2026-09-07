@@ -90,7 +90,7 @@ On a brand-new repo, one command does all the first-time setup:
 /dev-kit:bootstrap
 ```
 
-This command now prompts you for ci-setup (the prompt defaults to Y; pass `--skip-ci` to decline or `--yes` to auto-accept). With Y, it writes three project files (`CLAUDE.md`, `AGENTS.md`, and the hook configuration) **and** installs the CI templates, in a single shot. Run `/dev-kit:bootstrap --skip-ci` or `/dev-kit:ci-setup --force` separately if you only want one half.
+This command prompts you for ci-setup — `[y/N]`, so the default is **no** (pass `--yes` to auto-accept, or `--skip-ci` to skip the prompt entirely). Answer `y` and it writes three project files (`CLAUDE.md`, `AGENTS.md`, and the hook configuration) **and** installs the CI templates in a single shot. Answer `n` and you get the bootstrap set only; run `/dev-kit:ci-setup --force` later to add CI. Not sure what the gates are? `/dev-kit:gate-select show` prints all three dimensions before you pick.
 
 From there, the everyday loop is three commands:
 
@@ -189,6 +189,10 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:ci-setup`](docs/skills/ci-setup.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
 | [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
 | [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). The single switch that gates which hooks and skills run. |
+| [`/dev-kit:gate-select`](skills/gate-select/SKILL.md) | One picker for all three gate dimensions — project (CI workflows), session (local hooks), AI-judge. `show` reads current state; `pick` dispatches to the right installer. |
+| [`/dev-kit:harness-mode`](skills/harness-mode/SKILL.md) | Session-scoped local-hook mode — `fast` (optional hooks off), `full` (default), or `custom` per-hook picker. |
+| [`/dev-kit:guard-mode`](skills/guard-mode/SKILL.md) | Session-scoped on/off switch for the two hard-block hooks (`tdd-guard`, `worktree-guard`). |
+| [`/dev-kit:linear`](docs/skills/linear.md) | Optional Linear tracker sync — reconciles the current task with a canonical project + non-duplicate issue. |
 
 ### Planning and building
 
@@ -199,6 +203,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone hands the root cause to `/dev-kit:plan`. |
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
+| [`/dev-kit:interview`](docs/skills/interview.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
 
 ### End-to-end autonomous
 
@@ -239,6 +244,10 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:evaluate`](docs/skills/evaluate.md) | LLM-judge eval across registered rubrics + the five-component harness-effectiveness report. Programmatic gate after any harness change. |
 | [`/dev-kit:harness-effectiveness`](docs/skills/harness-effectiveness.md) | The five-component scorecard (prevention / first-pass / recovery / learning / measurement-integrity) standalone — sub-second, zero API spend. |
 | [`/dev-kit:learn`](docs/skills/learn.md) | Distill source text (file, URL, prose, or transcript) into a candidate `SKILL.md`, gated by deterministic G1–G5 checks. |
+| [`/dev-kit:prune-propose`](docs/skills/prune-propose.md) | Usage-telemetry dump + per-skill delete proposal, each deletion approved explicitly. The evidence step before `/dev-kit:prune`. |
+| [`/dev-kit:worktree-prune`](skills/worktree-prune/SKILL.md) | Counts registered worktrees, lists them oldest-first by branch-tip age, removes the N oldest behind a y/N gate. |
+| [`/dev-kit:llm-refresh`](docs/skills/llm-refresh.md) | Refreshes `docs/llm-info/<provider>.json` from each vendor's official pricing page. Diff-then-commit, never silent. |
+| [`/dev-kit:codex-cache-update`](docs/skills/codex-cache-update.md) | Refreshes the Codex marketplace checkout + versioned plugin cache when `plugin marketplace upgrade` reports "up to date" but the files are stale. |
 
 For the complete list (grouped by category, one-line summary each), see
 [`docs/skills/README.md`](docs/skills/README.md) — or just type `/dev-kit:` and
