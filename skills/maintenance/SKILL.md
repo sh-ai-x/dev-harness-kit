@@ -1,7 +1,7 @@
 ---
 name: maintenance
 category: audit
-description: Code-sanity gate. Judges the PR diff against the 20-checkbox rubric from eval/prompts/judge-code-sanity.md (CC-1..8 clean code, OE-1..8 over-engineering, VM-1..4 value/meaning). Mirrors .github/workflows/maintenance.yml's gate logic. Verdict mapping: code_sanity_score >= 8.0 -> Approve; 5.0..7.99 -> Changes Requested; < 5.0 -> Blocked. Plus the docs-updated sub-gate (PR must touch docs/ OR carry a `docs-not-required:` marker in the body OR not touch production code).
+description: Code-sanity gate. Judges the PR diff against the 20-checkbox rubric from eval/prompts/judge-code-sanity.md (CC-1..8 clean code, OE-1..8 over-engineering, VM-1..4 value/meaning). Mirrors .github/workflows/maintenance.yml's gate logic. Verdict mapping: code_sanity_score >= 8.0 -> Approve; 5.0..7.99 -> Changes Requested; < 5.0 -> Blocked. Plus the docs-updated sub-gate (PR must touch docs/ OR carry a `docs-not-required:` marker in the body OR not touch production code) and the registry-index rule (a PR adding a skill/command must register it in the root README.md).
 alpha: enforcement
 when_to_use:
   - User types /dev-kit:maintenance
@@ -23,7 +23,7 @@ Code-sanity gate. Runs the 20-checkbox rubric (CC-1..8 + OE-1..8 + VM-1..4) from
 3. Judges CC-1..8 (vague names, oversized functions, dead code, magic constants, copy-paste, swallowed errors, type unsafety, stale comments).
 4. Judges OE-1..8 (single-implementer abstract base classes, YAGNI flags, premature optimization, excessive layering, factory/strategy/DI for one impl, deep inheritance, file-per-class sprawl).
 5. Judges VM-1..4 (stated purpose, no noise, scope discipline, "diff earns its lines").
-6. Runs the docs-updated sub-gate (path-level + registry-index). The **registry-index** check fires when the PR adds a new `skills/<name>/SKILL.md` or `commands/<name>.md` (status `added`); the operator must also touch one of the manually maintained registry docs (`README.md`, `docs/skills/README.md`, `docs/skills/README.ko.md`, `commands/README.md`), or carry `docs-not-required:` in the PR body. The auto-generated `skills/README.md` does NOT count — it's a near-no-op for the gate. The path-level check still applies for non-skill/command prod changes that touch `lib/` / `bin/` / `tools/` / etc. without any `docs/*` update. FAIL otherwise — downgrades `Approve` to `Changes Requested`.
+6. Runs the docs-updated sub-gate (path-level + registry-index). The **registry-index** check fires when the PR adds a new `skills/<name>/SKILL.md` or `commands/<name>.md` (status `added`); the operator must also touch the **root `README.md`** — mandatory, because it's the front door every operator reads first. `docs/skills/README.md`, `docs/skills/README.ko.md`, and `commands/README.md` are good practice but do NOT substitute for it; the auto-generated `skills/README.md` never counts. Only `docs-not-required:` in the PR body exempts. Beyond the path-level check, confirm the README edit actually **registers** the skill (a row naming `/dev-kit:<name>`) rather than touching the file incidentally. The path-level check still applies for non-skill/command prod changes that touch `lib/` / `bin/` / `tools/` / etc. without any `docs/*` update. FAIL otherwise — downgrades `Approve` to `Changes Requested`.
 7. Emits a single-line verdict at the top of the response in the exact form below; the gate's verdict-extraction helper (`lib/maintenance_gate.py`) parses this.
 
 ## Verdict mapping
