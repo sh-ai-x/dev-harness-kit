@@ -78,7 +78,7 @@ once `attended_lock` is set (the one-way boundary is crossed).
 - The forensic field `last_blocked_ask` is populated whenever a
   blocked Ask is attempted (for postmortem)
 
-The test `tests/test_ralph_skill.py::test_attended_lock_forbids_ask`
+The test `tests/test_ralph_skill.py::test_attended_run_forbids_ask`
 is the invariant guard.
 
 ## State machine — `skills/ralph/lib/ralph_state.py`
