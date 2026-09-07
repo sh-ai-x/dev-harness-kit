@@ -370,6 +370,82 @@ class TestCLISubprocess(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["docs_ok"], True)
 
+    def test_cli_docs_check_fails_on_new_skill(self):
+        # File-status-aware input via the CLI: a new SKILL.md with no
+        # registry doc update MUST fail the docs check.
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--docs-check",
+             "--changed-files", "skills/foo/SKILL.md:added",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertFalse(out["docs_ok"])
+        self.assertIn("skills/foo/SKILL.md", out["reason"])
+
+    def test_cli_docs_check_passes_new_skill_with_readme(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--docs-check",
+             "--changed-files", "skills/foo/SKILL.md:added",
+             "--changed-files", "README.md:modified",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertTrue(out["docs_ok"])
+
+    def test_cli_docs_check_malformed_entry_returns_clean_json(self):
+        # Multi-colon path triggers parse_file_entry's ValueError.
+        # The CLI MUST catch it and emit a clean JSON failure
+        # (the workflow's `jq -r .reason` extraction depends on this)
+        # rather than a Python traceback on stderr.
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--docs-check",
+             "--changed-files", "weird:path:added",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        # stdout MUST be parseable JSON (not a traceback).
+        out = json.loads(result.stdout)
+        self.assertFalse(out["docs_ok"])
+        self.assertIn("malformed", out["reason"])
+        # stderr may have a traceback too, but stdout is the contract.
+
+    def test_cli_registry_only_malformed_entry_returns_clean_json(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--registry-only",
+             "--changed-files", ":added",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertFalse(out["registry_ok"])
+        self.assertIn("malformed", out["reason"])
+
     def test_cli_format_audit_gh_shape(self):
         py = sys.executable
         result = subprocess.run(
@@ -423,6 +499,300 @@ class TestCLISubprocess(unittest.TestCase):
         # AND as table rows (Title-Case labels).
         self.assertIn("| Review", body)
         self.assertIn("| Security", body)
+
+
+class TestRegistryIndexCheck(unittest.TestCase):
+    """The skill/command registry sub-gate (issue: new SKILL.md / new
+    commands/*.md without a registry-doc update was silently approved).
+
+    The deterministic check lives in `registry_index_updated_ok()`. It
+    combines with the path-level `docs_updated_ok()` check via worst-wins
+    in the parent `docs_updated_ok()` orchestrator.
+    """
+
+    # --- new skill detection -------------------------------------------------
+
+    def test_fails_when_new_skill_has_no_registry_doc(self):
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["skills/foo/SKILL.md:added"],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
+        self.assertIn("skills/foo/SKILL.md", reason)
+
+    def test_passes_when_new_skill_updates_readme(self):
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["skills/foo/SKILL.md:added", "README.md:modified"],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_passes_when_new_skill_updates_docs_skills_readme(self):
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "skills/foo/SKILL.md:added",
+                "docs/skills/README.md:modified",
+            ],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_passes_when_new_skill_updates_docs_skills_readme_ko(self):
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "skills/foo/SKILL.md:added",
+                "docs/skills/README.ko.md:modified",
+            ],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_passes_when_pr_body_carries_marker(self):
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["skills/foo/SKILL.md:added"],
+            pr_body=(
+                "Adds /dev-kit:foo.\n\n"
+                "docs-not-required: docs/skills/README.md already lists it.\n"
+            ),
+        )
+        self.assertTrue(ok, reason)
+
+    def test_passes_when_only_existing_skill_modified(self):
+        # status=modified (not added) — registry check should not fire.
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["skills/foo/SKILL.md:modified"],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_passes_when_skill_renamed_only(self):
+        # Per design decision (Q4): pure renames do NOT require a
+        # registry doc update — `skills/README.md` still points to the
+        # renamed skill's path. GitHub's similarity threshold makes
+        # `renamed` inconsistent across PRs, so we treat renames as
+        # no-op for the registry check.
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["skills/bar/SKILL.md:renamed"],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    # --- new command detection -----------------------------------------------
+
+    def test_fails_when_new_command_has_no_registry_doc(self):
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["commands/foo.md:added"],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
+        self.assertIn("commands/foo.md", reason)
+
+    def test_passes_when_commands_readme_added_alongside_new_command(self):
+        # Bootstrap case: first PR that ever adds commands/README.md
+        # AND a new command at the same time. The registry doc + the new
+        # command are both `added` in the same diff.
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "commands/README.md:added",
+                "commands/foo.md:added",
+            ],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_modified_commands_readme_does_not_bypass_check(self):
+        # A `commands/README.md` with status=modified does not by itself
+        # satisfy the registry check — only a NEW skill/command does.
+        # (This is more of a sanity check on the status gating.)
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=[
+                "commands/README.md:modified",
+                "commands/foo.md:added",
+            ],
+            pr_body="",
+        )
+        # commands/README.md IS in the registry docs set, so this passes.
+        # This test documents the fact that the gate counts any
+        # `commands/README.md` touch as a registry doc update, regardless
+        # of status. If we ever tighten to status=added, this test pins
+        # the behavior change.
+        self.assertTrue(ok, reason)
+
+    # --- backward compatibility ---------------------------------------------
+
+    def test_legacy_bare_path_defaults_to_modified(self):
+        # Pre-existing callers pass `"skills/foo/SKILL.md"` without a
+        # status — they MUST keep working (status defaults to "modified",
+        # so the registry check sees nothing new and passes).
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["skills/foo/SKILL.md"],
+            pr_body="",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_mixed_entry_shapes(self):
+        # One legacy bare path + one path:status — both must be parsed
+        # independently. The legacy entry is treated as "modified" and
+        # does not trigger the registry check; the status-aware entry
+        # IS a new skill and the registry check MUST see it.
+        ok, reason = maintenance_gate.registry_index_updated_ok(
+            changed_files=["lib/foo.py", "skills/foo/SKILL.md:added"],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
+        self.assertIn("skills/foo/SKILL.md", reason)
+
+    # --- defensive parser ----------------------------------------------------
+
+    def test_colon_in_path_rejected(self):
+        # Paths in this repo never contain `:` (flat layout, no Windows
+        # drive letters). The parser MUST reject ambiguous multi-colon
+        # entries rather than silently splitting on the wrong one.
+        with self.assertRaises(ValueError):
+            maintenance_gate.registry_index_updated_ok(
+                changed_files=["weird:path:added"],
+                pr_body="",
+            )
+
+    def test_empty_status_rejected(self):
+        # `:added` with empty path is also malformed.
+        with self.assertRaises(ValueError):
+            maintenance_gate.registry_index_updated_ok(
+                changed_files=[":added"],
+                pr_body="",
+            )
+
+    def test_empty_path_rejected(self):
+        # `lib/foo.py:` (trailing colon, empty status) is malformed.
+        with self.assertRaises(ValueError):
+            maintenance_gate.registry_index_updated_ok(
+                changed_files=["lib/foo.py:"],
+                pr_body="",
+            )
+
+    # --- combined docs_updated_ok wiring ------------------------------------
+
+    def test_docs_updated_ok_combines_registry_fail_first(self):
+        # When BOTH the path-level check AND the registry check would
+        # fail, the registry-specific message wins (more actionable).
+        ok, reason = maintenance_gate.docs_updated_ok(
+            changed_files=[
+                "skills/foo/SKILL.md:added",
+                "lib/bar.py:modified",
+            ],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
+        # Registry reason mentions the new skill + the registry doc.
+        self.assertIn("skills/foo/SKILL.md", reason)
+        self.assertIn("registry", reason.lower())
+
+    def test_docs_updated_ok_path_level_failure_when_no_registry_issue(self):
+        # lib/foo.py changed (path-level fail) but no new skill/command
+        # → reason names the path-level failure, not registry.
+        ok, reason = maintenance_gate.docs_updated_ok(
+            changed_files=["lib/foo.py:modified"],
+            pr_body="",
+        )
+        self.assertFalse(ok, reason)
+        self.assertIn("lib/foo.py", reason)
+
+
+class TestParseFileEntry(unittest.TestCase):
+    """The `parse_file_entry` helper is exported so CLI `--help` and
+    downstream callers can reference it directly.
+    """
+
+    def test_legacy_bare_path(self):
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("lib/foo.py"),
+            ("lib/foo.py", "modified"),
+        )
+
+    def test_status_aware(self):
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:added"),
+            ("skills/foo/SKILL.md", "added"),
+        )
+
+    def test_uppercase_status_normalized(self):
+        # GitHub's `gh pr view --json files --jq` emits
+        # `.changeType` values in UPPERCASE (ADDED, MODIFIED,
+        # DELETED, RENAMED, COPIED). The parser MUST lowercase them
+        # so internal comparisons stay consistent (the registry
+        # check matches against lowercase frozensets). Discovered
+        # live in PR #802 babysit iter 1 — uppercase values were
+        # silently failing the registry check (no lowercase match).
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:ADDED"),
+            ("skills/foo/SKILL.md", "added"),
+        )
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:MODIFIED"),
+            ("skills/foo/SKILL.md", "modified"),
+        )
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:DELETED"),
+            ("skills/foo/SKILL.md", "deleted"),
+        )
+        self.assertEqual(
+            maintenance_gate.parse_file_entry("skills/foo/SKILL.md:RENAMED"),
+            ("skills/foo/SKILL.md", "renamed"),
+        )
+
+    def test_rejects_multi_colon(self):
+        with self.assertRaises(ValueError):
+            maintenance_gate.parse_file_entry("weird:path:added")
+
+    def test_rejects_empty_path(self):
+        with self.assertRaises(ValueError):
+            maintenance_gate.parse_file_entry(":added")
+
+    def test_rejects_empty_status(self):
+        with self.assertRaises(ValueError):
+            maintenance_gate.parse_file_entry("lib/foo.py:")
+
+
+class TestRegistryOnlyCLI(unittest.TestCase):
+    """`--registry-only` flag runs only the registry check (skip the
+    path-level docs check). Useful for triaging "did the operator
+    forget to update the README" without conflating with the broader
+    docs-not-required path-level check.
+    """
+
+    def test_cli_registry_only_fails_on_new_skill(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--registry-only",
+             "--changed-files", "skills/foo/SKILL.md:added",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertFalse(out["registry_ok"])
+        self.assertIn("skills/foo/SKILL.md", out["reason"])
+
+    def test_cli_registry_only_passes_when_registry_doc_touched(self):
+        py = sys.executable
+        result = subprocess.run(
+            [py, "-m", "lib.maintenance_gate",
+             "--project-root", tempfile.mkdtemp(),
+             "--registry-only",
+             "--changed-files", "skills/foo/SKILL.md:added",
+             "--changed-files", "README.md:modified",
+             "--pr-body", ""],
+            capture_output=True, text=True,
+            cwd=str(Path(__file__).parent.parent),
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertTrue(out["registry_ok"])
 
 
 if __name__ == "__main__":

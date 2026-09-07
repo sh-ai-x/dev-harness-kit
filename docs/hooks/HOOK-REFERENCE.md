@@ -59,7 +59,7 @@ useful when you're debugging *why* a hook did or didn't run:
 | `session-start-check.sh` | SessionStart | Remind about the worktree rule | advisory |
 | `log-on-session-start.sh` | SessionStart | Auto-install loghooks each session (idempotent) | advisory |
 | `provider-divergence-check.sh` | SessionStart | Nudge when `.env:CI_REVIEW_PROVIDER` is off-list, diverges, or missing | advisory |
-| `worktree-janitor-session-start.sh` | SessionStart | Nudge when merged-into-main or stale `fix/classify-request-*` worktrees are present; opt-out via `DEV_KIT_JANITOR_OFF=1` (issue #717) | advisory |
+| `worktree-janitor-session-start.sh` | SessionStart | Nudge when merged-into-main or stale `fix/classify-request-*` worktrees are present; opt-out via `DEV_KIT_JANITOR_OFF=1` (issue #717). Optional auto-apply when `DEV_KIT_JANITOR_AUTO_PRUNE=1` *and* `DEV_KIT_JANITOR_AUTO_PRUNE_YES=1` are exported (capped at `DEV_KIT_JANITOR_AUTO_PRUNE_MAX`, default 50/session) — restricted to stale-classify predicate only, skips current + main worktree, requires clean `git status`, drops `--force`. Audit log at `.dev-kit/janitor-audit.log`. | advisory |
 | `secret-scan.sh` | PostToolUse (Write\|Edit) | Detect credentials in edits | hard-block |
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
 | `l4-todo-scan.sh` | PostToolUse (Write\|Edit) | Fail-closed scan for TODO/FIXME deferred-work markers in `Write`/`Edit`/`MultiEdit` payloads; strict-mode via `L4_STRICT=1` (MUST-4) | hard-block (advisory under allowed-path exemption) |
@@ -95,6 +95,27 @@ inside a PreToolUse shell script). Each helper carries its own
 | `slot-check.sh` | `git-guard.sh` | `slot_should_deny <claude> <codex> <expected>` truth table for the `plugin.json` version-slot check (added 2026-08-03, inspect finding #2) |
 | `stage-gate.sh` | `stop-verify.sh` | `hook_stage_active` + `pre_completion_checklist_active` stage-activation helpers (the second follows stop-verify's stage + override rules so the intent checklist fires under the same gate) |
 | `loop-detect.sh` | `hooks/loop-detect.sh` | Append per-session Bash fingerprints and detect consecutive matches at the configured threshold |
+
+## Reference data banks (`hooks/references/`)
+
+Two hooks (`slop-detector.sh`, `l4-todo-scan.sh`) load their detection
+patterns from runtime data files under [`hooks/references/`](../../hooks/references/)
+instead of inlining EREs in shell. Despite the `.md` extension, those files
+are **machine-readable data**, not user-facing docs — the top-level
+[`hooks/references/README.md`](../../hooks/references/README.md) explains
+the loader contract (POSIX ERE, line-delimited, `#` comments skipped) and
+which consumer reads which bank.
+
+| Bank | Consumer | Purpose | Fallback |
+|---|---|---|---|
+| `hooks/references/l4/markers.md` | `l4-todo-scan.sh` | TODO/FIXME/XXX/HACK + KO soft markers (`나중에`, `임시`, `스텁`, …) | None — fails closed |
+| `hooks/references/slop/phrases.md` | `slop-detector.sh` (T1) + `inspect --slop` | High-signal n-gram bank (KO + EN) | Inline v1 single regex (degraded; WARN printed) |
+| `hooks/references/slop/structures.md` | `slop-detector.sh` (T2) + `inspect --slop` | Structural regex bank (binary contrast, false agency, Wh-starters, KO structure) | Inline v1 single regex |
+| `hooks/references/slop/scoring.md` | `inspect --slop` (only) | 1-10 × 5-dim rubric (Directness / Rhythm / Trust / Authenticity / Density) | None |
+| `hooks/references/slop/examples.md` | `inspect --slop` (reference only) | Before/after fixtures for human reviewers; real fixtures live in `tests/fixtures/slop/` | None |
+
+`hooks/references/slop/README.md` is the per-bank README (severity tier,
+`SLOP_LEVEL` / `SLOP_QUIET` / `SLOP_STRICT` env vars, fallback contract).
 
 ---
 
