@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin version bump via GitHub Merge Queue</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Plugin version bump via GitHub Merge Queue</h1>
+<p class="meta">2026-08-30 · <span class="tag tag-info">ready-for-review</span></p>
+
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Plugin version bump via GitHub Merge Queue</a></li></ol></div>
+<h2 id="sec-0">Plugin version bump via GitHub Merge Queue</h2>
+<h2>Why this exists</h2>
+<p>Every PR into <code>main</code> on dev-harness-kit triggers a one-line conflict on <code>.claude-plugin/plugin.json:version</code> and <code>.codex-plugin/plugin.json:version</code>.</p>
+<p>The root cause is a self-imposed loop:</p>
+<ol><li>PR #N is open, branched from <code>main</code> at version <code>v0.3.N</code>.</li><li>PR #N-1 merges into <code>main</code>.</li><li><code>.github/workflows/version-bump.yml</code> auto-fires on <code>push: branches: [main]</code>, opens a <code>chore(release): bump dev-kit to v0.3.N+1</code> PR (or pushes directly).</li><li>PR #N is now one version behind <code>main</code>; opening it against <code>main</code> produces a content conflict on the version field.</li></ol>
+<p>Every feature PR has hit this in 2026-08 (PRs #762, #763, #764 all shipped a "Merge origin/main" commit that only resolved this one line). The maintainer noted this in <code>docs/reverts/2026-08-02-revert-eval-prs.md</code> line 23: "Review the version-bump workflow (#522) — it was a workaround for #507's server-side branch protection and may be obsolete after this revert chain lands."</p>
+<p>The maintainer also wrote <code>docs/skills/bump.md</code> describing a manual <code>/dev-kit:bump</code> skill, which exists "for race recovery — redoing an orphaned bump locally after the workflow leaves a tip without a PR, and for cutting an explicit pre-PR release candidate." That skill exists because the workflow is racy.</p>
+<h2>Why a fix is needed now</h2>
+<p>The conflict pattern is mechanical and zero-substance. Each conflict costs:</p>
+<ul><li>~30 seconds of author time to merge main and recommit</li><li>a new "Merge origin/main" commit per PR (visible in PR history, noise in changelog)</li><li>a recurring review/security LLM-judge run if the bot can't fast-forward cleanly (cost on Anthropic API spend)</li></ul>
+<p>Three PRs in the last 48 hours each shipped a merge commit for this alone. This is the wrong ratio of operator effort to release value.</p>
+<h2>Constraints (what we cannot break)</h2>
+<p><a href="https://code.claude.com/docs/en/plugin-marketplaces">Claude Code plugin-marketplaces docs</a> and <a href="https://github.com/anthropics/claude-code/issues/43763">issue #43763</a> both confirm: bumping <code>plugin.json:version</code> is the <strong>primary cache invalidation mechanism</strong> for installed users. Removing or computing this field at runtime would break user-side cache refresh.</p>
+<p>Therefore <code>plugin.json:version</code> MUST remain:</p>
+<ol><li>A real string in the file (not generated at install time)</li><li>Bumped on every change that should reach installed users</li><li>Bumped monotonically with each merged PR</li></ol>
+<h2>Constraints (what we CAN change)</h2>
+<p><a href="https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue">GitHub Merge Queue docs</a> and <a href="https://github.com/orgs/community/discussions/102764">community discussion #102764</a> confirm Merge Queue fires <code>merge_group</code> events at the moment a PR is merged. <code>merge_group</code> is the GitHub-provided mechanism that solves this exact problem:</p>
+<blockquote><p>"A merge queue runs required checks against every pull request head immediately before merging, and updates the head branch with the target branch before the merge to keep the test surface up to date."</p></blockquote>
+<p>The merge queue's own behavior guarantees that <strong>every merged PR has already incorporated the latest `main` state</strong>, including any version bump. This makes the per-PR conflict resolution path obsolete.</p>
+<h2>Options considered</h2>
+<h3>Option A — Remove <code>version</code> field, compute at runtime</h3>
+<ul><li><strong>Verdict</strong>: rejected. Breaks cache invalidation contract.</li><li>Source: <a href="https://code.claude.com/docs/en/plugin-marketplaces">Claude Code plugin-marketplaces docs</a> + <a href="https://github.com/alirezarezvani/claude-skills/issues/757">issue #757 stale marketplace.json</a> + <a href="https://github.com/anthropics/claude-code/issues/43763">issue #43763 installed_plugins.json not updating</a></li></ul>
+<h3>Option B — Per-PR auto-rebase bot (cron + push)</h3>
+<ul><li><strong>Verdict</strong>: rejected. Re-triggers LLM-judge review per rebase (cost explosion), race condition with version-bump workflow's own PR, no conflict resolution on hard-conflict PRs.</li><li>Source: <a href="https://github.com/orgs/community/discussions/166932">community discussion #166932</a> + <a href="https://github.com/github-community-projects/pr-conflict-detector">PR Conflict Detector</a></li></ul>
+<h3>Option C — GitHub Merge Queue (selected)</h3>
+<ul><li><strong>Verdict</strong>: selected. GitHub-managed rebase at merge time, no cron, no bot, no LLM-judge re-run, all current contracts preserved.</li><li>Source: <a href="https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue">Managing a merge queue</a> + <a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads#merge_group">merge_group event docs</a></li></ul>
+<h3>Option D — Version from env var injected at build time</h3>
+<ul><li><strong>Verdict</strong>: rejected for now. Requires release artifact + tag machinery this repo doesn't have; larger refactor with same end state as C.</li></ul>
+<h2>What changes</h2>
+<h3>BEFORE (current)</h3>
+<pre><code>PR #N open, branched from main at v0.3.K
+   │
+   ├─ PR #N-1 merges into main
+   │     └─ version-bump.yml auto-runs on push
+   │           └─ pushes chore(release): bump v0.3.(K+1) to main
+   │
+   ├─ PR #N now conflicts on plugin.json:version
+   │     └─ author: git fetch origin/main &amp;&amp; git merge &amp;&amp; git push
+   │           └─ LLM review re-runs (cost)
+   │
+   └─ PR #N merges, &quot;Merge origin/main&quot; commit in history</code></pre>
+<h3>AFTER (proposed)</h3>
+<pre><code>PR #N open, branched from main at v0.3.K
+   │
+   ├─ PR #N-1 merges via Merge Queue
+   │     └─ merge_group event fires
+   │           └─ version-bump.yml bumps v0.3.(K+1) on the merge_group ref
+   │           └─ queue merges the result into main
+   │
+   ├─ PR #N enters queue
+   │     └─ GitHub auto-rebases PR #N onto new main (with v0.3.K+1)
+   │     └─ ready-check workflow runs (lint + validate + scope only)
+   │     └─ merges into main
+   │
+   └─ No conflict, no &quot;Merge origin/main&quot; commit</code></pre>
+<h2>Files in this migration</h2>
+<h3>Added</h3>
+<ul><li><code>.github/workflows/merge-queue-ready-check.yml</code> — fast (&lt;2min) checks that gate the merge queue; does NOT include the 30-300s LLM judges (those run on the <code>pull_request</code> event as today, finish before the PR is queue-eligible).</li><li><code>docs/proposals/release/plugin-version-bump-via-merge-queue.yaml</code> — this file.</li><li><code>docs/release.md</code> — operator-facing OLD vs NEW with evidence links.</li></ul>
+<h3>Modified</h3>
+<ul><li><code>.github/workflows/version-bump.yml</code> — <code>on: push: branches: [main]</code> → <code>on: merge_group</code>. Keep the title regex <code>chore(release): bump dev-kit to vX.Y.Z</code> because every other workflow filters on it; the bump still produces the same commit, just from a different trigger.</li><li><code>bin/sync-version.sh</code> — becomes a no-op compat shim with a comment pointing at the proposal. The pre-push auto-sync is removed.</li><li><code>.githooks/pre-push</code> — the auto-SYNC block is removed; pre-push keeps its other duties (block direct push to main, intent check).</li></ul>
+<h3>Removed</h3>
+<ul><li>The "auto-SYNC plugin.json from origin/main" code path in <code>.githooks/pre-push</code> (dead under merge queue; creates race).</li><li>The functional body of <code>bin/sync-version.sh</code> (replaced by no-op shim).</li><li>The <code>description</code> paragraph in <code>skills/sync-version/SKILL.md</code> that tells users to run it before pushing (now done automatically by the queue).</li></ul>
+<h2>Operational changes</h2>
+<ol><li>Repository admin: enable Merge Queue on <code>main</code> with the default settings + the new <code>merge-queue-ready-check.yml</code> as a required check. (This is an out-of-repo GitHub UI change; documented in <code>docs/release.md</code> step 1.)</li><li>Contributors: no change. PRs are auto-rebased by the queue.</li><li>Release tagging: unchanged. Tag-driven releases still work; the bump is a separate concern.</li></ol>
+<h2>Evidence trail (preserved for auditability)</h2>
+<ul><li><a href="https://code.claude.com/docs/en/plugin-marketplaces">Claude Code plugin-marketplaces spec</a> — confirms <code>version</code> is the cache-invalidation field</li><li><a href="https://github.com/anthropics/claude-code/issues/43763">issue #43763 installed_plugins.json stale</a> — confirms runtime-computed versions break cache</li><li><a href="https://github.com/alirezarezvani/claude-skills/issues/757">issue #757 stale marketplace.json</a> — confirms cache staleness is a real production concern</li><li><a href="https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue">Managing a merge queue</a> — official merge-queue docs</li><li><a href="https://github.com/orgs/community/discussions/102764">community discussion #102764 merge_group</a> — merge_group trigger semantics</li><li><a href="https://github.com/orgs/community/discussions/24567">community discussion #24567 synchronize</a> — synchronize does NOT fire on base advance (the reason a custom bot would be needed without the queue)</li><li><a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads#merge_group">merge_group webhook event</a> — official webhook payload spec</li><li><a href="../../../reverts/2026-08-02-revert-eval-prs.md">docs/reverts/2026-08-02-revert-eval-prs.md line 23</a> — internal: maintainer already flagged version-bump workflow as a workaround</li><li><a href="../../../skills/bump.md">docs/skills/bump.md</a> — internal: skill exists only because the workflow is racy</li><li><a href="../../../.github/workflows/version-bump.yml">`.github/workflows/version-bump.yml`</a> — current implementation being migrated</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-07 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

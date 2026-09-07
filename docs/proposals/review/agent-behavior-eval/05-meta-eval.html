@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 — Meta-Eval (Evaluator를 평가한다)</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>05 — Meta-Eval (Evaluator를 평가한다)</h1>
+<p class="meta">2026-07-31 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">meta-eval</span><span class="tag tag-info">evidence-based</span><span class="tag tag-info">golden-cases</span><span class="tag tag-info">calibration</span><span class="tag tag-info">regression</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">문제 — Eval 자체를 어떻게 검증하는가</a></li><li><a href="#sec-1">해결 — Golden case + expected verdict</a></li><li><a href="#sec-2">모듈 구조</a></li><li><a href="#sec-3">Check 규칙 (`_check_case`)</a></li><li><a href="#sec-4">Public API</a></li><li><a href="#sec-5">3 개의 Seed Cases</a></li><li><a href="#sec-6">동작 흐름</a></li><li><a href="#sec-7">Audit 매트릭스 갱신 (본 토픽 적용 후)</a></li><li><a href="#sec-8">한계와 후속</a></li><li><a href="#sec-9">다음 문서</a></li></ol></div>
+<h2 id="sec-0">문제 — Eval 자체를 어떻게 검증하는가</h2>
+<p>evidence-based 평가의 핵심 요건은 <strong>"점수가 ground truth 와 연결"</strong> 되어야 한다는 점이다 (proposal 04 §"계층 2 — Calibration" / §"계층 3 — Evaluator 평가").</p>
+<p>현재 eval 하네스의 audit 매트릭스:</p>
+<table><thead><tr><th>기준</th><th>D1-D4</th><th>D5-D7 (Phase 0)</th><th>평가</th></tr></thead><tbody><tr><td>1. 모든 claim 에 evidence 가 있다</td><td>✅</td><td>⚠️ stub</td><td>⚠️</td></tr><tr><td>2. evidence 가 raw 데이터에서 도출</td><td>✅</td><td>⚠️</td><td>⚠️</td></tr><tr><td>3. 같은 입력 → 같은 결과</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>4. 사용자가 challenge 가능</td><td>✅</td><td>⚠️</td><td>⚠️</td></tr><tr><td>5. ground truth 와 비교 가능</td><td>❌</td><td>❌</td><td>❌</td></tr><tr><td>6. meta-eval (golden case known verdict)</td><td>❌</td><td>❌</td><td>❌</td></tr></tbody></table>
+<p><strong>5, 6번</strong> 이 빈 자리. 본 토픽이 이를 채운다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">해결 — Golden case + expected verdict</h2>
+<p><code>eval/cases/agent-behavior/</code> 디렉터리에 <strong>golden case fixture</strong> 를 둔다. 각 case 는:</p>
+<ul><li><code>worktree_path</code> — 평가 대상 worktree (fixture 안 fixture)</li><li><code>expected</code> — <em>올바른</em> eval verdict (메타 정보로 박혀 있음)</li></ul>
+<pre><code class="language-json">{
+  &quot;case_id&quot;: &quot;agent-behavior-01-golden-clean-pr&quot;,
+  &quot;dim&quot;: &quot;agent-behavior&quot;,
+  &quot;schema_version&quot;: 1,
+  &quot;worktree_path&quot;: &quot;../../../tests/fixtures/agent-behavior/&quot;,
+  &quot;expected&quot;: {
+    &quot;verdict&quot;: &quot;OK&quot;,
+    &quot;deterministic_mean_min&quot;: 3.5,
+    &quot;weighted_mean_min&quot;: 3.8,
+    &quot;per_dim_min&quot;: {
+      &quot;D1_outcome&quot;: 4, &quot;D2_process&quot;: 3,
+      &quot;D3_efficiency&quot;: 3, &quot;D4_safety&quot;: 4,
+      &quot;D5_communication&quot;: 3, &quot;D6_robustness&quot;: 3,
+      &quot;D7_trajectory&quot;: 3
+    }
+  }
+}</code></pre>
+<p>eval 하네스가 case 를 실행하면, 실제 verdict vs expected verdict 비교. 불일치 시 eval 하네스 자체에 regression 이 있는 것 → <strong>자동 감지</strong>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">모듈 구조</h2>
+<pre><code>eval/cases/agent-behavior/
+├── 01_golden_clean_pr.json       # 정상 PR → OK 기대
+├── 02_l1_violation_escalated.json # L1 위반 → ESCALATED 기대
+└── 03_drift_warning.json         # 부분 회귀 → DRIFT_WARNING 기대
+
+lib/meta_eval.py                   # 본 토픽이 추가
+  ├── CaseSpec                  # case JSON → typed
+  ├── CaseExpected              # expected metadata
+  ├── CaseMetaResult            # per-case outcome
+  ├── MetaEvalReport            # aggregate
+  └── run_meta_eval(cases_dir)  # entry point</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-3">Check 규칙 (`_check_case`)</h2>
+<p>CaseSpec.expected vs 실제 BehaviorReport 비교:</p>
+<table><thead><tr><th>규칙</th><th>위반 시</th></tr></thead><tbody><tr><td><code>verdict_mismatch</code></td><td><code>verdict != expected.verdict</code></td></tr><tr><td><code>weighted_mean_below_min</code></td><td><code>weighted_mean &lt; weighted_mean_min</code></td></tr><tr><td><code>weighted_mean_above_max</code></td><td><code>weighted_mean &gt; weighted_mean_max</code></td></tr><tr><td><code>deterministic_mean_below_min</code></td><td><code>deterministic_mean &lt; deterministic_mean_min</code></td></tr><tr><td><code>&lt;dim&gt;_below_min</code></td><td>dim 점수 &lt; <code>per_dim_min[dim]</code></td></tr><tr><td><code>&lt;dim&gt;_above_max</code></td><td>dim 점수 &gt; <code>per_dim_max[dim]</code></td></tr></tbody></table>
+<p>각 규칙은 <code>CaseFailure(rule, expected, actual)</code> 로 보고. <strong>case 의 status</strong>:</p>
+<ul><li><code>passed</code> — failures 없음</li><li><code>failed</code> — 1+ failures</li><li><code>skipped</code> — worktree_path 가 disk 에 없음 (fixture 미완성)</li><li><code>error</code> — case JSON 자체가 파싱 불가 또는 eval 이 raise</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-4">Public API</h2>
+<pre><code class="language-python">from pathlib import Path
+from lib.meta_eval import run_meta_eval
+from lib.behavior_scorers import Context
+
+report = run_meta_eval(
+    cases_dir=Path(&quot;eval/cases/agent-behavior&quot;),
+    ctx=Context(no_llm=True),
+)
+# report.total, report.passed, report.failed, report.skipped
+# report.cases -&gt; tuple[CaseMetaResult]
+# report.all_passed -&gt; bool</code></pre>
+<p>CLI 통합 (Phase 1 후속):</p>
+<pre><code class="language-bash">/dev-kit:evaluate --self-check eval/cases/agent-behavior/
+/dev-kit:evaluate --self-check --update-golden   # 회귀 감지 시 expected 갱신</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-5">3 개의 Seed Cases</h2>
+<table><thead><tr><th>Case</th><th>fixture</th><th>expected verdict</th><th>검증 의도</th></tr></thead><tbody><tr><td><code>01_golden_clean_pr</code></td><td><code>tests/fixtures/agent-behavior/</code></td><td>OK</td><td>정상 PR baseline. eval 하네스가 OK 를 내야 한다.</td></tr><tr><td><code>02_l1_violation_escalated</code></td><td><code>tests/fixtures/agent-behavior/l1-violation/</code></td><td>ESCALATED</td><td>TODO in lib/ → D4 L1 위반 → deterministic floor 발동. eval 하네스가 ESCALATED 를 내야 한다.</td></tr><tr><td><code>03_drift_warning</code></td><td><code>tests/fixtures/agent-behavior/drift/</code></td><td>DRIFT_WARNING</td><td>부분 회귀 (compile error). eval 하네스가 DRIFT_WARNING 을 내야 한다.</td></tr></tbody></table>
+<p>새 case 추가 = 1 JSON 파일 + fixture 디렉터리. CI 자동 검증.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">동작 흐름</h2>
+<pre><code>git commit (or PR open)
+  │
+  ▼
+CI: /dev-kit:evaluate --self-check eval/cases/agent-behavior/
+  │
+  ▼
+run_meta_eval(cases_dir)
+  │
+  ├─ load cases/*.json → CaseSpec[]
+  │
+  ├─ for each spec:
+  │     ├─ worktree_path.is_dir() ? → score_all() → BehaviorReport
+  │     │     ├─ _check_case(spec, report) → tuple[CaseFailure]
+  │     │     └─ CaseMetaResult(status=passed/failed)
+  │     └─ not dir → CaseMetaResult(status=skipped)
+  │
+  ▼
+MetaEvalReport { total, passed, failed, skipped, errored, all_passed }
+  │
+  ▼
+CI gate: exit 0 if all_passed else 1</code></pre>
+<p>회귀 감지 시점:</p>
+<ul><li>D4 scorer 로직 변경 → <code>02_l1_violation_escalated</code> 가 더 이상 ESCALATED 안 냄</li><li>verdict 규칙 변경 → <code>01_golden_clean_pr</code> 가 OK 안 냄</li><li>가중치 변경 → <code>weighted_mean</code> 이 expected 범위 밖</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-7">Audit 매트릭스 갱신 (본 토픽 적용 후)</h2>
+<table><thead><tr><th>기준</th><th>D1-D4</th><th>D5-D7</th><th>평가</th><th>변화</th></tr></thead><tbody><tr><td>1. evidence 가 있다</td><td>✅</td><td>⚠️</td><td>⚠️</td><td>(불변)</td></tr><tr><td>2. raw 데이터에서 도출</td><td>✅</td><td>⚠️</td><td>⚠️</td><td>(불변)</td></tr><tr><td>3. 재현성</td><td>✅</td><td>✅</td><td>✅</td><td>(불변)</td></tr><tr><td>4. challenge 가능</td><td>✅</td><td>⚠️</td><td>⚠️</td><td>(불변)</td></tr><tr><td>5. ground truth 비교</td><td>✅</td><td>⚠️</td><td>✅</td><td><strong>개선</strong></td></tr><tr><td>6. meta-eval</td><td>✅</td><td>✅</td><td>✅</td><td><strong>개선</strong></td></tr></tbody></table>
+<p>5, 6번이 이제 ✅. <strong>eval 하네스 자체가 evidence-based</strong>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">한계와 후속</h2>
+<p><strong>한계 (Phase 0 한정)</strong>:</p>
+<ul><li>3 개 case 만 seed. 더 필요한 case 는 운영하면서 발견되는 대로 추가</li><li>D5/D6/D7 stub 의 <em>expected verdict</em> 는 meta-eval 의 한계 — Phase 1 LLM judge 가 들어와야 ground truth 검증 가능</li><li>expected verdict 갱신 (<code>--update-golden</code>) 은 아직 미구현. PR review 시 수동</li></ul>
+<p><strong>Phase 1 후속</strong>:</p>
+<ul><li>12 case → 50+ case 확장 (real eval history 에서 rotation)</li><li><code>--update-golden</code> CLI: 회귀 감지 시 expected 자동 갱신 (review 필수)</li><li>LLM judge expected_score_range 보정 (현재는 verdict 만)</li><li>CI: eval 하네스 변경 PR 마다 <code>--self-check</code> 자동 실행</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-9">다음 문서</h2>
+<ul><li><a href="00-index.html">00-index.html</a> — 색인 + 최종 권고</li><li><a href="01-rubric.html">01-rubric.html</a> — 7 차원 루브릭</li><li><a href="04-open-questions.html">04-open-questions.html</a> — Q1-Q6 deferred</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-07 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

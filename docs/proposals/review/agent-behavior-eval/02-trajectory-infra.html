@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 — JSONL Trajectory Infrastructure</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>02 — JSONL Trajectory Infrastructure</h1>
+<p class="meta">2026-07-31 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">trajectory</span><span class="tag tag-info">jsonl</span><span class="tag tag-info">worktree-logs</span><span class="tag tag-info">diff</span><span class="tag tag-info">dashboard</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">개요</a></li><li><a href="#sec-1">Trace JSON 스키마</a></li><li><a href="#sec-2">모듈 구조</a></li><li><a href="#sec-3">TraceLog API</a></li><li><a href="#sec-4">Diff 도구 (tools/trace_diff.py)</a></li><li><a href="#sec-5">Cost Dashboard (tools/cost_dashboard.py)</a></li><li><a href="#sec-6">통합 흐름</a></li><li><a href="#sec-7">신규 의존성 (0)</a></li><li><a href="#sec-8">다음 문서</a></li></ol></div>
+<h2 id="sec-0">개요</h2>
+<p><strong>모든 trajectory 데이터는 worktree 내 JSON 파일에 저장</strong>. 외부 telemetry 인프라 없음. 한 줄 요약:</p>
+<pre><code>worktree/&lt;task&gt;/
+├── .git/                         # git history (이미 존재)
+├── hooks-output.log              # hook firing log (이미 존재)
+├── .dev-kit/hand-off/*.md        # 단계 노트 (이미 존재)
+└── eval/transcripts/
+    └── &lt;case-id&gt;/
+        └── &lt;UTC-timestamp&gt;.json  # ← 본 proposal 신규</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-1">Trace JSON 스키마</h2>
+<pre><code class="language-json">{
+  &quot;schema_version&quot;: 1,
+  &quot;case_id&quot;: &quot;fix-login-validation&quot;,
+  &quot;started_at&quot;: &quot;2026-07-31T10:00:00Z&quot;,
+  &quot;ended_at&quot;: &quot;2026-07-31T10:08:42Z&quot;,
+  &quot;harness_version&quot;: &quot;0.3.175&quot;,
+  &quot;agent&quot;: &quot;claude-code-4.8&quot;,
+  &quot;worktree_branch&quot;: &quot;fix/login-validation&quot;,
+  &quot;worktree_path&quot;: &quot;.worktrees/fix-login-validation&quot;,
+  &quot;steps&quot;: [
+    {
+      &quot;ts&quot;: &quot;2026-07-31T10:00:12Z&quot;,
+      &quot;skill&quot;: &quot;plan&quot;,
+      &quot;phase&quot;: &quot;interview&quot;,
+      &quot;model&quot;: &quot;claude-opus-4-8&quot;,
+      &quot;prompt_hash&quot;: &quot;8a2f9b...&quot;,
+      &quot;input_tokens&quot;: 312,
+      &quot;output_tokens&quot;: 89,
+      &quot;latency_ms&quot;: 1240,
+      &quot;retries&quot;: 0,
+      &quot;exit_code&quot;: 0
+    },
+    {
+      &quot;ts&quot;: &quot;2026-07-31T10:01:33Z&quot;,
+      &quot;skill&quot;: &quot;build&quot;,
+      &quot;phase&quot;: &quot;tdd-red&quot;,
+      &quot;test_file&quot;: &quot;tests/test_login.py&quot;,
+      &quot;exit_code&quot;: 0,
+      &quot;latency_ms&quot;: 850
+    }
+  ],
+  &quot;judge_scores&quot;: [
+    {
+      &quot;judge&quot;: &quot;rubric:agent-behavior&quot;,
+      &quot;axes&quot;: {
+        &quot;D1_outcome&quot;: 5,
+        &quot;D2_process&quot;: 4,
+        &quot;D3_efficiency&quot;: 4,
+        &quot;D4_safety&quot;: 5,
+        &quot;D5_communication&quot;: 4,
+        &quot;D6_robustness&quot;: 3,
+        &quot;D7_trajectory&quot;: 4
+      },
+      &quot;weighted_mean&quot;: 4.29,
+      &quot;verdict&quot;: &quot;OK&quot;,
+      &quot;escalate&quot;: false
+    }
+  ],
+  &quot;evidence&quot;: {
+    &quot;D1&quot;: {&quot;tests&quot;: &quot;passed: 47/47&quot;, &quot;lint_violations&quot;: 0, &quot;eval_verdict&quot;: &quot;OK&quot;},
+    &quot;D2&quot;: {&quot;conventional_commits&quot;: true, &quot;branch_naming&quot;: true, &quot;tdd_intact&quot;: true, &quot;handoff_present&quot;: true, &quot;worktree_intact&quot;: true},
+    &quot;D4&quot;: {&quot;worktree_guard&quot;: &quot;pass&quot;, &quot;secret_scan&quot;: &quot;pass&quot;, &quot;bash_guard&quot;: &quot;pass&quot;, &quot;tdd_guard&quot;: &quot;pass&quot;}
+  }
+}</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-2">모듈 구조</h2>
+<pre><code>lib/
+├── trace_log.py            # TraceLog dataclass + write() + read()
+└── behavior_scorers/
+    ├── __init__.py         # public API
+    ├── registry.py         # DIM_AXES_BEHAVIOR + SCORER_REGISTRY
+    ├── outcome.py          # D1
+    ├── process.py          # D2
+    ├── efficiency.py       # D3
+    ├── safety.py           # D4
+    ├── communication.py    # D5 (LLM judge)
+    ├── robustness.py       # D6 (placeholder)
+    ├── trajectory.py       # D7 (hybrid)
+    └── aggregate.py        # verdict 결정
+
+tools/
+├── trace_diff.py           # 두 trace 비교 + delta 출력
+├── cost_dashboard.py       # 정적 HTML 1 파일
+└── replay_regression.py    # golden case N회 replay → baseline diff</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-3">TraceLog API</h2>
+<pre><code class="language-python"># lib/trace_log.py
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import List, Optional
+import json
+
+@dataclass(frozen=True)
+class TraceStep:
+    ts: str                              # ISO-8601 UTC
+    skill: str
+    phase: str
+    model: Optional[str] = None
+    prompt_hash: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
+    retries: int = 0
+    exit_code: int = 0
+    extra: dict = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class TraceLog:
+    schema_version: int = 1
+    case_id: str = &quot;&quot;
+    started_at: str = &quot;&quot;
+    ended_at: str = &quot;&quot;
+    harness_version: str = &quot;&quot;
+    agent: str = &quot;&quot;
+    worktree_branch: str = &quot;&quot;
+    worktree_path: str = &quot;&quot;
+    steps: List[TraceStep] = field(default_factory=list)
+    judge_scores: List[dict] = field(default_factory=list)
+    evidence: dict = field(default_factory=dict)
+
+    def to_dict(self) -&gt; dict:
+        d = asdict(self)
+        d[&quot;steps&quot;] = [asdict(s) for s in self.steps]
+        return d
+
+    @classmethod
+    def load(cls, path: Path) -&gt; &quot;TraceLog&quot;:
+        raw = json.loads(path.read_text())
+        steps = [TraceStep(**s) for s in raw.pop(&quot;steps&quot;, [])]
+        return cls(steps=steps, **raw)
+
+    def save(self, worktree: Path) -&gt; Path:
+        ts = datetime.now(timezone.utc).strftime(&quot;%Y%m%dT%H%M%SZ&quot;)
+        out_dir = worktree / &quot;eval&quot; / &quot;transcripts&quot; / self.case_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f&quot;{ts}.json&quot;
+        out.write_text(json.dumps(self.to_dict(), indent=2))
+        return out</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-4">Diff 도구 (tools/trace_diff.py)</h2>
+<p><strong>사용법</strong>: <code>python -m tools.trace_diff baseline.json current.json</code></p>
+<p><strong>출력</strong> (구조화):</p>
+<pre><code>Trace diff: baseline.json -&gt; current.json
+─────────────────────────────────────────
+Step count:    8 -&gt; 11         (+3)
+Total tokens:  4.2k -&gt; 6.8k   (+2.6k, +62%)
+Total latency: 12.3s -&gt; 18.9s (+6.6s, +54%)
+Retry total:   1 -&gt; 4         (+3)  ⚠️
+─────────────────────────────────────────
+Per-axis score delta:
+  D1_outcome        5 -&gt; 5   (=)
+  D2_process        4 -&gt; 3   (-1)  ⚠️
+  D3_efficiency     4 -&gt; 3   (-1)  ⚠️
+  D4_safety         5 -&gt; 5   (=)
+  D5_communication  4 -&gt; 4   (=)
+  D7_trajectory     4 -&gt; 3   (-1)  ⚠️
+─────────────────────────────────────────
+Verdict: OK -&gt; DRIFT_WARNING  ⚠️
+─────────────────────────────────────────
+Exit 1 (delta &gt; threshold)</code></pre>
+<p><strong>임계값</strong> (delta 가 다음 초과 시 exit 1):</p>
+<ul><li>retry count &gt; +2</li><li>tokens &gt; +50%</li><li>latency &gt; +50%</li><li>per-axis score drop &gt; 1</li><li>verdict drop (OK → DRIFT/ROT/ESCALATED)</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-5">Cost Dashboard (tools/cost_dashboard.py)</h2>
+<p><strong>사용법</strong>: <code>python -m tools.cost_dashboard eval/transcripts/ &gt; cost.html</code></p>
+<p><strong>표시 항목</strong> (정적 HTML, JS 없음):</p>
+<ul><li><strong>$/case</strong> — case 별 누적 API 비용</li><li><strong>$/judge</strong> — judge 호출당 비용</li><li><strong>Top-10 expensive prompts</strong> — 비용이 큰 prompt 상위 10개</li><li><strong>Latency p50/p95</strong> — step 별 지연 분포</li><li><strong>Token 분포</strong> — input/output 비율</li><li><strong>Trend</strong> (D1 future) — 1 주 단위 평균</li></ul>
+<p><strong>색상 토큰</strong>: design.md 의 <code>--accent</code>, <code>--bg</code>, <code>--card-bg</code> 등 재사용.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">통합 흐름</h2>
+<pre><code>/dev-kit:evaluate --agent-behavior &lt;worktree&gt;
+  │
+  ├─ lib/behavior_scorers/outcome.py        # D1 (결정적)
+  ├─ lib/behavior_scorers/process.py        # D2 (결정적)
+  ├─ lib/behavior_scorers/efficiency.py     # D3 (결정적, baseline 대비)
+  ├─ lib/behavior_scorers/safety.py         # D4 (결정적)
+  ├─ lib/behavior_scorers/communication.py  # D5 (LLM, --no-llm 시 skip)
+  ├─ lib/behavior_scorers/robustness.py     # D6 (placeholder, v2)
+  ├─ lib/behavior_scorers/trajectory.py     # D7 (heuristic)
+  └─ lib/behavior_scorers/aggregate.py      # weighted_mean + verdict
+  │
+  ▼
+TraceLog.save(worktree)
+  │
+  ▼
+.dev-kit/agent-behavior-report.md (per-worktree)
+eval/transcripts/&lt;case&gt;/&lt;UTC&gt;.json (machine-readable)</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-7">신규 의존성 (0)</h2>
+<p>본 인프라에 <strong>신규 의존성 없음</strong>. 모두 표준 라이브러리:</p>
+<ul><li><code>dataclasses</code> — trace / step 구조</li><li><code>json</code> — 직렬화</li><li><code>pathlib</code> — 파일 경로</li><li><code>subprocess</code> — git / pytest / lint 호출</li><li><code>argparse</code> — CLI</li><li><code>html</code> (stdlib) — dashboard escape</li></ul>
+<p>LLM judge (D5/D7) 는 기존 <code>lib/llm_judge.py:call_judge()</code> 재사용.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">다음 문서</h2>
+<ul><li><a href="03-rollout.html">03-rollout.html</a> — 단계별 도입 + 결정</li><li><a href="04-open-questions.html">04-open-questions.html</a> — 미해결 질문 (auto-calibration, batch eval)</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-07 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

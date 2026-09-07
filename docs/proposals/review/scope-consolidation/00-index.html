@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scope consolidation — single source of truth for user/project/local settings</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Scope consolidation — single source of truth for user/project/local settings</h1>
+<p class="meta">2026-09-05 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">scopes</span><span class="tag tag-info">user-scope</span><span class="tag tag-info">project-scope</span><span class="tag tag-info">local-scope</span><span class="tag tag-info">modes</span><span class="tag tag-info">full</span><span class="tag tag-info">lite</span><span class="tag tag-info">undev</span><span class="tag tag-info">plugin-leak</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Why one canonical reference</a></li><li><a href="#sec-1">The three scopes, restated crisply</a></li><li><a href="#sec-2">The three modes</a></li><li><a href="#sec-3">The leak, in one paragraph</a></li><li><a href="#sec-4">Why dev-harness-kit-lite becomes a follow-up</a></li><li><a href="#sec-5">Cross-reference plan</a></li><li><a href="#sec-6">Adoption path</a></li><li><a href="#sec-7">Tests and verification</a></li><li><a href="#sec-8">Why this design wins alternatives</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Why one canonical reference</h2>
+<p>Every operator asks the same five questions:</p>
+<ol><li>Where do I put my personal preferences? (user scope)</li><li>Where do I tell this project which kit to use? (project scope)</li><li>Where do I put my private overrides within a project? (local scope)</li><li>Which mode (full / lite / undev) is right for this project?</li><li>Why is destructive-confirm firing in a repo that never ran ci-setup?</li></ol>
+<p>Until this PR, each of those questions had an answer scattered across CLAUDE.md, hooks/index.md, iron-laws/index.md, the bootstrap skill, and tribal knowledge. The answer also depended on which plugin was loaded (dev-kit vs dev-kit-lite), so the same project could behave differently on two operators' machines.</p>
+<p>docs/scopes/ answers all five questions from one directory, indexed by one word: scope.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">The three scopes, restated crisply</h2>
+<table><thead><tr><th>Scope</th><th>File</th><th>Git</th><th>Lifetime</th><th>Owner</th><th>Used for</th></tr></thead><tbody><tr><td>User</td><td>~/.claude/settings.json</td><td>n/a</td><td>machine</td><td>operator only</td><td>personal prefs, keybindings, statusline, universal allows</td></tr><tr><td>Project</td><td>&lt;proj&gt;/.claude/settings.json</td><td>committed</td><td>repo</td><td>team</td><td>this project's plugin choice, hooks, team-shared permissions</td></tr><tr><td>Local</td><td>&lt;proj&gt;/.claude/settings.local.json</td><td>gitignored</td><td>your checkout</td><td>operator only</td><td>personal override of project scope, debug flags</td></tr></tbody></table>
+<p>The rule that resolves 90% of confusion: the smallest scope that satisfies the need wins. If a setting is purely personal, it goes in user scope. If it must be team-shared, it goes in project scope. If it is your private override of a team setting, it goes in local scope.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">The three modes</h2>
+<p>DEV_KIT_MODE is a project-scope env value with three legal values:</p>
+<ul><li>full — current dev-kit (30+ skills, 30+ hooks, multi-session/multi-agent). Default if unset.</li><li>lite — 7-skill / 7-hook subset for 4-hour MVP sprints with a 6-person team. The follow-up PR makes this subset run from the same plugin.</li><li>undev — plugin not enabled. Silent default for non-dev repos. Already true today, but now it is explicit.</li></ul>
+<p>Resolution order (highest wins):</p>
+<ol><li>$DEV_KIT_MODE env var in the shell</li><li>env.DEV_KIT_MODE in &lt;proj&gt;/.claude/settings.json</li><li>Default = full</li></ol>
+<p>Per-session override without touching files: <code>DEV_KIT_MODE=lite claude --plugin-dir &lt;repo&gt;</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">The leak, in one paragraph</h2>
+<p>The bug we are closing: enabledPlugins.dev-kit@dev-kit: true at the user layer fires the kit's hook stack in every project on the machine, including ones that never opted in. The fix is structural — move the enabledPlugins line from user to project scope, and rely on extraKnownMarketplaces at user scope only so slash commands resolve.</p>
+<p>This PR documents the fix. The follow-up PR will offer a one-shot migration script.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Why dev-harness-kit-lite becomes a follow-up</h2>
+<p>Unifying dev-harness-kit-lite into the main repo requires runtime changes — a mode gate inside every hook, a mode resolver, and /dev-kit:mode skill. Those are non-trivial and risky to ship in the same PR as the docs because reviewers cannot tell which change caused a regression.</p>
+<p>The doc-first sequencing lets reviewers validate the contract (templates + decision tree) before any code reads from it. The follow-up PR will then write lib/mode.sh, gate every hook, and add the /dev-kit:mode skill — all using these templates as their input.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Cross-reference plan</h2>
+<p>One-line additions to existing files, all pointing back at docs/scopes/README.md:</p>
+<ul><li>CLAUDE.md — add <code>- Scope reference → docs/scopes/README.md</code></li><li>iron-laws/index.md — add a Modes section linking to docs/scopes/modes.md</li><li>hooks/index.md — add a Scope and mode section linking to docs/scopes/README.md</li><li>README.md — add a Where to configure link in Quick Start</li><li>skills/bootstrap/SKILL.md — replace its ad-hoc guidance with a reference to docs/scopes/templates/</li></ul>
+<p>No existing content is removed; this is purely additive.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Adoption path</h2>
+<p>Step 0 — Land docs (this PR). Reviewers verify the scope/mode contract is clear and the templates are correct.</p>
+<p>Step 1 — Update bootstrap. /dev-kit:bootstrap reads from docs/scopes/templates/settings.project.&lt;mode&gt;.json instead of writing inline JSON. Drop-in for projects that already ran bootstrap.</p>
+<p>Step 2 — Add /dev-kit:mode skill. Read/write DEV_KIT_MODE in env block. No hook changes yet.</p>
+<p>Step 3 — Wire hook mode gate. Add lib/mode.sh, source it at the top of every hook, short-circuit if $DEV_KIT_MODE does not match the hook's required mode.</p>
+<p>Step 4 — Deprecate lite repo. Tag sh-ai-x/dev-harness-kit-lite v0.1.0 as final, add a DEPRECATED banner pointing at dev-kit + mode=lite, archive after 90 days.</p>
+<p>Step 5 — Migrate users. One-shot script: claude plugin uninstall dev-kit@dev-kit &amp;&amp; claude plugin install dev-kit@dev-kit to drop stale cache versions.</p>
+<p>Each step is independently reviewable and reversible. None of them weakens the safety rails of the existing kit.</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">Tests and verification</h2>
+<p>This PR is docs-only, so the verification is review-side:</p>
+<ul><li>Markdown renders correctly on GitHub (no broken links).</li><li>JSON templates parse with jq (no trailing commas, valid syntax).</li><li>.gitignore-snippet applies cleanly to a fresh repo (verified by git check-ignore).</li><li>Cross-references resolve (every internal link points to an existing file).</li></ul>
+<p>The follow-up runtime PR will add tests/test_mode_resolution.sh (3 modes × 3 scope levels = 9 cases) and tests/test_hook_filtering.sh (every hook × 3 modes = N cases).</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">Why this design wins alternatives</h2>
+<table><thead><tr><th>Alternative</th><th>Why rejected</th></tr></thead><tbody><tr><td>Put scope docs in each plugin's README.md</td><td>Drift between two repos; operators read whichever repo they installed, never the other.</td></tr><tr><td>One giant docs/configuration.md</td><td>Mixes scopes, modes, hooks, permissions into one wall of text; reduces findability.</td></tr><tr><td>Three separate plugin manifests (dev-kit-full, dev-kit-lite, dev-kit-off)</td><td>Triples marketplace surface area; mode becomes an install-time decision instead of a per-session env var; harder to evolve.</td></tr><tr><td>Single docs/scopes/ with no templates</td><td>Operators still copy-paste from examples; drift returns within a week.</td></tr></tbody></table>
+<p>The chosen design — one directory, three scopes, three modes, six templates — matches the three scopes of Claude Code settings and the three usage classes (full / lite / undev) without inventing new abstractions.</p>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>Today, dev-harness-kit ships reference docs for plugin hooks, iron laws, skills, and CI templates, but nothing dedicated to the three Claude Code settings scopes (user, project, local) or to plugin mode selection (full / lite / undev). As a result, the same questions are answered inconsistently across docs, and the answer changes depending on which guide the operator reads.</p>
+<p>Concretely:</p>
+<ul><li><code>~/.claude/settings.json</code> is treated as the default place to enable plugins, but the user layer is machine-global — anything enabled there fires in every project, including scratchpads and non-dev repos. This causes the observed leak where <code>dev-kit-lite</code>'s <code>destructive-confirm.sh</code> fires inside <code>dev-harness-kit/</code> despite no project-level opt-in.</li><li><code>&lt;project&gt;/.claude/settings.json</code> is the right place for a project's plugin choice, but no canonical template exists. Operators copy-paste from old examples, drift appears, and <code>.claude/settings.local.json</code> is sometimes committed because the project's <code>.gitignore</code> was never extended.</li><li>The "lite" plugin is published as a separate repo (<code>sh-ai-x/dev-harness-kit-lite</code>), but the lite assets are a strict subset of the full kit plus 5 role rules and 7 templates. Maintaining two repos diverges them over time; the same <code>destructive-confirm.sh</code> already exists in three places (full kit, lite, and stale cache versions).</li><li>The phrase "undev" (silent, no dev hooks) is not defined anywhere. Non-dev projects inherit the user-scope's leaked plugins, which is the bug, not the feature.</li></ul><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>~/.claude/settings.json</code> has <code>"enabledPlugins": { "dev-kit@dev-kit": true, ... }</code> at the user layer, so the kit fires in every project on this machine.</li><li><code>~/.claude/plugins/cache/</code> contains 6 stale <code>dev-kit/dev-kit/&lt;sha&gt;</code> versions plus <code>dev-kit-lite/0.1.0/</code>; <code>find ... -name destructive-confirm.sh</code> returns 5 instances and <code>worktree-guard.sh</code> returns 8 — the cache itself is part of the leak surface.</li><li><code>hooks/index.md</code> and <code>iron-laws/index.md</code> reference plugin modes implicitly but never explain how an operator sets or changes the mode.</li><li><code>.claude/settings.local.json</code> is committed in this repo because <code>.gitignore</code> only ignores <code>.claude-plugin/plugin/hooks/.strict</code> and <code>.claude/commands/</code> — the local-scope file leaks into the team-shared scope.</li><li><code>docs/proposals/</code> has no entry under <code>scope-consolidation/</code> and <code>docs/scopes/</code> does not exist.</li><li><code>sh-ai-x/dev-harness-kit-lite</code> is a separate marketplace entry with 7 skills + 7 hooks; ~80% overlap with the full kit, but with no shared mode contract.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>A single canonical reference directory <code>docs/scopes/</code> answers every "which scope do I edit?" and "which mode am I in?" question from one place. The directory contains seven markdown files (decision tree + per-scope reference + modes + troubleshooting) and six JSON / dotfile templates (<code>settings.user.json</code>, <code>settings.project.{full,lite,undev}.json</code>, <code>settings.local.json</code>, and a <code>.gitignore-snippet</code>).</p>
+<p>Every existing cross-reference (<code>CLAUDE.md</code>, <code>iron-laws/index.md</code>, <code>hooks/index.md</code>, <code>README.md</code>) gains a single one-line link into <code>docs/scopes/</code>. <code>/dev-kit:bootstrap</code> and <code>/dev-kit:ci-setup</code> are documented as the consumers of these templates — they read from <code>docs/scopes/templates/</code> and write the matching file into the target project.</p>
+<p>No runtime behavior changes in this PR. It is docs + templates only. Runtime unification (mode picker skill, <code>lib/mode.sh</code>, repo deprecation of <code>dev-harness-kit-lite</code>) is a follow-up PR that consumes these templates as its contract.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">docs/proposals/scope-consolidation/00-index.yaml</span><p>This proposal source.</p></li><li><span class="file-path">docs/proposals/scope-consolidation/00-index.html</span><p>Self-contained HTML render of this proposal (regenerated on demand via /dev-kit:proposal).</p></li><li><span class="file-path">docs/scopes/README.md</span><p>Landing page + scope/mode matrix.</p></li><li><span class="file-path">docs/scopes/decision-tree.md</span><p>Operator-facing flowchart for "which scope do I edit?".</p></li><li><span class="file-path">docs/scopes/user-scope.md</span><p>Reference for ~/.claude/settings.json.</p></li><li><span class="file-path">docs/scopes/project-scope.md</span><p>Reference for &lt;project&gt;/.claude/settings.json.</p></li><li><span class="file-path">docs/scopes/local-scope.md</span><p>Reference for &lt;project&gt;/.claude/settings.local.json.</p></li><li><span class="file-path">docs/scopes/modes.md</span><p>Reference for full / lite / undev mode selection and resolution order.</p></li><li><span class="file-path">docs/scopes/troubleshooting.md</span><p>FAQ for "why is X firing in Y?" leakage questions.</p></li><li><span class="file-path">docs/scopes/templates/settings.user.json</span><p>Canonical user-scope template (enabledPlugins deliberately empty).</p></li><li><span class="file-path">docs/scopes/templates/settings.project.full.json</span><p>Project-scope template for mode=full.</p></li><li><span class="file-path">docs/scopes/templates/settings.project.lite.json</span><p>Project-scope template for mode=lite.</p></li><li><span class="file-path">docs/scopes/templates/settings.project.undev.json</span><p>Project-scope template with no plugin (silent default).</p></li><li><span class="file-path">docs/scopes/templates/settings.local.json</span><p>Canonical local-scope template with common personal overrides.</p></li><li><span class="file-path">docs/scopes/templates/.gitignore-snippet</span><p>One-line .gitignore extension every kit consumer should add.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Single address (docs/scopes/) answers every scope/mode question — operators stop copy-pasting stale examples.</li><li>Templates are versioned with the kit, so bootstrap and ci-setup can read from a single source of truth.</li><li>Explicitly documents undev as a first-class mode, making the silent default intentional instead of accidental.</li><li>Reduces drift: any project that runs /dev-kit:bootstrap gets the right scope config in one command.</li><li>Net-negative file count when paired with the planned follow-up PR that deletes dev-harness-kit-lite (~25 fewer files repo-wide).</li><li>No runtime behavior change in this PR — purely additive documentation, zero blast radius for existing consumers.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Adds 13 new files to the repo; operators who never read the docs gain nothing and pay the maintenance cost.</li><li>Cross-references in CLAUDE.md, iron-laws/index.md, hooks/index.md must be kept in sync — drift here defeats the purpose.</li><li>Templates codify today's best practice; if the operator surface area changes (e.g., a fourth mode is added), every template must be revisited.</li><li>The lite template assumes the full plugin is enabled with DEV_KIT_MODE=lite; until the follow-up PR lands, running /dev-kit-lite:bootstrap will still try to install a separate lite plugin.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>This PR is docs + templates only. It does not add a /dev-kit:mode skill, lib/mode.sh, or runtime hook filtering — those ship in the follow-up PR.</li><li>It does not archive dev-harness-kit-lite or remove it from any user's extraKnownMarketplaces. That is also the follow-up PR, gated on user adoption of the unified mode approach.</li><li>It does not delete the 6 stale dev-kit/dev-kit/&lt;sha&gt; cache entries; that is a one-shot claude plugin uninstall &amp;&amp; install on each operator's machine.</li><li>It does not retroactively fix any project that has dev-kit@dev-kit: true at the user layer — operators must opt each project into the right template manually.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-07 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
