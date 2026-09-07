@@ -189,6 +189,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:ci-setup`](docs/skills/ci-setup.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
 | [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
 | [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev` / `team`). The single switch that gates which hooks and skills run. |
+| [`/dev-kit:team`](skills/team/SKILL.md) | Toggle whether `.dev-kit/` is tracked in git (`DEV_KIT_TEAM` on / off). Orthogonal to `DEV_KIT_MODE` — the team-committed default for who-sees-what state files. |
 | [`/dev-kit:gate-select`](skills/gate-select/SKILL.md) | One picker for all three gate dimensions — project (CI workflows), session (local hooks), AI-judge. `show` reads current state; `pick` dispatches to the right installer. |
 | [`/dev-kit:harness-mode`](skills/harness-mode/SKILL.md) | Session-scoped local-hook mode — `fast` (optional hooks off), `full` (default), or `custom` per-hook picker. |
 | [`/dev-kit:guard-mode`](skills/guard-mode/SKILL.md) | Session-scoped on/off switch for the two hard-block hooks (`tdd-guard`, `worktree-guard`). |

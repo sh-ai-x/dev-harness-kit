@@ -24,7 +24,7 @@ If Y: also runs `lib/ci_setup.py:install_ci_config()` to install the 15 CI workf
 If N (or `--skip-ci`): prints the unavailable-features list below and exits with code 0. CI can be added later via `/dev-kit:ci-setup --force`.
 
 ## Iron Law (no exceptions)
-**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the ci-setup prompt, assume `Y`; preserves the legacy default for operators who always want CI gates), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify).
+**0-arg default OK.** Hidden flags: `--target DIR` (all sub-stages — sanity, codebase-map, hook-matrix, write-claude-md, and the conditional ci-setup — operate on `<DIR>` instead of `$PWD`; pass `target=` to `install_ci_config()`), `--skip-sanity`, `--skip-map`, `--slim|--full`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the ci-setup prompt, assume `Y`; preserves the legacy default for operators who always want CI gates), `--force` (overwrite existing CI templates during ci-setup), `--skip-verify` (skip ci-setup Phase 3 verify). Team-mode tracking of `.dev-kit/` is no longer a flag — it now reads `$DEV_KIT_TEAM` via `hooks/lib/team-resolve.sh` (see sub-stage 8.5 below).
 
 ## 9-Step Orchestration (4 auto + 1 prompt + 1 ci-setup + 2 git-defaults + 1 user review)
 
@@ -49,6 +49,10 @@ If N (or `--skip-ci`): prints the unavailable-features list below and exits with
        | (Y default; auto if --yes; skip if --skip-git-defaults)
 [8] git-defaults          -> bin/setup-git-defaults.sh (only if Y/--yes)
        | (idempotent; --check available; --dry-run available; safe to re-run)
+[8.5] team-track          -> hooks/lib/team-resolve.sh + bin/dev_kit_team.py resolve
+       | (auto; reads $DEV_KIT_TEAM via 4-layer resolution; if ON and target
+       |  has .gitignore, strips ^\.dev-kit lines; prints "team=on: .dev-kit/
+       |  kept in git". Silent if team=off. Independent of mode.)
 [9] exit -> HOTL review -> next: /dev-kit:build (or /dev-kit:plan for idea -> PRD.md synthesis)
 ```
 
@@ -244,6 +248,48 @@ bin/setup-git-defaults.sh --dry-run    # preview
 ### n branch
 
 Skips `bin/setup-git-defaults.sh`. Operators can run it manually any time using the commands above. Equivalent to passing `--skip-git-defaults` (no prompt, assume `n`).
+
+## team-track sub-stage 8.5 (deterministic, no LLM)
+
+**Iron Law:** never modify files unless `team=on`. Read-only probe of
+`$DEV_KIT_TEAM`; write-on-act only on the `.gitignore` strip.
+
+### Resolution
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/team-resolve.sh"
+dev_kit_team_resolve
+# $DEV_KIT_TEAM is now "on" or "off"; $DEV_KIT_TEAM_SOURCE names the
+# layer (shell / project / local / outside-git / default).
+```
+
+### Behavior
+
+| `$DEV_KIT_TEAM` | Target is a git repo | Target `.gitignore` has `.dev-kit/` | Action |
+|---|---|---|---|
+| `on` | yes | yes | strip `^\.dev-kit` lines, print `team=on: .dev-kit/ kept in git` |
+| `on` | yes | no | no-op, print `team=on: .gitignore has no .dev-kit/ entry to strip` |
+| `on` | no | n/a | no-op, print `team=on: not a git repo; nothing to track` |
+| `off` | n/a | n/a | silent — print nothing, do nothing |
+
+The strip is a one-line shell command:
+
+```bash
+grep -v "^\.dev-kit" "$TARGET/.gitignore" > "$TARGET/.gitignore.tmp" || true
+mv "$TARGET/.gitignore.tmp" "$TARGET/.gitignore"
+```
+
+Idempotent on re-run: a second pass finds no `^\.dev-kit` lines and
+exits cleanly.
+
+### Why not a flag
+
+The team toggle is intentionally an env-var (`DEV_KIT_TEAM`), not a
+hidden `--team` flag, because (a) it can be team-committed at project
+scope, (b) it can be personal-overridden at local scope, and (c) it
+can be set per-session via the shell env — all without the operator
+remembering which subcommand of bootstrap to invoke. The CLI surface
+lives at `/dev-kit:team` (see [`skills/team/SKILL.md`](../team/SKILL.md)).
 
 ## What is unavailable without ci-setup
 

@@ -24,7 +24,7 @@ The mode selector is the single switch that gates which dev-kit hooks
 and skills run. Four legal values:
 
 - **`full`** — current dev-kit (30+ skills, 30+ hooks, multi-session/multi-agent). Default if plugin is enabled.
-- **`lite`** — 7-hook / 7-skill subset for 4-hour MVP sprints with a 6-person team.
+- **`lite`** — 7-hook / 7-skill subset for 4-hour MVP sprints (the "lite" subset of full kit).
 - **`undev`** — plugin not enabled; silent default.
 - **`team`** — multi-role team + dependency-aware plan. Roles are **user-defined** (no shipped defaults). Plan skill prompts for per-step `dependencies:` edges in Gate 4/5. See [`docs/scopes/modes.md`](../../docs/scopes/modes.md) for details.
 

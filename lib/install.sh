@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # install.sh — Bootstrap dev-harness-kit into target project.
 # Modes:
-#   --team   : include .dev-kit/ in git (override .gitignore)
 #   --strict : set DEV_KIT_STRICT=1 in plugin.json env (hard-block hooks)
 #
 # Source layout (this script lives at lib/install.sh):
@@ -18,12 +17,10 @@ set -eo pipefail
 TARGET="${1:-$PWD}"
 SRC_LIB="$(cd "$(dirname "$0")" && pwd)"
 SRC_REPO="$(cd "$SRC_LIB/.." && pwd)"
-WITH_TEAM=false
 WITH_STRICT=false
 
 for arg in "$@"; do
   case "$arg" in
-    --team) WITH_TEAM=true ;;
     --strict) WITH_STRICT=true ;;
     *) ;;
   esac
@@ -93,11 +90,11 @@ if $WITH_STRICT; then
 fi
 
 # Team mode — keep .dev-kit/ tracked (strip any pre-existing ignore).
-if $WITH_TEAM && [ -f "$TARGET/.gitignore" ]; then
-  grep -v "^\.dev-kit" "$TARGET/.gitignore" > "$TARGET/.gitignore.tmp" || true
-  mv "$TARGET/.gitignore.tmp" "$TARGET/.gitignore"
-  echo "  ✓ team mode: .dev-kit/ kept in git"
-fi
+# Note: this script is invoked by manual `bash lib/install.sh` only; the
+# canonical /dev-kit:bootstrap skill reads $DEV_KIT_TEAM via
+# hooks/lib/team-resolve.sh and acts there. Callers that want the
+# .dev-kit/-tracking effect should set DEV_KIT_TEAM=1 and run the
+# bootstrap skill, not pass --team to this script.
 
 echo "→ Verifying:"
 for f in "$TARGET/.claude-plugin/marketplace.json" \

@@ -3,6 +3,26 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **feat(scope):** `team` refactored from a `--team` bootstrap flag to a
+  first-class toggleable skill (`/dev-kit:team`) backed by a separate
+  env-var `DEV_KIT_TEAM`. Default OFF, independent of `DEV_KIT_MODE`.
+  The four valid combinations are full+team, full+no-team, lite+team,
+  lite+no-team. Resolution mirrors `mode` (4 layers: shell env,
+  `<proj>/.claude/settings.json` `env.DEV_KIT_TEAM`,
+  `<proj>/.claude/settings.local.json` `env.DEV_KIT_TEAM`, silent
+  default = off). The single concrete effect when team=ON is that
+  `hooks/lib/team-resolve.sh:dev_kit_team_resolve` returns `on`, and
+  `/dev-kit:bootstrap` sub-stage 8.5 strips `^\.dev-kit` from the
+  target `.gitignore`. New files: `skills/team/SKILL.md`,
+  `bin/dev_kit_team.py`, `hooks/lib/team-resolve.sh`,
+  `commands/team.md`, `docs/skills/team.md`,
+  `tests/test_team_resolution.py`,
+  `tests/test_dev_kit_team_cli.py`,
+  `tests/test_bootstrap_team_wiring.py`. `lib/install.sh` no longer
+  accepts `--team` (the flag was undocumented at the skill-body level
+  and untested). `skills/mode/SKILL.md` and `docs/scopes/modes.md`
+  soften the "6-person team" prose from `lite`'s description since
+  team-tracking is no longer bundled with lite.
 - **fix(skill-usage):** `prune-propose` no longer flags every user-invocable
   skill as a deletion candidate. The catalog seed (`dev-kit:<name>`) was
   compared against telemetry that captures skills under their bare name

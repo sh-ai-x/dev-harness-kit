@@ -26,12 +26,12 @@ Bootstrap runs the unconditional pipeline then optionally ci-setup and git-defau
 
 9. **Exit** — pointer to `/dev-kit:build <first-feature>` to start the canonical plan -> build loop, or `/dev-kit:ci-doctor` for post-install drift verification.
 
-Hidden flags (no visible option prompts — MUST-NOT-13): `--skip-sanity`, `--skip-map`, `--slim|--full`, `--team`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the ci-setup + git-defaults prompts, default `Y`), `--force` (overwrite existing CI templates), `--skip-verify` (skip ci-setup Phase 3 verify). With `--strict`, all hooks default to `exit 2` instead of `exit 0`.
+Hidden flags (no visible option prompts — MUST-NOT-13): `--skip-sanity`, `--skip-map`, `--slim|--full`, `--strict`, `--persist-audit`, `--skip-ci` (skip ci-setup, equivalent to answering `n`), `--skip-git-defaults` (skip sub-stage 7 + 8 git-defaults, equivalent to answering `n` on both the prompt and the execution), `--yes` (skip the ci-setup + git-defaults prompts, default `Y`), `--force` (overwrite existing CI templates), `--skip-verify` (skip ci-setup Phase 3 verify). With `--strict`, all hooks default to `exit 2` instead of `exit 0`. Team-mode tracking of `.dev-kit/` is no longer a flag — it now reads `$DEV_KIT_TEAM` via `hooks/lib/team-resolve.sh` (see sub-stage 8.5 below).
 
 ## Usage
 
 ```bash
-/dev-kit:bootstrap [--skip-sanity] [--skip-map] [--slim|--full] [--team] [--strict] [--persist-audit]
+/dev-kit:bootstrap [--skip-sanity] [--skip-map] [--slim|--full] [--strict] [--persist-audit]
 ```
 
 | Flag | Effect |
@@ -41,7 +41,6 @@ Hidden flags (no visible option prompts — MUST-NOT-13): `--skip-sanity`, `--sk
 | `--skip-map` | Skips the codebase-map sub-stage. |
 | `--slim` / `--full` | Controls CLAUDE.md verbosity mode. |
 | `--full-claude-md` | Writes the full 4-section codebase map to `docs/CODEBASE-MAP.md` instead of the lazy-loading index. |
-| `--team` | Team-mode variant (hidden flag). |
 | `--strict` | All hooks default to `exit 2` instead of `exit 0`. |
 | `--persist-audit` | Also writes `.dev-kit/sanity-report.md`. |
 | `--skip-ci` | Skips ci-setup. Prints the unavailable-features list. |
