@@ -882,6 +882,25 @@ jobs:
             echo "::error::  '<N> failed in <Ns>s'"
             echo "::error::Use the .github/pull_request_template.md 'Iron Law L3' section,"
             echo "::error::paste the EXACT line from your local pytest run (not a paraphrase)."
+            # Issue #803: also post a PR-visible comment with the same
+            # diagnostic so a contributor reading the PR's Conversation
+            # tab sees why the gate failed without opening the Actions
+            # log. The body lives in `.github/review-yml/l3-evidence-
+            # fail.md` (a separate file, NOT inline in this YAML —
+            # multi-line bash strings inside YAML literal blocks trip
+            # the YAML scanner on `**` and `<<` patterns). The body is
+            # `cat`-fed to `gh pr comment --body-file -`.
+            #
+            # We post the comment BEFORE `exit 1` so the comment survives
+            # even when the job's overall status flips to `failure` (a
+            # failure-status job can still post PR comments — `pull-requests:
+            # write` is granted on the `severity gate` job). We use
+            # `|| true` on the gh call so a transient gh failure does
+            # not mask the `::error::` exit; the Actions log will still
+            # capture the comment-post failure separately.
+            gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" \
+              --body-file "${{ github.workspace }}/.github/review-yml/l3-evidence-fail.md" \
+              || echo "::warning::failed to post L3 evidence PR comment (gh error); see Actions log for the same diagnostic" || true
             exit 1
           else
             echo "::notice::docs/infra-only PR; L3 evidence is advisory here."
