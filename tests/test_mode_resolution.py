@@ -186,6 +186,33 @@ class TestModeResolution(unittest.TestCase):
                           enabled_plugins={"dev-kit@dev-kit": True})
         self.assertEqual(_resolve(proj), "undev")
 
+    # ----- `mod` value (4th mode, multi-role + dependency-aware plan) -----
+    # The mod value must satisfy the same 4-layer precedence rule as
+    # full / lite / undev. These cases mirror the existing matrix one
+    # case per layer so the resolver, CLI, and docs stay in agreement.
+
+    def test_shell_env_mod_overrides_project_full(self):
+        proj = _make_proj(Path(self.tmp), project_mode="full",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "mod"}), "mod")
+
+    def test_project_mod_when_plugin_enabled(self):
+        proj = _make_proj(Path(self.tmp), project_mode="mod",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "mod")
+
+    def test_local_mod_used_when_project_unset(self):
+        proj = _make_proj(Path(self.tmp), project_mode=None,
+                          local_mode="mod",
+                          enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "mod")
+
+    def test_project_mod_wins_over_local_lite(self):
+        proj = _make_proj(Path(self.tmp), project_mode="mod",
+                          local_mode="lite",
+                          enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "mod")
+
 
 if __name__ == "__main__":
     unittest.main()

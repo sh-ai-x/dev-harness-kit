@@ -188,7 +188,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:bootstrap` (with ci-setup prompt) | `bootstrap` **and** `ci-setup` in one shot — the usual new-project starting point. |
 | [`/dev-kit:ci-setup`](docs/skills/ci-setup.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
 | [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
-| [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). The single switch that gates which hooks and skills run. |
+| [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev` / `mod`). The single switch that gates which hooks and skills run. |
 
 ### Planning and building
 
@@ -268,10 +268,11 @@ repo's worktrees and hands you back the exact command to resume the right one.
 (This needs `/dev-kit:log` to have been on — that's what records the sessions.)
 See [Session monitor](#session-monitor) below for the flag reference.
 
-**You want to switch between `full` / `lite` / `undev` modes.** Run
+**You want to switch between `full` / `lite` / `undev` / `mod` modes.** Run
 [`/dev-kit:mode`](skills/mode/SKILL.md). `full` is the multi-session/multi-agent
 default; `lite` is a 7-hook / 7-skill subset for a 4-hour MVP sprint;
-`undev` disables the plugin entirely. Use `--scope=local` to test a mode
+`undev` disables the plugin entirely; `mod` adds user-defined roles +
+dependency-aware plan output. Use `--scope=local` to test a mode
 without committing the change. The full resolution order
 (shell env → `settings.json` → `settings.local.json`) lives in
 [`docs/scopes/modes.md`](docs/scopes/modes.md).

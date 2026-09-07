@@ -1,13 +1,14 @@
 ---
 name: mode
 category: mode
-description: Read or write the active DEV_KIT_MODE (full | lite | undev) for the current project. Picker by default; --show to display current mode; --scope=local to write to .claude/settings.local.json instead of .claude/settings.json.
+description: Read or write the active DEV_KIT_MODE (full | lite | undev | mod) for the current project. Picker by default; --show to display current mode; --scope=local to write to .claude/settings.local.json instead of .claude/settings.json.
 alpha: state
 user-invocable: true
 when_to_use: |
   - User types `/dev-kit:mode` and wants to pick a mode
   - User types `/dev-kit:mode --show` to see current mode
   - User types `/dev-kit:mode lite` to switch to 4-hour MVP mode
+  - User types `/dev-kit:mode mod` to enable the multi-role + dependency-aware-plan mode
 allowed-tools: Read Write Glob Bash AskUserQuestion
 disallowed-tools: Agent WebFetch
 model: sonnet
@@ -20,11 +21,12 @@ disable-model-invocation: false
 ## What it does
 
 The mode selector is the single switch that gates which dev-kit hooks
-and skills run. Three legal values:
+and skills run. Four legal values:
 
 - **`full`** — current dev-kit (30+ skills, 30+ hooks, multi-session/multi-agent). Default if plugin is enabled.
 - **`lite`** — 7-hook / 7-skill subset for 4-hour MVP sprints with a 6-person team.
 - **`undev`** — plugin not enabled; silent default.
+- **`mod`** — multi-role team + dependency-aware plan. Roles are **user-defined** (no shipped defaults). Plan skill prompts for per-step `dependencies:` edges in Gate 4/5. See [`docs/scopes/modes.md`](../../docs/scopes/modes.md) for details.
 
 The resolution order lives in [`docs/scopes/modes.md`](../../docs/scopes/modes.md):
 
@@ -37,7 +39,7 @@ The resolution order lives in [`docs/scopes/modes.md`](../../docs/scopes/modes.m
 
 ## Iron Law (no exceptions)
 
-**0-arg default opens the picker.** Hidden flags: `--show` (print current mode + exit 0), `--scope=project|local` (where to write; default `project`; `--scope=local` writes to gitignored `settings.local.json` instead of team-committed `settings.json`), `--mode full|lite|undev` (non-interactive; bypasses the picker), `--target DIR` (operate on `<DIR>` instead of `$PWD`).
+**0-arg default opens the picker.** Hidden flags: `--show` (print current mode + exit 0), `--scope=project|local` (where to write; default `project`; `--scope=local` writes to gitignored `settings.local.json` instead of team-committed `settings.json`), `--mode full|lite|undev|mod` (non-interactive; bypasses the picker), `--target DIR` (operate on `<DIR>` instead of `$PWD`).
 
 ## 4-Step Orchestration
 
@@ -46,8 +48,9 @@ The resolution order lives in [`docs/scopes/modes.md`](../../docs/scopes/modes.m
        | (auto, deterministic; reads $DEV_KIT_MODE then settings layers)
 [2] show               -> print "current mode: <X>  (set via <source>)" + exit 0
        | (auto, when --show or first run)
-[3] pick (interactive) -> AskUserQuestion (full / lite / undev)
+[3] pick (interactive) -> AskUserQuestion (full / lite / undev / mod)
        | (auto, when no --mode arg)
+       | (mod branch -> AskUserQuestion loop for user-defined roles, then write)
 [4] write              -> bin/dev_kit_mode.py write --scope <project|local> --mode <X>
        | (auto)
 ```
@@ -58,6 +61,17 @@ The resolution order lives in [`docs/scopes/modes.md`](../../docs/scopes/modes.m
 - **`--scope=local`** — writes to `.claude/settings.local.json`. Gitignored; only your checkout is affected. Use this when you want to test `lite` behavior in a `full` project without committing it.
 - **Shell env var** — `DEV_KIT_MODE=lite claude` for a one-session override that doesn't touch any file.
 
+## `mod` mode — user-defined roles
+
+When the picker lands on `mod`, the skill opens an `AskUserQuestion` loop:
+
+1. "How many roles do you want to define?" (1–N) — collected via repeated free-text prompts.
+2. For each role, prompt for the role name + skill subset (`multiSelect` over the canonical dev-kit skill list, or free-text for new skills).
+3. Prompt for the active role name (must match one of the declared roles).
+4. Write `roles.active` + `roles.members` into the same `settings.json` write transaction alongside `DEV_KIT_MODE=mod`.
+
+The plugin ships **no default role names** — the operator declares the names + skills. `lib/role_config.py` validates the schema and gates on `DEV_KIT_MODE=mod` (raises `RoleConfigError` if a `roles` block is present in `full`/`lite`/`undev`).
+
 ## Examples
 
 ```bash
@@ -67,6 +81,7 @@ The resolution order lives in [`docs/scopes/modes.md`](../../docs/scopes/modes.m
 # Non-interactive
 /dev-kit:mode lite
 /dev-kit:mode --mode undev
+/dev-kit:mode mod          # picker opens user-defined-role loop
 
 # Show current
 /dev-kit:mode --show
@@ -82,11 +97,12 @@ DEV_KIT_MODE=undev claude
 
 - **Does not modify `enabledPlugins`.** Mode = "undev" with the plugin enabled is a misleading label; to actually go undev, run `/dev-kit:bootstrap` and choose "no kit", or edit `.claude/settings.json` to set `"enabledPlugins": {}`.
 - **Does not commit.** When writing to `--scope=project`, the change is staged in the working tree but not committed. The operator decides when to commit and push.
-- **Does not archive `dev-harness-kit-lite`.** That's a separate concern; see `/dev-kit:docs` or the proposal at `docs/proposals/scope-consolidation/00-index.yaml`.
+- **Does not ship default `mod` roles.** The operator declares role names + per-role skills during `/dev-kit:mode mod`; nothing is hard-coded.
 
 ## Cross-references
 
 - [`docs/scopes/modes.md`](../../docs/scopes/modes.md) — full mode reference
 - [`hooks/lib/mode-resolve.sh`](../../hooks/lib/mode-resolve.sh) — single source of truth for resolution logic
+- [`lib/role_config.py`](../../lib/role_config.py) — `mod` role resolver + gate (`RoleConfigError`)
 - [`tests/test_mode_resolution.py`](../../tests/test_mode_resolution.py) — 15 pinned resolution cases
 - Hook integration (per-hook `dev_kit_mode_require`) — see follow-up PR; current PR ships the resolver + skill only
