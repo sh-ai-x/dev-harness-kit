@@ -109,7 +109,10 @@ def cmd_resolve(args) -> int:
 def cmd_show(args) -> int:
     cwd = Path(args.target or os.getcwd())
     team, source = _resolve_team(cwd)
-    label = "team" if team == "on" else "team"
+    # Label is constant ("team") for both branches; matches the mode CLI
+    # shape (`f"current mode: {mode}  (set via {source})"`) which also
+    # emits no label prefix.
+    label = "team"
     print(f"{label}: {team.upper()}  (set via {source})")
     return 0
 
