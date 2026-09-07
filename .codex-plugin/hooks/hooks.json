@@ -164,7 +164,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/plugin-cache-refresh.sh",
+            "command": "bash ${PLUGIN_ROOT}/hooks/plugin-cache-refresh.sh",
             "fail_closed": false
           }
         ]

@@ -205,8 +205,15 @@ class TestPluginCacheRefresh(unittest.TestCase):
             self.assertEqual(r.returncode, 0,
                              f"hook must fail open without rsync, got {r.returncode}: {r.stderr}")
 
-    def test_jq_missing_fail_open(self):
-        """PATH without jq -> hook must exit 0 (preamble warns)."""
+    def test_jq_missing_in_cc_hook_is_ignored(self):
+        """The CC hook (hooks/plugin-cache-refresh.sh) does not call jq
+        directly — it only sources lib/plugin_cache_refresh.sh which is
+        pure bash + rsync + git. So a missing jq must NOT affect the
+        hook (the preamble's `::warning::` fires, hook still exits 0).
+        Contrast with the Codex manual script
+        skills/codex-cache-update/scripts/update.sh which DOES die
+        hard on missing jq (covered by the existing codex_cache_update
+        test)."""
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             mp = _init_marketplace_with_remote(tmp, {"README.md": "v1\n"})
@@ -214,6 +221,7 @@ class TestPluginCacheRefresh(unittest.TestCase):
             cache_root.mkdir(parents=True)
             fake_bin = tmp / "fake_bin"
             fake_bin.mkdir()
+            # Stub jq as missing, but keep bash/git/rsync available.
             (fake_bin / "jq").write_text("#!/bin/sh\nexit 127\n")
             (fake_bin / "jq").chmod(0o755)
             r = _run_hook({
@@ -223,6 +231,8 @@ class TestPluginCacheRefresh(unittest.TestCase):
                 "DEV_KIT_CACHE_ROOT": str(cache_root),
             })
             self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+            # The hook ran the rsync even without jq available.
+            self.assertTrue((cache_root / "0.1.0" / "README.md").exists())
 
     # ---- 4. marker location + contents -------------------------------------
 

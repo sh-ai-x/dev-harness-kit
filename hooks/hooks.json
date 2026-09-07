@@ -167,7 +167,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/plugin-cache-refresh.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/plugin-cache-refresh.sh",
             "fail_closed": false
           }
         ]

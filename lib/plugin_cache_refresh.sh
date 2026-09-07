@@ -6,6 +6,19 @@
 # The rsync exclusion list, chmod pass, marker file, and version
 # resolver all live here so the manual and auto paths cannot drift.
 #
+# Globals exported (read-only by convention):
+#
+#   PLUGIN_CACHE_RSYNC_EXCLUDES (array)
+#       Single source of truth for the rsync --exclude flags used by
+#       every sync path. `.devkit-refresh-head` is in the list so the
+#       marker is never deleted by rsync --delete on a subsequent run
+#       (the helper rewrites it post-rsync; the exclude makes the
+#       design self-evident and refactor-safe). Callers that need
+#       `--delete --dry-run --itemize-changes` style output (e.g.
+#       bin/devkit-refresh.sh's dry-run report) expand this array plus
+#       their own flags so the exclusion list cannot drift between
+#       dry-run and live runs.
+#
 # Functions:
 #
 #   plugin_cache_resolve_version <marketplace_dir> [plugin_subdir]
@@ -29,6 +42,21 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   printf 'plugin_cache_refresh.sh must be sourced, not executed.\n' >&2
   exit 1
 fi
+
+# Single source of truth for rsync --exclude flags. Both the helper's
+# internal rsync and bin/devkit-refresh.sh's dry-run expand this array,
+# so the exclusion list cannot drift between manual and auto paths.
+# `.devkit-refresh-head` is excluded so the marker survives `rsync
+# --delete` on the destination; the helper rewrites it post-rsync.
+PLUGIN_CACHE_RSYNC_EXCLUDES=(
+  --exclude='.git'
+  --exclude='.worktrees'
+  --exclude='.dev-kit'
+  --exclude='.eval-cache'
+  --exclude='*.pyc'
+  --exclude='__pycache__'
+  --exclude='.devkit-refresh-head'
+)
 
 plugin_cache_resolve_version() {
   local marketplace="$1"
@@ -73,21 +101,12 @@ plugin_cache_sync() {
     return 0  # in sync, silent
   fi
 
-  local excludes=(
-    --exclude='.git'
-    --exclude='.worktrees'
-    --exclude='.dev-kit'
-    --exclude='.eval-cache'
-    --exclude='*.pyc'
-    --exclude='__pycache__'
-  )
-
   mkdir -p "$cache_dir"
   if [ "$dry_run" = "1" ]; then
-    rsync -a --delete --dry-run --itemize-changes "${excludes[@]}" \
+    rsync -a --delete --dry-run --itemize-changes "${PLUGIN_CACHE_RSYNC_EXCLUDES[@]}" \
       "$marketplace/" "$cache_dir/" 2>&1 || true
   else
-    rsync -a --delete "${excludes[@]}" "$marketplace/" "$cache_dir/"
+    rsync -a --delete "${PLUGIN_CACHE_RSYNC_EXCLUDES[@]}" "$marketplace/" "$cache_dir/"
     # Preserve +x on hook + script files. rsync -a mirrors source bits,
     # but the destination may have been created by an earlier install
     # that left mode 0o644.

@@ -66,8 +66,6 @@ source "$SCRIPT_DIR/../lib/plugin_cache_refresh.sh"
 
 VERSION="$(plugin_cache_resolve_version "$MARKETPLACE_DIR" .claude-plugin)"
 if [ -z "$VERSION" ]; then
-  # No version field in plugin.json AND git rev-parse failed.
-  plugin_cache_resolve_version "$MARKETPLACE_DIR" .claude-plugin >/dev/null
   # The helper falls back to short SHA when the version field is missing;
   # only print this message if that fallback also failed.
   if ! git -C "$MARKETPLACE_DIR" rev-parse --short HEAD >/dev/null 2>&1; then
@@ -98,12 +96,14 @@ fi
 echo
 if [ "$DRY_RUN" = "1" ]; then
   echo "→ rsync $MARKETPLACE_DIR/ → $CACHE_DIR/  (DRY RUN)"
-  # Capture rsync output FIRST, then truncate. Avoids the pipefail/SIGPIPE
-  # issue where `head` closing the pipe makes rsync exit 141 and abort the
-  # script under `set -euo pipefail`.
+  # Reuse the helper's exclusion list (PLUGIN_CACHE_RSYNC_EXCLUDES) so the
+  # dry-run report cannot drift from the live behavior. The helper's own
+  # dry-run path does the same thing via plugin_cache_sync -- but that
+  # helper is drift-gated (skips when SHA matches). For the manual
+  # --dry-run we want the unconditional diff regardless of marker state,
+  # so we run rsync directly with the shared exclude set.
   RSYNC_OUT="$(rsync -a --delete --dry-run --itemize-changes \
-                --exclude='.git' --exclude='.worktrees' --exclude='.dev-kit' \
-                --exclude='.eval-cache' --exclude='*.pyc' --exclude='__pycache__' \
+                "${PLUGIN_CACHE_RSYNC_EXCLUDES[@]}" \
                 "$MARKETPLACE_DIR/" "$CACHE_DIR/" 2>/dev/null || true)"
   if [ -z "$RSYNC_OUT" ]; then
     echo "  (no changes)"
@@ -118,6 +118,18 @@ if [ "$DRY_RUN" = "1" ]; then
   fi
 else
   echo "→ rsync $MARKETPLACE_DIR/ → $CACHE_DIR/"
+  # The SessionStart hook may have already synced this SHA. Delete the
+  # marker so the helper does an unconditional rsync (a user running
+  # bin/devkit-refresh.sh by hand is asking for a forced refresh, not
+  # the hook's silent no-op). If the rsync produces no diff, we'll
+  # detect that via the marker write below and report accordingly.
+  rm -f "$CACHE_DIR/.devkit-refresh-head"
   plugin_cache_sync "$MARKETPLACE_DIR" "$CACHE_ROOT" .claude-plugin 0
-  echo "  done."
+  if [ -f "$CACHE_DIR/.devkit-refresh-head" ]; then
+    echo "  done."
+  else
+    # Helper soft-failed (no git, version unresolvable, etc.). Already
+    # logged the reason via stderr; surface a final marker here.
+    echo "  done (no marker written -- helper reported soft-fail on stderr)."
+  fi
 fi
