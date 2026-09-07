@@ -217,6 +217,20 @@ a:hover { text-decoration: underline; }
 .pcl-pros h3    { color: var(--ok); }
 .pcl-cons h3    { color: var(--bad); }
 .pcl-limit h3   { color: var(--warn); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
 </style>
 </head>
 <body>
@@ -399,6 +413,6 @@ the step file. If a hook fires (stop_verify, secret_scan), treat it as a hard st
 
 <hr class="section-divider">
 
-<footer>Generated 2026-08-28 · render via <code>/dev-kit:proposal</code></footer>
+<footer>Generated 2026-09-07 · render via <code>/dev-kit:proposal</code></footer>
 </body>
 </html>
