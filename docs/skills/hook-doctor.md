@@ -12,6 +12,7 @@
 - `SessionStart`, `UserPromptSubmit`, `PostToolUse`, or `Stop` hooks fail.
 - A plugin reload leaves hook manifests and cached files out of sync.
 - The user asks why a dev-kit hook is failing.
+- The user reports a slash command resolves the wrapper but the skill body is missing — usually a same-version marketplace update that the cache hasn't picked up (the SessionStart hook `hooks/plugin-cache-refresh.sh` runs `bin/devkit-refresh.sh`'s rsync automatically on every session start).
 
 ## How it works
 
@@ -29,6 +30,12 @@ The model invokes this skill the moment the conversation contains hook failure t
    - Claude Code: `bash bin/devkit-refresh.sh`
 
    Do not run both unless both providers are reported stale.
+
+   > Both updaters are now also wired as SessionStart hooks
+   > (`hooks/plugin-cache-refresh.sh` and `.codex-plugin/hooks/plugin-cache-refresh.sh`)
+   > that detect marketplace → cache drift via short-SHA marker comparison
+   > and rsync only when the SHA differs. Manual invocation is only
+   > needed for explicit verification or out-of-band triggers.
 4. **Re-run the checker.** If all checks pass, tell the user to restart the affected client because plugin hooks are loaded at session start. Do not claim the live session is repaired before the restart.
 
 ## Failure handling

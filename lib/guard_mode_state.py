@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-guard_mode_state.py — session-scoped on/off state for the two hard-block
-Iron Law hooks: `hooks/tdd-guard.sh` and `hooks/worktree-guard.sh`.
+guard_mode_state.py — session-scoped on/off state for the hard-block
+Iron Law hooks: `hooks/tdd-guard.sh`, `hooks/worktree-guard.sh`, and the
+ask-tier push-confirmation bypass used by `hooks/destructive-confirm.sh`
+during `/dev-kit:babysit-pr` and `/dev-kit:babysit-pr-local`.
 
 State lives at ``.dev-kit/guard-mode.session.json``, reset to all-"on" by
 ``hooks/session-start-guard-mode-reset.sh`` at the start of every session
@@ -9,9 +11,11 @@ State lives at ``.dev-kit/guard-mode.session.json``, reset to all-"on" by
 "new window = strict" design). Unlike harness-mode's optional local hooks,
 `tdd_guard` and `worktree_guard` are hard PreToolUse blocks enforcing Iron
 Law L1 (no prod code without a verification artifact) and the
-`rules/git-workflow.md` worktree-isolation rule; this module exists so a session
-can deliberately and visibly suspend them for itself, never silently and
-never beyond the current session.
+`rules/git-workflow.md` worktree-isolation rule; `push_confirm` is the
+ask-tier bypass for the non-force git push ask, opt-in only by the
+babysit-pr loop lifetime, force-with-lease is unaffected. This module exists
+so a session can deliberately and visibly suspend any of them for itself,
+never silently and never beyond the current session.
 """
 from __future__ import annotations
 
@@ -26,11 +30,12 @@ from atomic import atomic_write_json  # noqa: E402
 
 STATE_REL_PATH = Path(".dev-kit") / "guard-mode.session.json"
 
-GUARDS = ("tdd_guard", "worktree_guard")
+GUARDS = ("tdd_guard", "worktree_guard", "push_confirm")
 
 GUARD_DESCRIPTIONS = {
     "tdd_guard": "hooks/tdd-guard.sh — blocks prod code edits without RED evidence (Iron Law L1)",
     "worktree_guard": "hooks/worktree-guard.sh — blocks Edit/Write/MultiEdit in the main checkout (rules/git-workflow.md worktree isolation)",
+    "push_confirm": "hooks/destructive-confirm.sh — ask-tier gate that pauses non-force git push -u / git push --set-upstream ; toggled off by /dev-kit:babysit-pr[-local] for the loop lifetime, force-with-lease is unaffected",
 }
 
 

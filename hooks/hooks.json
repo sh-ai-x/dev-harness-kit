@@ -70,13 +70,13 @@
           {
             "type": "command",
             "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
-            "timeout": 60,
+            "timeout": 120,
             "fail_closed": true
           },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-auto-cut.sh",
-            "timeout": 60,
+            "timeout": 120,
             "fail_closed": false
           },
           {
@@ -159,6 +159,15 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start-guard-mode-reset.sh",
+            "fail_closed": false
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/plugin-cache-refresh.sh",
             "fail_closed": false
           }
         ]

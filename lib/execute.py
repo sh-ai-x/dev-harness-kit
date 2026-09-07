@@ -236,6 +236,7 @@ def register_step(
     phase: str,
     step: int,
     name: str,
+    depends_on: list[int] | None = None,
 ) -> None:
     """Register a step in phases/<phase>/index.json as `unimplemented`.
 
@@ -247,6 +248,20 @@ def register_step(
     The `unimplemented` status is in SKIPPABLE_STATUSES, so the runner ignores it.
     Once plan writes step<N>.md, it transitions the stub to `pending` via
     update_step_status() and the runner picks it up on the next run.
+
+    The `depends_on` field (list of upstream step numbers) is the producer
+    side of the dispatch contract — when set, the new step dict carries it
+    into `phases/<phase>/index.json` immediately, so the
+    `lib/dispatch_classifier.py:_has_dependency_edge` consumer can classify
+    the phase as `sequential` from the moment the step is registered (not
+    only after the runner reads `step<N>.md`). The plan skill in `team`
+    mode populates this field from the per-step dependency prompt the
+    operator answered during Gate 4/5. Defaults to `None` (= no
+    declared deps = leaf). Re-registering a step with a different
+    `depends_on` is a no-op (the early-return guard preserves whatever
+    was already on disk); to mutate deps after first registration, write
+    to the step file directly or call `update_step_status` with a future
+    `set_depends_on` flag.
     """
     idx_path = project_root / "phases" / phase / "index.json"
     if idx_path.exists():
@@ -257,11 +272,14 @@ def register_step(
     for s in data.get("steps", []):
         if s.get("step") == step:
             return  # already registered — preserve any user-set fields
-    data.setdefault("steps", []).append({
-        "step": step,
-        "name": name,
-        "status": "unimplemented",
-    })
+    entry: dict = {"step": step, "name": name, "status": "unimplemented"}
+    if depends_on is not None:
+        # Normalize to list[int] so the JSON is canonical (avoids [1, "2"] drift
+        # when the caller mixes types). Non-int entries are dropped silently —
+        # `lib/plan_dependency.compute_dag` is the strict validator.
+        clean: list[int] = [d for d in depends_on if isinstance(d, int)]
+        entry["depends_on"] = clean
+    data.setdefault("steps", []).append(entry)
     atomic_write_json(idx_path, data)
 
 

@@ -33,6 +33,12 @@ command -v rsync >/dev/null 2>&1 || {
 
 codex plugin marketplace upgrade dev-kit
 
+# Source the shared rsync + marker helper (extracted from the SessionStart
+# hook so this script and the auto-sync path cannot drift).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../../lib/plugin_cache_refresh.sh
+source "$SCRIPT_DIR/../../../lib/plugin_cache_refresh.sh"
+
 PLUGIN_JSON="$MARKETPLACE_DIR/.codex-plugin/plugin.json"
 [[ -f "$PLUGIN_JSON" ]] || {
     echo "error: marketplace plugin manifest not found: $PLUGIN_JSON" >&2
@@ -49,14 +55,6 @@ VERSION="$(jq -er '.version // empty' "$PLUGIN_JSON")" || {
 }
 
 CACHE_DIR="$CACHE_ROOT/$VERSION"
-EXCLUDES=(
-    --exclude='.git'
-    --exclude='.worktrees'
-    --exclude='.dev-kit'
-    --exclude='.eval-cache'
-    --exclude='*.pyc'
-    --exclude='__pycache__'
-)
 
 echo "marketplace: $MARKETPLACE_DIR"
 echo "version:     $VERSION"
@@ -64,10 +62,10 @@ echo "cache:       $CACHE_DIR"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     mkdir -p "$CACHE_DIR"
-    rsync -ani --delete "${EXCLUDES[@]}" "$MARKETPLACE_DIR/" "$CACHE_DIR/"
+    plugin_cache_sync "$MARKETPLACE_DIR" "$CACHE_ROOT" .codex-plugin 1
     echo "cache dry-run complete"
 else
     mkdir -p "$CACHE_DIR"
-    rsync -a --delete "${EXCLUDES[@]}" "$MARKETPLACE_DIR/" "$CACHE_DIR/"
+    plugin_cache_sync "$MARKETPLACE_DIR" "$CACHE_ROOT" .codex-plugin 0
     echo "cache synchronized"
 fi

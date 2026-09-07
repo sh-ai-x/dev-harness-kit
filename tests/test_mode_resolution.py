@@ -186,6 +186,33 @@ class TestModeResolution(unittest.TestCase):
                           enabled_plugins={"dev-kit@dev-kit": True})
         self.assertEqual(_resolve(proj), "undev")
 
+    # ----- `team` value (4th mode, multi-role + dependency-aware plan) -----
+    # The team value must satisfy the same 4-layer precedence rule as
+    # full / lite / undev. These cases mirror the existing matrix one
+    # case per layer so the resolver, CLI, and docs stay in agreement.
+
+    def test_shell_env_team_overrides_project_full(self):
+        proj = _make_proj(Path(self.tmp), project_mode="full",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "team"}), "team")
+
+    def test_project_team_when_plugin_enabled(self):
+        proj = _make_proj(Path(self.tmp), project_mode="team",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "team")
+
+    def test_local_team_used_when_project_unset(self):
+        proj = _make_proj(Path(self.tmp), project_mode=None,
+                          local_mode="team",
+                          enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "team")
+
+    def test_project_team_wins_over_local_lite(self):
+        proj = _make_proj(Path(self.tmp), project_mode="team",
+                          local_mode="lite",
+                          enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "team")
+
 
 if __name__ == "__main__":
     unittest.main()

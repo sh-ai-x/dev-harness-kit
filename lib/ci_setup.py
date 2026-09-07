@@ -179,6 +179,9 @@ _CI_PATHS_AFTER_HOOKS: tuple[str, ...] = (
     # lib/ helpers actually imported by bin/review-local.sh. The rest of
     # lib/ is plugin-internal and intentionally not shipped.
     "lib/review_local_lib.sh",  # bash, sourced by bin/review-local.sh:77
+    # bash, sourced by hooks/plugin-cache-refresh.sh AND bin/devkit-refresh.sh
+    # (cross-tree helper -- lives at top-level lib/ rather than hooks/lib/).
+    "lib/plugin_cache_refresh.sh",
     "lib/maintenance_gate.py",  # Python, invoked by bin/review-local.sh:96,439
     "lib/atomic.py",            # Python, dep of lib/maintenance_gate.py
     "lib/__init__.py",          # Python package marker (already exists at repo root)
@@ -306,6 +309,11 @@ EXECUTABLE_PATHS: _LazyTuple = _LazyTuple(
         "bin/babysit-pr-local.sh",
         "bin/review-local.sh",
         "bin/set-provider.sh",
+        # lib/ bash helpers sourced by EXPECTED_PATHS hooks/scripts. +x is
+        # cheap insurance in case any future caller invokes them as a CLI
+        # rather than via `source`.
+        "lib/review_local_lib.sh",
+        "lib/plugin_cache_refresh.sh",
         *[path for path in EXPECTED_PATHS
           if path.startswith("hooks/") and path.endswith(".sh")],
     )
