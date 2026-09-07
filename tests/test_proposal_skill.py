@@ -1535,5 +1535,161 @@ class MigrateTests(unittest.TestCase):
             )
 
 
+# ----- Timeline fields (started / shipped) ---------------------------------
+
+
+class TimelineFieldsTests(unittest.TestCase):
+    """`started:` / `shipped:` are optional YYYY-MM-DD strings on the
+    proposal YAML. They never change BUCKETS, the path shape, or the
+    list ordering by default; they only render as timeline chips in the
+    HTML header and surface under the `--in-flight` CLI filter.
+
+    Why this exists: tracking "an accepted proposal whose work has
+    begun" is a time-bound property, not a categorical bucket. Adding
+    a fourth bucket (`in-progress/`) would mean a 4-state whitelist,
+    a new bucket name to maintain, and a 5th STATUS_TO_BUCKET entry.
+    Storing the dates directly lets the renderer compose the
+    "currently being shipped" view from data that's already there,
+    with zero bucket churn.
+    """
+
+    def test_started_and_shipped_default_to_none(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\nsections: []\n"
+        )
+        self.assertIsNone(p.started)
+        self.assertIsNone(p.shipped)
+
+    def test_started_parsed_when_iso_date(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\n"
+            "started: 2026-09-01\n"
+            "sections: []\n"
+        )
+        self.assertEqual(p.started, "2026-09-01")
+
+    def test_shipped_parsed_when_iso_date(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\n"
+            "started: 2026-09-01\n"
+            "shipped: 2026-09-05\n"
+            "sections: []\n"
+        )
+        self.assertEqual(p.started, "2026-09-01")
+        self.assertEqual(p.shipped, "2026-09-05")
+
+    def test_started_must_match_iso_date(self):
+        with self.assertRaises(ValueError):
+            rph.parse_proposal_yaml(
+                "title: T\nstatus: accepted\nstarted: 2026/09/01\nsections: []\n"
+            )
+
+    def test_started_non_string_raises(self):
+        with self.assertRaises(ValueError):
+            rph.parse_proposal_yaml(
+                "title: T\nstatus: accepted\nstarted: 20260901\nsections: []\n"
+            )
+
+    def test_shipped_must_match_iso_date(self):
+        with self.assertRaises(ValueError):
+            rph.parse_proposal_yaml(
+                "title: T\nstatus: accepted\nshipped: tomorrow\nsections: []\n"
+            )
+
+    def test_render_emits_started_chip_when_set(self):
+        import re as _re
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n"
+        )
+        html_doc = rph.render(p, now="2026-09-07")
+        # Match the chip <span> in the body (CSS class names live in the
+        # always-emitted <style> block, so a bare substring search is
+        # too coarse).
+        body_match = _re.search(
+            r'<span class="timeline-chip timeline-started">started 2026-09-01</span>',
+            html_doc,
+        )
+        self.assertIsNotNone(body_match, "expected started chip span in body")
+        self.assertNotRegex(
+            html_doc.split("</style>", 1)[-1],
+            r'<span class="timeline-chip timeline-shipped">',
+        )
+
+    def test_render_emits_shipped_chip_when_set(self):
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\n"
+            "started: 2026-09-01\nshipped: 2026-09-05\n"
+            "sections: []\n"
+        )
+        html_doc = rph.render(p, now="2026-09-07")
+        body = html_doc.split("</style>", 1)[-1]
+        for needle in (
+            r'<span class="timeline-chip timeline-started">started 2026-09-01</span>',
+            r'<span class="timeline-chip timeline-shipped">shipped 2026-09-05</span>',
+        ):
+            self.assertRegex(body, needle, f"missing chip: {needle}")
+
+    def test_render_omits_timeline_chips_when_unset(self):
+        """Legacy/back-compat: a proposal without started/shipped renders
+        with no timeline chip <span> in the body (CSS selectors in the
+        <style> block are always emitted, so the check is scoped to
+        the post-</style> body)."""
+        p = rph.parse_proposal_yaml(
+            "title: T\nstatus: accepted\nsections: []\n"
+        )
+        html_doc = rph.render(p, now="2026-09-07")
+        body = html_doc.split("</style>", 1)[-1]
+        self.assertNotRegex(
+            body, r'<span class="timeline-chip '
+        )
+
+    # ----- CLI filter ------------------------------------------------------
+
+    def _plant(
+        self, root: Path, bucket: str, main: str, sub: str,
+        body: str = "title: T\nstatus: accepted\nsections: []\n",
+    ) -> None:
+        d = root / "docs" / "proposals" / bucket / main
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sub}.yaml").write_text(body, encoding="utf-8")
+
+    def test_in_flight_lists_accepted_with_started_no_shipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "alive1",
+                        "title: A1\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n")
+            self._plant(root, "accepted", "a", "alive2",
+                        "title: A2\nstatus: accepted\nstarted: 2026-09-02\nsections: []\n")
+            self._plant(root, "accepted", "a", "done",
+                        "title: D\nstatus: accepted\nstarted: 2026-08-01\nshipped: 2026-09-01\nsections: []\n")
+            self._plant(root, "accepted", "a", "waiting",
+                        "title: W\nstatus: accepted\nsections: []\n")
+            self._plant(root, "review", "b", "draft",
+                        "title: D\nstatus: draft\nstarted: 2026-09-01\nsections: []\n")
+            names = rph._in_flight(root)
+            self.assertEqual(
+                names,
+                [
+                    "accepted/a/alive2",  # newer started first
+                    "accepted/a/alive1",
+                ],
+            )
+
+    def test_in_flight_empty_when_no_matches(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "done",
+                        "title: D\nstatus: accepted\nstarted: 2026-08-01\nshipped: 2026-09-01\nsections: []\n")
+            self.assertEqual(rph._in_flight(root), [])
+
+    def test_cli_main_in_flight_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._plant(root, "accepted", "a", "alive",
+                        "title: A\nstatus: accepted\nstarted: 2026-09-01\nsections: []\n")
+            rc = rph.main(["--project-root", str(root), "--in-flight"])
+            self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

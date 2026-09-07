@@ -227,6 +227,18 @@ cons:
 limitations:
   - 'What the design CANNOT do (out-of-scope-by-design)'
 
+# Implementation timeline -- both optional, both YYYY-MM-DD.
+# `started:` records when implementation began on an accepted proposal.
+# `shipped:` records when the implementation landed (PR merged, etc.).
+# The renderer emits a "started YYYY-MM-DD" or "shipped YYYY-MM-DD"
+# chip in the HTML meta line for each set field; the CLI's
+# `--in-flight` filter lists accepted proposals whose `started:` is
+# set and `shipped:` is unset, newest started first. Both fields are
+# intentionally NOT a fourth bucket -- see "Implementation timeline"
+# below.
+started: YYYY-MM-DD
+shipped: YYYY-MM-DD
+
 sections:
   - title: <section 1>
     body: |
@@ -254,6 +266,41 @@ match `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`
 filenames must not collide with the reserved legacy canonical names
 `proposal.yaml` and `index.yaml` -- if they do, the renderer treats
 the file as a leftover from a previous refactor and skips it.
+
+### Implementation timeline (`started` / `shipped`)
+
+Once a proposal reaches `status: accepted` and work actually begins,
+record the date in the YAML:
+
+```yaml
+status: accepted
+started: 2026-09-01
+shipped: 2026-09-12
+```
+
+The renderer emits a `started YYYY-MM-DD` (warn-colored) chip and/or
+a `shipped YYYY-MM-DD` (ok-colored) chip in the HTML meta line for
+each set field. The CLI's `--in-flight` flag lists accepted proposals
+whose `started:` is set and `shipped:` is unset, newest started first:
+
+```bash
+python3 -m lib.render_proposal_html --in-flight
+# accepted/foo/bar
+# accepted/foo/baz
+```
+
+**Why dates, not a fourth bucket.** "Currently being implemented"
+is a time-bound property: a proposal is in-flight for a few days,
+then `accepted` forever. Adding an `in-progress/` bucket would mean
+a 4-name `BUCKETS` whitelist, a new `STATUS_TO_BUCKET` entry, and a
+migration pass for the 13 legacy flat-layout dirs -- all to encode
+a property the YAML already carries. Storing the dates directly
+keeps `BUCKETS` at three and gives `--in-flight` for free.
+
+Both fields are optional and back-compatible: legacy proposals
+without `started:` / `shipped:` render unchanged. Strict YYYY-MM-DD
+parsing -- a typo (`2026/09/01`, `Sep 1`, `tomorrow`) is rejected
+so a broken value can't reach the meta chip.
 
 ### Cross-references between proposals
 

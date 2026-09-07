@@ -328,6 +328,20 @@ a:hover { text-decoration: underline; }
 .pcl-pros h3    { color: var(--ok); }
 .pcl-cons h3    { color: var(--bad); }
 .pcl-limit h3   { color: var(--warn); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
 """
 
 
@@ -397,6 +411,16 @@ class Proposal:
     pros: List[str] = field(default_factory=list)
     cons: List[str] = field(default_factory=list)
     limitations: List[str] = field(default_factory=list)
+    # Implementation timeline (additive, both YYYY-MM-DD or unset).
+    # `started` is the date implementation began on an accepted
+    # proposal. `shipped` is the date the implementation landed
+    # (PR merged, or the proposal is otherwise considered done).
+    # The renderer emits timeline chips when these are set; the
+    # `--in-flight` CLI filter lists accepted proposals where
+    # `started` is set and `shipped` is not. BUCKETS is unchanged --
+    # timeline state is time-bound, not a categorical bucket.
+    started: Optional[str] = None
+    shipped: Optional[str] = None
 
     @property
     def status_class(self) -> str:
@@ -443,6 +467,8 @@ def parse_proposal_yaml(text: str) -> Proposal:
     pros = _parse_string_list(raw.get("pros"), "pros")
     cons = _parse_string_list(raw.get("cons"), "cons")
     limitations = _parse_string_list(raw.get("limitations"), "limitations")
+    started = _parse_optional_date(raw.get("started"), "started")
+    shipped = _parse_optional_date(raw.get("shipped"), "shipped")
 
     return Proposal(
         title=raw["title"],
@@ -456,6 +482,8 @@ def parse_proposal_yaml(text: str) -> Proposal:
         pros=pros,
         cons=cons,
         limitations=limitations,
+        started=started,
+        shipped=shipped,
     )
 
 
@@ -524,6 +552,46 @@ def _parse_string_list(raw: object, field_name: str) -> List[str]:
     if not isinstance(raw, list):
         raise ValueError(f"`{field_name}` must be a list of strings")
     return _parse_string_items(raw, field_name)
+
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_optional_date(raw: object, field_name: str) -> Optional[str]:
+    """Strict YYYY-MM-DD parser for the optional `started:` / `shipped:`
+    timeline fields. Returns None when unset; raises ValueError for any
+    non-string, non-date, or non-ISO value.
+
+    YAML auto-parses bare ISO-8601 literals like `started: 2026-09-01`
+    into `datetime.date` objects (not strings), so we accept both and
+    normalise to ISO format. Anything else -- `2026/09/01`, `Sep 1`,
+    a datetime object, a free-form string -- is rejected so a typo
+    can't silently produce a broken chip in the rendered HTML."""
+    if raw is None:
+        return None
+    # `datetime` is imported at module top; check `date` first so the
+    # subclass match doesn't shadow plain dates.
+    import datetime as _dt
+    if isinstance(raw, _dt.datetime):
+        # YAML only produces `date` for bare ISO dates; `datetime`
+        # means the user wrote `started: 2026-09-01T10:00:00`, which
+        # is too precise for a day-granularity timeline chip.
+        raise ValueError(
+            f"`{field_name}` must be a YYYY-MM-DD date "
+            f"(got datetime {raw.isoformat()!r})"
+        )
+    if isinstance(raw, _dt.date):
+        return raw.isoformat()
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"`{field_name}` must be a YYYY-MM-DD date string "
+            f"(got {type(raw).__name__}: {raw!r})"
+        )
+    if not _ISO_DATE_RE.fullmatch(raw):
+        raise ValueError(
+            f"`{field_name}` must match YYYY-MM-DD (got {raw!r})"
+        )
+    return raw
 
 
 # ----- Markdown-lite renderer -----------------------------------------------
@@ -846,6 +914,20 @@ def _meta_line(p: Proposal) -> str:
         )
     if p.status:
         parts.append(f'<span class="tag {p.status_class}">{html.escape(p.status)}</span>')
+    # Timeline chips appear AFTER the status chip so the visual
+    # reading order is `when proposed · status · implementing since ·
+    # shipped`. Both are html.escape'd twice-once-via-tag-wrap plus the
+    # attr-quote escape below.
+    if p.started:
+        parts.append(
+            f'<span class="timeline-chip timeline-started">started '
+            f'{html.escape(p.started)}</span>'
+        )
+    if p.shipped:
+        parts.append(
+            f'<span class="timeline-chip timeline-shipped">shipped '
+            f'{html.escape(p.shipped)}</span>'
+        )
     return " · ".join(parts)
 
 
@@ -1127,6 +1209,46 @@ def _parse_topic_slug(topic: str) -> tuple[Optional[str], str, str]:
         f"invalid proposal topic {topic!r}: must be `<main>/<sub>` "
         f"(legacy) or `<bucket>/<main>/<sub>` (status-routed)"
     )
+
+
+def _in_flight(project_root: Path) -> list[str]:
+    """Return accepted proposals currently being shipped, newest started first.
+
+    A proposal is "in flight" iff it is in the `accepted/` bucket AND
+    has a `started:` date set AND has no `shipped:` date. This is a
+    derived view over data the proposal YAML already carries -- it does
+    NOT move files, does NOT require a new bucket, and does NOT depend
+    on git history. The 00-index page for an umbrella counts as any
+    other sub-topic and is included if it has timeline data set
+    (typically it won't, but we don't special-case it).
+
+    Sort key: `started` desc, then `(main, sub)` lexicographic to keep
+    ties deterministic. Malformed YAMLs are skipped (the renderer is
+    the right place to error on those, not the filter).
+    """
+    pdir = project_root / "docs" / "proposals" / "accepted"
+    if not pdir.is_dir():
+        return []
+    candidates: list[tuple[str, str, str]] = []  # (started, main, sub)
+    for main_dir in sorted(pdir.iterdir()):
+        if not main_dir.is_dir():
+            continue
+        for sub_entry in sorted(main_dir.iterdir()):
+            if not (sub_entry.is_file() and sub_entry.name.endswith(".yaml")):
+                continue
+            sub = sub_entry.name[: -len(".yaml")]
+            if sub in RESERVED_SLUGS:
+                continue
+            try:
+                text = sub_entry.read_text(encoding="utf-8")
+                p = parse_proposal_yaml(text)
+            except (ValueError, KeyError, yaml.YAMLError):
+                continue
+            if not p.started or p.shipped:
+                continue
+            candidates.append((p.started, main_dir.name, sub))
+    candidates.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+    return [f"accepted/{main}/{sub}" for _started, main, sub in candidates]
 
 
 def _list_proposals(project_root: Path) -> list[str]:
@@ -1429,11 +1551,29 @@ def main(argv: list[str] | None = None) -> int:
             "files into the bucket dir matching each YAML's `status:`"
         ),
     )
+    parser.add_argument(
+        "--in-flight", action="store_true",
+        help=(
+            "list accepted proposals whose `started:` is set and "
+            "`shipped:` is unset (currently being implemented), "
+            "newest started first; the same data the timeline chips "
+            "in the rendered HTML show, surfaced as a flat list"
+        ),
+    )
     args = parser.parse_args(argv)
     root = Path(args.project_root).resolve()
 
     if args.migrate:
         return _migrate(root)
+
+    if args.in_flight:
+        names = _in_flight(root)
+        if not names:
+            print("(no proposals in flight)")
+            return 0
+        for n in names:
+            print(n)
+        return 0
 
     if args.list:
         names = _list_proposals(root)
