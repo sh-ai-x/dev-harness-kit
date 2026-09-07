@@ -274,4 +274,4 @@ sections:
       | Sub-proposal | Status | One-line scope |
       |---|---|---|
       | [evidence-collection](evidence-collection.html) | design-discussion | Fix the seven producer root causes (RC-1..7) so the reducer has evidence to score against. |
-      | [auto-collection](auto-collection.html) | design-discussion | Surface the reducer at workflow boundaries — SessionEnd hook, PR-verify CI gate, status-line HUD — so the scorecard is observable without manual invocation. Depends on `evidence-collection` RC-1/RC-2/RC-5. |
+      | [auto-collection](auto-collection.html) | design-discussion | One reliable metric (`subject_observability`) surfaced automatically: `try/finally` context manager + SessionEnd collector + pr-verify CI gate + opt-in HUD tile. No new event types, no schema bump. |

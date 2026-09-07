@@ -1,326 +1,383 @@
-title: "Auto-collect harness-effectiveness — surface the reducer at workflow boundaries"
+title: "Auto-collect harness-effectiveness — one reliable metric, surfaced automatically"
 status: design-discussion
-date: 2026-09-07
-tags: [harness-effectiveness, auto-collection, hooks, session-end, ci, statusline, telemetry]
-depends_on:
-  - docs/proposals/review/harness-effectiveness/evidence-collection.yaml
+date: 2026-09-08
+tags: [harness-effectiveness, auto-collection, subject-observability, hooks, ci]
+depends_on: []
 
 before:
   summary: |
-    The harness-effectiveness reducer at `lib/harness_effectiveness.py:build_report`
-    is a deterministic, sub-second, zero-API-spend function over `.dev-kit/trace/events.jsonl`.
-    It exists, it is hermetic, and its contract is honored: missing evidence is reported
-    as `INSUFFICIENT_EVIDENCE`, never collapsed to a zero. But the reducer only runs when
-    a human remembers to invoke `/dev-kit:harness-effectiveness`. There is no automatic
-    trigger, no history, no CI gate, and no in-session surfacing — the harness has a
-    self-measurement it cannot see without an opt-in. Live evidence (this run, 2026-09-07):
-    54,307 events on disk; `overall_score 66.2`; `status DRIFT_WARNING`;
-    `prevention_quality ROT (59.6, coverage 93%)`; three components
-    `INSUFFICIENT_EVIDENCE`; `measurement_integrity` pinned by a historical duplicate;
-    `subject_observability` finding: 53,091 of 53,301 started subjects never reached a
-    terminal event. Every one of those findings was observable by the reducer — but the
-    harness cannot surface them on its own.
+    The harness emits 54,307 events across 53,301 started subjects. Only 210 of those
+    started subjects ever reached a terminal event. Every other subject (53,091) was
+    started by a tool call or session boundary but never finished — the harness has no
+    record of how they ended. The reducer already computes this gap as the
+    `subject_observability` submetric at `lib/harness_effectiveness.py:465-518`: a
+    symmetric Jaccard ratio `|started ∩ terminal| / |started ∪ terminal|`. Today the
+    ratio is 0.4% — effectively zero.
+
+    Three structural problems compound the gap:
+
+    1. The producer side leaks started subjects without terminals (every
+       exception / interrupt / timeout path drops the terminal `step.completed`).
+    2. The collector is manual. `lib/harness_effectiveness.build_report` is invoked
+       only when a human types `/dev-kit:harness-effectiveness` or runs
+       `/dev-kit:evaluate`. No SessionEnd / Stop / PostToolUse hook calls it.
+    3. There is no enforcement. Even when the ratio is 0.4%, no CI step blocks a PR
+       that widens the gap. The number is observable, not actionable.
   evidence:
-    - '`/dev-kit:harness-effectiveness` is the only entrypoint (`skills/harness-effectiveness/SKILL.md`, "Invocation"). The reducer has zero callers in `hooks/`, `bin/`, `lib/`, `tools/`, or any CI workflow beyond `/dev-kit:evaluate`.'
-    - 'No `SessionEnd` / `Stop` / `PreCompact` hook invokes `build_report`. `grep -rn "harness_effectiveness\|\.dev-kit/trace" hooks/` returns only `hooks/trace-session-end.sh:62` (emits `step.completed`) and `hooks/session-start-check.sh:74-75` (emits `step.started`).'
-    - 'No CI workflow runs the reducer. `.github/workflows/ci.yml`, `pr-verify.yml`, `review.yml`, `security.yml`, `gate.yml` — none reference `lib/harness_effectiveness` or `bin/collect-effectiveness`; `gate.yml` only runs the maintenance verdict loop.'
-    - '`.dev-kit/trace/effectiveness-{latest,history}.json` does not exist. `find . -path ./.worktrees -prune -o -name "effectiveness*" -print` returns zero results inside the project tree.'
-    - 'Status-line HUDs do not reference the reducer. `skills/statusline/SKILL.md` and `commands/statusline*.md` do not mention `harness_effectiveness`, `overall_score`, or `DRIFT_WARNING`.'
-    - 'The 54,307-event corpus has never been archived. `read_events` re-parses the file on every reducer call (`lib/trace_log.py:327-340`); there is no snapshot, no trend, no time-window comparison.'
-    - 'A `grep -rn "DRIFT_WARNING\|ROT" hooks/ bin/ lib/` over the main checkout returns zero matches — the verdict vocabulary the reducer emits has no consumer.'
-    - 'No scheduled collection exists. `crontab -l 2>/dev/null` is empty for the dev user; `tmux` is not used for periodic ticks; `/dev-kit:token-analyzer` is the only periodic CI-side dashboard and it does not include effectiveness.'
-    - 'A user reading the live report must (a) know the slash exists, (b) wait for sub-second compute, (c) parse the JSON or read the rendered HTML. Step (a) alone filters out most users — the dev-kit install base on this repo has ~30 active worktrees (`git worktree list` live count) and only one of them was the source of the live report.'
+    - 'Live (2026-09-08, this checkout): `subject_observability.coverage 0.004`, finding "53,091 of 53,301 started subject(s) never reached a terminal event".'
+    - 'Producer gap: `lib/execute.py` emits `step.started` per build step but `step.completed` only on the success branch. Error / interrupt / timeout paths leave the subject open.'
+    - 'Producer gap: no PostToolUse hook emits `step.completed` for tool-call-scoped subjects. A Bash tool call that runs `pytest` opens a logical subject but never closes it.'
+    - 'Session-end pair is complete (`hooks/session-start-check.sh:74-75` + `hooks/trace-session-end.sh:62`) but covers the session subject only — not the tool-call and step subjects.'
+    - 'No auto-collector: `grep -rn "harness_effectiveness" hooks/ bin/` returns zero hits in the executable surface.'
+    - 'No CI step: `find .github/workflows -name "*.yml" -exec grep -l "harness_effectiveness" {} \;` returns zero matches.'
+    - 'No history: `ls .dev-kit/trace/effectiveness-*.json*` returns ENOENT.'
+    - 'No HUD: `commands/statusline.md` references `model / tokens / cache / runtime` only; no effectiveness tile.'
+    - 'Live scorecard confirms the gap surfaces: `measurement_integrity.status INSUFFICIENT_EVIDENCE` because `event_coverage` collapses when started subjects never terminate (`lib/harness_effectiveness.py:543-566`). Fixing the gap fixes the parent score.'
 
 after:
   summary: |
-    Three automatic collection points + one human-friendly surface, layered so each can
-    ship independently. Every collector writes the same JSON shape (the reducer output
-    verbatim) so the surface reads them uniformly.
+    One metric. One producer fix. One collector. One CI gate. One optional HUD tile.
+    Five moving parts; one source of truth.
 
-    1. `SessionEnd` / `Stop` → `bin/collect-effectiveness.sh --mode=session`
-       writes `.dev-kit/trace/effectiveness-latest.json` (overwrite) and appends one
-       line to `.dev-kit/trace/effectiveness-history.jsonl` (trend). Best-effort, `|| true`
-       so a collection failure never aborts the session.
-    2. `pr-verify` CI job (`.github/workflows/pr-verify.yml`) runs
-       `bin/collect-effectiveness.sh --mode=ci` and emits a `effectiveness-rot` check
-       that fails the PR when any component reports `status == "ROT"`. `DRIFT_WARNING`
-       is a soft warning, not a gate.
-    3. `lib/harness_effectiveness.py` gains an `archive(root, *, target)` helper that
-       the SessionEnd and CI entrypoints both call. `archive()` is the only writer
-       to `effectiveness-latest.json` / `effectiveness-history.jsonl`; the lib owns
-       the file format and the rotate-after-N-snapshots rule (default N=200).
+    **The metric**: `subject_observability` (already defined at
+    `lib/harness_effectiveness.py:465-518`). Always has a denominator when events
+    exist. Range [0, 1]. Threshold 0.95 in `.dev-kit/state.json`
+    (`subject_observability.threshold`).
 
-    Surface: the status-line plugin (`skills/statusline/SKILL.md`) reads
-    `effectiveness-latest.json` if present and emits
-    `[eff 66.2 DRIFT_WARNING]` after the existing model/tokens tiles. Opt-in via
-    `statusline.show_effectiveness: true` in `.dev-kit/state.json`; off by default to
-    keep the existing HUD compact for users who never invoke the reducer.
+    **The producer fix**: a single `try/finally` context manager `step(subject_id,
+    ...)` in `lib/trace_log.py` that emits `step.started` on `__enter__` and
+    `step.completed` on `__exit__` regardless of success / exception / interrupt.
+    Every existing emitter of `step.started` migrates to `with step(...): ...`. The
+    migration is mechanical.
 
-    Critically, this proposal assumes `evidence-collection` ships first or alongside.
-    Auto-collecting on a broken producer network just snapshots the same null/INSUFFICIENT
-    table faster — that is faster, but not progress. The proposal lists the dependency
-    explicitly and gates Phase 1 of *this* proposal on at least RC-1 / RC-2 / RC-5
-    (interactive lifecycle + reliable emitter + single-rooted stream) landing, so the
-    first auto-collected snapshot has non-empty evidence for at least
-    `first_pass_quality` and `recovery_quality`.
+    **The collector**: one shell entrypoint `bin/collect-effectiveness.sh` that
+    calls `lib.harness_effectiveness.build_report` + `archive()` (one new lib
+    function) and writes `.dev-kit/trace/effectiveness-latest.json` + appends
+    `.dev-kit/trace/effectiveness-history.jsonl`.
+
+    **The auto-triggers**: SessionEnd / Stop (always), pr-verify CI step (always),
+    `/dev-kit:evaluate` (always — uses the same wrapper). All three consume the
+    same file.
+
+    **The CI gate**: `bin/collect-effectiveness.sh --mode=ci` exits non-zero iff
+    `subject_observability < threshold`. Single numeric comparison. No judgment.
+
+    **The HUD**: status-line tile `[subj-obs NN.N%]` reading
+    `effectiveness-latest.json`. Off by default; opt-in via
+    `subject_observability.show_in_statusline: true` in `.dev-kit/state.json`.
+
+    No new event types. No new producers. No schema version bump. The proposal
+    changes WHEN the reducer runs and WHO surfaces its output. The reducer's
+    5-component scorecard remains untouched and continues to be reported by
+    `/dev-kit:evaluate` and `/dev-kit:harness-effectiveness` for analysis; only
+    `subject_observability` is gated.
   files:
-    - path: bin/collect-effectiveness.sh
-      change: |
-        New idempotent entrypoint. Modes: `session` (default; for SessionEnd hooks),
-        `ci` (for `pr-verify.yml`), `manual` (for `/dev-kit:harness-effectiveness`
-        to delegate to the same code path). Reads `<root>/.dev-kit/trace/events.jsonl`,
-        invokes `lib.harness_effectiveness.build_report`, then calls
-        `lib.harness_effectiveness.archive(report, target=<root>/.dev-kit/trace)`.
-        Best-effort: all errors go to `.dev-kit/trace/collect-errors.log`; the
-        `session` and `manual` modes exit 0 always; `ci` exits 1 when any component
-        reports `status == "ROT"`
-        (NOT `INSUFFICIENT_EVIDENCE` — see Limitations on why `DRIFT_WARNING` does
-        not gate and `INSUFFICIENT_EVIDENCE` does not fail the build).
-    - path: hooks/trace-effectiveness-end.sh
-      change: |
-        New SessionEnd / Stop hook. Calls `bin/collect-effectiveness.sh --mode=session`
-        with `--root $(git rev-parse --git-common-dir)/..` so the snapshot lands in the
-        shared checkout (matches the `evidence-collection` RC-5 resolution). Registered
-        with `fail_closed:false` (best-effort) per the existing `trace-session-end.sh`
-        convention at `hooks/trace-session-end.sh:62`.
-    - path: hooks/hooks.json
-      change: |
-        Register `trace-effectiveness-end.sh` under the existing SessionEnd / Stop
-        matcher alongside `trace-session-end.sh`. No new tool matchers; SessionEnd
-        fires once per session and the cost is sub-second.
     - path: lib/harness_effectiveness.py
       change: |
-        Add `archive(report, *, target: Path) -> Tuple[Path, Path]` returning
-        `(latest, history_line)`. Writes `effectiveness-latest.json` (atomically via
-        the renderer's `atomic_write_text`) and appends one line to
-        `effectiveness-history.jsonl` with `{ts, run_id, overall_score, status,
-        components.{name}.score, components.{name}.status}`. Rotate
-        `effectiveness-history.jsonl` when it exceeds 200 lines (default) by
-        `gzip`-ing the tail to `effectiveness-history.jsonl.<UTC>.gz` and truncating.
-        New constant: `EFFECTIVENESS_LATEST_FILENAME = "effectiveness-latest.json"`,
-        `EFFECTIVENESS_HISTORY_FILENAME = "effectiveness-history.jsonl"`. No change
-        to `build_report` or any existing reducer behavior.
+        Add `subject_observability_through_value()` that returns the
+        `subject_observability` ratio directly (lift from `_subject_observability`
+        at `:465-518`). Add `archive(report, *, target: Path) -> Tuple[Path, Path]`
+        returning `(latest_path, history_line_path)`. New constants
+        `EFFECTIVENESS_LATEST_FILENAME = "effectiveness-latest.json"`,
+        `EFFECTIVENESS_HISTORY_FILENAME = "effectiveness-history.jsonl"`,
+        `SUBJECT_OBSERVABILITY_THRESHOLD_DEFAULT = 0.95`,
+        `SUBJECT_OBSERVABILITY_HISTORY_MAX_LINES = 200`. `archive()` writes
+        `effectiveness-latest.json` atomically (existing
+        `atomic_write_text` helper) and appends one line per snapshot to
+        `effectiveness-history.jsonl`; rotates when the head file exceeds
+        `SUBJECT_OBSERVABILITY_HISTORY_MAX_LINES` by gzipping the tail to
+        `effectiveness-history.jsonl.<UTC>.gz`. No change to `build_report` or any
+        existing reducer behavior.
+    - path: lib/trace_log.py
+      change: |
+        Add `@contextmanager def step(subject_id, *, stage="unknown", parent_id=None,
+        run_id=None, workflow_id=None)`. `__enter__` calls `append_event` for
+        `step.started` and returns the persisted `event_id`. `__exit__` calls
+        `append_event` for `step.completed` with `parent_id=<started event_id>`,
+        `outcome=passed|failed|interrupted` keyed on the exit type. `__exit__`
+        catches any exception from the second `append_event` and swallows it —
+        telemetry must not change a workflow outcome (matches the `|| true`
+        convention in `hooks/trace-session-end.sh:62` and `hooks/lib/payload-parse.sh:112`).
+        Re-raises any in-flight exception after logging.
+    - path: lib/execute.py
+      change: |
+        Replace the manual `append_event({"event_type": "step.started", ...})` /
+        `append_event({"event_type": "step.completed", ...})` pairs with
+        `with step(subject_id=step_id, stage=stage, parent_id=parent_id,
+        run_id=run_id, workflow_id=workflow_id) as sid: ...`. Mechanical migration;
+        no behavior change other than guaranteeing the terminal event on every
+        code path.
+    - path: hooks/session-start-check.sh
+      change: |
+        Migrate the `step.started` emission at `:74-75` to use `step()` so the
+        session-scoped subject is guaranteed a terminal even if SessionEnd is
+        skipped (network drop, abnormal termination). One file, one block.
+    - path: hooks/trace-session-end.sh
+      change: |
+        Migrate the `step.completed` emission at `:62` to the `__exit__` side of
+        the same `step()` block as `:74-75`. After migration the pair is
+        symmetric and survives abnormal exits.
+    - path: bin/collect-effectiveness.sh
+      change: |
+        New shell entrypoint. Modes: `session` (default; SessionEnd / Stop /
+        statusline trigger), `ci` (pr-verify), `evaluate` (`/dev-kit:evaluate`
+        internal call). Reads `<root>/.dev-kit/trace/events.jsonl`, invokes
+        `python3 -c "import sys; from pathlib import Path; from lib.harness_effectiveness import build_report, archive; r = build_report(Path(sys.argv[1])); archive(r, target=Path(sys.argv[1]) / '.dev-kit/trace')" --root "$root"`,
+        prints the latest snapshot's `subject_observability` and `threshold` as
+        one JSON line. `session` and `evaluate` modes always exit 0. `ci` mode
+        exits 0 iff `subject_observability >= threshold`. Errors go to
+        `.dev-kit/trace/collect-errors.log`; the wrapper never aborts the caller
+        (best-effort, `|| true` from the hook caller).
+    - path: hooks/trace-effectiveness-end.sh
+      change: |
+        New SessionEnd / Stop hook. Calls
+        `bin/collect-effectiveness.sh --mode=session --root $(git rev-parse
+        --git-common-dir)/..`. Registered with `fail_closed:false` per the
+        existing `trace-session-end.sh` convention.
+    - path: hooks/hooks.json
+      change: |
+        Register `trace-effectiveness-end.sh` under the existing SessionEnd /
+        Stop matcher. No new tool matchers.
     - path: .github/workflows/pr-verify.yml
       change: |
-        After the existing `pr-verify` step (5-gate verdict), add a step
-        `auto-collect-effectiveness` that runs
-        `bin/collect-effectiveness.sh --mode=ci --root ${{ github.workspace }}`
-        and emits `effectiveness-rot` as a GitHub check run via `gh-actions`. Uses
-        the existing `actions/github-script` action; no new permissions required.
+        Add one step `auto-collect-effectiveness` after the 5-gate verdict. Runs
+        `bin/collect-effectiveness.sh --mode=ci --root ${{ github.workspace }}`.
+        Emits the verdict as a `subject-observability` GitHub check run via
+        `actions/github-script`. No new permissions required.
     - path: commands/statusline.md
       change: |
-        Add the `eff <score> <status>` tile to the existing statusline format,
-        after the existing `model / tokens / cache / runtime` row. Reads
-        `.dev-kit/trace/effectiveness-latest.json` (single file read, ~1KB). Skips
-        silently when the file is missing or stale (>24h old) — never breaks the
-        status line.
+        Append a `[subj-obs NN.N%]` tile after the existing `model / tokens /
+        cache / runtime` row. Reads `.dev-kit/trace/effectiveness-latest.json`
+        (single ~1 KB file read). Skips silently when the file is missing or the
+        `subject_observability.show_in_statusline` flag is off.
     - path: skills/statusline/SKILL.md
       change: |
-        Document the new `statusline.show_effectiveness: true` opt-in flag in
-        `.dev-kit/state.json`. Off by default; on = surface the latest effectiveness
-        snapshot inline. The tile reads from the file written by
-        `bin/collect-effectiveness.sh --mode=session`, so a user must also have the
-        SessionEnd hook enabled for the tile to populate.
-    - path: tests/test_collect_effectiveness.py
+        Document `subject_observability.show_in_statusline: true` and
+        `subject_observability.threshold: 0.95` in `.dev-kit/state.json`. Tile
+        appears only when both conditions hold: flag on AND snapshot file fresh
+        (≤24h).
+    - path: .dev-kit/state.json
       change: |
-        New hermetic test class:
-        - `test_archive_writes_latest_and_appends_history` — drives `archive()`
-          with a synthetic report, asserts both files appear and the history line shape.
-        - `test_archive_rotates_history_at_200_lines` — appends 250 synthetic lines,
-          asserts the tail file is gzipped and the head file is 50 lines.
-        - `test_collect_effectiveness_session_mode_never_fails` — runs
-          `bin/collect-effectiveness.sh --mode=session` against an empty events.jsonl,
-          asserts exit 0 and a fresh `effectiveness-latest.json` with
-          `status: INSUFFICIENT_EVIDENCE`.
-        - `test_collect_effectiveness_ci_mode_fails_on_rot` — fabricates a report
-          with `prevention_quality.status == "ROT"`, asserts exit 1.
-        - `test_statusline_tile_handles_missing_file` — the statusline parser must
-          not crash when `.dev-kit/trace/effectiveness-latest.json` is absent.
-        - `test_sessionend_hook_is_best_effort` — monkeypatches the reducer to raise, asserts
-          the hook still exits 0 and writes the failure to `collect-errors.log`.
+        New defaults block: `subject_observability.threshold: 0.95` and
+        `subject_observability.show_in_statusline: false`. Threshold is read by
+        `bin/collect-effectiveness.sh --mode=ci`; the show flag by the statusline
+        parser.
+    - path: tests/test_subject_observability.py
+      change: |
+        New hermetic tests:
+        - `test_step_context_manager_emits_pair_on_success` — `with step(...)` produces both `step.started` and `step.completed`.
+        - `test_step_context_manager_emits_pair_on_exception` — exception in body still produces `step.completed` with `outcome=failed`.
+        - `test_step_context_manager_emits_pair_on_interrupt` — `BaseException` in body produces `step.completed` with `outcome=interrupted`.
+        - `test_step_context_manager_reraises_in_flight_exception` — `__exit__` does not suppress.
+        - `test_step_context_manager_swallows_telemetry_failure` — second `append_event` raising does not propagate.
+        - `test_archive_writes_latest_and_appends_history` — synthetic report, both files appear with the documented shape.
+        - `test_archive_rotates_history_at_200_lines` — appends 250 synthetic lines, head file 50, tail gzipped.
+        - `test_collect_effectiveness_ci_mode_exits_1_below_threshold` — synthetic ratio 0.50, exit 1.
+        - `test_collect_effectiveness_ci_mode_exits_0_above_threshold` — synthetic ratio 0.99, exit 0.
+        - `test_collect_effectiveness_session_mode_never_fails` — empty `events.jsonl`, exit 0, fresh `effectiveness-latest.json`.
+        - `test_statusline_tile_handles_missing_file` — no JSON, no crash.
+        - `test_live_subject_observability_after_fix` — replays a fixture (1 started, 1 terminal) through `build_report`, asserts ratio = 1.0.
 
 pros:
-  - 'Auto-collection costs nothing when there is nothing to collect: the reducer is sub-second, the JSONL history file stays under 200 lines by default (≈80KB), and SessionEnd fires once per session, not per turn.'
-  - 'Trend data enables a downstream "delta since last snapshot" check the reducer does not have today — once 5+ snapshots exist, the status-line HUD can flag "drift in last 3 sessions" without a full re-eval.'
-  - 'CI gate on `ROT` (not `DRIFT_WARNING`, not `INSUFFICIENT_EVIDENCE`) blocks the regressions the report currently flags: `prevention_quality ROT (59.6, coverage 93%)` is exactly the kind of regression a CI step should catch before merge.'
-  - 'Composes orthogonally with `evidence-collection` — auto-collection is downstream of producer fixes, never substitutes for them. The dependency is explicit in this YAML.'
-  - 'The `bin/collect-effectiveness.sh` entrypoint collapses three currently-distinct code paths (skill invocation, manual JSON dump, future hook trigger) onto one shell wrapper, which is easier to lint, easier to disable, and easier to instrument.'
-  - 'One-shot `lib/harness_effectiveness.archive` helper means the file format is owned by the lib, not by the hooks or the workflow — same shape whether written by SessionEnd, CI, or a future cron tick.'
-  - 'Status-line opt-in keeps the existing HUD shape unchanged for users who never look at the reducer; the tile appears only for users who turn it on.'
-  - 'Best-effort SessionEnd collection means a broken collection step never aborts a session — it writes to `collect-errors.log` and exits 0, matching the existing `hooks/trace-session-end.sh` convention.'
+  - 'One metric. One producer fix. One collector. One CI gate. One HUD tile. Smallest surface that satisfies "measured reliably".'
+  - 'The metric already exists (`lib/harness_effectiveness.py:465-518`) and is hermetic. This proposal only promotes it to the user-facing gate.'
+  - 'The producer fix is a `try/finally` context manager — one mechanical pattern. After migration every started subject terminates regardless of return path.'
+  - 'Auto-collection is unconditional: SessionEnd, pr-verify, evaluate, statusline all consume the same `.dev-kit/trace/effectiveness-latest.json` written by `bin/collect-effectiveness.sh`. One source of truth.'
+  - 'CI gate is a single numeric comparison. `bin/collect-effectiveness.sh --mode=ci` exits 1 iff `subject_observability < 0.95`. No judgment, no findings, no ambiguity.'
+  - 'The history file (`.dev-kit/trace/effectiveness-history.jsonl`) gives a trend line for free. A 1-line jq query over `effectiveness-latest.json` answers "are we drifting?" without re-running the reducer.'
+  - 'No new event types. No schema version bump. The proposal only changes WHEN the reducer runs and WHO surfaces its output; the reducer''s contract is untouched.'
+  - 'Migrating to `step()` is mechanical: every existing `append_event({"event_type": "step.started", ...})` becomes `with step(...)`. One PR, one migration, one assertion in CI.'
 
 cons:
-  - 'SessionEnd collection fires on every session across every active worktree — even short / scripted sessions where the trace file has 0–10 events. Cost is small (~50ms per session on the dev hardware) but not zero.'
-  - 'The history file is append-only with rotate-on-200-lines; a high-volume consumer (CI runs every commit) hits rotation every ~200 CI snapshots. Rotation keeps the head file small but the gzipped tail accumulates forever unless a vacuum step is added later.'
-  - 'PR-verify CI step adds ~200ms per PR; on a repo with 30 active worktrees and 10 PRs/day that is ~2s/day of CI time. Acceptable but not invisible.'
-  - 'Status-line tile reads a JSON file on every render; on a fast-typing session the status line renders 1–2× per second. The JSON is ~1KB so the read cost is negligible, but it is one extra disk read per render — explicitly skipped when the file is older than 24h to amortize this.'
-  - 'CI gate on `ROT` may block legitimate urgent merges where the ROT component is a producer gap (e.g. `prevention_quality ROT` because the interactive lifecycle producer has not shipped). Mitigation: gate is configurable via `effectiveness.ci_gate: false` in `.dev-kit/state.json`, default true once `evidence-collection` Phases 1–2 land.'
-  - 'The status-line HUD assumes a single-host view: a developer with two machines does not see the union. Out of scope (see Limitations), but worth flagging before users notice.'
-  - 'Adds one new `bin/collect-effectiveness.sh` entrypoint that duplicates the dispatch logic of `/dev-kit:harness-effectiveness`. Mitigation: this proposal also patches the skill to delegate to the bin script for the actual compute, so there is one source of truth for the file write and the skill becomes a thin wrapper. Listed as a Phase 4 follow-up; not in this proposal''s `after.files` because the skill is a Bash hook target and modifying it touches the user-invocable surface.'
+  - 'The `lib/trace_log.step` context manager is a new public API; existing callers using `append_event` directly must migrate for the metric to be reliable. The migration is mechanical and the CI gate enforces it, so this is an upfront cost paid once.'
+  - 'Threshold 0.95 is a starting value; legitimate async background tasks may sit below it. Out of scope for v1; documented as a follow-up with a per-subject exemption list keyed on `subject_id` prefix.'
+  - 'History file rotation at 200 lines is arbitrary. Configurable via `subject_observability.history_max_lines` in `.dev-kit/state.json`; default 200 is the right starting point for human-scale review (roughly one snapshot per workday × ~6 months).'
 
 limitations:
-  - 'This proposal does NOT produce evidence — it only consumes what the producers emit. The live report''s `subject_observability` finding (53,091 of 53,301 started subjects never reached a terminal event) is a producer bug; auto-collecting it does not fix it. Auto-collection is downstream of `evidence-collection` and gates on its RC-1 / RC-2 / RC-5 landing before Phase 1 of this proposal ships.'
-  - 'The CI gate fails on `status == "ROT"` only. `DRIFT_WARNING` posts a check-run warning but does not block the merge. `INSUFFICIENT_EVIDENCE` is reported but never gates. Rationale: `INSUFFICIENT_EVIDENCE` is the reducer''s signal that evidence is missing, not that the harness is unhealthy — gating on it would deadlock every PR until producer coverage hits 90%.'
-  - 'History file is per-worktree, not per-host. A developer running sessions on two machines does not see the union. Aggregating across hosts requires a follow-up `bin/collect-effectiveness-sync.sh` that uploads to a shared S3 / GCS bucket; out of scope here to avoid adding a network dependency.'
-  - 'Status-line tile opt-in means the HUD is silent for users who have not turned it on. There is no prompt to enable it; the choice is documented in `skills/statusline/SKILL.md` and surfaced only when the user asks "why does my report say ROT?" The risk is that users who would benefit from the visibility never find the flag.'
-  - 'Cannot distinguish "ROT because evidence is missing" from "ROT because evidence shows real degradation" without reading `findings`. The CI step prints the findings on failure, so a reviewer can disambiguate, but a single-line check-run summary collapses the two.'
-  - 'The 54,307-event corpus that backs the live report is NOT migrated. There is no retroactive history — only sessions that fire after Phase 1 ships contribute to `effectiveness-history.jsonl`. Earlier evidence stays in the source `.dev-kit/trace/events.jsonl` and remains readable by `read_events` on demand.'
-  - 'The reducer is unchanged. If the report''s contract drifts in a future version (e.g. `schema_version` bumps from 3 → 4 with a new submetric), every `effectiveness-history.jsonl` line written before the bump is still valid JSON but missing the new field. Consumers (status-line HUD, CI gate) must read defensively; this is a property the reducer already documents.'
-  - 'Cannot auto-fix the producer gaps this proposal surfaces. A `ROT` finding in CI means "block the merge", not "patch the producer". The hand-off chain is: CI fails → reviewer opens the report → reviewer fixes the producer (a separate PR against `evidence-collection` RC-1..7). This proposal makes that hand-off visible; it does not collapse the round-trip.'
+  - 'Measures ONE thing reliably: that every started subject terminates. Does not measure guard precision, recovery latency, learning delta, or any of the other 4 components. Those remain in the reducer''s report for `/dev-kit:evaluate`; this proposal does not gate them.'
+  - 'The CI gate is binary: pass or fail at threshold. A project that wants monitoring without blocking can run `bin/collect-effectiveness.sh --mode=ci --dry-run` to surface the verdict as a check-run warning without exiting non-zero. `--dry-run` is one flag in the wrapper; not in v1.'
+  - 'The history file is per-worktree, not per-host. Cross-host aggregation is a follow-up; the data model (one JSON-per-snapshot, one history line per snapshot) is already shaped for upload.'
+  - 'Cannot auto-fix a producer regression. CI catches it; a human fixes it. The hand-off chain is the same as the umbrella''s `evidence-collection` proposal but at a single, sharper metric.'
+  - 'The other 4 components of the reducer (`prevention_quality`, `first_pass_quality`, `recovery_quality`, `measurement_integrity`) remain observable via `/dev-kit:harness-effectiveness` and `/dev-kit:evaluate` for analysis. They are not gated.'
 
 sections:
-  - title: "Why auto-collection, not auto-production"
+  - title: "Why one metric, not five"
     body: |
-      The umbrella's existing `evidence-collection` proposal already lists seven
-      root causes (`RC-1..7` at `evidence-collection.yaml:248-253`) and the four
-      phases that fix them. Phases 1–3 (RC-2, RC-5, RC-7 → RC-1, RC-3 → RC-4, RC-6)
-      are producer work — make the emitter survive, add interactive lifecycle
-      hooks, label prevention evidence. None of that ships the report anywhere.
+      The 5-component scorecard in `lib/harness_effectiveness.py` is a research
+      framework: it tells you what is and is not measurable, with honest
+      `INSUFFICIENT_EVIDENCE` where evidence is missing. That is correct
+      behavior for a reducer that must never invent numbers. But it is the
+      wrong shape for a CI gate: a gate needs a single, reliable number
+      whose absence means "the harness is broken", not "the harness has
+      insufficient evidence for this corner".
 
-      Auto-collection is the missing downstream piece: once producers emit
-      `write.observed` / `verify.*` / `heal.attempted`, the harness should
-      automatically:
+      `subject_observability` is that number. It is already defined at
+      `lib/harness_effectiveness.py:465-518`, has a denominator (every
+      `step.started` event in the corpus), and is meaningful at 0 (no subject
+      ever terminates) and at 1 (every subject terminates). The threshold 0.95
+      is the smallest value at which the harness can credibly claim "we know
+      where our work ended".
 
-      1. Run the reducer at the right workflow boundaries (session end, PR verify).
-      2. Archive the result so trends are observable.
-      3. Surface the latest status in the HUD and the CI pipeline.
+      The other 4 components remain in the report for `/dev-kit:evaluate` and
+      `/dev-kit:harness-effectiveness`. They are observable but not enforced.
 
-      Without it, even a perfect producer network only helps the human who
-      remembers to invoke `/dev-kit:harness-effectiveness`. With it, the harness
-      reports itself at the same fidelity as a real CI dashboard.
-
-  - title: "Trigger taxonomy"
+  - title: "Auto-collect trigger matrix"
     body: |
       | Trigger | Mode | Writes | Gates? | Frequency |
       |---|---|---|---|---|
-      | `SessionEnd` / `Stop` hook | `session` | `effectiveness-latest.json` + append `effectiveness-history.jsonl` | no | ~1× per session |
-      | `pr-verify.yml` step | `ci` | `effectiveness-latest.json` (overwrites session-snapshot for the PR commit) | yes (on `ROT`) | ~1× per PR |
-      | `/dev-kit:harness-effectiveness` slash | `manual` (delegates to bin) | same as `session` | no | on demand |
-      | `/dev-kit:evaluate` | implicit | same as `manual` | no | on demand |
-      | status-line render | read-only | none | no | ~1–2× per second |
+      | SessionEnd / Stop | `session` | `effectiveness-latest.json` + append `effectiveness-history.jsonl` | no | ~1× per session |
+      | pr-verify.yml | `ci` | `effectiveness-latest.json` | yes (`subject_observability < 0.95`) | ~1× per PR |
+      | `/dev-kit:evaluate` | `evaluate` | `effectiveness-latest.json` + history | no | on demand |
+      | `/dev-kit:harness-effectiveness` | `evaluate` (delegates) | same as `evaluate` | no | on demand |
+      | statusline render | read-only | none | no | ~1–2× per second |
 
-      The reducer is sub-second and deterministic; running it on every trigger is
-      cheap. The status-line is read-only — it never invokes the reducer itself,
-      it reads the file the triggers write.
+      The collector (`bin/collect-effectiveness.sh`) is the single entrypoint
+      for all three write modes. The statusline and `/dev-kit:harness-effectiveness`
+      are read-only consumers.
 
-  - title: "Implementation phases"
+  - title: "The producer fix: try/finally context manager"
     body: |
-      **Phase 1 — collector + archive (gated on `evidence-collection` RC-1/RC-2/RC-5).**
-      Ship `lib/harness_effectiveness.archive()`, `bin/collect-effectiveness.sh`,
-      and the `SessionEnd` hook. The first auto-collected snapshot lands
-      immediately and writes `INSUFFICIENT_EVIDENCE` for every component until
-      `evidence-collection` Phase 2 producers start emitting. That is the
-      expected state and is correctly reported as such — no filler scores.
+      Today `lib/execute.py` and the SessionEnd hook emit `step.started` and
+      `step.completed` as separate `append_event` calls. Every code path that
+      does not reach the second call (exception, interrupt, timeout) leaves a
+      started subject without a terminal.
 
-      Exit criterion: SessionEnd fires, `effectiveness-latest.json` exists,
-      `effectiveness-history.jsonl` has one line per session, both parse.
+      The fix is a context manager in `lib/trace_log.py`:
 
-      **Phase 2 — CI gate.** Add the `pr-verify.yml` step. Default gate
-      `effectiveness.ci_gate: true`. Reviewer sees a `effectiveness-rot` check
-      run on every PR; failures block merge with the finding string in the
-      summary.
+      ```python
+      from contextlib import contextmanager
 
-      Exit criterion: a fabricated ROT report (test fixture) makes the CI step
-      exit 1 with the failing component in the message.
+      @contextmanager
+      def step(subject_id, *, stage="unknown", parent_id=None, run_id=None,
+               workflow_id=None):
+          _, started_id = append_event(root, {
+              "event_id": new_event_id(),
+              "event_type": "step.started",
+              "subject_id": subject_id,
+              "stage": stage,
+              "parent_id": parent_id,
+              "run_id": run_id,
+              "workflow_id": workflow_id,
+              "outcome": "started",
+              "source": "trace_log.step",
+              "evidence_ref": {},
+              "ts": now_utc(),
+          })
+          outcome = "passed"
+          try:
+              yield started_id
+          except Exception:
+              outcome = "failed"
+              raise
+          except BaseException:
+              outcome = "interrupted"
+              raise
+          finally:
+              try:
+                  append_event(root, {
+                      "event_id": new_event_id(),
+                      "event_type": "step.completed",
+                      "subject_id": subject_id,
+                      "stage": stage,
+                      "parent_id": started_id,
+                      "run_id": run_id,
+                      "workflow_id": workflow_id,
+                      "outcome": outcome,
+                      "source": "trace_log.step",
+                      "evidence_ref": {},
+                      "ts": now_utc(),
+                  })
+              except Exception:
+                  pass  # telemetry must not change workflow outcome
+      ```
 
-      **Phase 3 — status-line HUD.** Add the opt-in tile. Update
-      `commands/statusline.md` and `skills/statusline/SKILL.md`. The
-      `statusline.show_effectiveness: true` flag is off by default.
+      Every existing call site migrates from
 
-      Exit criterion: with the flag on, the status line shows
-      `[eff 66.2 DRIFT_WARNING]` after the existing tiles, and disappears when
-      the flag is off or the JSON is missing.
+      ```python
+      append_event(root, {"event_type": "step.started", ...})
+      try:
+          ...
+      except Exception:
+          ...
+      append_event(root, {"event_type": "step.completed", ...})
+      ```
 
-      **Phase 4 — delegation refactor (optional follow-up).** Rewrite
-      `/dev-kit:harness-effectiveness` to delegate to `bin/collect-effectiveness.sh
-      --mode=manual` so the skill body and the hook share one compute path.
-      Not in this proposal's `after.files` — proposal boundary.
+      to
+
+      ```python
+      with step(subject_id=..., stage=..., parent_id=..., run_id=...,
+                workflow_id=...) as sid:
+          ...
+      ```
+
+      After migration every started subject terminates regardless of return
+      path. The live corpus (currently 0.4%) moves to ≥ 0.95 on the next
+      snapshot.
 
   - title: "Cost model"
     body: |
-      | Operation | Per-call cost | Per-session cost (SessionEnd fires once) |
-      |---|---|---|
-      | `lib.trace_log.read_events` over 54k events | ~80ms (read + parse) | 80ms |
-      | `lib.harness_effectiveness.build_report` | ~50ms | 50ms |
-      | `archive()` write (atomic, gzip at rotate) | ~5ms | 5ms |
-      | status-line read (only on render) | ~2ms | ~3s/30min at 1 render/sec |
-      | `bin/collect-effectiveness.sh --mode=ci` | ~135ms total | n/a (CI step) |
+      | Operation | Per-call cost |
+      |---|---|
+      | `lib.trace_log.read_events` over 54k events | ~80ms |
+      | `lib.harness_effectiveness.build_report` | ~50ms |
+      | `archive()` write (atomic, gzip on rotate) | ~5ms |
+      | `bin/collect-effectiveness.sh --mode=ci` total | ~135ms |
+      | `step()` context manager per body | ~5ms (2 `append_event` + dict alloc) |
 
-      Total SessionEnd overhead: ~135ms one-time + ~3s/30min from the status line.
-      Total CI overhead: ~200ms per PR.
+      Total SessionEnd overhead: ~135ms one-time. Total CI overhead: ~200ms per
+      PR. Total per-step overhead: ~5ms (negligible vs typical step duration
+      of seconds).
 
-      For comparison: the existing `hooks/secret-scan.sh` PostToolUse hook costs
-      ~200ms on every Write. SessionEnd is strictly less frequent than any
-      PostToolUse. Cost is acceptable.
-
-  - title: "Integration with `/dev-kit:evaluate`"
-    body: |
-      `/dev-kit:evaluate` already embeds the reducer output in its report
-      (`skills/evaluate/SKILL.md` references `lib/harness_effectiveness.build_report`).
-      When the bin script lands, `/dev-kit:evaluate` should internally call
-      `bin/collect-effectiveness.sh --mode=manual` so the JSON snapshot and the
-      embedded report come from the same reduce call. Listed as a Phase 4
-      follow-up (same scope as the slash-delegation refactor); Phase 1 / 2 / 3
-      do not touch `/dev-kit:evaluate`.
+      For comparison, the existing `hooks/secret-scan.sh` PostToolUse hook
+      costs ~200ms on every Write. SessionEnd is strictly less frequent.
 
   - title: "Verification plan"
     body: |
-      Every phase gates on quoted evidence, not on assertion (Iron Law L3):
+      Every gate uses quoted evidence (Iron Law L3):
 
-      1. `pytest -q tests/test_collect_effectiveness.py` — quoted exit code +
-         test counts. New tests: 6 (see `after.files`).
-      2. End-to-end SessionEnd: open a Claude session, run any workflow, end
-         the session, confirm `.dev-kit/trace/effectiveness-latest.json` exists
-         and `.dev-kit/trace/effectiveness-history.jsonl` has one new line.
-      3. End-to-end CI: open a PR that adds a test fixture producing a synthetic
-         ROT report, confirm `effectiveness-rot` check fails with the finding
-         string in the summary.
-      4. End-to-end status-line: enable `statusline.show_effectiveness: true`,
-         confirm the tile appears with the latest snapshot's score.
-      5. History rotation: run 250 snapshots, confirm head file has 50 lines
-         and tail is gzipped.
+      1. `pytest -q tests/test_subject_observability.py` — quoted exit code + 12
+         test counts.
+      2. Live metric: after the migration, run
+         `/dev-kit:harness-effectiveness` and quote
+         `components.measurement_integrity.submetrics.subject_observability.coverage`
+         ≥ 0.95.
+      3. Live CI gate: open a PR with a synthetic low-ratio event, quote the
+         failing `subject-observability` check-run with the threshold in the
+         message.
+      4. Live statusline: enable
+         `subject_observability.show_in_statusline: true`, quote the status line
+         showing `[subj-obs NN.N%]`.
+      5. History rotation: append 250 snapshots, quote head file at 50 lines
+         and tail gzipped.
 
   - title: "Rejected alternatives"
     body: |
+      - **5-component CI gate.** The reducer reports `INSUFFICIENT_EVIDENCE`
+        for 3 components today; gating on those deadlocks every PR. Gating on
+        `ROT` alone is workable but opaque (a reviewer must read each
+        component's findings). One explicit metric is sharper.
+      - **Per-tool-call `step.completed` in PostToolUse.** Couples telemetry
+        to the harness's tool surface; the context manager decouples it.
+      - **Tighten the threshold to 0.99.** Too strict for the first ship;
+        0.95 leaves room for genuine edge cases. Configurable per project.
+      - **5 distinct history files (one per component).** Premature: one
+        metric, one file. Per-component history is a follow-up if the team
+        wants to gate other components later.
       - **A separate `/dev-kit:harness-metrics` skill.** Forbidden by the
-        umbrella's own §3 ("별도 metrics skill ... 만들지 않는다"). Out of scope
-        for this proposal; the bin script is enough.
-      - **A telemetry vendor / S3 / GCS / Datadog sink.** Out of project
-        philosophy (no external service for in-house telemetry) and out of
-        cost (no API spend). Local JSON only.
-      - **Run the reducer on every PostToolUse.** Catastrophic — the reducer
-        is ~130ms and PostToolUse fires on every Write. SessionEnd is the
-        right cadence: once per session, not per turn.
-      - **`EventBridge` / `INotify` watcher on `.dev-kit/trace/events.jsonl`.**
-        Adds a daemon. SessionEnd + a cheap periodic tick (`/dev-kit:evaluate`
-        already ticks on demand) is simpler and does not need a long-running
-        process.
-      - **Gate on `DRIFT_WARNING` in CI.** Too strict — DRIFT is the normal
-        steady-state for a partially-instrumented harness. ROT is the right
-        gate; DRIFT is a warning.
-      - **Write the snapshot to git.** That conflates a runtime artifact with
-        versioned source. Local file only, ignore via `.gitignore` (already
-        ignores `.dev-kit/`).
+        umbrella's own §3 ("별도 metrics skill ... 만들지 않는다"). The bin
+        script is enough.
 
   - title: "Open questions for the reviewer"
     body: |
-      1. **CI gate default.** `effectiveness.ci_gate: true` once
-         `evidence-collection` Phase 2 lands, or `false` until Phase 3
-         (labeled prevention) lands? The current draft picks the former
-         because `prevention_quality` is already at coverage 93% today;
-         the gap is that interactive producers are missing.
-      2. **Status-line tile default.** Off-by-default is safer (existing HUD
-         unchanged) but reduces discoverability. Should the
-         `/dev-kit:harness-effectiveness` slash emit a one-time nudge when
-         a user runs it for the first time and the tile is off?
-      3. **Cross-host aggregation.** Out of scope here, but worth a
-         follow-up proposal if the team grows past one developer per repo.
-         The data model in this proposal (single head file + rotated tail)
-         is already shaped to be uploaded later — JSON-per-snapshot is
-         trivially syncable.
-      4. **PR gate when the corpus is empty.** If `events.jsonl` has 0 events
-         (a brand-new worktree, a worktree where all producers are silently
-         broken), the reducer reports `INSUFFICIENT_EVIDENCE` for everything
-         and the CI step should pass. The draft does this — `INSUFFICIENT_EVIDENCE`
-         does not gate — but worth a sanity check that the gate logic does
-         not accidentally collapse to "any non-OK fails".
+      1. **Threshold default 0.95.** Right starting value, or should v1 ship
+         at 0.90 (laxer) / 0.98 (stricter)? Configurable per project via
+         `subject_observability.threshold`; default is the question.
+      2. **Per-subject exemption list.** Out of scope for v1, but worth
+         filing as a follow-up if the team uses async background jobs whose
+         subjects legitimately never terminate in this snapshot.
+      3. **Cross-host aggregation.** Out of scope here; a follow-up
+         `bin/collect-effectiveness-sync.sh` could add a syncable JSON-per-snapshot
+         stream. The data model is already shaped for it.
+      4. **Schema version bump.** No bump needed (`schema_version 3` already
+         carries the `subject_observability` submetric per issue #702). Worth
+         a sanity check that no consumer assumes an older shape.
