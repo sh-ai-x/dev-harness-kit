@@ -217,6 +217,98 @@ a:hover { text-decoration: underline; }
 .pcl-pros h3    { color: var(--ok); }
 .pcl-cons h3    { color: var(--bad); }
 .pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
 /* ----- Timeline chips -------------------------------------------------------
  * Emitted by `_meta_line` when the proposal YAML declares
  * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
@@ -238,7 +330,7 @@ a:hover { text-decoration: underline; }
 <h1>Harness Effectiveness — Workflow-Native Evidence and Agent Eval</h1>
 <p class="meta">2026-08-12 · <span class="tag tag-info">design-discussion</span></p>
 <div class="tags"><span class="tag tag-info">harness-effectiveness</span><span class="tag tag-info">agent-eval</span><span class="tag tag-info">self-heal</span><span class="tag tag-info">auto-learning</span><span class="tag tag-info">evidence</span></div>
-<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">1. 설계 원칙 — 기존 workflow 안에서 측정한다</a></li><li><a href="#sec-1">2. 기존 시스템과의 통합 경계</a></li><li><a href="#sec-2">3. Minimal event contract</a></li><li><a href="#sec-3">4. 5개 score의 evidence-based 계산</a></li><li><a href="#sec-4">5. Score status와 기존 평가의 관계</a></li><li><a href="#sec-5">6. Workflow producer 연결</a></li><li><a href="#sec-6">7. 구현 순서와 검증</a></li><li><a href="#sec-7">결론</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">1. 설계 원칙 — 기존 workflow 안에서 측정한다</a></li><li><a href="#sec-1">2. 기존 시스템과의 통합 경계</a></li><li><a href="#sec-2">3. Minimal event contract</a></li><li><a href="#sec-3">4. 5개 score의 evidence-based 계산</a></li><li><a href="#sec-4">5. Score status와 기존 평가의 관계</a></li><li><a href="#sec-5">6. Workflow producer 연결</a></li><li><a href="#sec-6">7. 구현 순서와 검증</a></li><li><a href="#sec-7">결론</a></li><li><a href="#sec-8">Sub-proposals</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
 <h2 id="sec-0">1. 설계 원칙 — 기존 workflow 안에서 측정한다</h2>
 <p>평가를 별도 replay workflow로 만들지 않는다. 실제 workflow가 실행될 때 결정 사건을 기록하고, evaluate는 그 evidence를 읽어 report를 만든다.</p>
 <pre><code class="language-text">plan → build/write → guard → verify/self-heal → review/security → ship
@@ -326,6 +418,10 @@ learning_delta = treatment_verified_recovery_rate
 
 <h2 id="sec-7">결론</h2>
 <p>이 설계의 기준은 “로그와 점수를 많이 만든다”가 아니다. workflow의 결정 경계에서 필요한 evidence만 기록하고, 기존 trace/repair/eval 시스템을 하나의 reducer로 연결해 5개 score를 계산하는 것이다. 기존 평가와 새 effectiveness 평가는 같은 <code>/dev-kit:evaluate</code> report에서 함께 보이지만, 의미와 source는 서로 섞지 않는다.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">Sub-proposals</h2>
+<table><thead><tr><th>Sub-proposal</th><th>Status</th><th>One-line scope</th></tr></thead><tbody><tr><td><a href="evidence-collection.html">evidence-collection</a></td><td>design-discussion</td><td>Fix the seven producer root causes (RC-1..7) so the reducer has evidence to score against.</td></tr><tr><td><a href="auto-collection.html">auto-collection</a></td><td>design-discussion</td><td>Surface the reducer at workflow boundaries — SessionEnd hook, PR-verify CI gate, status-line HUD — so the scorecard is observable without manual invocation. Depends on <code>evidence-collection</code> RC-1/RC-2/RC-5.</td></tr></tbody></table>
 <hr class="section-divider">
 
 <section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>저장소에는 이미 두 평가 경로가 있다. <code>lib/behavior_scorers</code>는 worktree를 D1–D7로 1–5점 평가하고, <code>lib/eval_runner.py</code>는 transcript를 rubric별 0–10 LLM judge로 평가한다. <code>TraceLog</code>, <code>repair_coordinator</code> events, <code>meta_eval.py</code>, <code>render_report_html.py</code>도 이미 존재한다.</p>

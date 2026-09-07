@@ -268,3 +268,10 @@ sections:
       하나의 reducer로 연결해 5개 score를 계산하는 것이다. 기존 평가와 새
       effectiveness 평가는 같은 `/dev-kit:evaluate` report에서 함께 보이지만,
       의미와 source는 서로 섞지 않는다.
+
+  - title: "Sub-proposals"
+    body: |
+      | Sub-proposal | Status | One-line scope |
+      |---|---|---|
+      | [evidence-collection](evidence-collection.html) | design-discussion | Fix the seven producer root causes (RC-1..7) so the reducer has evidence to score against. |
+      | [auto-collection](auto-collection.html) | design-discussion | Surface the reducer at workflow boundaries — SessionEnd hook, PR-verify CI gate, status-line HUD — so the scorecard is observable without manual invocation. Depends on `evidence-collection` RC-1/RC-2/RC-5. |
