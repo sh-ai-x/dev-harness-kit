@@ -154,6 +154,35 @@ def _discover_catalog_skills(repo_root: Path) -> list[str]:
     return names
 
 
+def _seed_from_catalog(skills: dict[str, dict],
+                       catalog_names: list[str]) -> dict[str, dict]:
+    """Seed ``skills`` with one row per catalog name, merging prefixed and
+    bare-name telemetry rows.
+
+    Telemetry captures skills under their bare name (e.g. ``worktree-prune``)
+    but the catalog lists them under the prefixed form (``dev-kit:worktree-prune``).
+    A skill with bare-name usage would otherwise show as 0/0 because the
+    prefix-aware candidate filter would never see it. Merge both rows so a
+    skill with any dispatch in any name form is recognised as used.
+
+    Returns a fresh dict; ``skills`` is not mutated.
+    """
+    seeded = dict(skills)
+    for name in catalog_names:
+        bare = name.split(":", 1)[-1] if ":" in name else name
+        merged = {"turns": 0, "invocations": 0, "last_seen": None}
+        for src in (skills.get(name), skills.get(bare)):
+            if not src:
+                continue
+            merged["turns"] += src.get("turns", 0)
+            merged["invocations"] += src.get("invocations", 0)
+            ls = src.get("last_seen")
+            if ls and (merged["last_seen"] is None or ls > merged["last_seen"]):
+                merged["last_seen"] = ls
+        seeded[name] = merged
+    return seeded
+
+
 def _run_propose_delete(skills: dict[str, dict],
                         window: int | None,
                         *,
@@ -178,10 +207,7 @@ def _run_propose_delete(skills: dict[str, dict],
     here = here or Path(__file__).resolve().parent
     repo_root = here.parent
 
-    seeded = dict(skills)
-    for name in _discover_catalog_skills(repo_root):
-        seeded.setdefault(name, {"turns": 0, "invocations": 0,
-                                 "last_seen": None})
+    seeded = _seed_from_catalog(skills, _discover_catalog_skills(repo_root))
 
     candidates = sorted(
         name for name, rec in seeded.items()

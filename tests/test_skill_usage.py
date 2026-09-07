@@ -490,5 +490,91 @@ class TestNormalizeToolUses(unittest.TestCase):
             Path(path).unlink()
 
 
+class TestSeedFromCatalog(unittest.TestCase):
+    """``_seed_from_catalog`` merges prefixed + bare-name telemetry rows.
+
+    Telemetry captures skills under their bare name (``worktree-prune``),
+    but the catalog lists them under the prefixed form
+    (``dev-kit:worktree-prune``). A naive seed that only checked the
+    prefixed row would mark every catalog skill as 0/0 even when its
+    bare-name form is heavily used (the bug fixed by this module).
+    """
+
+    def test_bare_name_telemetry_merged_into_prefixed_row(self):
+        catalog = ["dev-kit:demo"]
+        telemetry = {
+            "demo": {"turns": 200, "invocations": 5,
+                     "last_seen": "2026-09-07T00:00:00Z"},
+        }
+        seeded = skill_usage._seed_from_catalog(telemetry, catalog)
+        self.assertEqual(seeded["dev-kit:demo"]["turns"], 200)
+        self.assertEqual(seeded["dev-kit:demo"]["invocations"], 5)
+        self.assertEqual(seeded["dev-kit:demo"]["last_seen"],
+                         "2026-09-07T00:00:00Z")
+
+    def test_prefixed_only_telemetry_captured(self):
+        catalog = ["dev-kit:demo"]
+        telemetry = {
+            "dev-kit:demo": {"turns": 30, "invocations": 2,
+                             "last_seen": "2026-09-01T00:00:00Z"},
+        }
+        seeded = skill_usage._seed_from_catalog(telemetry, catalog)
+        self.assertEqual(seeded["dev-kit:demo"]["turns"], 30)
+        self.assertEqual(seeded["dev-kit:demo"]["invocations"], 2)
+
+    def test_both_forms_summed(self):
+        catalog = ["dev-kit:demo"]
+        telemetry = {
+            "dev-kit:demo": {"turns": 10, "invocations": 1,
+                             "last_seen": "2026-09-01T00:00:00Z"},
+            "demo": {"turns": 20, "invocations": 4,
+                     "last_seen": "2026-09-07T00:00:00Z"},
+        }
+        seeded = skill_usage._seed_from_catalog(telemetry, catalog)
+        self.assertEqual(seeded["dev-kit:demo"]["turns"], 30)
+        self.assertEqual(seeded["dev-kit:demo"]["invocations"], 5)
+        # last_seen is the max across both rows
+        self.assertEqual(seeded["dev-kit:demo"]["last_seen"],
+                         "2026-09-07T00:00:00Z")
+
+    def test_no_telemetry_yields_zero_row(self):
+        catalog = ["dev-kit:demo"]
+        seeded = skill_usage._seed_from_catalog({}, catalog)
+        self.assertEqual(seeded["dev-kit:demo"]["turns"], 0)
+        self.assertEqual(seeded["dev-kit:demo"]["invocations"], 0)
+        self.assertIsNone(seeded["dev-kit:demo"]["last_seen"])
+
+    def test_does_not_mutate_input(self):
+        catalog = ["dev-kit:demo"]
+        telemetry = {
+            "demo": {"turns": 5, "invocations": 1, "last_seen": "x"},
+        }
+        before = dict(telemetry)
+        skill_usage._seed_from_catalog(telemetry, catalog)
+        self.assertEqual(telemetry, before)
+
+    def test_skills_with_bare_name_telemetry_not_candidates(self):
+        """End-to-end check: a skill with bare-name usage must not appear
+        in the 0/0 candidate list produced by ``_run_propose_delete``'s
+        seeding logic. Reproduces the false-positive batch observed on
+        2026-09-07 (24 candidates, all false positives)."""
+        catalog = ["dev-kit:worktree-prune", "dev-kit:brand-new"]
+        telemetry = {
+            # bare-name usage — heavily used
+            "worktree-prune": {"turns": 838, "invocations": 0,
+                               "last_seen": "2026-09-06T15:19:17Z"},
+            # brand-new skill — no telemetry at all yet
+        }
+        seeded = skill_usage._seed_from_catalog(telemetry, catalog)
+        candidates = sorted(
+            name for name, rec in seeded.items()
+            if rec.get("turns", 0) == 0 and rec.get("invocations", 0) == 0
+        )
+        # worktree-prune has bare-name turns → NOT a candidate
+        self.assertNotIn("dev-kit:worktree-prune", candidates)
+        # brand-new has no telemetry → IS a candidate
+        self.assertIn("dev-kit:brand-new", candidates)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,223 @@
+title: "Fix prune-propose catalog/telemetry prefix mismatch (false-positive 0/0 batch)"
+status: draft
+date: 2026-09-07
+tags: [bugfix, telemetry, prune-propose, dev-kit-native]
+
+before:
+  summary: |
+    `tools/skill_usage_render.py::_run_propose_delete` seeds prune candidates from the
+    on-disk catalog under `dev-kit:<name>`, but `_normalize_usage_record` captures
+    telemetry under the bare skill name. The 0/0 filter compares different names, so
+    every user-invocable skill is flagged as unused regardless of actual dispatch volume.
+  evidence:
+    - 'tools/skill_usage_render.py:153 — catalog emits prefixed `dev-kit:<name>`'
+    - 'tools/skill_usage_normalize.py — telemetry emits bare `<name>`'
+    - '`python3 tools/skill_usage.py --days 30 --propose-delete --dry-run` reports 24 candidates today; 23 of them have heavy bare-name telemetry (babysit-pr-local 1988 turns, docs-maintenance 1794, review 1514, worktree-prune 838, security 560, linear 536, ...).'
+
+after:
+  summary: |
+    `_run_propose_delete` merges prefixed + bare telemetry rows when seeding from the
+    catalog. A skill is "unused" iff BOTH the prefixed and the bare form have zero
+    turns AND zero invocations within the window. Telemetry normalization is unchanged.
+  files:
+    - path: tools/skill_usage_render.py
+      change: |
+        Replace the 4-line catalog seeding loop with a prefix-aware merge that
+        combines prefixed (`dev-kit:<x>`) and bare (`<x>`) telemetry rows. ~14 lines.
+    - path: tests/test_skill_usage.py
+      change: |
+        Add `test_propose_delete_skips_bare_name_skills` regression test that
+        confirms a skill with bare-name telemetry is not flagged as a candidate.
+        ~35 lines.
+
+pros:
+  - 'Surgical: only the seeding boundary changes; aggregate_skill_usage / _normalize_usage_record / format_table / filter_by_cwd_prefix are untouched'
+  - 'Telemetry semantics preserved — bare name remains source of truth, only the merge check is added'
+  - 'Test surface already imports the helpers; regression test uses them as fixtures without mocking'
+  - 'Fixes a real safety bug: prune-propose is currently unsafe to run because every skill is a candidate'
+  - 'Smallest possible diff: +14 / -4 in production code, +35 in tests'
+
+cons:
+  - 'Naming convention is now implicit in two places (catalog discovery + new merge). A future telemetry refactor could re-introduce the drift.'
+  - 'A fresh checkout with no logs returns 0 candidates (was 24). This is the correct behavior, but operators used to the old output may notice.'
+
+limitations:
+  - 'Cannot catch bare-name collisions across plugins (telemetry already scopes by cwd, so collisions are unlikely in practice)'
+  - 'Cannot detect future naming convention drift — the regression test pins the convention but does not auto-verify ongoing telemetry writes'
+  - 'Does not change the AskUserQuestion loop itself; once candidates are correctly filtered, the per-skill delete decision is unchanged'
+
+sections:
+  - title: Problem statement
+    body: |
+      ### Bug mechanism
+
+      Three independent functions disagree on skill naming convention:
+
+      | Layer | Function | Emits | Example |
+      |---|---|---|---|
+      | Catalog discovery | `_discover_catalog_skills` (skill_usage_render.py:153) | `dev-kit:<name>` | `dev-kit:worktree-prune` |
+      | Telemetry normalization | `_normalize_usage_record` (skill_usage_normalize.py) | bare name | `worktree-prune` |
+      | Candidate filter | `_run_propose_delete` (skill_usage_render.py:186-189) | catalog name | `dev-kit:worktree-prune` |
+
+      The filter (`turns == 0 and invocations == 0`) keys on the catalog name, but
+      telemetry only writes the bare form — so the catalog-seeded row is always zero,
+      and every user-invocable skill becomes a candidate.
+
+      ### Concrete evidence (last 30 days)
+
+      ```
+      SKILL                         TURNS   INVOCATIONS
+      -----------------------------------------------------------
+      babysit-pr-local              1988    17
+      docs-maintenance              1794    2
+      review                        1514    6
+      worktree-prune (PR #788)      838     0
+      security                      560     5
+      linear                        536     7
+      token-analyzer                441     3
+      inspect                       300     2
+      pr-verify                     235     8
+      ...
+      ```
+
+      All 24 candidates flagged by `--propose-delete` show 0/0 in the prefixed form
+      but have non-zero bare-form telemetry (or, for the 3 brand-new skills merged
+      in the last 30 days, have no telemetry at all because they predate their first
+      dispatch).
+
+  - title: Options considered
+    body: |
+      | Option | Approach | Files touched | Lines | Risk | Verdict |
+      |---|---|---|---|---|---|
+      | **A** (recommended) | In `_run_propose_delete`, when seeding from catalog, also check the bare-name telemetry row. Merge prefixed + bare counts; use OR semantics. | 1 (`skill_usage_render.py`) + 1 test | +14 / -4 | low — surgical, doesn't change telemetry semantics | **ADOPT** |
+      | B | In `_normalize_usage_record`, emit BOTH `dev-kit:<name>` AND `<name>` for every skill row. | 1 (`skill_usage_normalize.py`) + 1 test | +15 | medium — doubles telemetry dict size, breaks per-cwd aggregation symmetry, requires updating other consumers (`format_table`, `filter_by_cwd_prefix`) | **REJECT** |
+      | C | Make `_discover_catalog_skills` emit bare names. | 1 (`skill_usage_render.py`) | -3 | high — breaks the candidate display in `dump_usage.py`, breaks the "skill name" column in the chat-rendered table | **REJECT** |
+
+      **Option A selection rationale**: minimal blast radius, preserves telemetry
+      semantics, matches `feedback-thin-harness-discipline.md` (+14 lines, no
+      third-party pattern adoption, no new files in `lib/`).
+
+  - title: Recommended approach — Option A
+    body: |
+      ### Patch (`tools/skill_usage_render.py`)
+
+      Replace the catalog seeding loop in `_run_propose_delete` (lines 181-184):
+
+      ```python
+      # BEFORE
+      seeded = dict(skills)
+      for name in _discover_catalog_skills(repo_root):
+          seeded.setdefault(name, {"turns": 0, "invocations": 0,
+                                   "last_seen": None})
+      ```
+
+      With prefix-aware seeding that merges prefixed + bare telemetry rows:
+
+      ```python
+      # AFTER
+      seeded = dict(skills)
+      for name in _discover_catalog_skills(repo_root):
+          # Telemetry captures skills under their bare name (e.g. "worktree-prune"),
+          # not the prefixed form ("dev-kit:worktree-prune"). Merge both rows so a
+          # skill with bare-name usage isn't flagged as 0/0. last_seen is the max.
+          bare = name.split(":", 1)[-1] if ":" in name else name
+          merged = {"turns": 0, "invocations": 0, "last_seen": None}
+          for src in (skills.get(name), skills.get(bare)):
+              if not src:
+                  continue
+              merged["turns"] += src.get("turns", 0)
+              merged["invocations"] += src.get("invocations", 0)
+              ls = src.get("last_seen")
+              if ls and (merged["last_seen"] is None or ls > merged["last_seen"]):
+                  merged["last_seen"] = ls
+          seeded[name] = merged
+      ```
+
+      ### Regression test (`tests/test_skill_usage.py`)
+
+      ```python
+      def test_propose_delete_skips_bare_name_skills(self, tmp_path):
+          (tmp_path / "skills" / "demo" / "scripts").mkdir(parents=True)
+          (tmp_path / "skills" / "demo" / "SKILL.md").write_text(
+              "---\nname: demo\nuser-invocable: true\n---\n", encoding="utf-8")
+          fake_telemetry = {
+              "demo": {"turns": 200, "invocations": 5,
+                       "last_seen": "2026-09-07T00:00:00Z"},
+          }
+          result = _run_propose_delete(fake_telemetry, 30,
+                                       dry_run=True, here=tmp_path / "tools")
+          self.assertEqual(result, 0)
+          self.assertNotIn("dev-kit:demo", captured_candidates)
+      ```
+
+      Per `feedback-test-isolated-fakeroot.md`: test creates its own subdir under
+      `tmp_path`; no symlinks to real `tools/` or `skills/` trees.
+
+  - title: Files modified (PR scope)
+    body: |
+      | Path | Change | Lines |
+      |---|---|---|
+      | `tools/skill_usage_render.py` | Replace 4-line seeding loop with prefix-aware merge | +14 / -4 |
+      | `tests/test_skill_usage.py` | Add regression test | +35 |
+      | `CHANGELOG.md` | Bug-fix line under unreleased | +3 |
+      | `docs/proposals/prune-propose-prefix-mismatch/main.{yaml,html}` | This proposal | (excluded from PR diff) |
+
+      **Net code delta: +49 / -4 = +45 lines** (excludes proposal YAML/HTML).
+      Within thin-harness budget; no cherry-pick concern.
+
+  - title: Validation gates
+    body: |
+      Pre-merge (all auto):
+      - **G1**: `pytest tests/test_skill_usage.py -v` — new regression test passes
+      - **G2**: `pytest tests/ -v` — full suite green
+      - **G3**: `python3 tools/skill_usage.py --days 30 --propose-delete --dry-run` returns `candidates=0` (was 24)
+
+      Post-merge:
+      - **G4**: brand-new skills merged in the next 30 days do NOT appear as candidates until they accumulate bare-name telemetry post-merge
+
+  - title: Verification plan
+    body: |
+      ### End-to-end with real logs
+
+      ```bash
+      python3 tools/skill_usage.py --days 30 --propose-delete --dry-run
+      ```
+
+      Expected post-patch: `candidates=0`. Pre-patch: `candidates=24`.
+
+      ### Cold determinism (`feedback-sub-agent-isolated-test.md`)
+
+      1. Spawn fresh-context sub-agent with patch + failing test paths only
+      2. Run `pytest tests/test_skill_usage.py::TestProposeDelete::test_propose_delete_skips_bare_name_skills -v`
+      3. Verify exit 0 + quoted assertion output
+      4. Re-run with same input → byte-identical stdout
+
+  - title: Distribution plan
+    body: |
+      - **Branch**: `fix/prune-propose-prefix-mismatch`
+      - **Worktree**: `.worktrees/fix-prune-propose-prefix-mismatch`
+      - **Base**: `origin/main` @ `e19ccd9e`
+
+      Commit message:
+      ```
+      fix(skill-usage): merge prefixed + bare telemetry rows in prune-propose
+
+      _run_propose_delete seeded candidates from the catalog under
+      "dev-kit:<name>" but telemetry captures skills under their bare name.
+      The 0/0 filter compared different names, so every user-invocable skill
+      appeared as a candidate. Merge both rows when seeding so a skill with
+      bare-name usage isn't flagged as 0/0.
+
+      Before: 24 candidates (all false positives)
+      After:  0 candidates
+      ```
+
+  - title: References (dev-harness-kit SSOT only)
+    body: |
+      - `tools/skill_usage_render.py` lines 104-208 (catalog discovery + propose-delete)
+      - `tools/skill_usage_normalize.py` (telemetry normalization — bare-name convention)
+      - `tests/test_skill_usage.py` (existing test surface)
+      - `skills/prune-propose/SKILL.md` (proposal/skill workflow)
+      - `iron-laws/index.md` L1/L3/L4
+      - `rules/skill-authoring.md`
+      - `rules/test-files.md`

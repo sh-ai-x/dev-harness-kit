@@ -96,6 +96,27 @@ inside a PreToolUse shell script). Each helper carries its own
 | `stage-gate.sh` | `stop-verify.sh` | `hook_stage_active` + `pre_completion_checklist_active` stage-activation helpers (the second follows stop-verify's stage + override rules so the intent checklist fires under the same gate) |
 | `loop-detect.sh` | `hooks/loop-detect.sh` | Append per-session Bash fingerprints and detect consecutive matches at the configured threshold |
 
+## Reference data banks (`hooks/references/`)
+
+Two hooks (`slop-detector.sh`, `l4-todo-scan.sh`) load their detection
+patterns from runtime data files under [`hooks/references/`](../../hooks/references/)
+instead of inlining EREs in shell. Despite the `.md` extension, those files
+are **machine-readable data**, not user-facing docs — the top-level
+[`hooks/references/README.md`](../../hooks/references/README.md) explains
+the loader contract (POSIX ERE, line-delimited, `#` comments skipped) and
+which consumer reads which bank.
+
+| Bank | Consumer | Purpose | Fallback |
+|---|---|---|---|
+| `hooks/references/l4/markers.md` | `l4-todo-scan.sh` | TODO/FIXME/XXX/HACK + KO soft markers (`나중에`, `임시`, `스텁`, …) | None — fails closed |
+| `hooks/references/slop/phrases.md` | `slop-detector.sh` (T1) + `inspect --slop` | High-signal n-gram bank (KO + EN) | Inline v1 single regex (degraded; WARN printed) |
+| `hooks/references/slop/structures.md` | `slop-detector.sh` (T2) + `inspect --slop` | Structural regex bank (binary contrast, false agency, Wh-starters, KO structure) | Inline v1 single regex |
+| `hooks/references/slop/scoring.md` | `inspect --slop` (only) | 1-10 × 5-dim rubric (Directness / Rhythm / Trust / Authenticity / Density) | None |
+| `hooks/references/slop/examples.md` | `inspect --slop` (reference only) | Before/after fixtures for human reviewers; real fixtures live in `tests/fixtures/slop/` | None |
+
+`hooks/references/slop/README.md` is the per-bank README (severity tier,
+`SLOP_LEVEL` / `SLOP_QUIET` / `SLOP_STRICT` env vars, fallback contract).
+
 ---
 
 

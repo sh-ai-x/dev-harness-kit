@@ -3,6 +3,15 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **fix(skill-usage):** `prune-propose` no longer flags every user-invocable
+  skill as a deletion candidate. The catalog seed (`dev-kit:<name>`) was
+  compared against telemetry that captures skills under their bare name
+  (`<name>`); the 0/0 filter therefore matched every catalog row. The fix
+  extracts `_seed_from_catalog` and merges prefixed + bare telemetry rows
+  when seeding, so a skill with bare-name usage isn't a false-positive
+  candidate. Real candidates drop from 24 to 21 on the current 30-day
+  window (3 actually-used skills correctly excluded; remaining 21 are
+  genuinely 0/0 and surface for human review).
 - **fix(review):** severity gate tolerates the bootstrap-PR fallback contract
   on BOTH review + security jobs. When `anthropics/claude-code-action@v1`'s
   anti-recursion guard skips both agents because the PR modifies
