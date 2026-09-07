@@ -36,7 +36,9 @@ them. It works in both Claude Code and Codex, and the same commands mean the
 same thing in both.
 
 **New here?** Start at [`docs/home/00-index.md`](docs/home/00-index.md) — it
-walks a 60-second tour.
+walks a 60-second tour. For a Problem · Analysis · Solution framing
+("why does this exist, and what specifically does it solve?"), see
+[`docs/home/01-pas.md`](docs/home/01-pas.md).
 
 ---
 
@@ -186,6 +188,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:bootstrap` (with ci-setup prompt) | `bootstrap` **and** `ci-setup` in one shot — the usual new-project starting point. |
 | [`/dev-kit:ci-setup`](docs/skills/ci-setup.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
 | [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
+| [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). The single switch that gates which hooks and skills run. |
 
 ### Planning and building
 
@@ -268,6 +271,14 @@ repo's worktrees and hands you back the exact command to resume the right one.
 (This needs `/dev-kit:log` to have been on — that's what records the sessions.)
 See [Session monitor](#session-monitor) below for the flag reference.
 
+**You want to switch between `full` / `lite` / `undev` modes.** Run
+[`/dev-kit:mode`](skills/mode/SKILL.md). `full` is the multi-session/multi-agent
+default; `lite` is a 7-hook / 7-skill subset for a 4-hour MVP sprint;
+`undev` disables the plugin entirely. Use `--scope=local` to test a mode
+without committing the change. The full resolution order
+(shell env → `settings.json` → `settings.local.json`) lives in
+[`docs/scopes/modes.md`](docs/scopes/modes.md).
+
 **You want to skip the Valuate step.** Go ahead — the verdict is advisory.
 `valuate` scores whether a plan is worth building, but the build stage proceeds
 either way (the old hard gate was removed in PR #463). Note that as of PR #589
@@ -320,6 +331,7 @@ table — HTML / MD / 한국어 sibling / what each doc gives you — lives in
 | If you want to … | Open |
 |---|---|
 | Learn the *why* in five minutes | [`docs/home/00-index.md`](docs/home/00-index.md) (sections 1–3) |
+| Read the Problem · Analysis · Solution framing | [`docs/home/01-pas.md`](docs/home/01-pas.md) |
 | Wire dev-kit into a new repo | [`docs/quality/ci-setup.md`](docs/quality/ci-setup.md) |
 | See all stages in one place | [`docs/stages/STAGES.md`](docs/stages/STAGES.md) |
 | Recover from a broken flow | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
