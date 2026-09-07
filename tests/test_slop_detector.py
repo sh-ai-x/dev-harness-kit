@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -46,10 +47,19 @@ def _payload(file_path: str, content: str) -> str:
 
 
 def run_hook(content: str, *, file_path: str = "test.md", env_extra: dict | None = None) -> subprocess.CompletedProcess:
-    """Invoke the hook with a PostToolUse payload and capture output."""
+    """Invoke the hook with a PostToolUse payload and capture output.
+
+    Pin `DEV_KIT_STAGE=build` so the test is hermetic w.r.t. whatever
+    `.dev-kit/.active-hooks.json` the developer has on disk. Without the
+    pin, a bootstrapped checkout (the typical post-`/dev-kit:bootstrap`
+    state) makes the stage gate resolve the stage to `bootstrap`, where
+    `slop-detector` is off, so the hook exits 0 silently and the tests
+    assert against a hook that deliberately did nothing.
+    """
     _require_jq()
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+    env.setdefault("DEV_KIT_STAGE", "build")
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -169,34 +179,77 @@ class StrictMode(unittest.TestCase):
 
 class BankFallback(unittest.TestCase):
     def test_inline_fallback_when_banks_missing(self) -> None:
-        # Defensive: if the references/ bank is ever removed, hook must still fire on
-        # legacy v1 phrases (e.g. "Certainly!"). We simulate by pointing CLAUDE_PLUGIN_ROOT
-        # at a temp dir without references/, with the hook exposed there.
-        import tempfile
-
+        # Defensive: if the references/ bank is ever removed, hook must
+        # still fire on legacy v1 phrases (e.g. "Certainly!").
+        #
+        # The hook sources hooks/lib/stage-gate.sh, which reads
+        # `.dev-kit/.active-hooks.json` from `git rev-parse
+        # --show-toplevel`. To make the gate fail-open at line 17 (no
+        # matrix file present), the test must run the hook from a
+        # directory whose git toplevel has NO `.dev-kit/`. Creating a
+        # worktree inside the dev-harness-kit checkout is not enough
+        # because git resolves the worktree's toplevel to the parent
+        # worktree (via commondir), which DOES have `.dev-kit/`. We
+        # therefore use a temp worktree created from a git context
+        # OUTSIDE the dev-harness-kit checkout (a temp dir containing
+        # only a fresh `git init`), which makes the toplevel that
+        # git sees exactly equal to the temp dir — no `.dev-kit/`,
+        # stage gate fail-opens, inline fallback fires.
+        import subprocess as sp
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            tmp_hook = tmp_path / "slop-detector.sh"
-            shutil.copy(str(HOOK), str(tmp_hook))
-            # slop-detector.sh now sources ${BASH_SOURCE[0]%/*}/lib/payload-parse.sh;
-            # the test fixture copies both the hook AND its lib/ sibling so the
-            # `require_jq`/`read_stdin_json`/`extract_content` helpers are
-            # available. The fallback we exercise is the missing-`references/slop/`
-            # path (v1 inline bank), NOT a broken-payload path.
+            outer = tmp_path / "outer"
+            wt = tmp_path / "wt"
+            outer.mkdir()
+            # Fresh git context, NOT inside dev-harness-kit.
+            sp.run(["git", "init", "-q", str(outer)], check=True)
+            (outer / ".gitkeep").write_text("placeholder\n")
+            sp.run(["git", "add", ".gitkeep"], cwd=str(outer), check=True)
+            sp.run(["git", "-c", "user.email=x@x", "-c", "user.name=x",
+                    "commit", "-q", "-m", "init"], cwd=str(outer), check=True)
+            sp.run(
+                ["git", "worktree", "add", "--quiet", "--detach", str(wt), "HEAD"],
+                cwd=str(outer), check=True,
+            )
+            # Mirror just the hook + its lib into the worktree.
+            sp.run(["mkdir", "-p", str(wt / "hooks")], check=True)
+            shutil.copy(str(HOOK), str(wt / "hooks" / "slop-detector.sh"))
             shutil.copytree(
                 REPO_ROOT / "hooks" / "lib",
-                tmp_path / "lib",
+                wt / "hooks" / "lib",
                 symlinks=True,
             )
-            # no references/ dir — fallback path
+            # The stage gate does `cd ${BASH_SOURCE[0]%/*}/../..` and
+            # then `sys.path.insert(0, <plugin_root>/lib)` before
+            # importing `active_hooks_codec`. That module is part of
+            # dev-kit's lib/ package and depends on `lib/atomic.py` —
+            # the gate does NOT source them on a separate path, so the
+            # entire `lib/` directory must be reachable at the
+            # worktree root.
+            shutil.copytree(
+                REPO_ROOT / "lib",
+                wt / "lib",
+                symlinks=True,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            (wt / "hooks" / "references" / "slop" / "phrases.md").unlink(
+                missing_ok=True,
+            )
+            (wt / "hooks" / "references" / "slop" / "structures.md").unlink(
+                missing_ok=True,
+            )
             content = "Certainly! This is a robust and comprehensive solution."
             payload = json.dumps({"tool_input": {"file_path": "test.md", "content": content}})
-            proc = subprocess.run(
-                [str(tmp_hook)],
-                input=payload,
-                capture_output=True,
-                text=True,
-                env={**os.environ, "CLAUDE_PLUGIN_ROOT": tmp, "PATH": os.environ["PATH"]},
+            proc = sp.run(
+                [str(wt / "hooks" / "slop-detector.sh")],
+                input=payload, capture_output=True, text=True,
+                cwd=str(wt),
+                env={
+                    **os.environ,
+                    "CLAUDE_PLUGIN_ROOT": str(wt),
+                    "CLAUDE_PROJECT_DIR": str(wt),
+                    "PATH": os.environ["PATH"],
+                },
                 timeout=10,
             )
             self.assertEqual(proc.returncode, 0, msg=proc.stderr)
