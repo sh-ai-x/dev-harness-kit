@@ -260,6 +260,48 @@ For each step in order:
 
 For a worked example, see `lib/execute.py:examples/plan_step_template.md`.
 
+### team mode — dependency-aware step docs
+
+When `DEV_KIT_MODE=team` (read via `os.environ.get("DEV_KIT_MODE")` or
+`.claude/settings.json` `env.DEV_KIT_MODE`), Gate 4/5 emits extra
+structure that the existing dispatcher / integrity layers already
+consume:
+
+1. **Per-step dependency prompt.** After the operator has chosen the
+   step titles (the same multi-step picker that runs in `full` / `lite` /
+   `undev`), run one `AskUserQuestion` per step with `multiSelect: true`
+   over the upstream step numbers. The question text per step N is:
+   "Which earlier steps must complete before step N starts?". Empty
+   answer = leaf.
+2. **Validate via `lib/plan_dependency.py:compute_dag`.** Build the
+   step list and call `compute_dag(steps)`. If `result["valid"]` is
+   `False`, refuse to emit: surface `result["missing"]` (unknown refs)
+   or `result["cycles"]` (one cycle per offending SCC) and ask the
+   operator to fix the edges before re-running. The validator runs
+   BEFORE the index.json / step<N>.md writes so a broken graph never
+   lands on disk.
+3. **Write `dependencies:` block into `step<N>.md`.** For each step,
+   add a top-level `dependencies: [N, ...]` field to the step file
+   body. `lib/intent_integrity.py:_parse_step_file` already reads this
+   field (coerces to int via `_to_int()`); the existing IC-3 gap check
+   then enforces step.md ↔ index.json consistency for free.
+4. **Skip the `dependencies:` block in non-team modes.** This section is
+   gated on `DEV_KIT_MODE=team`. In `full` / `lite` / `undev`, Gate 4/5
+   emits exactly as today (no extra prompt, no extra block).
+5. **Build-runner fan-out.** `lib/dispatch_classifier.py:_has_dependency_edge`
+   already reads `depends_on` / `consumes` from each step dict in
+   `phases/<phase>/index.json`. Once the plan skill persists the
+   per-step dependency list into the step dict (the same prompt that
+   drives `step<N>.md`), the dispatcher classifies the phase as
+   `sequential` for any non-trivial dependency edge — without any
+   further wiring on the dispatch side.
+
+The `## Dependencies` block in `step<N>.md` is the documented
+extension to the step-file template (alongside `Status`, `Read first`,
+`Task`, `Acceptance Criteria`, `Verification & Status Update`,
+`Don't`). Keep the section order stable — `lib/intent_integrity.py`
+parses these by exact key.
+
 ## Gate 5/5 — emit
 
 Write `PRD.md` with the 6 sections below. DoD 5 conditions (all required):
@@ -282,6 +324,30 @@ Then:
   the reviewer will see before `/dev-kit:build` is invoked.
 - Pre-build integrity check is enforced by `/dev-kit:build`; the plan emit
   is complete when `phases/<name>/index.json` and `step<N>.md` are written.
+
+### team mode — PRD §4 Dependency DAG subsection
+
+When `DEV_KIT_MODE=team`, extend PRD §4 (Phase plan) with a "Dependency
+DAG" subsection listing each edge from the per-step `dependencies:`
+block collected in Gate 4/5:
+
+```markdown
+### Dependency DAG
+- step2 → step1 (data model must exist before API layer)
+- step3 → step1, step2 (config + API before UI)
+- step4 → step3 (UI consumes config)
+```
+
+Edge order follows `compute_dag(steps)["topo"]` so the subsection reads
+in execution order. Skip the subsection entirely when `dependencies` is
+empty for every step (a fully-leaf graph). This is the DoD condition for
+team mode; in `full` / `lite` / `undev`, omit the subsection.
+
+The DoD item list above (1-6) does not gain a 7th bullet in team; the
+subsection lives inside the existing §4 bullet, not as a separate DoD
+check — the gate enforcement is on the per-step `dependencies:` block
+existing in each `step<N>.md` (which `lib/intent_integrity.py` IC-3
+already enforces at build time).
 
 ## Proposal auto-invoke (Gate 5/5 final step)
 

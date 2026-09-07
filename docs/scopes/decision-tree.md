@@ -16,6 +16,7 @@ Answer in order. Stop at the first "yes".
 
 - **4-hour sprint** with a 6-person team → **lite**. Edit `<proj>/.claude/settings.json`. See [`project-scope.md`](project-scope.md) and copy [`templates/settings.project.lite.json`](templates/settings.project.lite.json).
 - **Multi-session / multi-agent / autonomous** → **full**. Edit `<proj>/.claude/settings.json`. See [`project-scope.md`](project-scope.md) and copy [`templates/settings.project.full.json`](templates/settings.project.full.json).
+- **Multi-role team / dependency-aware plan** → **team**. Edit `<proj>/.claude/settings.json`. See [`project-scope.md`](project-scope.md) and copy [`templates/settings.project.team.json`](templates/settings.project.team.json). Roles are user-defined (no shipped defaults); `/dev-kit:mode team` prompts for active role + member roles at activation time.
 
 ---
 

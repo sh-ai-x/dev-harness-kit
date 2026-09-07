@@ -327,6 +327,55 @@ class TestUnimplementedStubRegistration(unittest.TestCase):
         data = json.loads((self.root / "phases" / "0-mvp" / "index.json").read_text())
         self.assertEqual(data["steps"][0]["name"], "future-step")
 
+    def test_register_step_persists_depends_on(self):
+        """`team` mode producer-side contract (issue #18 follow-up):
+
+        `register_step(..., depends_on=[1, 2])` writes the `depends_on`
+        field into the step dict at registration time, so the
+        `lib/dispatch_classifier.py:_has_dependency_edge` consumer can
+        classify the phase as sequential from the moment the step is
+        registered — not only after the runner reads step<N>.md.
+        """
+        execute.register_step(self.root, "0-mvp", step=1, name="data-model")
+        execute.register_step(
+            self.root, "0-mvp", step=2, name="api-layer",
+            depends_on=[1],
+        )
+        execute.register_step(
+            self.root, "0-mvp", step=3, name="ui",
+            depends_on=[1, 2],
+        )
+        data = json.loads((self.root / "phases" / "0-mvp" / "index.json").read_text())
+        by_step = {s["step"]: s for s in data["steps"]}
+        self.assertNotIn("depends_on", by_step[1], "leaf step should have no depends_on")
+        self.assertEqual(by_step[2]["depends_on"], [1])
+        self.assertEqual(by_step[3]["depends_on"], [1, 2])
+
+    def test_register_step_depends_on_drops_non_int_silently(self):
+        """Non-int entries (e.g. typos from the prompt) are dropped; the strict
+        validator is `lib/plan_dependency.compute_dag`, not `register_step`."""
+        execute.register_step(
+            self.root, "0-mvp", step=2, name="api-layer",
+            depends_on=[1, "2", None, 2.5],
+        )
+        step = json.loads(
+            (self.root / "phases" / "0-mvp" / "index.json").read_text()
+        )["steps"][0]
+        self.assertEqual(step["depends_on"], [1])
+
+    def test_register_step_re_register_preserves_depends_on(self):
+        """Idempotency guard preserves user-set fields including depends_on."""
+        execute.register_step(
+            self.root, "0-mvp", step=2, name="api-layer",
+            depends_on=[1],
+        )
+        # Re-register with different name + no depends_on — should keep FIRST deps.
+        execute.register_step(self.root, "0-mvp", step=2, name="renamed")
+        step = json.loads(
+            (self.root / "phases" / "0-mvp" / "index.json").read_text()
+        )["steps"][0]
+        self.assertEqual(step["depends_on"], [1])
+
 
 class TestRunSequential(unittest.TestCase):
     """Issue #63: _run_sequential is a stub. Real impl must:

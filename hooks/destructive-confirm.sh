@@ -82,6 +82,22 @@ esac
 
 # ---- Classes 2 & 3: destructive git plumbing (Bash) ----
 [ "$TOOL" = "Bash" ] || exit 0
+
+# Session-scoped bypass during babysit-pr / babysit-pr-local. The
+# non-force first-push ask below is suppressed so the unattended loop
+# is not blocked; force-with-lease stays unchanged. Fail closed (on)
+# when python3 is unavailable or the read fails for any reason — an
+# unrecognized state must never silently bypass the ask gate.
+_PUSH_CONFIRM_STATE=on
+if command -v python3 >/dev/null 2>&1; then
+  _PUSH_CONFIRM_STATE="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && python3 -m lib.guard_mode_state get push_confirm 2>/dev/null || echo on)"
+  case "$_PUSH_CONFIRM_STATE" in
+    on|off) ;;
+    *) _PUSH_CONFIRM_STATE=on ;;  # unknown value → fail closed
+  esac
+fi
+_PUSH_CONFIRM_STATE="$_PUSH_CONFIRM_STATE"  # local; not exported
+
 CMD=$(printf '%s' "$INPUT_JSON" | jq -r '.tool_input.command // ""')
 [ -z "$CMD" ] && exit 0
 
@@ -99,8 +115,12 @@ if echo "$CMD" | grep -qE "git push .*--force-with-lease"; then
 fi
 
 if echo "$CMD" | grep -qE "git push .*(-u|--set-upstream)"; then
-  ask "DESTRUCTIVE CONFIRM" \
-    "first push of this branch to the remote — externally visible. Confirm the branch name and target remote are correct."
+  if [ "$_PUSH_CONFIRM_STATE" = "off" ]; then
+    : # bypassed during babysit-pr / babysit-pr-local loop lifetime
+  else
+    ask "DESTRUCTIVE CONFIRM" \
+      "first push of this branch to the remote — externally visible. Confirm the branch name and target remote are correct."
+  fi
 fi
 
 exit 0
