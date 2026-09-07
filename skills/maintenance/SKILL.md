@@ -23,7 +23,7 @@ Code-sanity gate. Runs the 20-checkbox rubric (CC-1..8 + OE-1..8 + VM-1..4) from
 3. Judges CC-1..8 (vague names, oversized functions, dead code, magic constants, copy-paste, swallowed errors, type unsafety, stale comments).
 4. Judges OE-1..8 (single-implementer abstract base classes, YAGNI flags, premature optimization, excessive layering, factory/strategy/DI for one impl, deep inheritance, file-per-class sprawl).
 5. Judges VM-1..4 (stated purpose, no noise, scope discipline, "diff earns its lines").
-6. Runs the docs-updated sub-gate: PASS if (a) the PR touches no production path, (b) the PR also touches a `docs/` file (excluding `docs/stages/STAGES.md` and `docs/repo/REPOSITORY-MAP.md`, which are auto-managed), or (c) the PR body contains the `docs-not-required:` marker with a quoted pre-existing reference. FAIL otherwise — downgrades `Approve` to `Changes Requested`.
+6. Runs the docs-updated sub-gate (path-level + registry-index). The **registry-index** check fires when the PR adds a new `skills/<name>/SKILL.md` or `commands/<name>.md` (status `added`); the operator must also touch one of the manually maintained registry docs (`README.md`, `docs/skills/README.md`, `docs/skills/README.ko.md`, `commands/README.md`), or carry `docs-not-required:` in the PR body. The auto-generated `skills/README.md` does NOT count — it's a near-no-op for the gate. The path-level check still applies for non-skill/command prod changes that touch `lib/` / `bin/` / `tools/` / etc. without any `docs/*` update. FAIL otherwise — downgrades `Approve` to `Changes Requested`.
 7. Emits a single-line verdict at the top of the response in the exact form below; the gate's verdict-extraction helper (`lib/maintenance_gate.py`) parses this.
 
 ## Verdict mapping

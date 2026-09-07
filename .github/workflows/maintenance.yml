@@ -202,6 +202,20 @@ jobs:
               - code_sanity_score ≥ 8         → **Verdict:** Approve
             The summary MUST begin with a single line exactly of the
             form `**Verdict:** <Word>`.
+
+            Registry-index rule (docs_coverage_score axis): when the
+            PR's changed-files list contains a newly-added
+            `skills/<name>/SKILL.md` (status `added`) or
+            `commands/<name>.md` (status `added`), the PR MUST also
+            touch one of the manually maintained registry docs:
+              - README.md (top-level)
+              - docs/skills/README.md or docs/skills/README.ko.md
+              - commands/README.md (future-proof)
+            OR carry `docs-not-required:` in the PR body. The
+            auto-generated `skills/README.md` does NOT count (it's
+            a no-op for the gate). If a new skill/command was added
+            without any of the above, deduct from
+            `docs_coverage_score` accordingly.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -224,6 +238,16 @@ jobs:
             Apply the 20-checkbox code-sanity rubric and emit the
             three composite axes. The summary MUST begin with
             `**Verdict:** <Word>` (Approve / Changes Requested / Blocked).
+
+            Registry-index rule (docs_coverage_score axis): when the
+            PR's changed-files list contains a newly-added
+            `skills/<name>/SKILL.md` (status `added`) or
+            `commands/<name>.md` (status `added`), the PR MUST also
+            touch one of the manually maintained registry docs
+            (README.md, docs/skills/README.md, docs/skills/README.ko.md,
+            commands/README.md) OR carry `docs-not-required:` in the
+            PR body. Auto-generated `skills/README.md` does NOT count.
+            Deduct from `docs_coverage_score` if missing.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -252,6 +276,15 @@ jobs:
 
             Apply the 20-checkbox code-sanity rubric. The summary MUST
             begin with `**Verdict:** <Word>`.
+
+            Registry-index rule (docs_coverage_score axis): when the
+            PR adds a new `skills/<name>/SKILL.md` or
+            `commands/<name>.md` (status `added`), the PR MUST also
+            touch one of the manually maintained registry docs
+            (README.md, docs/skills/README.md, docs/skills/README.ko.md,
+            commands/README.md) OR carry `docs-not-required:` in the
+            PR body. Auto-generated `skills/README.md` does NOT count.
+            Deduct from `docs_coverage_score` if missing.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
 
@@ -363,15 +396,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
+          # Emit "<changeType>\t<path>" per line so the registry-index
+          # sub-gate can detect newly-added (changeType=ADDED) skills
+          # and commands. Tab-delimiter via jq's `@tsv` avoids the `:`
+          # ambiguity that the Python parser handles on the receiving
+          # end. NOTE: GitHub's API field is `changeType` (not
+          # `status`), with values ADDED / MODIFIED / DELETED /
+          # RENAMED / COPIED (uppercase). The Python
+          # `parse_file_entry` lowercases the status so internal
+          # comparisons stay lowercase.
+          #
+          # Do NOT add `-r` after `--jq` — gh parses `-r` as a separate
+          # positional arg ("accepts at most 1 arg(s), received 2"),
+          # and gh already emits raw strings for `--jq` output.
           files="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" \
-            --json files --jq '.files[].path' 2>/dev/null || true)"
+            --json files --jq '.files[] | [.changeType, .path] | @tsv' 2>/dev/null || true)"
           if [ -z "$files" ]; then
             echo "::error::Could not read PR $PR_NUMBER changed-files list."
             exit 1
           fi
-          # Emit one line per path to $GITHUB_OUTPUT for downstream steps.
-          # `tr` collapses newlines to spaces so the output value is a
-          # newline-separated multiline string the next step can iterate.
+          # Emit one status\tpath pair per line to a tempfile the next
+          # step iterates with `IFS=$'\t'`.
           printf '%s\n' "$files" > /tmp/changed_files.txt
           echo "files_count=$(wc -l < /tmp/changed_files.txt)" >> "$GITHUB_OUTPUT"
 
@@ -389,11 +434,13 @@ jobs:
         id: docs_check
         run: |
           set -uo pipefail
-          # Build --changed-files args from the file list.
+          # Build --changed-files args from the tab-delimited file list.
+          # The Python helper accepts both legacy bare paths and the
+          # new "path:status" form (first ':' as separator).
           args=()
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            args+=("--changed-files" "$f")
+          while IFS=$'\t' read -r status path; do
+            [ -z "$path" ] && continue
+            args+=("--changed-files" "${path}:${status}")
           done < /tmp/changed_files.txt
           # Run the same module the unit tests exercise — keeps the
           # logic in one place.
