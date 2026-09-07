@@ -155,3 +155,47 @@ Adds one new row to the audit summary, labelled
   `ruleset workflow contract` row alongside the rest of the audit.
 - Issue #774 — original root-cause writeup; the issue body
   contains the full chain (#763 -> #773 -> #774).
+
+## L3 evidence sub-gate PR comment (issue #803)
+
+The `severity gate (review + security)` job in
+`.github/workflows/review.yml` contains a deterministic
+**L3 evidence sub-gate** step (`L3 evidence gate (PR body must
+quote test count)`, lines 841-890). When `touches_prod=true` and
+the PR body lacks a quoted pytest tail line, the step fails with
+`::error::PR body lacks a quoted pytest tail line.`.
+
+Prior to issue #803, the only trace of *why* the gate failed lived
+in the GitHub Actions log. A contributor reading the PR saw two
+"Approve" verdict comments + a red check with no attached reason
+and had to open the Actions log to discover the cause (observed
+on PR #797).
+
+Starting with PR #805, the L3 step ALSO posts a PR-visible comment
+with the same diagnostic. The body lives in
+`.github/review-yml/l3-evidence-fail.md` (a separate file, NOT
+inline in the YAML — multi-line bash strings inside a YAML literal
+block trip the YAML scanner on `**` and `<<` patterns) and is
+`cat`-fed to `gh pr comment --body-file`. The body enumerates the
+four accepted pytest summary forms, points the author at the PR
+template's Iron Law L3 section, and links issue #803 so a
+contributor who finds the comment can read the full bug context.
+
+The companion regression guards pin both contracts:
+
+- `tests/test_review_yml_l3_pr_comment.py` — pins the L3 step's
+  PR-comment behavior (body file path, body content, fail-only-in-
+  prod-branch, advisory branch remains silent).
+- `tests/test_fork_pr_review_combined_status.py` — pins the
+  `fork-pr-review/ai-judges` combined status description shape so a
+  deterministic sub-check failure isn't reported as a judge
+  failure.
+
+Why this matters here: the `severity gate` job name in
+`.github/workflows/review.yml` is part of the ruleset contract
+above. The L3 step is inside that job and runs BEFORE the
+`Combined verdict gate` step that produces the job's overall
+conclusion. A failure in L3 therefore flips the job's check to
+`failure` even when both LLM judges returned Approve — the
+combined status now distinguishes these two cases so the
+branch-protection gate doesn't blame the judges.

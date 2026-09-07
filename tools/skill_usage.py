@@ -52,6 +52,7 @@ from skill_usage_normalize import (  # noqa: E402  (sys.path set in main)
 from skill_usage_render import (  # noqa: E402
     _discover_catalog_skills,
     _run_propose_delete,
+    _seed_from_catalog,
     format_json,
     format_table,
 )
@@ -68,7 +69,7 @@ __all__ = [
     "NormalizedUsage", "_normalize_usage_record", "_parse_iso",
     # render + propose-delete
     "format_table", "format_json", "filter_by_cwd_prefix",
-    "_run_propose_delete", "_discover_catalog_skills",
+    "_run_propose_delete", "_seed_from_catalog", "_discover_catalog_skills",
     # aggregator
     "aggregate_skill_usage",
 ]

@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fix prune-propose catalog/telemetry prefix mismatch (false-positive 0/0 batch)</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>Fix prune-propose catalog/telemetry prefix mismatch (false-positive 0/0 batch)</h1>
+<p class="meta">2026-09-07 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">bugfix</span><span class="tag tag-info">telemetry</span><span class="tag tag-info">prune-propose</span><span class="tag tag-info">dev-kit-native</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Problem statement</a></li><li><a href="#sec-1">Options considered</a></li><li><a href="#sec-2">Recommended approach — Option A</a></li><li><a href="#sec-3">Files modified (PR scope)</a></li><li><a href="#sec-4">Validation gates</a></li><li><a href="#sec-5">Verification plan</a></li><li><a href="#sec-6">Distribution plan</a></li><li><a href="#sec-7">References (dev-harness-kit SSOT only)</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Problem statement</h2>
+<h3>Bug mechanism</h3>
+<p>Three independent functions disagree on skill naming convention:</p>
+<table><thead><tr><th>Layer</th><th>Function</th><th>Emits</th><th>Example</th></tr></thead><tbody><tr><td>Catalog discovery</td><td><code>_discover_catalog_skills</code> (skill_usage_render.py:153)</td><td><code>dev-kit:&lt;name&gt;</code></td><td><code>dev-kit:worktree-prune</code></td></tr><tr><td>Telemetry normalization</td><td><code>_normalize_usage_record</code> (skill_usage_normalize.py)</td><td>bare name</td><td><code>worktree-prune</code></td></tr><tr><td>Candidate filter</td><td><code>_run_propose_delete</code> (skill_usage_render.py:186-189)</td><td>catalog name</td><td><code>dev-kit:worktree-prune</code></td></tr></tbody></table>
+<p>The filter (<code>turns == 0 and invocations == 0</code>) keys on the catalog name, but telemetry only writes the bare form — so the catalog-seeded row is always zero, and every user-invocable skill becomes a candidate.</p>
+<h3>Concrete evidence (last 30 days)</h3>
+<pre><code>SKILL                         TURNS   INVOCATIONS
+-----------------------------------------------------------
+babysit-pr-local              1988    17
+docs-maintenance              1794    2
+review                        1514    6
+worktree-prune (PR #788)      838     0
+security                      560     5
+linear                        536     7
+token-analyzer                441     3
+inspect                       300     2
+pr-verify                     235     8
+...</code></pre>
+<p>All 24 candidates flagged by <code>--propose-delete</code> show 0/0 in the prefixed form but have non-zero bare-form telemetry (or, for the 3 brand-new skills merged in the last 30 days, have no telemetry at all because they predate their first dispatch).</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Options considered</h2>
+<table><thead><tr><th>Option</th><th>Approach</th><th>Files touched</th><th>Lines</th><th>Risk</th><th>Verdict</th></tr></thead><tbody><tr><td><strong>A</strong> (recommended)</td><td>In <code>_run_propose_delete</code>, when seeding from catalog, also check the bare-name telemetry row. Merge prefixed + bare counts; use OR semantics.</td><td>1 (<code>skill_usage_render.py</code>) + 1 test</td><td>+14 / -4</td><td>low — surgical, doesn't change telemetry semantics</td><td><strong>ADOPT</strong></td></tr><tr><td>B</td><td>In <code>_normalize_usage_record</code>, emit BOTH <code>dev-kit:&lt;name&gt;</code> AND <code>&lt;name&gt;</code> for every skill row.</td><td>1 (<code>skill_usage_normalize.py</code>) + 1 test</td><td>+15</td><td>medium — doubles telemetry dict size, breaks per-cwd aggregation symmetry, requires updating other consumers (<code>format_table</code>, <code>filter_by_cwd_prefix</code>)</td><td><strong>REJECT</strong></td></tr><tr><td>C</td><td>Make <code>_discover_catalog_skills</code> emit bare names.</td><td>1 (<code>skill_usage_render.py</code>)</td><td>-3</td><td>high — breaks the candidate display in <code>dump_usage.py</code>, breaks the "skill name" column in the chat-rendered table</td><td><strong>REJECT</strong></td></tr></tbody></table>
+<p><strong>Option A selection rationale</strong>: minimal blast radius, preserves telemetry semantics, matches <code>feedback-thin-harness-discipline.md</code> (+14 lines, no third-party pattern adoption, no new files in <code>lib/</code>).</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Recommended approach — Option A</h2>
+<h3>Patch (<code>tools/skill_usage_render.py</code>)</h3>
+<p>Replace the catalog seeding loop in <code>_run_propose_delete</code> (lines 181-184):</p>
+<pre><code class="language-python"># BEFORE
+seeded = dict(skills)
+for name in _discover_catalog_skills(repo_root):
+    seeded.setdefault(name, {&quot;turns&quot;: 0, &quot;invocations&quot;: 0,
+                             &quot;last_seen&quot;: None})</code></pre>
+<p>With prefix-aware seeding that merges prefixed + bare telemetry rows:</p>
+<pre><code class="language-python"># AFTER
+seeded = dict(skills)
+for name in _discover_catalog_skills(repo_root):
+    # Telemetry captures skills under their bare name (e.g. &quot;worktree-prune&quot;),
+    # not the prefixed form (&quot;dev-kit:worktree-prune&quot;). Merge both rows so a
+    # skill with bare-name usage isn&#x27;t flagged as 0/0. last_seen is the max.
+    bare = name.split(&quot;:&quot;, 1)[-1] if &quot;:&quot; in name else name
+    merged = {&quot;turns&quot;: 0, &quot;invocations&quot;: 0, &quot;last_seen&quot;: None}
+    for src in (skills.get(name), skills.get(bare)):
+        if not src:
+            continue
+        merged[&quot;turns&quot;] += src.get(&quot;turns&quot;, 0)
+        merged[&quot;invocations&quot;] += src.get(&quot;invocations&quot;, 0)
+        ls = src.get(&quot;last_seen&quot;)
+        if ls and (merged[&quot;last_seen&quot;] is None or ls &gt; merged[&quot;last_seen&quot;]):
+            merged[&quot;last_seen&quot;] = ls
+    seeded[name] = merged</code></pre>
+<h3>Regression test (<code>tests/test_skill_usage.py</code>)</h3>
+<pre><code class="language-python">def test_propose_delete_skips_bare_name_skills(self, tmp_path):
+    (tmp_path / &quot;skills&quot; / &quot;demo&quot; / &quot;scripts&quot;).mkdir(parents=True)
+    (tmp_path / &quot;skills&quot; / &quot;demo&quot; / &quot;SKILL.md&quot;).write_text(
+        &quot;---\nname: demo\nuser-invocable: true\n---\n&quot;, encoding=&quot;utf-8&quot;)
+    fake_telemetry = {
+        &quot;demo&quot;: {&quot;turns&quot;: 200, &quot;invocations&quot;: 5,
+                 &quot;last_seen&quot;: &quot;2026-09-07T00:00:00Z&quot;},
+    }
+    result = _run_propose_delete(fake_telemetry, 30,
+                                 dry_run=True, here=tmp_path / &quot;tools&quot;)
+    self.assertEqual(result, 0)
+    self.assertNotIn(&quot;dev-kit:demo&quot;, captured_candidates)</code></pre>
+<p>Per <code>feedback-test-isolated-fakeroot.md</code>: test creates its own subdir under <code>tmp_path</code>; no symlinks to real <code>tools/</code> or <code>skills/</code> trees.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Files modified (PR scope)</h2>
+<table><thead><tr><th>Path</th><th>Change</th><th>Lines</th></tr></thead><tbody><tr><td><code>tools/skill_usage_render.py</code></td><td>Replace 4-line seeding loop with prefix-aware merge</td><td>+14 / -4</td></tr><tr><td><code>tests/test_skill_usage.py</code></td><td>Add regression test</td><td>+35</td></tr><tr><td><code>CHANGELOG.md</code></td><td>Bug-fix line under unreleased</td><td>+3</td></tr><tr><td><code>docs/proposals/prune-propose-prefix-mismatch/main.{yaml,html}</code></td><td>This proposal</td><td>(excluded from PR diff)</td></tr></tbody></table>
+<p><strong>Net code delta: +49 / -4 = +45 lines</strong> (excludes proposal YAML/HTML). Within thin-harness budget; no cherry-pick concern.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Validation gates</h2>
+<p>Pre-merge (all auto):</p>
+<ul><li><strong>G1</strong>: <code>pytest tests/test_skill_usage.py -v</code> — new regression test passes</li><li><strong>G2</strong>: <code>pytest tests/ -v</code> — full suite green</li><li><strong>G3</strong>: <code>python3 tools/skill_usage.py --days 30 --propose-delete --dry-run</code> returns <code>candidates=0</code> (was 24)</li></ul>
+<p>Post-merge:</p>
+<ul><li><strong>G4</strong>: brand-new skills merged in the next 30 days do NOT appear as candidates until they accumulate bare-name telemetry post-merge</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-5">Verification plan</h2>
+<h3>End-to-end with real logs</h3>
+<pre><code class="language-bash">python3 tools/skill_usage.py --days 30 --propose-delete --dry-run</code></pre>
+<p>Expected post-patch: <code>candidates=0</code>. Pre-patch: <code>candidates=24</code>.</p>
+<h3>Cold determinism (<code>feedback-sub-agent-isolated-test.md</code>)</h3>
+<ol><li>Spawn fresh-context sub-agent with patch + failing test paths only</li><li>Run <code>pytest tests/test_skill_usage.py::TestProposeDelete::test_propose_delete_skips_bare_name_skills -v</code></li><li>Verify exit 0 + quoted assertion output</li><li>Re-run with same input → byte-identical stdout</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-6">Distribution plan</h2>
+<ul><li><strong>Branch</strong>: <code>fix/prune-propose-prefix-mismatch</code></li><li><strong>Worktree</strong>: <code>.worktrees/fix-prune-propose-prefix-mismatch</code></li><li><strong>Base</strong>: <code>origin/main</code> @ <code>e19ccd9e</code></li></ul>
+<p>Commit message:</p>
+<pre><code>fix(skill-usage): merge prefixed + bare telemetry rows in prune-propose
+
+_run_propose_delete seeded candidates from the catalog under
+&quot;dev-kit:&lt;name&gt;&quot; but telemetry captures skills under their bare name.
+The 0/0 filter compared different names, so every user-invocable skill
+appeared as a candidate. Merge both rows when seeding so a skill with
+bare-name usage isn&#x27;t flagged as 0/0.
+
+Before: 24 candidates (all false positives)
+After:  0 candidates</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-7">References (dev-harness-kit SSOT only)</h2>
+<ul><li><code>tools/skill_usage_render.py</code> lines 104-208 (catalog discovery + propose-delete)</li><li><code>tools/skill_usage_normalize.py</code> (telemetry normalization — bare-name convention)</li><li><code>tests/test_skill_usage.py</code> (existing test surface)</li><li><code>skills/prune-propose/SKILL.md</code> (proposal/skill workflow)</li><li><code>iron-laws/index.md</code> L1/L3/L4</li><li><code>rules/skill-authoring.md</code></li><li><code>rules/test-files.md</code></li></ul>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p><code>tools/skill_usage_render.py::_run_propose_delete</code> seeds prune candidates from the on-disk catalog under <code>dev-kit:&lt;name&gt;</code>, but <code>_normalize_usage_record</code> captures telemetry under the bare skill name. The 0/0 filter compares different names, so every user-invocable skill is flagged as unused regardless of actual dispatch volume.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li>tools/skill_usage_render.py:153 — catalog emits prefixed <code>dev-kit:&lt;name&gt;</code></li><li>tools/skill_usage_normalize.py — telemetry emits bare <code>&lt;name&gt;</code></li><li><code>python3 tools/skill_usage.py --days 30 --propose-delete --dry-run</code> reports 24 candidates today; 23 of them have heavy bare-name telemetry (babysit-pr-local 1988 turns, docs-maintenance 1794, review 1514, worktree-prune 838, security 560, linear 536, ...).</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p><code>_run_propose_delete</code> merges prefixed + bare telemetry rows when seeding from the catalog. A skill is "unused" iff BOTH the prefixed and the bare form have zero turns AND zero invocations within the window. Telemetry normalization is unchanged.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">tools/skill_usage_render.py</span><p>Replace the 4-line catalog seeding loop with a prefix-aware merge that combines prefixed (<code>dev-kit:&lt;x&gt;</code>) and bare (<code>&lt;x&gt;</code>) telemetry rows. ~14 lines.</p></li><li><span class="file-path">tests/test_skill_usage.py</span><p>Add <code>test_propose_delete_skips_bare_name_skills</code> regression test that confirms a skill with bare-name telemetry is not flagged as a candidate. ~35 lines.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Surgical: only the seeding boundary changes; aggregate_skill_usage / _normalize_usage_record / format_table / filter_by_cwd_prefix are untouched</li><li>Telemetry semantics preserved — bare name remains source of truth, only the merge check is added</li><li>Test surface already imports the helpers; regression test uses them as fixtures without mocking</li><li>Fixes a real safety bug: prune-propose is currently unsafe to run because every skill is a candidate</li><li>Smallest possible diff: +14 / -4 in production code, +35 in tests</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Naming convention is now implicit in two places (catalog discovery + new merge). A future telemetry refactor could re-introduce the drift.</li><li>A fresh checkout with no logs returns 0 candidates (was 24). This is the correct behavior, but operators used to the old output may notice.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>Cannot catch bare-name collisions across plugins (telemetry already scopes by cwd, so collisions are unlikely in practice)</li><li>Cannot detect future naming convention drift — the regression test pins the convention but does not auto-verify ongoing telemetry writes</li><li>Does not change the AskUserQuestion loop itself; once candidates are correctly filtered, the per-skill delete decision is unchanged</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-07 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

@@ -45,6 +45,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`config`](config.md) | `state` | Skill / hook / methodology picker. |
 | [`gate-select`](../../skills/gate-select/SKILL.md) | `state` | Unified 3-dimension picker for project / session / AI-judge gates (`show` / `pick` / `install-project` / `install-session`). Reads existing sources (`.dev-kit/ci-config.json`, `.dev-kit/harness-mode.session.json`) — no new state file. (Consumer docs land in a follow-up PR.) |
 | [`linear`](linear.md) | `state` | Optional Linear task tracker — reconciling the current repo task with a canonical project + issue (auto-sync on every edit when configured). |
+| [`mode`](../../skills/mode/SKILL.md) | `state` | Pick / show / write the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). 0-arg default opens the picker; `--show` prints current; `--scope=local` writes to `settings.local.json` instead of the committed project file. |
 
 ### Plan → Build
 
@@ -158,6 +159,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`llm-refresh`](llm-refresh.md) | `shortcuts` | `analysis` | human |
 | [`log`](log.md) | `shortcuts` | `state` | human |
 | [`maintenance`](maintenance.md) | `audit` | `enforcement` | human |
+| [`mode`](../../skills/mode/SKILL.md) | `mode` | `state` | human |
 | [`plan`](plan.md) | `plan` | `state` | human |
 | [`proposal`](proposal.md) | `design` | `state` | human |
 | [`prune`](prune.md) | `build` | `analysis` | human |
