@@ -1169,11 +1169,26 @@ class TestCiSetup(unittest.TestCase):
                 "re-run the structural test against the plugin tree",
             )
             sources_examined.append(rel)
-            # The helper ref is always relative to the file's own directory:
-            # hooks/<x>.sh -> hooks/lib/<helper>.sh; bin/<x>.sh -> lib/<helper>.sh.
-            helper_prefix = "hooks/lib/" if rel.startswith("hooks/") else "lib/"
-            for m in sourced_helper_re.finditer(src_path.read_text(encoding="utf-8")):
-                sourced.add(f"{helper_prefix}{m.group(1)}")
+            # Helper ref resolution rules:
+            #   source "<dir>/lib/<h>.sh"      -> <dir>/lib/<h>.sh
+            #   source "<dir>/../lib/<h>.sh"   -> lib/<h>.sh   (top-level, shared
+            #                                          between hooks/ and bin/)
+            # Both hooks/ and bin/ scripts may reach into top-level lib/ when
+            # the helper is genuinely cross-tree (e.g. lib/plugin_cache_refresh.sh,
+            # shared between hooks/plugin-cache-refresh.sh and bin/devkit-refresh.sh).
+            src_text = src_path.read_text(encoding="utf-8")
+            for m in sourced_helper_re.finditer(src_text):
+                ref = m.group(1)
+                # Match the literal prefix in the source line so we can decide
+                # whether the helper is hooks-local (./lib/) or top-level (../lib/).
+                line_start = src_text.rfind("\n", 0, m.start()) + 1
+                line_end = src_text.find("\n", m.end())
+                line = src_text[line_start:line_end if line_end != -1 else len(src_text)]
+                if "../lib/" in line:
+                    sourced.add(f"lib/{ref}")
+                else:
+                    helper_prefix = "hooks/lib/" if rel.startswith("hooks/") else "lib/"
+                    sourced.add(f"{helper_prefix}{ref}")
         # Every sourced helper must be in EXPECTED_PATHS (so it ships) AND
         # EXECUTABLE_PATHS (so it gets +x on install — sourced-as-library
         # files need +x if any consumer invokes them as a CLI later).
