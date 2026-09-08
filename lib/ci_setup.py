@@ -832,7 +832,7 @@ def plugin_version(plugin_root: Path | None = None) -> str:
     except (OSError, json.JSONDecodeError):
         pass
     return "0.0.0"  # sentinel — not a published release
-def _build_marker() -> dict:
+def _build_marker(exclude: frozenset[str] | None = None) -> dict:
     """Build the `.dev-kit/ci-config.json` payload.
 
     Records `installed_dev_kit_version` (from `.claude-plugin/plugin.json:version`
@@ -841,13 +841,21 @@ def _build_marker() -> dict:
     SHA map is computed separately by `_compute_template_shas()` and merged
     in by `install_ci_config()` — not part of this base payload because it
     requires filesystem access to dev-kit's source tree.
+
+    Issue #823: `exclude` (basename set) drops the matching workflow from
+    the `runners` list so the marker honestly reflects what was installed
+    (a `review only` consumer shows review.yml, not security.yml). Default
+    install — no exclude — emits both.
     """
+    runners = ["ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"]
+    if exclude:
+        runners = [r for r in runners if r not in exclude]
     return {
         "schema_version": MARKER_SCHEMA_VERSION,
         "installed_at": _now_utc_iso(),
         "installed_by": "dev-kit:ci-setup",
         "installed_dev_kit_version": plugin_version(_PLUGIN_ROOT),
-        "runners": ["ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"],
+        "runners": runners,
         "provider_env_key": "CI_REVIEW_PROVIDER",
         "scripts": [
             "scripts/validate.py",
@@ -999,23 +1007,55 @@ def _resolve_prior_marker(target: Path) -> Tuple[Path, dict]:
     return marker_path, read_json_or_default(marker_path, {})
 
 
-def _is_already_installed(target: Path, marker_path: Path, force: bool) -> bool:
-    """Presence-based no-op check: marker exists AND every EXPECTED_PATHS
-    file is present. With `force=True` always returns False.
+def _is_already_installed(
+    target: Path,
+    marker_path: Path,
+    force: bool,
+    paths_to_check: tuple[str, ...] = EXPECTED_PATHS,
+) -> bool:
+    """Presence-based no-op check: marker exists AND every path in
+    `paths_to_check` is present. With `force=True` always returns False.
+
+    `paths_to_check` defaults to the full EXPECTED_PATHS but can be a
+    subset (e.g. when an `exclude=` filter is in effect) so the idempotent
+    no-op detection only considers the files the current install wants
+    to own.
     """
     if force or not marker_path.exists():
         return False
-    return all((target / rel).exists() for rel in EXPECTED_PATHS)
+    return all((target / rel).exists() for rel in paths_to_check)
 
 
-def _copy_all_templates(target: Path, force: bool, report: InstallReport) -> None:
+def _filter_expected_paths(exclude: frozenset[str] | None) -> tuple[str, ...]:
+    """Return EXPECTED_PATHS filtered by `exclude` (basename set).
+
+    Issue #823: gate-select's `review only` pick threads `exclude=
+    frozenset({"security.yml"})` so the install lands review.yml but
+    leaves security.yml absent. The filter is basename-only so callers
+    pass the workflow filename (matches the marker `runners` shape) and
+    not the EXPECTED_PATHS rel-path (which would couple the caller to
+    the installer's internal layout).
+    """
+    if not exclude:
+        return EXPECTED_PATHS
+    return tuple(rel for rel in EXPECTED_PATHS if Path(rel).name not in exclude)
+
+
+def _copy_all_templates(
+    target: Path,
+    force: bool,
+    report: InstallReport,
+    paths_to_copy: tuple[str, ...] = EXPECTED_PATHS,
+) -> None:
     """Copy each EXPECTED_PATHS template into target + chmod shell scripts.
 
     Mutates `report.created` / `report.overwritten` / `report.skipped`
     in place. Continues past per-file errors so a single bad template
-    doesn't fail the whole install.
+    doesn't fail the whole install. `paths_to_copy` defaults to the full
+    EXPECTED_PATHS but can be a subset (e.g. when an `exclude=` filter
+    is in effect).
     """
-    for rel in EXPECTED_PATHS:
+    for rel in paths_to_copy:
         try:
             outcome = _copy_template(rel, target, force=force)
         except Exception as e:
@@ -1027,7 +1067,14 @@ def _copy_all_templates(target: Path, force: bool, report: InstallReport) -> Non
             report.overwritten.append(rel)
         else:
             report.skipped.append(rel)
-    _chmod_executable(EXECUTABLE_PATHS, target)
+    # Issue #823: only chmod scripts that are actually being installed,
+    # so an `exclude=` filter that drops a script doesn't leave a stale
+    # +x on a file we didn't touch (defensive — chmod is idempotent and
+    # no-op on missing files).
+    _chmod_executable(
+        tuple(p for p in EXECUTABLE_PATHS if p in paths_to_copy),
+        target,
+    )
 
 
 def _validate_target(target_dir: Path | None) -> Path:
@@ -1050,22 +1097,89 @@ def _run_lint_and_emit_summary(target_dir: Path) -> list[str]:
     return list(lint_installed_workflows(target_dir))
 
 
+def _backfill_marker_schema(
+    marker_path: Path, prior_marker: dict[str, object]
+) -> str | None:
+    """Backfill `installed_dev_kit_version` + `template_shas` on a v1.0.0 marker.
+
+    Returns the warning string if a backfill was performed, else None.
+    A v1.0.0 consumer marker lacks the two schema fields; the next
+    `ci-update` cannot classify drift without them. Backfill here so the
+    consumer becomes queryable in one zero-touch step. Preserves
+    `installed_at` so install history is honest.
+    """
+    if "installed_dev_kit_version" in prior_marker and "template_shas" in prior_marker:
+        return None
+    backfilled = dict(prior_marker)
+    backfilled["installed_dev_kit_version"] = plugin_version(_PLUGIN_ROOT)
+    backfilled["template_shas"] = _compute_template_shas()
+    atomic_write_json(marker_path, backfilled)
+    return (
+        f"{MARKER_REL}: backfilled installed_dev_kit_version + "
+        f"template_shas ({len(backfilled['template_shas'])} entries)"
+    )
+
+
+def _no_op_reinstall_report(
+    target: Path,
+    existing_marker: Path,
+    prior_marker: dict[str, object],
+    paths_to_install: tuple[str, ...],
+    lint: bool,
+    started: float,
+) -> InstallReport:
+    """Build the no-op InstallReport for an idempotent re-install.
+
+    Issue #823: `paths_to_install` is the post-`exclude` set so the
+    skipped list reflects what the current install owns (not the full
+    EXPECTED_PATHS). Backfill schema fields if needed, surface drift
+    warnings, optionally lint, and return — no files are touched.
+    """
+    report = InstallReport()
+    report.skipped.extend(paths_to_install)
+    report.marker_path = str(existing_marker)
+    backfill_warning = _backfill_marker_schema(existing_marker, prior_marker)
+    if backfill_warning is not None:
+        report.warnings.append(backfill_warning)
+    report.elapsed_ms = int((time.monotonic() - started) * 1000)
+    recorded_shas = prior_marker.get("installed_file_shas", {})
+    if isinstance(recorded_shas, dict):
+        report.warnings.extend(_detect_drift(target, recorded_shas))
+    if lint:
+        report.warnings.extend(_run_lint_and_emit_summary(target))
+    return report
+
+
 def install_ci_config(
     target_dir: Path,
     *,
     force: bool = False,
     print_checklist: bool = False,
     lint: bool = True,
+    exclude: frozenset[str] | None = None,
 ) -> InstallReport:
     """Install dev-kit's CI templates into `target_dir`.
 
     Idempotent: no-op when marker exists and every EXPECTED_PATHS file is
     in place. `force=True` overwrites regardless. Returns InstallReport;
     raises FileNotFoundError / NotADirectoryError for bad targets.
+
+    `exclude` (issue #823) is a basename set that suppresses the install
+    of matching files. Gate-select's `review only` pick threads
+    `exclude=frozenset({"security.yml"})` so the install lands review.yml
+    but leaves security.yml absent — the marker `runners` list reflects
+    only what was actually installed, and the idempotent no-op detection
+    considers only the post-filter set so a re-install with the same
+    filter does not regress on a previously-absent file.
     """
     started = time.monotonic()
     target = _validate_target(target_dir)
     report = InstallReport()
+
+    # Filter EXPECTED_PATHS by `exclude` so the rest of the install
+    # operates on the post-filter set. Empty / None `exclude` is the
+    # default install path; non-empty `exclude` shrinks the set.
+    paths_to_install = _filter_expected_paths(exclude)
 
     # Read prior marker (if any) so the drift-detection pass (issue #202)
     # can compare current file SHAs against the SHAs recorded at the last
@@ -1076,40 +1190,14 @@ def install_ci_config(
     existing_marker, prior_marker = _resolve_prior_marker(target)
 
     # Presence-based "already installed" detection: marker exists AND every
-    # template file is present ⇒ nothing to copy. Phase 1 of the skill body
-    # can still detect "already installed" via marker_path.
-    if _is_already_installed(target, existing_marker, force):
-        report.skipped.extend(EXPECTED_PATHS)
-        report.marker_path = str(existing_marker)
-        # Backfill new schema fields if missing. A v1.0.0 consumer marker
-        # lacks `installed_dev_kit_version` and `template_shas`; the next
-        # `ci-update` cannot classify drift without them. Backfill here so
-        # the consumer becomes queryable in one zero-touch step. Preserves
-        # `installed_at` so install history is honest. No files are touched.
-        needs_backfill = (
-            "installed_dev_kit_version" not in prior_marker
-            or "template_shas" not in prior_marker
+    # template file in the (post-filter) install set is present ⇒ nothing
+    # to copy. Phase 1 of the skill body can still detect "already
+    # installed" via marker_path.
+    if _is_already_installed(target, existing_marker, force, paths_to_install):
+        return _no_op_reinstall_report(
+            target, existing_marker, prior_marker,
+            paths_to_install, lint, started,
         )
-        if needs_backfill:
-            backfilled = dict(prior_marker)
-            backfilled["installed_dev_kit_version"] = plugin_version(_PLUGIN_ROOT)
-            backfilled["template_shas"] = _compute_template_shas()
-            atomic_write_json(existing_marker, backfilled)
-            report.warnings.append(
-                f"{MARKER_REL}: backfilled installed_dev_kit_version + "
-                f"template_shas ({len(backfilled['template_shas'])} entries)"
-            )
-        report.elapsed_ms = int((time.monotonic() - started) * 1000)
-        # Drift detection still runs even on no-op re-installs: the
-        # consumer may have modified files locally since the last
-        # install, and we want the next `--force` invocation to
-        # surface that.
-        recorded_shas = prior_marker.get("installed_file_shas", {})
-        if isinstance(recorded_shas, dict):
-            report.warnings.extend(_detect_drift(target, recorded_shas))
-        if lint:
-            report.warnings.extend(_run_lint_and_emit_summary(target))
-        return report
 
     # Drift detection BEFORE the copy loop (issue #202). Only meaningful
     # when `force=True` AND a prior marker recorded SHAs — without those
@@ -1120,13 +1208,16 @@ def install_ci_config(
     if force and isinstance(recorded_shas, dict) and recorded_shas:
         report.warnings.extend(_detect_drift(target, recorded_shas))
 
-    _copy_all_templates(target, force, report)
+    _copy_all_templates(target, force, report, paths_to_install)
 
     # Write marker (overwrites on force, always succeeds idempotently).
     # Record SHA-256 of every EXPECTED_PATHS file so the next install's
     # drift-detection pass can identify locally-modified files (issue #202).
     marker = target / MARKER_REL
-    marker_payload = _build_marker()
+    # Issue #823: `_build_marker(exclude=...)` reflects the post-filter
+    # install set in the `runners` field, so a `review only` consumer
+    # shows review.yml (not security.yml) as a runner it owns.
+    marker_payload = _build_marker(exclude=exclude)
     new_shas: dict[str, str] = {}
     for rel in EXPECTED_PATHS:
         p = target / rel

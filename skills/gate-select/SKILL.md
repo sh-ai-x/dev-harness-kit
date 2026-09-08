@@ -130,8 +130,20 @@ Skill tool, not by shelling out to a non-existent `/dev-kit/ci-setup` binary.
 
 ```python
 # Project pick — Skill tool (slash commands are not on PATH).
+# Issue #823: `exclude` threads through to ci-setup's `--exclude` flag so
+# the `review only` AI-judge pick drops security.yml from the install set
+# (and from the marker `runners` list). The `review + security` and
+# `Skip` picks do NOT pass exclude — they land both workflows.
+exclude_arg = "security.yml" if ai_judge_pick == "review" else None
 if project_pick == "Install":
-    Skill(name="ci-setup", args={"force": force, "skip_verify": skip_verify})
+    Skill(
+        name="ci-setup",
+        args={
+            "force": force,
+            "skip_verify": skip_verify,
+            **({"exclude": exclude_arg} if exclude_arg else {}),
+        },
+    )
 
 # Session pick — harness-mode is a real CLI for fast|full; custom goes via Skill.
 if session_pick in ("fast", "full"):
@@ -144,16 +156,22 @@ elif session_pick == "custom":
 # operator skipped the project pick, the relevant workflow is not
 # installed, so the status must say so — otherwise the echo is a lie.
 # Issue #823: each workflow (review.yml, security.yml) is wired and
-# reported independently.
+# reported independently. The `review` pick must report review.yml wired
+# ONLY if review.yml is actually present AND security.yml is absent (the
+# install path's `exclude=security.yml` enforces this).
 case ai_judge_pick:
     case "review":
-        if project_pick == "Install" or Path(".github/workflows/review.yml").is_file():
+        if Path(".github/workflows/review.yml").is_file() and not Path(".github/workflows/security.yml").is_file():
             print("✓ review.yml wired (3-dim correctness + reuse/simplification only)")
+        elif Path(".github/workflows/review.yml").is_file() and Path(".github/workflows/security.yml").is_file():
+            print("⚠ review + security actually wired — `review only` pick did not take. Re-run /dev-kit:ci-setup --exclude security.yml to drop security.yml.")
         else:
             print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
     case "review + security":
-        if project_pick == "Install" or Path(".github/workflows/review.yml").is_file():
+        if Path(".github/workflows/review.yml").is_file() and Path(".github/workflows/security.yml").is_file():
             print("✓ Wired via review.yml + security.yml (installed by ci-setup)")
+        elif Path(".github/workflows/review.yml").is_file():
+            print("⚠ review.yml wired but security.yml missing — re-run /dev-kit:ci-setup --force to refresh.")
         else:
             print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
     case "review + security + maintenance":
