@@ -495,9 +495,18 @@ jobs:
           # returned an inconsistent snapshot mid-write). PRs with >30
           # comments would otherwise extract the verdict from the OLDEST
           # page-1 comment instead of the LLM judge's latest verdict.
-          comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
+          head_date="$(gh api "repos/${{ github.repository }}/commits/${{ steps.pr_meta.outputs.head_sha }}" \
+            --jq '.commit.committer.date // .commit.author.date // ""' 2>/dev/null || true)"
+          if [ -n "$head_date" ]; then
+            comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate --slurp \
+              | jq -r --arg head_date "$head_date" '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not) | select((.created_at // "") >= $head_date)] | sort_by(.created_at) | .[-1].body // ""')"
+          else
+            echo "::warning::head_date fetch failed; falling back to legacy updated_at selector (no stale-comment filter)"
+            comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate --slurp \
+              | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
+          fi
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "review_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
@@ -761,9 +770,18 @@ jobs:
           # same regex the unit tests pin governs CI (no nested-mention
           # false-positive from a literal `**Verdict:**` inside the
           # body prose).
-          comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
+          head_date="$(gh api "repos/${{ github.repository }}/commits/${{ steps.pr_meta.outputs.head_sha }}" \
+            --jq '.commit.committer.date // .commit.author.date // ""' 2>/dev/null || true)"
+          if [ -n "$head_date" ]; then
+            comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate --slurp \
+              | jq -r --arg head_date "$head_date" '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not) | select((.created_at // "") >= $head_date)] | sort_by(.created_at) | .[-1].body // ""')"
+          else
+            echo "::warning::head_date fetch failed; falling back to legacy updated_at selector (no stale-comment filter)"
+            comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate --slurp \
+              | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
+          fi
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "security_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
