@@ -96,16 +96,6 @@ _REF_KEYWORDS = (
 
 _ALL_KEYWORDS = _CLOSE_KEYWORDS + _REF_KEYWORDS
 
-# Pre-compiled alternation for the keyword probe (left of the ref).
-# `_KEYWORD_PROBE_RE` runs against the substring immediately before a
-# `#N`/`owner/repo#N` match to recover the original keyword.
-_KEYWORD_PROBE_RE = re.compile(
-    r"(?P<kw>"
-    + "|".join(re.escape(k) for k in _ALL_KEYWORDS)
-    + r")\s*$",
-    re.IGNORECASE,
-)
-
 # The full reference pattern. Two halves:
 #   1. An optional leading keyword (with trailing whitespace) from
 #      _ALL_KEYWORDS, captured as `kw` so we can recover it from
@@ -188,7 +178,16 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="issue_sync",
         description="Parse GitHub-issue references from a PR body.",
     )
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # Two-pass parse: top-level args first so `--version` works without
+    # a subcommand. `add_subparsers(required=False)` (instead of True)
+    # keeps the parser from rejecting `--version` before the version
+    # flag is read. `parse_known_args()` lets us consume `--version`
+    # without argparse complaining about a missing subcommand.
+    pre_args, _ = p.parse_known_args()
+    if getattr(pre_args, "version", False):
+        print(f"issue_sync {__version__}")
+        sys.exit(0)
+    sub = p.add_subparsers(dest="cmd", required=False)
 
     p_parse = sub.add_parser("parse", help="Parse references and print as JSON.")
     p_parse.add_argument("--body", default="", help="PR body text (Markdown).")

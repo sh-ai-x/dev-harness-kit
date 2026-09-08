@@ -33,8 +33,13 @@ jobs:
     name: GitHub issue sync check
     runs-on: ubuntu-latest
     # `issues: read` is enough to GET /repos/{owner}/{repo}/issues/{N}.
-    # No write scope is needed — the gate is read-only.
+    # No write scope is needed — the gate is read-only. `contents: read`
+    # is required so `actions/checkout` can clone the repo under the
+    # sparse-checkout shape below (the runner needs read access to the
+    # source tree to materialize `tools/issue_sync.py`). Mirrors the
+    # permission block in `linear-pr-sync.yml`.
     permissions:
+      contents: read
       issues: read
       pull-requests: read
     steps:
