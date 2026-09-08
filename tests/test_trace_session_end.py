@@ -9,7 +9,6 @@ The proposal mandates:
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,15 +21,12 @@ sys.path.insert(0, str(ROOT / "lib"))
 from effectiveness_collection import (  # noqa: E402
     TRANSITION_CONTROLLER_CLOSE,
     TRANSITION_CONTROLLER_FINAL,
-    TRANSITION_ENROLL,
     TRANSITION_OBSERVED_START,
     TRANSITION_OBSERVED_TERMINAL,
     collect,
     enroll,
-    measurement_dir,
     observe,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

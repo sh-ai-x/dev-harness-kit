@@ -24,24 +24,18 @@ from effectiveness_collection import (  # noqa: E402
     ALL_READINESS,
     COLLECT_BUDGET_SECONDS,
     DEFAULT_RUNTIME_COVERAGE,
-    DEFAULT_RUNTIME_COVERAGE,
     ENVELOPE_CONTRACT,
     ENVELOPE_SCHEMA_VERSION,
     JOURNAL_TOTAL_CAP_BYTES,
     ORIGIN_CI_PROBE,
     ORIGIN_RUNTIME,
-    READINESS_COLLECTION_ERROR,
-    READINESS_COVERAGE_BELOW_POLICY,
     READINESS_DEGRADED,
     READINESS_INSUFFICIENT_EVIDENCE,
-    READINESS_NO_OPPORTUNITY,
     READINESS_READY,
-    READINESS_UNSUPPORTED,
     RETENTION_CLOSED_DAYS,
     SEGMENT_ROTATE_BYTES,
     SUCCESS_OUTCOMES,
     TERMINAL_OUTCOMES,
-    TRANSITION_CONTROLLER_CLOSE,
     TRANSITION_CONTROLLER_FINAL,
     TRANSITION_ENROLL,
     TRANSITION_OBSERVED_START,
@@ -55,7 +49,6 @@ from effectiveness_collection import (  # noqa: E402
     observe,
     probe,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -244,7 +237,6 @@ def test_protected_unresolved_segment_not_pruned(tmp_path: Path, monkeypatch: py
     via the identity payload, then re-running collect() and asserting
     the segment still exists.
     """
-    import effectiveness_collection as ec
     # Enroll with a far-past timestamp (still valid ISO).
     past = "2020-01-01T00:00:00.000Z"
     root_id = str(root(tmp_path).resolve()) if False else str(tmp_path.resolve())  # noqa: F841

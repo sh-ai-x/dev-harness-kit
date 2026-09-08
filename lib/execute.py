@@ -28,15 +28,21 @@ from typing import Callable, Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atomic import atomic_write_json, now_iso  # noqa: E402
 from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
+from effectiveness_collection import (  # noqa: E402 — bounded journal + projection
+    ORIGIN_RUNTIME,
+)
+from effectiveness_collection import (
+    collect as _eff_collect,
+)
+from effectiveness_collection import (
+    enroll as _eff_enroll,
+)
+from effectiveness_collection import (
+    observe as _eff_observe,
+)
 from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
 from harness_mode_state import resolved_gate  # noqa: E402 — workflow-fast-mode-lean gate resolution
 from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
-from effectiveness_collection import (  # noqa: E402 — bounded journal + projection
-    ORIGIN_RUNTIME,
-    collect as _eff_collect,
-    enroll as _eff_enroll,
-    observe as _eff_observe,
-)
 
 SCHEMA_VERSION = "1.0.0"
 # Sub-agent stdout marker. If the per-step `claude -p` emits this line, the

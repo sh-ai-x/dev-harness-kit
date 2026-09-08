@@ -34,7 +34,6 @@ Design rules (re-stated for grep):
 from __future__ import annotations
 
 import argparse
-import enum
 import fcntl
 import hashlib
 import json

@@ -19,17 +19,14 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
 
+import execute  # noqa: E402
 from effectiveness_collection import (  # noqa: E402
-    ORIGIN_RUNTIME,
     TRANSITION_CONTROLLER_CLOSE,
     TRANSITION_ENROLL,
     TRANSITION_OBSERVED_START,
     TRANSITION_OBSERVED_TERMINAL,
     collect,
-    measurement_dir,
 )
-import execute  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

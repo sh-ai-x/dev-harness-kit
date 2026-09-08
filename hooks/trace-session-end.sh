@@ -50,36 +50,50 @@ LIB_DIR="${BASH_SOURCE[0]%/*}/../lib"
 #    The existing legacy `events.jsonl` emission at the bottom of this
 #    file is unchanged; the new bounded journal is an additive layer
 #    that lives in .dev-kit/trace/measurement/.
-SUBJECT_ID="session:${SESSION_ID}"
-RUN_ID="session:${SESSION_ID}"
-WORKFLOW_ID="session-lifecycle"
-ATTEMPT_ID="sess-${SESSION_ID}"
-
-python3 - <<PY 2>/dev/null || true
+#
+# Security: A05 injection defense-in-depth. The hook payload
+# (SESSION_ID, HOOK_EVENT_NAME, PAYLOAD_CWD) is untrusted from the
+# shell's perspective — any value containing a `"` would break out of
+# the heredoc string literal and execute arbitrary Python. We pass
+# every value through os.environ after exporting it as a discrete
+# variable, and the heredoc terminator is single-quoted (<<'PY') so
+# bash performs NO expansion inside the script. The Python source
+# becomes a static literal regardless of the payload's contents.
+EFFECTIVE_CWD="$EFFECTIVE_CWD" \
+  SESSION_ID="$SESSION_ID" \
+  HOOK_EVENT_NAME="$HOOK_EVENT_NAME" \
+  LIB_DIR="$LIB_DIR" \
+  python3 - <<'PY' 2>/dev/null || true
 import os, sys
-sys.path.insert(0, "${LIB_DIR}")
-from effectiveness_collection import enroll, observe, TRANSITION_OBSERVED_START
-root = "${EFFECTIVE_CWD}"
+sys.path.insert(0, os.environ["LIB_DIR"])
+from effectiveness_collection import (
+    enroll, observe, TRANSITION_OBSERVED_START,
+)
+root = os.environ["EFFECTIVE_CWD"]
+sid = os.environ["SESSION_ID"]
+hn = os.environ["HOOK_EVENT_NAME"]
 try:
-    enroll(root, run_id="${RUN_ID}", workflow_id="${WORKFLOW_ID}",
-           subject_id="${SUBJECT_ID}", attempt_id="${ATTEMPT_ID}",
+    enroll(root, run_id=f"session:{sid}", workflow_id="session-lifecycle",
+           subject_id=f"session:{sid}", attempt_id=f"sess-{sid}",
            controller="session")
-    observe(root, run_id="${RUN_ID}", workflow_id="${WORKFLOW_ID}",
-            subject_id="${SUBJECT_ID}", attempt_id="${ATTEMPT_ID}",
+    observe(root, run_id=f"session:{sid}", workflow_id="session-lifecycle",
+            subject_id=f"session:{sid}", attempt_id=f"sess-{sid}",
             transition=TRANSITION_OBSERVED_START, outcome="started",
-            payload={"hook_event": "${HOOK_EVENT_NAME}"})
+            payload={"hook_event": hn})
 except Exception:
     pass
 PY
 
 # 2) Stop: collect() only. Never record a closure.
 if [ "$HOOK_EVENT_NAME" = "Stop" ]; then
-  python3 - <<PY 2>/dev/null || true
-import sys
-sys.path.insert(0, "${LIB_DIR}")
+  EFFECTIVE_CWD="$EFFECTIVE_CWD" \
+    LIB_DIR="$LIB_DIR" \
+    python3 - <<'PY' 2>/dev/null || true
+import os, sys
+sys.path.insert(0, os.environ["LIB_DIR"])
 from effectiveness_collection import collect
 try:
-    collect("${EFFECTIVE_CWD}")
+    collect(os.environ["EFFECTIVE_CWD"])
 except Exception:
     pass
 PY
@@ -104,23 +118,28 @@ fi
 #    reaches the SessionEnd hook is by definition the terminal boundary
 #    for this session; we surface the trigger label in the payload so
 #    audits can disambiguate.
-OUTCOME="completed"
-python3 - <<PY 2>/dev/null || true
-import sys
-sys.path.insert(0, "${LIB_DIR}")
+EFFECTIVE_CWD="$EFFECTIVE_CWD" \
+  SESSION_ID="$SESSION_ID" \
+  HOOK_EVENT_NAME="$HOOK_EVENT_NAME" \
+  LIB_DIR="$LIB_DIR" \
+  python3 - <<'PY' 2>/dev/null || true
+import os, sys
+sys.path.insert(0, os.environ["LIB_DIR"])
 from effectiveness_collection import (
     collect, observe, TRANSITION_OBSERVED_TERMINAL, TRANSITION_CONTROLLER_CLOSE,
 )
-root = "${EFFECTIVE_CWD}"
+root = os.environ["EFFECTIVE_CWD"]
+sid = os.environ["SESSION_ID"]
+hn = os.environ["HOOK_EVENT_NAME"]
 try:
-    observe(root, run_id="${RUN_ID}", workflow_id="${WORKFLOW_ID}",
-            subject_id="${SUBJECT_ID}", attempt_id="${ATTEMPT_ID}",
-            transition=TRANSITION_OBSERVED_TERMINAL, outcome="${OUTCOME}",
-            payload={"hook_event": "${HOOK_EVENT_NAME}"})
-    observe(root, run_id="${RUN_ID}", workflow_id="${WORKFLOW_ID}",
-            subject_id="${SUBJECT_ID}", attempt_id="${ATTEMPT_ID}",
-            transition=TRANSITION_CONTROLLER_CLOSE, outcome="${OUTCOME}",
-            payload={"hook_event": "${HOOK_EVENT_NAME}"})
+    observe(root, run_id=f"session:{sid}", workflow_id="session-lifecycle",
+            subject_id=f"session:{sid}", attempt_id=f"sess-{sid}",
+            transition=TRANSITION_OBSERVED_TERMINAL, outcome="completed",
+            payload={"hook_event": hn})
+    observe(root, run_id=f"session:{sid}", workflow_id="session-lifecycle",
+            subject_id=f"session:{sid}", attempt_id=f"sess-{sid}",
+            transition=TRANSITION_CONTROLLER_CLOSE, outcome="completed",
+            payload={"hook_event": hn})
     collect(root)
 except Exception:
     pass
