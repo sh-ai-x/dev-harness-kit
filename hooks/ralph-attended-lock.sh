@@ -77,17 +77,21 @@ fi
 }
 
 # Import ralph_state via PYTHONPATH so we use the same module the
-# orchestrator uses. Stderr-only diagnostics; the actual decision is
-# the exit code below. NOTE: the heredoc delimiter is bare `PY` (NOT
-# quoted) so $STATE_FILE and $PROJECT_ROOT are expanded by bash
-# before Python sees the script body.
-STATE_JSON=$(PYTHONPATH="${RALPH_LIB}" python3 - <<PY 2>/dev/null
-import json, sys
+# orchestrator uses. Paths are passed via env vars (RALPH_STATE_FILE,
+# RALPH_PROJECT_ROOT) instead of bash heredoc interpolation — a
+# defence-in-depth guard against future code that reads RALPH_SESSION
+# from an untrusted source (PR title, branch name, etc.) and might
+# contain a `"` or `\` that would corrupt the embedded Python.
+STATE_JSON=$(PYTHONPATH="${RALPH_LIB}" \
+  RALPH_STATE_FILE="${STATE_FILE}" \
+  RALPH_PROJECT_ROOT="${PROJECT_ROOT}" \
+  python3 - <<PY 2>/dev/null
+import json, os, sys
 from pathlib import Path
 try:
     import ralph_state as rs  # type: ignore
-    p = Path("$STATE_FILE")
-    root = Path("$PROJECT_ROOT").resolve()
+    p = Path(os.environ["RALPH_STATE_FILE"])
+    root = Path(os.environ["RALPH_PROJECT_ROOT"]).resolve()
     state = rs.RalphState.load(root, p.stem)
     out = {
         "attended_lock": state.attended_lock,

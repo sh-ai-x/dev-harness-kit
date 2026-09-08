@@ -151,15 +151,29 @@ def test_attended_run_with_lock_denies(project_root: Path):
 
 def test_lock_set_on_done_terminal_still_denies(project_root: Path):
     """Defence-in-depth: a stale DONE state with attended_lock=True
-    must still deny — the lock is the one-way wall."""
+    must still deny — the lock is the one-way wall.
+
+    Like ``test_lock_alone_is_sufficient_to_deny``, this constructs an
+    impossible state (``DONE + attended_lock=True``). ``transition()``
+    never lands there. The test pins that the hook's deny logic is
+    keyed off ``attended_lock`` first and stage second, regardless of
+    state-machine reachability.
+    """
     _write_state(project_root, attended_lock=True, current_stage="DONE")
     result = _run_hook(PROBE_PAYLOAD, project_root)
     assert result.returncode == 2
 
 
-def test_attended_lock_only_with_attended_stage_denies(project_root: Path):
+def test_lock_alone_is_sufficient_to_deny(project_root: Path):
     """Edge case: lock is set but stage was reset. The lock alone is
-    enough to deny — it is the one-way boundary, not the stage."""
+    enough to deny — it is the one-way boundary, not the stage.
+
+    Production code never produces ``RESEARCH_GATE + attended_lock=True``:
+    ``RalphState.transition()`` only sets the lock on the
+    ``SHIP_CONFIRM_GATE → ATTENDED_RUN`` edge. The test still exercises
+    the hook's contract: the ``LOCK=true`` branch trips before the
+    stage check matters.
+    """
     _write_state(
         project_root,
         attended_lock=True,
@@ -246,6 +260,37 @@ def test_hook_registered_for_askuserquestion_in_hooks_json():
     match = pattern.search(hooks_json)
     assert match is not None, "AskUserQuestion matcher block missing from hooks.json"
     assert "ralph-attended-lock.sh" in match.group(1)
+
+
+def test_askuserquestion_matcher_is_under_pretooluse_not_posttooluse():
+    """CRITICAL — the hook is a PreToolUse denial gate, not a
+    PostToolUse advisory. Per `hooks/injection-content-guard.sh:14-17`:
+    PostToolUse hooks cannot block — `permissionDecision` is decorative.
+    The matcher MUST live in the PreToolUse array.
+
+    Regression guard for the PR #828 review finding F1 (CRITICAL):
+    a prior version inserted the matcher under PostToolUse, which
+    silently no-op'd the entire mechanical layer.
+    """
+    import json
+
+    for hooks_path in (
+        ROOT / "hooks" / "hooks.json",
+        ROOT / ".codex-plugin" / "hooks" / "hooks.json",
+    ):
+        data = json.loads(hooks_path.read_text())
+        pre_blocks = data["hooks"].get("PreToolUse", [])
+        post_blocks = data["hooks"].get("PostToolUse", [])
+        pre_matchers = [b.get("matcher") for b in pre_blocks]
+        post_matchers = [b.get("matcher") for b in post_blocks]
+        assert "AskUserQuestion" in pre_matchers, (
+            f"{hooks_path}: AskUserQuestion matcher missing from PreToolUse. "
+            "PostToolUse cannot block — the hook would silently no-op."
+        )
+        assert "AskUserQuestion" not in post_matchers, (
+            f"{hooks_path}: AskUserQuestion matcher is under PostToolUse. "
+            "Move to PreToolUse so the deny envelope is honoured."
+        )
 
 
 # ============================================================================

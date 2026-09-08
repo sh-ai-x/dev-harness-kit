@@ -115,14 +115,6 @@ class UserMergeRequired(ChainError):
     is asleep."""
 
 
-class DispatchContractError(ChainError):
-    """Raised when a dispatch shim violates the no-Ask contract.
-
-    A sub-skill (or its stdout) emitted a string that resembles an
-    AskUserQuestion payload. The chain refuses to ask and surfaces
-    this so the operator knows a sub-skill needs to be patched."""
-
-
 # ----------------------------------------------------------------------------
 # Dispatch contract
 # ----------------------------------------------------------------------------
@@ -391,9 +383,14 @@ def run_attended(
     seen_sub_stage_count: Dict[str, int] = {}
 
     for sub in SUB_STAGE_ORDER:
-        # SAME-STAGE-REPEAT safety valve. If the same sub_stage has
-        # been entered twice, flip to RECOVERY_REQUIRED instead of
-        # looping forever.
+        # Same-stage-repeat=2 safety valve. When the orchestrator
+        # re-enters the same sub_stage (e.g. a future babysit-pr
+        # ``continue`` semantic re-iterating the BABYSIT phase), flip
+        # to RECOVERY_REQUIRED instead of looping forever. Today the
+        # chain iterates SUB_STAGE_ORDER exactly once, so this branch
+        # is reachable only when a caller passes a custom SUB_STAGE_ORDER
+        # that revisits a phase — see ``test_repeated_substage_visits_
+        # land_recovery_required`` for the regression guard.
         seen_sub_stage_count[sub] = seen_sub_stage_count.get(sub, 0) + 1
         if seen_sub_stage_count[sub] >= 2:
             state.sub_stage = sub
@@ -520,10 +517,18 @@ def run_attended(
 # ----------------------------------------------------------------------------
 
 
-def _default_dispatch_for_session(state: "rs.RalphState") -> ChainDispatch:
+def _default_dispatch_for_session(
+    state: "rs.RalphState", *, project_root: Path
+) -> ChainDispatch:
     """Construct the real dispatch for a ralph session. Tests bypass
-    this by passing their own ``ChainDispatch`` to ``run_attended``."""
-    return RealDispatch()
+    this by passing their own ``ChainDispatch`` to ``run_attended``.
+
+    ``project_root`` is threaded explicitly so subprocess cwd is pinned
+    to the repo root, never to the host's cwd. A CLI invocation from
+    a non-repo directory (e.g. a script wrapper) would otherwise land
+    ``git push`` / ``gh pr merge`` against the wrong remote.
+    """
+    return RealDispatch(project_root=project_root)
 
 
 def _cli(argv: List[str]) -> int:
@@ -557,10 +562,21 @@ def _cli(argv: List[str]) -> int:
             file=sys.stderr,
         )
         return 2
+    if not state.attended_lock:
+        print(
+            "error: current_stage=ATTENDED_RUN but "
+            "attended_lock=False (expected True). "
+            "State may have been rewound out of the attended phase; "
+            "refusing to dispatch.",
+            file=sys.stderr,
+        )
+        return 2
 
     dispatch: ChainDispatch
     if args.dispatch == "real":
-        dispatch = _default_dispatch_for_session(state)
+        dispatch = _default_dispatch_for_session(
+            state, project_root=args.project_root
+        )
     else:
         # dry-run: RecordingDispatch with successful defaults + terminal
         # USER_MERGE_REQUIRED at BABYSIT (mirrors RealDispatch.babysit).

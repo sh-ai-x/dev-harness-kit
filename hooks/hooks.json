@@ -62,6 +62,16 @@
             "fail_closed": true
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/ralph-attended-lock.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -191,16 +201,6 @@
             "type": "command",
             "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/l4-todo-scan.sh",
             "fail_closed": true
-          }
-        ]
-      },
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/ralph-attended-lock.sh",
-            "fail_closed": false
           }
         ]
       },

@@ -211,19 +211,34 @@ def test_dispatch_exception_lands_recovery_required(project_root: Path):
 # ============================================================================
 
 
-def test_same_stage_repeat_trips_recovery(project_root: Path):
-    """If the chain re-enters the same sub_stage (e.g. babysit-pr
-    returns 'continue'), the 2-trip valve fires."""
-    _entered_attended(session="repeat")
-    # We can't make the chain revisit a sub_stage without mutating
-    # SUB_STAGE_ORDER, so we test the safety-valve helper indirectly by
-    # asserting the count tracking — the actual count trip happens on
-    # the second visit. This test pins the helper behaviour.
-    counter: dict = {}
-    sub = rc.BUILD
-    counter[sub] = counter.get(sub, 0) + 1
-    counter[sub] = counter.get(sub, 0) + 1
-    assert counter[sub] == 2  # the same-stage-repeat=2 trip wire
+def test_repeated_substage_visits_land_recovery_required(project_root: Path):
+    """Same-stage-repeat=2 safety valve contract: when the orchestrator
+    re-enters the same sub_stage twice (e.g. a future babysit-pr
+    `continue` semantic), the chain must flip to ``RECOVERY_REQUIRED``
+    instead of looping forever. Today `run_attended` iterates
+    ``SUB_STAGE_ORDER`` exactly once, so we monkey-patch the constant to
+    repeat ``BUILD`` and assert the trip wire fires on the second visit.
+    """
+    state = _entered_attended(session="repeat")
+    dispatch = rc.RecordingDispatch(
+        results={
+            rc.BUILD: rc.DispatchResult(exit_code=0, stdout="build green"),
+        }
+    )
+    # Force the orchestrator to visit BUILD twice.
+    original = rc.SUB_STAGE_ORDER
+    rc.SUB_STAGE_ORDER = [rc.BUILD, rc.BUILD, rc.BABYSIT, rc.SHIP]
+    try:
+        final = rc.run_attended(state, dispatch, project_root=project_root)
+    finally:
+        rc.SUB_STAGE_ORDER = original
+
+    assert final.current_stage == rs.RECOVERY_REQUIRED
+    assert "BUILD" in (final.last_action or "")
+    assert "same-stage-repeat=2" in (final.last_action or "")
+    # Only the first BUILD ran — the trip fired before the second visit
+    # dispatched anything.
+    assert [c["sub_stage"] for c in dispatch.calls] == [rc.BUILD]
 
 
 # ============================================================================
