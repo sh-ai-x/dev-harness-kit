@@ -222,7 +222,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:bump`](docs/skills/bump.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
 | [`/dev-kit:sync-version`](docs/skills/sync-version.md) | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically. |
 | [`/dev-kit:maintenance`](docs/skills/maintenance.md) | Code-sanity gate (CC-1..8 / OE-1..8 / VM-1..4). Fires in `review.yml` and locally via `/dev-kit:review-local`; verdict maps `>=8.0` → Approve, `5.0..7.99` → Changes Requested, `<5.0` → Blocked. |
-| [`/dev-kit:review-local`](commands/review-local.md) | Local equivalent of the GH-Actions review workflow — runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`. Full playbook in [`docs/local-ci.md`](docs/local-ci.md). |
+| [`/dev-kit:review-local`](skills/review-local/SKILL.md) | Local equivalent of the GH-Actions review workflow — runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`. Full playbook in [`docs/local-ci.md`](docs/local-ci.md). |
 
 ### Keeping the project healthy
 
@@ -240,7 +240,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:docs-maintenance`](docs/skills/docs-maintenance.md) | Audits stale docs and refreshes the README without baking in facts that go out of date. |
 | [`/dev-kit:ci-triage`](docs/skills/ci-triage.md) | Triages failing GitHub Actions runs across recent commits, deduplicates against a persisted case store. |
 | [`/dev-kit:log`](docs/skills/log.md) | Turns session logging on/off — feeds `token-analyzer`, `skill-usage`, and the session monitor. |
-| [`/dev-kit:skill-usage`](commands/skill-usage.md) | Shows which skills you actually use, and how much — useful for pruning. |
+| [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | Shows which skills you actually use, and how much — useful for pruning. |
 | [`/dev-kit:sot-harness-writer`](docs/skills/sot-harness-writer.md) | Interview-based Single Source of Truth harness document writer — hands off to `/dev-kit:plan`. |
 | [`/dev-kit:evaluate`](docs/skills/evaluate.md) | LLM-judge eval across registered rubrics + the five-component harness-effectiveness report. Programmatic gate after any harness change. |
 | [`/dev-kit:harness-effectiveness`](docs/skills/harness-effectiveness.md) | The five-component scorecard (prevention / first-pass / recovery / learning / measurement-integrity) standalone — sub-second, zero API spend. |

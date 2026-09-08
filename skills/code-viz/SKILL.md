@@ -230,7 +230,7 @@ PILLAR_PATTERNS = {
     'Cloud':    ['aws', 'gcp', 'azure', 'cloud', 'k8s', 'kubernetes', 'docker', 'lambda', 's3', 'ec2', 'iam'],
     'API':      ['api', 'rest', 'graphql', 'grpc', 'endpoint', 'route', 'controller', 'handler', 'middleware'],
     'MCP':      ['mcp', 'model_context'],
-    'Skill':    ['skill', 'slash_command', 'commands/'],
+    'Skill':    ['skill', 'slash_command', 'skills/'],
     'Hook':     ['hook'],
     'Network':  ['network', 'http', 'socket', 'dns', 'tcp', 'udp', 'fetch', 'request', 'websocket', 'tls'],
     'Security': ['auth', 'secret', 'oauth', 'jwt', 'token', 'encrypt', 'decrypt', 'crypto', 'permission', 'rbac'],
@@ -519,7 +519,7 @@ blocks = []
 
 arch = ['flowchart TB',
     '  USER([user / CLI / IDE]):::ext',
-    '  SF[skills + commands/<br/>SKILL.md frontmatter]:::layer',
+    '  SF[skills/<br/>SKILL.md frontmatter]:::layer',
     '  HF[hooks/<br/>Claude events]:::layer',
     '  LF[lib/ + tools/ + bin/<br/>domain modules]:::layer',
     '  EF[(external tools<br/>GH Actions . MCP . CLI)]:::ext',

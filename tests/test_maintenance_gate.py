@@ -137,9 +137,9 @@ class TestDocsUpdatedCheck(unittest.TestCase):
     # -------------------------------------------------------------------
     # _PROD_ROOTS drift regression: this list independently duplicates
     # bin/review-local.sh's touch-probe regex (which already includes
-    # bin/ and commands/ per a fix noted in its own comments) and
+    # bin/ per a fix noted in its own comments) and
     # review.yml's scope-job regex. All three drifted out of sync --
-    # this module's list was missing bin/, commands/, .claude/,
+    # this module's list was missing bin/, .claude/,
     # .codex/, and .github/ entirely, so a PR that ONLY touches e.g.
     # bin/*.sh was never flagged as needing a docs update.
     # -------------------------------------------------------------------
@@ -157,16 +157,16 @@ class TestDocsUpdatedCheck(unittest.TestCase):
         )
         self.assertTrue(ok, reason)
 
-    def test_fails_for_commands_change_without_docs(self):
+    def test_fails_for_skill_change_without_docs(self):
         ok, reason = maintenance_gate.docs_updated_ok(
             changed_files=["skills/babysit-pr-local/SKILL.md"],
             pr_body="",
         )
         self.assertFalse(ok, reason)
 
-    def test_passes_for_commands_change_with_docs(self):
+    def test_passes_for_skill_change_with_docs(self):
         ok, reason = maintenance_gate.docs_updated_ok(
-            changed_files=["commands/babysit-pr-local.md", "docs/local-ci.md"],
+            changed_files=["skills/babysit-pr-local/SKILL.md", "docs/local-ci.md"],
             pr_body="",
         )
         self.assertTrue(ok, reason)
@@ -629,11 +629,11 @@ class TestRegistryIndexCheck(unittest.TestCase):
         self.assertIn("skills/foo/SKILL.md", reason)
 
     def test_fails_when_new_skill_updates_only_nested_readme(self):
-        # `commands/README.md` is a SECONDARY registry doc — updating it
+        # `docs/skills/README.md` is a SECONDARY registry doc — updating it
         # does not exempt the PR from touching the root README.
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
-                "commands/README.md:added",
+                "docs/skills/README.md:added",
                 "skills/foo/SKILL.md:added",
             ],
             pr_body="",

@@ -46,7 +46,7 @@ def files(root: Path) -> list[Path]:
     - Stale agent worktrees at the repo root (`.worktrees/`).
     - Stale agent worktrees nested under `.claude/worktrees/`. We do NOT
       exclude all of `.claude/` because that tree also holds checked-in
-      config (settings.json, hooks/, commands/) that should be scored;
+      config (settings.json, hooks/, skills/) that should be scored;
       only the scratch worktrees nested inside it are excluded.
     - The scorer output artifact itself (`security-metrics.md`) — it
       contains the report table, which echoes pattern names like

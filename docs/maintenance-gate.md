@@ -4,7 +4,7 @@ The `/dev-kit:maintenance` gate enforces two independent docs-coverage
 rules on every PR:
 
 1. **Path-level docs check** (existing). When the PR touches a
-   production path under `bin/` / `commands/` / `lib/` / `tools/` /
+   production path under `bin/` / `lib/` / `tools/` /
    `hooks/` / `skills/` / `.githooks/` / `.claude/` / `.codex/` /
    `.github/`, it must also touch a `docs/*` file (excluding
    `docs/stages/STAGES.md` and `docs/repo/REPOSITORY-MAP.md`, which

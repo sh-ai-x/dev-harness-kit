@@ -4,10 +4,10 @@
 Discovered live (2026-08-11): the touch-probe regex used to decide
 `touches_prod` — which gates whether the expensive `/dev-kit:review`
 and `/dev-kit:security` LLM-judge jobs even run in CI — was missing
-`bin/` and `commands/` from its production-root list, even though
+`bin/` from its production-root list, even though
 `bin/review-local.sh`'s OWN internal touch-probe regex (used for the
 local `--auto-approve` L3-evidence gate) already includes both. A PR
-that ONLY touches `bin/*.sh` or `commands/*.md` was silently
+that ONLY touches `bin/*.sh` was silently
 classified as "docs/infra-only", so the LLM review + security jobs
 never ran in GH-Actions at all (no review comments posted -- observed
 against a real PR).
@@ -44,7 +44,7 @@ REVIEW_LOCAL_SH = PROJECT_ROOT / "bin" / "review-local.sh"
 # so "does this PR touch production code" means the same thing in
 # both the local and CI code paths.
 CANONICAL_ROOTS = (
-    "bin", "commands", "lib", "tools", "hooks", "skills",
+    "bin", "lib", "tools", "hooks", "skills",
     "\\.githooks", "\\.claude", "\\.codex", "\\.github",
 )
 
@@ -65,15 +65,9 @@ class TestReviewYmlTouchProbeRootsMatchCanonical(unittest.TestCase):
         roots = m.group(1).split("|")
         self.assertIn("bin", roots, f"touch-probe pattern missing 'bin': {roots}")
 
-    def test_scope_job_touch_probe_regex_includes_commands(self) -> None:
-        m = re.search(r"grep -E '\^\(([^)]+)\)/'", self.text)
-        self.assertIsNotNone(m, "could not find the scope job's grep -E touch-probe pattern")
-        roots = m.group(1).split("|")
-        self.assertIn("commands", roots, f"touch-probe pattern missing 'commands': {roots}")
-
     def test_scope_job_touch_probe_regex_matches_canonical_set(self) -> None:
         """Full parity check against bin/review-local.sh's already-
-        correct list -- catches ANY future drift, not just bin/commands.
+        correct list -- catches ANY future drift, not just bin/.
         """
         m = re.search(r"grep -E '\^\(([^)]+)\)/'", self.text)
         self.assertIsNotNone(m, "could not find the scope job's grep -E touch-probe pattern")
@@ -86,17 +80,16 @@ class TestReviewYmlTouchProbeRootsMatchCanonical(unittest.TestCase):
             f"own touch-probe regex)",
         )
 
-    def test_docs_infra_only_message_mentions_bin_and_commands(self) -> None:
+    def test_docs_infra_only_message_mentions_bin(self) -> None:
         """The human-readable messages that ENUMERATE the production
         roots (not the short "::notice::...advisory here" summary
-        line) should stay consistent with the regex they describe -- a
-        silent drift here is a documentation bug, not a functional
-        one, but it misleads operators debugging a skipped review job.
+        line) should stay consistent with the regex they describe.
+        commands/ was removed in fix/commands-prefix-only.
         """
         occurrences = [
             line for line in self.text.splitlines()
             if "echo" in line and (
-                "no bin/commands/lib" in line or "did not touch" in line
+                "no bin/lib" in line or "did not touch" in line
             )
         ]
         self.assertTrue(
@@ -105,7 +98,6 @@ class TestReviewYmlTouchProbeRootsMatchCanonical(unittest.TestCase):
         )
         for line in occurrences:
             self.assertIn("bin", line, f"message doesn't mention bin/: {line!r}")
-            self.assertIn("commands", line, f"message doesn't mention commands/: {line!r}")
 
 
 class TestMaintenanceGateFileStatusExtraction(unittest.TestCase):
