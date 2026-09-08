@@ -64,6 +64,40 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/lib
 
+      - name: Effectiveness collection adapter probe
+        # PR #817: bounded real-adapter probe. The test job creates a
+        # scratch project under /tmp/eff-probe, exercises the actual
+        # enroll / observe / collect paths through the public helpers
+        # (not a synthetic event match), and asserts the envelope is
+        # READY under --origin ci-probe. A non-READY envelope fails
+        # the gate so DEGRADED / INSUFFICIENT_EVIDENCE / COLLECTION_ERROR
+        # all surface in CI rather than production. The probe is
+        # gated on the new test files existing; older CI runs without
+        # the module fail the test step before reaching here.
+        run: |
+          set -euo pipefail
+          PROBE_ROOT="$(mktemp -d /tmp/eff-probe-XXXXXX)"
+          git init -q "$PROBE_ROOT"
+          # Enroll a unit, observe start, observe terminal through the
+          # public helpers. Probe-only — does NOT use --gate-ci so a
+          # fresh tree with no enrollment still passes (NO_OPPORTUNITY
+          # is informational, not a failure).
+          PYTHONPATH=lib python3 -m effectiveness_collection enroll \
+            --root "$PROBE_ROOT" \
+            --run-id probe-1 --workflow-id ci-probe --subject-id probe:step:1 --attempt-id probe-a1
+          PYTHONPATH=lib python3 -m effectiveness_collection observe \
+            --root "$PROBE_ROOT" \
+            --run-id probe-1 --workflow-id ci-probe --subject-id probe:step:1 --attempt-id probe-a1 \
+            --transition observed_start --outcome started
+          PYTHONPATH=lib python3 -m effectiveness_collection observe \
+            --root "$PROBE_ROOT" \
+            --run-id probe-1 --workflow-id ci-probe --subject-id probe:step:1 --attempt-id probe-a1 \
+            --transition observed_terminal --outcome completed
+          # Gate: a probe with a known expected population must end READY.
+          PYTHONPATH=lib python3 -m effectiveness_collection collect \
+            --root "$PROBE_ROOT" --origin ci-probe --gate-ci | tee "$PROBE_ROOT/envelope.json"
+          test "$(jq -r .readiness < "$PROBE_ROOT/envelope.json")" = "READY"
+
   validate:
     name: validate
     runs-on: ubuntu-latest
