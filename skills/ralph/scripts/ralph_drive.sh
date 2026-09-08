@@ -12,6 +12,7 @@
 #   ./ralph_drive.sh can-ask [--session NAME]
 #   ./ralph_drive.sh advance <target> [--action TEXT] [--session NAME]
 #   ./ralph_drive.sh rewind <target> --reason TEXT [--session NAME]
+#   ./ralph_drive.sh run-attended [--dispatch real|noop] [--session NAME]
 #
 # Exit codes:
 #   0 — OK
@@ -35,11 +36,14 @@ usage() {
 ralph_drive.sh — bash glue for /dev-kit:ralph state machine
 
 Subcommands:
-  init <idea>                     Create a new state for <idea>
-  status                          Print current state JSON
-  can-ask                         Exit 0 if AskUserQuestion allowed, 1 if locked
-  advance <target> [--action T]   Transition current -> target (validated)
-  rewind <target> --reason T      Rewind to a prior gate (Edit-then-approve)
+  init <idea>                       Create a new state for <idea>
+  status                            Print current state JSON
+  can-ask                           Exit 0 if AskUserQuestion allowed, 1 if locked
+  advance <target> [--action T]     Transition current -> target (validated)
+  rewind <target> --reason T        Rewind to a prior gate (Edit-then-approve)
+  run-attended [--dispatch real|noop]
+                                    Drive ATTENDED_RUN to terminal. Exit 0=DONE,
+                                    USER_MERGE_REQUIRED; non-zero=RECOVERY_REQUIRED.
 
 Env vars:
   PROJECT_ROOT   Project root (default: git toplevel)
@@ -51,6 +55,7 @@ Examples:
   PROJECT_ROOT=. ./ralph_drive.sh can-ask
   PROJECT_ROOT=. ./ralph_drive.sh advance PROPOSAL_GATE --action "user approved research"
   PROJECT_ROOT=. ./ralph_drive.sh rewind PROPOSAL_GATE --reason "user edits A2"
+  PROJECT_ROOT=. ./ralph_drive.sh run-attended
 EOF
 }
 
@@ -163,6 +168,46 @@ cmd_rewind() {
         rewind "$target" --reason "$reason"
 }
 
+cmd_run_attended() {
+    local dispatch="real"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dispatch)
+                dispatch="$2"
+                shift 2
+                ;;
+            --session)
+                SESSION="$2"
+                shift 2
+                ;;
+            --noop)
+                dispatch="noop"
+                shift
+                ;;
+            *)
+                echo "error: unknown flag: $1" >&2
+                exit 1
+                ;;
+        esac
+    done
+    case "$dispatch" in
+        real|noop) ;;
+        *)
+            echo "error: --dispatch must be 'real' or 'noop' (got '$dispatch')" >&2
+            exit 1
+            ;;
+    esac
+    require_python
+    # Delegate to the chain executor. Exit codes:
+    #   0 = DONE / USER_MERGE_REQUIRED (success — babysit landed)
+    #   2 = RECOVERY_REQUIRED (recovery surface, operator reviews)
+    #   non-zero (1, 3) = CLI usage / environment error
+    python3 -m skills.ralph.lib.ralph_chain \
+        --project-root "$PROJECT_ROOT" \
+        --session "$SESSION" \
+        run-attended --dispatch "$dispatch"
+}
+
 # ----------------------------------------------------------------------------
 # Entry point
 # ----------------------------------------------------------------------------
@@ -176,11 +221,12 @@ sub="$1"
 shift
 
 case "$sub" in
-    init)      cmd_init "$@" ;;
-    status)    cmd_status "$@" ;;
-    can-ask)   cmd_can_ask "$@" ;;
-    advance)   cmd_advance "$@" ;;
-    rewind)    cmd_rewind "$@" ;;
+    init)         cmd_init "$@" ;;
+    status)       cmd_status "$@" ;;
+    can-ask)      cmd_can_ask "$@" ;;
+    advance)      cmd_advance "$@" ;;
+    rewind)       cmd_rewind "$@" ;;
+    run-attended) cmd_run_attended "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     *)
         echo "error: unknown subcommand: $sub" >&2
