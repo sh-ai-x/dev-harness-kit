@@ -12,6 +12,10 @@ Three scopes × three modes = nine cells. Pick the one that matches your situati
 
 See [`decision-tree.md`](decision-tree.md) for the full mapping.
 
+> **Want the action checklist + day-to-day workflow instead of this matrix?**
+> Read [`../best-practice-workflow.md`](../best-practice-workflow.md) first — setup,
+> session overrides, audit commands, and common pitfalls in one page.
+
 ## Why this directory exists
 
 dev-harness-kit has plugins, hooks, iron laws, and templates — but until now, nothing dedicated to **which settings file you should edit** or **which mode your project is in**. This directory is the single source of truth for those two questions.
@@ -29,6 +33,7 @@ If you remember nothing else, remember that URL.
 | File | Purpose |
 |---|---|
 | [`README.md`](README.md) | This file — landing page + matrix |
+| [`../best-practice-workflow.md`](../best-practice-workflow.md) | Action-oriented setup checklist + day-to-day workflow + session overrides |
 | [`decision-tree.md`](decision-tree.md) | Operator-facing flowchart for "which scope do I edit?" |
 | [`user-scope.md`](user-scope.md) | Reference for `~/.claude/settings.json` |
 | [`project-scope.md`](project-scope.md) | Reference for `<project>/.claude/settings.json` |
