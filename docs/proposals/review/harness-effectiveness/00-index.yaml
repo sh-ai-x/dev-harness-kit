@@ -268,3 +268,10 @@ sections:
       하나의 reducer로 연결해 5개 score를 계산하는 것이다. 기존 평가와 새
       effectiveness 평가는 같은 `/dev-kit:evaluate` report에서 함께 보이지만,
       의미와 source는 서로 섞지 않는다.
+
+  - title: "Sub-proposals"
+    body: |
+      | Sub-proposal | Status | One-line scope |
+      |---|---|---|
+      | [evidence-collection](evidence-collection.html) | design-discussion | Fix the seven producer root causes (RC-1..7) so the reducer has evidence to score against. |
+      | [auto-collection](auto-collection.html) | design-discussion | Boundary-driven automatic measurement with one journal, incremental collection, explicit unresolved outcomes and real adapter probes; no resident monitor or legacy-log rescan. |

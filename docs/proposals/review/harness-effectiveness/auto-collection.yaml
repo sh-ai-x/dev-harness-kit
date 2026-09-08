@@ -1,0 +1,279 @@
+title: "Automatic harness measurement — one journal, existing boundaries, incremental collection"
+status: design-discussion
+date: 2026-09-08
+tags: [harness-effectiveness, auto-collection, lifecycle, incremental, ci]
+
+before:
+  summary: |
+    The repository already emits lifecycle evidence and computes diagnostic scores.
+    The preceding design added a separate registry, permanent monitor, heartbeat and
+    lease protocol, whole-log captures and multiple archive layers. Those mechanisms
+    introduced operating cost and timeout ambiguity without making observed outcomes
+    more truthful. Remove that machinery while retaining an independently enrolled
+    population, consistent evidence, explicit unknowns and real adapter verification.
+  evidence:
+    - '`lib/execute.py::_step_pre_spawn` and `_step_post_collect` already own dispatch and completed/failed/blocked boundaries. `update_step_status` is atomic, but its step identity does not distinguish every attempt; measurement needs an explicit attempt ID.'
+    - '`hooks/trace-session-end.sh` is registered for Stop and SessionEnd. Its first-terminal guard lets a per-turn Stop prematurely close a session; Stop must remain provisional.'
+    - '`lib/harness_effectiveness.py::build_report` joins legacy all-history evidence and renormalizes non-null component scores. That numeric score does not establish measurement readiness.'
+    - '`lib/trace_log.py::append_event` regenerates duplicate event IDs and may write after lock failure. Its legacy semantics are not the strict measurement retry contract.'
+    - '`lib/atomic.py::atomic_write_json` supplies temporary-file/replace publication. It does not itself supply locking or fsync durability; reuse it with the required surrounding protocol.'
+    - '`.github/workflows/ci.yml` already provides the test job. No new workflow, daemon, check-run API, database dependency or statusline implementation is required.'
+
+after:
+  summary: |
+    Use one small measurement journal per worktree and one disposable projection.
+    Existing session/executor boundaries append controller intent and observed events,
+    then automatically consume only new records. The projection contains counts and
+    an explicit measured-as-of cutoff. Enrollment and observations are distinct record
+    types in the same authoritative store; there is no second registry to synchronize.
+
+    Stop refreshes a provisional observation. Actual terminal callbacks close units.
+    A missed callback stays unresolved until a later boundary has authoritative evidence
+    of closure; elapsed time never invents an outcome. This trades immediate idle-time
+    detection for zero resident monitoring processes and no heartbeat/lease failures.
+    CI probes actual adapters against an independent expected population. Legacy quality
+    scores remain available on demand, with their own provenance and freshness.
+  files:
+    - path: lib/effectiveness_collection.py
+      change: 'One new module/CLI for enroll, observe, collect and probe; strict segmented journal, incremental projection, readiness and retention. Reuse lib.atomic for publication with explicit locking and durability.'
+    - path: lib/execute.py
+      change: 'Enroll a unique attempt before dispatch; record observed start and existing real completed/failed/blocked boundaries, including catchable cancellation/exception. Collect at those boundaries; preserve execution outcomes.'
+    - path: hooks/session-start-check.sh
+      change: 'Enroll session intent and observed start separately through the installed module; collect current and unresolved cohorts at this existing boundary.'
+    - path: hooks/trace-session-end.sh
+      change: 'Stop only requests collection; actual SessionEnd records terminal once and collects. Keep legacy emission compatible with corrected session-end semantics. No background process or heartbeat.'
+    - path: hooks/hooks.json
+      change: 'Retain one ordered lifecycle adapter invocation per boundary; do not register a separate unordered collector command.'
+    - path: .codex-plugin/hooks/hooks.json
+      change: 'Preserve portability parity and declare actual runtime lifecycle capabilities; Stop is never a substitute for SessionEnd.'
+    - path: hooks/index.md
+      change: 'Document automatic boundary collection, supported callbacks, unresolved observations and the absence of idle-time detection.'
+    - path: lib/eval_runner.py
+      change: 'Expose the measurement envelope separately from the existing harness_effectiveness result. Keep legacy reducer behavior and output unchanged.'
+    - path: skills/harness-effectiveness/SKILL.md
+      change: 'Refresh incremental measurement and show counts, readiness and cutoff. Explicit diagnostic invocation may also run the existing legacy reducer, clearly identified.'
+    - path: docs/skills/harness-effectiveness.md
+      change: 'Document one journal, rebuildable cache, evidence horizon, runtime capability matrix and measurable performance acceptance budgets.'
+    - path: .github/workflows/ci.yml
+      change: 'Add real production-adapter probes to the existing test job and always publish bounded evidence artifacts and a summary; ordinary CI exit status is the gate.'
+    - path: tests/test_effectiveness_collection.py
+      change: 'Cover incremental/full replay equivalence, attempt population, retries, truncated append, concurrency, retention, unknowns and readiness.'
+    - path: tests/test_trace_session_end.py
+      change: 'Verify multiple Stop events remain provisional, genuine SessionEnd closes once and concurrent sessions are not inferred closed.'
+    - path: tests/test_execute_effectiveness.py
+      change: 'Exercise actual executor boundaries with controlled success, nonzero, blocked and exception outcomes; independently assert expected attempts and bounded collection cost.'
+
+pros:
+  - 'No daemon, scheduler, heartbeat, lease expiry or owner-PID protocol to install, restart or support.'
+  - 'One authoritative journal and a rebuildable cache remove registry synchronization and snapshot/archive bookkeeping.'
+  - 'Normal automatic collection reads only appended measurement records; it never rescans or copies the growing legacy trace.'
+  - 'Explicit controller enrollment still reveals missing start/terminal observations; unknowns never improve a passing cohort.'
+  - 'Existing hooks and executor boundaries provide automatic refresh with no additional user command; installed-runtime probes validate the adapters.'
+  - 'One new module, standard-library dependencies and unchanged legacy score formulas keep implementation and rollback localized.'
+cons:
+  - 'A small amount of synchronous journal I/O and adapter maintenance remains. It is limited to existing lifecycle boundaries, checked by performance/capability tests, and requires no resident service.'
+limitations:
+  - 'There is no idle-time monitor: a missed callback is revisited at the next supported boundary. If no trustworthy closure evidence exists, the unit remains unresolved; the UI shows its cutoff and does not claim a current complete score.'
+  - 'Lifecycle closure measures observed accounting, not semantic correctness or causal benefit. Broader quality dimensions remain unavailable without their independent evidence.'
+  - 'Finite local storage has an explicit evidence horizon. Protected unresolved state reaching the cap produces COLLECTION_ERROR rather than silently deleting a denominator.'
+
+sections:
+  - title: "1. Remove costs at their source"
+    body: |
+      | Previous cost | Replacement | Accuracy preserved by |
+      |---|---|---|
+      | Per-worktree monitor, heartbeat and lease | existing boundary callbacks | unresolved state and measured-as-of cutoff |
+      | Separate registry and event stream | enrollment and observation records in one journal | distinct controller intent versus emitted observation |
+      | Whole legacy trace capture on each refresh | cursor-based measurement replay | deterministic full-replay equivalence |
+      | Latest + history + gzip archives + raw snapshots | journal segments + disposable latest cache | retained sequence/hash horizon |
+      | PID-liveness guesses and expiry | callback or authoritative controller outcome | unknown stays unknown |
+      | Coupled legacy reducer refactor | legacy diagnostics only on explicit evaluation | separate source/version/freshness labels |
+
+      The single residual con is bounded boundary I/O and maintaining the adapters.
+      Delayed reconciliation and finite evidence retention remain visible limitations;
+      they are not presented as solved or moved into undocumented background work.
+      No production behavior is implemented by this proposal-only PR.
+
+  - title: "2. Population, outcomes and honest readiness"
+    body: |
+      Unit identity is (root_id, run_id, workflow_id, subject_id, attempt_id).
+      root_id is the canonical absolute payload project/worktree path; plugin module
+      lookup is independent. Missing/ambiguous root is COLLECTION_ERROR, not fallback
+      to another worktree. Executor retries get new attempt IDs; repeated notification
+      of the same attempt reuses its identity. Session identity uses the runtime token. Attempt tokens also carry a validated
+      enrollment epoch, so an outside-retention retry cannot masquerade as new work.
+
+      A controller writes enrollment before dispatch and the adapter records observed
+      start separately. This catches emitter loss after enrollment. Both live in the
+      same journal, but a start event must never synthesize a missing enrollment.
+      An entirely missing controller cannot be discovered from an empty journal:
+      adapter capability/version probes and supported-population labels are required,
+      and uninstrumented runtime activity is never claimed as measured.
+
+      Cohorts are UTC enrollment days [start, end), one root and one origin (runtime
+      or ci-probe). Late terminals join the enrollment cohort, not their arrival day.
+      At cutoff, enrolled = closed + unresolved. Closed means an actual callback or
+      an independently recorded controller final disposition establishes the unit ended.
+      Missing observed terminal then remains a coverage defect, never synthesized success.
+      No deadline, new session, quiet period or missing PID proves a unit ended.
+
+      Coverage = paired / closed, with null for closed=0. Paired requires observed
+      start plus one semantically consistent observed terminal for the enrolled attempt.
+      Failed/blocked are valid closures, not successful task outcomes. Always show
+      enrolled, closed, unresolved, paired, missing_start, missing_terminal,
+      conflicting_terminal and unexpected_units. A partial ratio is descriptive only:
+      any unresolved unit prevents READY, so omitting unobserved outcomes cannot pass.
+
+      Readiness order: COLLECTION_ERROR; UNSUPPORTED; DEGRADED (invalid, conflicting
+      or unenrolled evidence); NO_OPPORTUNITY (no enrolled units); INSUFFICIENT_EVIDENCE
+      (any unresolved or absent required evidence); then READY or COVERAGE_BELOW_POLICY.
+      Runtime coverage threshold defaults to 0.95, a versioned policy choice without
+      a statistical-confidence claim. Always expose the sample count; READY means the
+      observed cohort meets this accounting policy, not population-wide effectiveness.
+      CI requires its exact known population and 100% expected observations.
+      Runtime and probe origins never pool evidence. No legacy overall_score gate.
+
+  - title: "3. Automatic collection without a resident process"
+    body: |
+      | Existing boundary | Action |
+      |---|---|
+      | Session start / executor dispatch | enroll, observe start, collect |
+      | Stop | collect current and unresolved cohorts; no close |
+      | Actual SessionEnd / executor terminal | observe terminal, record controller close, collect |
+      | Next session/executor boundary | reconcile only available authoritative dispositions, collect |
+      | Explicit harness-effectiveness / evaluate | collect; optionally compute legacy diagnostics |
+      | CI | execute production adapters, collect isolated expected cohort |
+
+      Each adapter serializes its persistence before collect. Catchable errors preserve
+      their actual outcome even if telemetry fails. No hook launches a detached worker.
+      A runtime lacking SessionEnd may use a documented controller final disposition;
+      without either, full session closure capability is UNSUPPORTED. Supported executor
+      attempts may still be measured as their own population, without claiming session
+      coverage. Capability probes must exercise the real runtime adapter contract.
+
+      A killed process or missed callback leaves an unresolved unit. On the next
+      boundary, a persisted executor result may establish closure; another session
+      starting does not, because sessions can overlap. No inference from wall-clock
+      age. Long calls and host sleep therefore cause no false expiry. If recovery
+      evidence never arrives, retain the unknown and its effect on readiness.
+
+      Latest includes collected_at, observed-through journal sequence, cohort/cutoff,
+      unresolved count and freshness state. With no new records, return the cached
+      projection without rewriting history; report checked_at separately. A cached
+      result is historical as-of evidence, not a claim that nothing happened afterward.
+      A read-only consumer shows age and cached status; a supported boundary refreshes
+      automatically. There is no promise of bounded idle-time detection latency.
+
+  - title: "4. One journal and a disposable cache"
+    body: |
+      Store compact measurement segments and effectiveness-latest.json under
+      <root>/.dev-kit/trace/measurement/. Journal records contain only bounded identity,
+      transition, outcome, provenance and evidence reference/hash fields, never tool
+      transcripts. Legacy events.jsonl remains a separate compatibility diagnostic,
+      not a second authority that must match this measurement store transactionally.
+
+      One per-root lock coordinates journal append, projection publication and pruning.
+      Use one ordered sequence with versioned record hashes. Semantic key is
+      (unit identity, transition); identical retries return the existing identity,
+      conflicting terminal content becomes a finding. Retry equality excludes transport
+      timestamp fields and compares the versioned semantic payload. Enrollment, start, controller
+      close and observed terminal are distinct transitions, so crashes between them
+      leave interpretable evidence rather than silently completing a transaction.
+
+      Append complete records with flush/fsync before acknowledging persistence. Repair
+      an incomplete final record under lock using the last verified offset, retain its
+      bounded corruption finding, and never silently skip interior corruption. The
+      journal is authoritative. A checkpoint/cache uses lib.atomic publication with
+      the same lock and an explicit durability protocol; cache loss only causes replay.
+      A cache sequence/hash mismatch, truncated segment or corrupt required source
+      cannot be replaced with an empty successful report.
+
+      Normal collection consumes the tail after its verified cursor and updates the
+      retained attempt projection. First run or cache loss replays retained segments.
+      Pure incremental and full replay must produce identical counts/status for the
+      same cutoff/policy. Holding the same lock prevents older concurrent publications;
+      do not add a separate capture ordering service or duplicate raw-source copies.
+      Persist compact lookup state as a rebuildable projection for retry lookup.
+      Terminal callback retries may retry a failed collect but never add duplicate
+      terminal records. Unchanged boundaries do no legacy-log reads or source copying.
+
+      Envelope v1 contains policy/version, root/origin, adapter capabilities, source
+      sequence/hash and retention floor, collected_at/cutoff, counts/ratio/readiness,
+      quality availability and bounded collection errors. The legacy schema-v3 report
+      stays in its existing API; explicit consumers display it separately with its own
+      source and collection time. Automatic collection need not modify either
+      lib.trace_log's compatibility semantics or the legacy reducer implementation.
+
+      Use enrollment-day segments, rotating each at 4 MiB. Retain at most 30 days of fully closed cohorts within
+      a 64 MiB total journal budget; prune whole oldest closed cohorts first. Segments with
+      unresolved units are protected. Pruning advances an explicit replay floor and
+      invalidates/rebuilds projections under lock; report the actual retained horizon.
+      Do not retain historical report files whose input has been pruned. Late evidence
+      outside the horizon is labeled OUTSIDE_RETENTION and cannot recreate a denominator
+      or become a new success. Pruned retry evidence similarly cannot be called new.
+      If protected data plus the next record exceeds the budget, return COLLECTION_ERROR.
+      Lock/disk errors preserve the last valid cache and expose error/stale state where
+      storage permits; absent writable storage cannot guarantee a persisted error flag.
+      No gzip archive tiers, raw capture store, periodic cleanup or database service.
+
+  - title: "5. Cost and accuracy acceptance gates"
+    body: |
+      Runtime collection is observational and never changes the user's workflow exit
+      code; collection CLI returns 2 on collection error. A cooperative two-second
+      budget covers lock wait and collection work, checked between bounded batches.
+      An incomplete update returns COLLECTION_ERROR without publishing partial success.
+      Kernel I/O stalls cannot be given a hard wall-clock guarantee by this design.
+
+      Prove operation counts before making performance claims: unchanged Stop reads
+      only bounded cursor metadata, no journal payload or legacy trace; appending N records parses only that tail;
+      cache loss performs one replay; no callback starts a resident process. Benchmark
+      acceptance target is <=100 ms p95 for warm unchanged Stop collection on the
+      declared CI runner over 100 repetitions. Record runner identity, corpus size and
+      elapsed samples; this is an implementation release target, not a measured claim.
+      Test cold replay within the configured budget or explicit incomplete/error state.
+
+      The existing ci.yml test job creates a temporary project and expected attempt
+      manifest before invoking actual hooks and executor adapters with controlled
+      subprocess outcomes. Do not write perfectly matching synthetic events as the
+      sole integration proof. Require:
+
+      - Success, failed exit, blocked and catchable exception preserve workflow results
+        and match independently expected enrollment/start/terminal/controller closure.
+      - Two Stop events remain unresolved; actual SessionEnd closes once. Concurrent
+        sessions, host sleep and long calls never close through time-based inference.
+      - Missing start or terminal remains visible against enrollment; missing adapter
+        is unsupported. Killed owner is unresolved until authoritative evidence exists.
+      - Same subject across retries/runs is distinct; duplicate callbacks are no-ops;
+        cross-midnight and retained late evidence stay with the enrollment cohort.
+      - Incremental/full replay, cache deletion, corrupt tail/interior, lock timeout,
+        parallel writers and crash between append/publication preserve the contract.
+      - Empty, partial and wrong-origin cohorts cannot pass CI; known failed outcomes
+        count as observed closures but never become quality successes.
+      - Retention, protected unresolved data and outside-horizon callbacks neither
+        lose denominators silently nor create false successes; path-with-spaces and
+        separate worktree roots remain isolated.
+      - Warm/tail/cold operation-count and latency checks demonstrate the intended
+        reduction in cost, with no daemon and no legacy rescan in automatic callbacks.
+
+      Always publish bounded redacted journal evidence, adapter/version, expected
+      manifest, SHA, envelope and scenario results. Missing artifact, wrong SHA/origin,
+      unsupported required adapter or collection error fails the ordinary CI job.
+      Passing probes validates those instrumentation scenarios, not unseen live activity.
+
+  - title: "6. Delivery and broader quality evidence"
+    body: |
+      Deliver the one-module journal/projector and replay tests, connect existing
+      lifecycle adapters, then enable automatic consumers and CI probes. Rollback
+      disables these adapter calls; legacy diagnostics remain usable and measurement
+      segments remain inspectable. No service uninstall or cross-store migration.
+
+      [evidence-collection](evidence-collection.html) owns broader quality producers.
+      Preserve independent opportunity denominators: all eligible writes including
+      missing verification; all eligible errors including unrecovered errors; independent
+      guard labels with calibration separate from ambient traffic; comparable treatment
+      and control evidence before causal learning claims. A missing outcome remains
+      unknown, while an observed failed check/recovery remains a measured failure.
+      Existing component formulas are not rewritten in this collector. Until each
+      quality contract exists, display its exact unavailable evidence separately from
+      lifecycle readiness. Automatic lifecycle accounting is the first bounded delivery,
+      not a claim that five dimensions are now measured correctly.
