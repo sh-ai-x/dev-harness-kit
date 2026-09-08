@@ -1,383 +1,293 @@
-title: "Auto-collect harness-effectiveness — one reliable metric, surfaced automatically"
+title: "Automatic harness measurement — bounded cohorts, verified producers, honest evidence"
 status: design-discussion
 date: 2026-09-08
-tags: [harness-effectiveness, auto-collection, subject-observability, hooks, ci]
-depends_on: []
+tags: [harness-effectiveness, auto-collection, lifecycle, provenance, ci]
 
 before:
   summary: |
-    The harness emits 54,307 events across 53,301 started subjects. Only 210 of those
-    started subjects ever reached a terminal event. Every other subject (53,091) was
-    started by a tool call or session boundary but never finished — the harness has no
-    record of how they ended. The reducer already computes this gap as the
-    `subject_observability` submetric at `lib/harness_effectiveness.py:465-518`: a
-    symmetric Jaccard ratio `|started ∩ terminal| / |started ∪ terminal|`. Today the
-    ratio is 0.4% — effectively zero.
-
-    Three structural problems compound the gap:
-
-    1. The producer side leaks started subjects without terminals (every
-       exception / interrupt / timeout path drops the terminal `step.completed`).
-    2. The collector is manual. `lib/harness_effectiveness.build_report` is invoked
-       only when a human types `/dev-kit:harness-effectiveness` or runs
-       `/dev-kit:evaluate`. No SessionEnd / Stop / PostToolUse hook calls it.
-    3. There is no enforcement. Even when the ratio is 0.4%, no CI step blocks a PR
-       that widens the gap. The number is observable, not actionable.
+    The repository already emits session and executor lifecycle events and computes
+    a five-component diagnostic report. The missing capability is a trustworthy,
+    automatic measurement contract: a known population, a closed observation window,
+    producer health, consistent source reads, and explicit unavailable evidence.
+    Merely running the existing reducer at Stop does not establish those properties.
   evidence:
-    - 'Live (2026-09-08, this checkout): `subject_observability.coverage 0.004`, finding "53,091 of 53,301 started subject(s) never reached a terminal event".'
-    - 'Producer gap: `lib/execute.py` emits `step.started` per build step but `step.completed` only on the success branch. Error / interrupt / timeout paths leave the subject open.'
-    - 'Producer gap: no PostToolUse hook emits `step.completed` for tool-call-scoped subjects. A Bash tool call that runs `pytest` opens a logical subject but never closes it.'
-    - 'Session-end pair is complete (`hooks/session-start-check.sh:74-75` + `hooks/trace-session-end.sh:62`) but covers the session subject only — not the tool-call and step subjects.'
-    - 'No auto-collector: `grep -rn "harness_effectiveness" hooks/ bin/` returns zero hits in the executable surface.'
-    - 'No CI step: `find .github/workflows -name "*.yml" -exec grep -l "harness_effectiveness" {} \;` returns zero matches.'
-    - 'No history: `ls .dev-kit/trace/effectiveness-*.json*` returns ENOENT.'
-    - 'No HUD: `commands/statusline.md` references `model / tokens / cache / runtime` only; no effectiveness tile.'
-    - 'Live scorecard confirms the gap surfaces: `measurement_integrity.status INSUFFICIENT_EVIDENCE` because `event_coverage` collapses when started subjects never terminate (`lib/harness_effectiveness.py:543-566`). Fixing the gap fixes the parent score.'
+    - '`lib/harness_effectiveness.py::_subject_observability`: joins distinct subject_id sets across the entire corpus, accepts completed/failed/blocked terminals, exposes score on 0–100 and coverage on 0–1. An empty union has score=null; unrelated non-lifecycle events do not create a denominator.'
+    - '`lib/harness_effectiveness.py::build_report`: schema_version=3; weighted overall uses only non-null components. A numeric overall is not evidence that all five dimensions were measured. `_integrity` independently rereads events.jsonl after read_events.'
+    - '`lib/execute.py::_step_post_collect`: already emits step.blocked, step.failed and step.completed. The old proposal incorrectly described nonzero/blocked exits as missing terminals. Unexpected exceptions outside those branches still need lifecycle tests.'
+    - '`hooks/session-start-check.sh` emits session start; `hooks/trace-session-end.sh` runs on both Stop and SessionEnd and skips after any terminal. A per-turn Stop can therefore prematurely close a session. Separate hook processes cannot share a Python context manager.'
+    - '`hooks/lib/payload-parse.sh`: emits guard decisions with ground_truth=unlabeled; it does not prove that every tool invocation starts a lifecycle subject.'
+    - '`lib/trace_log.py::append_event`: event validation/redaction exists, duplicate event IDs are regenerated and lock failures can fall through. This is not semantic retry idempotency or a coherent multi-reader snapshot contract.'
+    - '`.github/workflows/ci.yml` is the existing CI entrypoint. `.github/workflows/pr-verify.yml`, commands/statusline.md and skills/statusline/SKILL.md do not exist in the reviewed PR tree.'
+    - '`lib/eval_runner.py` already imports build_report; `skills/harness-effectiveness/SKILL.md` exposes the same diagnostic reducer. The sibling evidence-collection proposal owns broader producer quality work.'
+    - 'The previous 54,307-event / 0.4% claim has no committed corpus, cutoff, producer grouping or reproducible artifact. It is not used as a baseline or proof of a particular producer defect.'
 
 after:
   summary: |
-    One metric. One producer fix. One collector. One CI gate. One optional HUD tile.
-    Five moving parts; one source of truth.
+    Add one automatic measurement service around the existing event store. It owns
+    a versioned collection envelope and lifecycle registry, consumes a consistent
+    source snapshot, and publishes per-worktree results after real workflow boundaries.
+    Keep the existing five-component report as a clearly labeled legacy diagnostic.
+    The primary automatic result is lifecycle coverage plus measurement readiness,
+    not an unqualified effectiveness score. Missing outcomes remain missing.
 
-    **The metric**: `subject_observability` (already defined at
-    `lib/harness_effectiveness.py:465-518`). Always has a denominator when events
-    exist. Range [0, 1]. Threshold 0.95 in `.dev-kit/state.json`
-    (`subject_observability.threshold`).
-
-    **The producer fix**: a single `try/finally` context manager `step(subject_id,
-    ...)` in `lib/trace_log.py` that emits `step.started` on `__enter__` and
-    `step.completed` on `__exit__` regardless of success / exception / interrupt.
-    Every existing emitter of `step.started` migrates to `with step(...): ...`. The
-    migration is mechanical.
-
-    **The collector**: one shell entrypoint `bin/collect-effectiveness.sh` that
-    calls `lib.harness_effectiveness.build_report` + `archive()` (one new lib
-    function) and writes `.dev-kit/trace/effectiveness-latest.json` + appends
-    `.dev-kit/trace/effectiveness-history.jsonl`.
-
-    **The auto-triggers**: SessionEnd / Stop (always), pr-verify CI step (always),
-    `/dev-kit:evaluate` (always — uses the same wrapper). All three consume the
-    same file.
-
-    **The CI gate**: `bin/collect-effectiveness.sh --mode=ci` exits non-zero iff
-    `subject_observability < threshold`. Single numeric comparison. No judgment.
-
-    **The HUD**: status-line tile `[subj-obs NN.N%]` reading
-    `effectiveness-latest.json`. Off by default; opt-in via
-    `subject_observability.show_in_statusline: true` in `.dev-kit/state.json`.
-
-    No new event types. No new producers. No schema version bump. The proposal
-    changes WHEN the reducer runs and WHO surfaces its output. The reducer's
-    5-component scorecard remains untouched and continues to be reported by
-    `/dev-kit:evaluate` and `/dev-kit:harness-effectiveness` for analysis; only
-    `subject_observability` is gated.
+    CI executes production adapters against known process outcomes and checks their
+    recorded evidence. It gates the instrumentation contract, not the developer's
+    unavailable local history. Runtime cohorts are observed separately and never
+    padded with CI fixtures. Broader quality scores become ready only when their
+    independent outcome evidence and opportunity denominators are present.
   files:
-    - path: lib/harness_effectiveness.py
-      change: |
-        Add `subject_observability_through_value()` that returns the
-        `subject_observability` ratio directly (lift from `_subject_observability`
-        at `:465-518`). Add `archive(report, *, target: Path) -> Tuple[Path, Path]`
-        returning `(latest_path, history_line_path)`. New constants
-        `EFFECTIVENESS_LATEST_FILENAME = "effectiveness-latest.json"`,
-        `EFFECTIVENESS_HISTORY_FILENAME = "effectiveness-history.jsonl"`,
-        `SUBJECT_OBSERVABILITY_THRESHOLD_DEFAULT = 0.95`,
-        `SUBJECT_OBSERVABILITY_HISTORY_MAX_LINES = 200`. `archive()` writes
-        `effectiveness-latest.json` atomically (existing
-        `atomic_write_text` helper) and appends one line per snapshot to
-        `effectiveness-history.jsonl`; rotates when the head file exceeds
-        `SUBJECT_OBSERVABILITY_HISTORY_MAX_LINES` by gzipping the tail to
-        `effectiveness-history.jsonl.<UTC>.gz`. No change to `build_report` or any
-        existing reducer behavior.
+    - path: lib/effectiveness_collection.py
+      change: 'New collection/registry module and python -m CLI: enroll, heartbeat, close, collect and probe. Owns snapshot envelope v1, policy v1, coherent input capture, bounded archive and cohort readiness. No duplicate score formula for the legacy report.'
     - path: lib/trace_log.py
-      change: |
-        Add `@contextmanager def step(subject_id, *, stage="unknown", parent_id=None,
-        run_id=None, workflow_id=None)`. `__enter__` calls `append_event` for
-        `step.started` and returns the persisted `event_id`. `__exit__` calls
-        `append_event` for `step.completed` with `parent_id=<started event_id>`,
-        `outcome=passed|failed|interrupted` keyed on the exit type. `__exit__`
-        catches any exception from the second `append_event` and swallows it —
-        telemetry must not change a workflow outcome (matches the `|| true`
-        convention in `hooks/trace-session-end.sh:62` and `hooks/lib/payload-parse.sh:112`).
-        Re-raises any in-flight exception after logging.
+      change: 'Add strict measurement writes under the shared worktree lock, semantic lifecycle-key retry handling and an immutable raw-input reader. Preserve legacy append callers; strict failures mark the collection degraded without changing workflow outcomes.'
+    - path: lib/harness_effectiveness.py
+      change: 'Extract a pure report-from-captured-raw-input path; keep build_report(root), schema v3, existing formulas and old consumer output compatible. Validation and integrity must use the same captured bytes.'
     - path: lib/execute.py
-      change: |
-        Replace the manual `append_event({"event_type": "step.started", ...})` /
-        `append_event({"event_type": "step.completed", ...})` pairs with
-        `with step(subject_id=step_id, stage=stage, parent_id=parent_id,
-        run_id=run_id, workflow_id=workflow_id) as sid: ...`. Mechanical migration;
-        no behavior change other than guaranteeing the terminal event on every
-        code path.
+      change: 'Enroll unique run/workflow/subject/attempt identities before launch; preserve existing success/failed/blocked emissions; close registry at actual terminal boundaries and record observed exceptions/cancellation without fabricating success. Heartbeat active execution.'
     - path: hooks/session-start-check.sh
-      change: |
-        Migrate the `step.started` emission at `:74-75` to use `step()` so the
-        session-scoped subject is guaranteed a terminal even if SessionEnd is
-        skipped (network drop, abnormal termination). One file, one block.
+      change: 'Enroll session identity and record start under the same root policy used by the collector. Start the bounded monitor for that enrolled session.'
     - path: hooks/trace-session-end.sh
-      change: |
-        Migrate the `step.completed` emission at `:62` to the `__exit__` side of
-        the same `step()` block as `:74-75`. After migration the pair is
-        symmetric and survives abnormal exits.
-    - path: bin/collect-effectiveness.sh
-      change: |
-        New shell entrypoint. Modes: `session` (default; SessionEnd / Stop /
-        statusline trigger), `ci` (pr-verify), `evaluate` (`/dev-kit:evaluate`
-        internal call). Reads `<root>/.dev-kit/trace/events.jsonl`, invokes
-        `python3 -c "import sys; from pathlib import Path; from lib.harness_effectiveness import build_report, archive; r = build_report(Path(sys.argv[1])); archive(r, target=Path(sys.argv[1]) / '.dev-kit/trace')" --root "$root"`,
-        prints the latest snapshot's `subject_observability` and `threshold` as
-        one JSON line. `session` and `evaluate` modes always exit 0. `ci` mode
-        exits 0 iff `subject_observability >= threshold`. Errors go to
-        `.dev-kit/trace/collect-errors.log`; the wrapper never aborts the caller
-        (best-effort, `|| true` from the hook caller).
-    - path: hooks/trace-effectiveness-end.sh
-      change: |
-        New SessionEnd / Stop hook. Calls
-        `bin/collect-effectiveness.sh --mode=session --root $(git rev-parse
-        --git-common-dir)/..`. Registered with `fail_closed:false` per the
-        existing `trace-session-end.sh` convention.
+      change: 'Use Stop only to heartbeat and collect a provisional snapshot. Close a session only on an actual SessionEnd notification. Serialize terminal persistence before collection, including retry paths; do not early-return before collection on duplicate terminal.'
     - path: hooks/hooks.json
-      change: |
-        Register `trace-effectiveness-end.sh` under the existing SessionEnd /
-        Stop matcher. No new tool matchers.
-    - path: .github/workflows/pr-verify.yml
-      change: |
-        Add one step `auto-collect-effectiveness` after the 5-gate verdict. Runs
-        `bin/collect-effectiveness.sh --mode=ci --root ${{ github.workspace }}`.
-        Emits the verdict as a `subject-observability` GitHub check run via
-        `actions/github-script`. No new permissions required.
-    - path: commands/statusline.md
-      change: |
-        Append a `[subj-obs NN.N%]` tile after the existing `model / tokens /
-        cache / runtime` row. Reads `.dev-kit/trace/effectiveness-latest.json`
-        (single ~1 KB file read). Skips silently when the file is missing or the
-        `subject_observability.show_in_statusline` flag is off.
-    - path: skills/statusline/SKILL.md
-      change: |
-        Document `subject_observability.show_in_statusline: true` and
-        `subject_observability.threshold: 0.95` in `.dev-kit/state.json`. Tile
-        appears only when both conditions hold: flag on AND snapshot file fresh
-        (≤24h).
-    - path: .dev-kit/state.json
-      change: |
-        New defaults block: `subject_observability.threshold: 0.95` and
-        `subject_observability.show_in_statusline: false`. Threshold is read by
-        `bin/collect-effectiveness.sh --mode=ci`; the show flag by the statusline
-        parser.
-    - path: tests/test_subject_observability.py
-      change: |
-        New hermetic tests:
-        - `test_step_context_manager_emits_pair_on_success` — `with step(...)` produces both `step.started` and `step.completed`.
-        - `test_step_context_manager_emits_pair_on_exception` — exception in body still produces `step.completed` with `outcome=failed`.
-        - `test_step_context_manager_emits_pair_on_interrupt` — `BaseException` in body produces `step.completed` with `outcome=interrupted`.
-        - `test_step_context_manager_reraises_in_flight_exception` — `__exit__` does not suppress.
-        - `test_step_context_manager_swallows_telemetry_failure` — second `append_event` raising does not propagate.
-        - `test_archive_writes_latest_and_appends_history` — synthetic report, both files appear with the documented shape.
-        - `test_archive_rotates_history_at_200_lines` — appends 250 synthetic lines, head file 50, tail gzipped.
-        - `test_collect_effectiveness_ci_mode_exits_1_below_threshold` — synthetic ratio 0.50, exit 1.
-        - `test_collect_effectiveness_ci_mode_exits_0_above_threshold` — synthetic ratio 0.99, exit 0.
-        - `test_collect_effectiveness_session_mode_never_fails` — empty `events.jsonl`, exit 0, fresh `effectiveness-latest.json`.
-        - `test_statusline_tile_handles_missing_file` — no JSON, no crash.
-        - `test_live_subject_observability_after_fix` — replays a fixture (1 started, 1 terminal) through `build_report`, asserts ratio = 1.0.
+      change: 'Retain existing lifecycle registrations and update the invoked adapter contract; no second unordered collector hook. Maintain fail-open lifecycle behavior.'
+    - path: .codex-plugin/hooks/hooks.json
+      change: 'Mirror supported lifecycle adapter wiring with portability parity. A runtime lacking a true session-end callback uses monitor expiry as missing termination, never Stop-as-session-success.'
+    - path: hooks/index.md
+      change: 'Document per-runtime Stop/SessionEnd semantics, monitor ownership, timeout and fail-open collection behavior.'
+    - path: lib/eval_runner.py
+      change: 'Call the collection API for the same project root and expose a separate measurement envelope while preserving the existing harness_effectiveness result.'
+    - path: skills/harness-effectiveness/SKILL.md
+      change: 'Use the common collect entrypoint; show freshness, cohort, readiness and raw counts before the legacy diagnostic scores.'
+    - path: skills/evaluate/SKILL.md
+      change: 'Explain automatic collection and distinguish readiness, lifecycle closure and outcome-quality evidence.'
+    - path: docs/skills/harness-effectiveness.md
+      change: 'Document policy, envelope, unavailable states, archive limits and runtime support matrix; provide cache-reading commands without an invented statusline integration.'
+    - path: .github/workflows/ci.yml
+      change: 'Add production-adapter probe and collection-contract verification after dependencies are installed; always publish a summary and bounded JSON artifact. Use ordinary job failure, not a custom check-run API.'
+    - path: tests/test_effectiveness_collection.py
+      change: 'Test cohort eligibility, expiry, strict writes, concurrent snapshots, no-op retries, bounded archives and the readiness decision table.'
+    - path: tests/test_trace_session_end.py
+      change: 'Extend lifecycle regressions for multiple Stop events, actual SessionEnd, missing callback, duplicate notifications and separate worktree roots.'
+    - path: tests/test_harness_effectiveness.py
+      change: 'Pin legacy API compatibility and identical report output from one immutable source capture.'
+    - path: tests/test_execute_effectiveness.py
+      change: 'Exercise real executor adapters with controlled process exit/blocked/error/cancellation outcomes and compare emitted events to independent expected identities.'
 
 pros:
-  - 'One metric. One producer fix. One collector. One CI gate. One HUD tile. Smallest surface that satisfies "measured reliably".'
-  - 'The metric already exists (`lib/harness_effectiveness.py:465-518`) and is hermetic. This proposal only promotes it to the user-facing gate.'
-  - 'The producer fix is a `try/finally` context manager — one mechanical pattern. After migration every started subject terminates regardless of return path.'
-  - 'Auto-collection is unconditional: SessionEnd, pr-verify, evaluate, statusline all consume the same `.dev-kit/trace/effectiveness-latest.json` written by `bin/collect-effectiveness.sh`. One source of truth.'
-  - 'CI gate is a single numeric comparison. `bin/collect-effectiveness.sh --mode=ci` exits 1 iff `subject_observability < 0.95`. No judgment, no findings, no ambiguity.'
-  - 'The history file (`.dev-kit/trace/effectiveness-history.jsonl`) gives a trend line for free. A 1-line jq query over `effectiveness-latest.json` answers "are we drifting?" without re-running the reducer.'
-  - 'No new event types. No schema version bump. The proposal only changes WHEN the reducer runs and WHO surfaces its output; the reducer''s contract is untouched.'
-  - 'Migrating to `step()` is mechanical: every existing `append_event({"event_type": "step.started", ...})` becomes `with step(...)`. One PR, one migration, one assertion in CI.'
-
+  - 'An independently enrolled population makes missing start and missing terminal evidence visible; a missing producer cannot improve coverage by shrinking the event denominator.'
+  - 'Lifecycle closure, evidence readiness and observed quality are separate results with explicit counts and provenance.'
+  - 'Automatic hooks and a bounded monitor cover normal completion and missed callbacks; CI verifies production instrumentation with independently known outcomes.'
+  - 'One immutable input capture supports reproducible reports and safe concurrent writers without changing legacy diagnostic formulas.'
 cons:
-  - 'The `lib/trace_log.step` context manager is a new public API; existing callers using `append_event` directly must migrate for the metric to be reliable. The migration is mechanical and the CI gate enforces it, so this is an upfront cost paid once.'
-  - 'Threshold 0.95 is a starting value; legitimate async background tasks may sit below it. Out of scope for v1; documented as a follow-up with a per-subject exemption list keyed on `subject_id` prefix.'
-  - 'History file rotation at 200 lines is arbitrary. Configurable via `subject_observability.history_max_lines` in `.dev-kit/state.json`; default 200 is the right starting point for human-scale review (roughly one snapshot per workday × ~6 months).'
-
+  - 'Accurate measurement requires registry and monitor state in addition to the existing reducer; it is more work than a periodic shell invocation.'
+  - 'A finite lease can expire during a long runtime pause. Expiry records missing observation, and late real evidence produces a revised snapshot with the previous snapshot retained.'
+  - 'Per-worktree capture of a large legacy trace is linear work; collectors coalesce repeated requests and do no reducer work in a display callback.'
 limitations:
-  - 'Measures ONE thing reliably: that every started subject terminates. Does not measure guard precision, recovery latency, learning delta, or any of the other 4 components. Those remain in the reducer''s report for `/dev-kit:evaluate`; this proposal does not gate them.'
-  - 'The CI gate is binary: pass or fail at threshold. A project that wants monitoring without blocking can run `bin/collect-effectiveness.sh --mode=ci --dry-run` to surface the verdict as a check-run warning without exiting non-zero. `--dry-run` is one flag in the wrapper; not in v1.'
-  - 'The history file is per-worktree, not per-host. Cross-host aggregation is a follow-up; the data model (one JSON-per-snapshot, one history line per snapshot) is already shaped for upload.'
-  - 'Cannot auto-fix a producer regression. CI catches it; a human fixes it. The hand-off chain is the same as the umbrella''s `evidence-collection` proposal but at a single, sharper metric.'
-  - 'The other 4 components of the reducer (`prevention_quality`, `first_pass_quality`, `recovery_quality`, `measurement_integrity`) remain observable via `/dev-kit:harness-effectiveness` and `/dev-kit:evaluate` for analysis. They are not gated.'
+  - 'No local process can observe events while the host is powered off. Monitor loss is exposed by stale freshness; recovery collection runs automatically at the next supported boundary.'
+  - 'SIGKILL/OOM cannot guarantee a terminal event. Timeout proves that closure was not observed by a cutoff; it does not prove task failure or success.'
+  - 'Lifecycle coverage is not usefulness, correctness, prevention precision or causal learning benefit. Those require separate evidence under the sibling proposal.'
+  - 'The existing all-history subject_observability diagnostic remains coarse and may collapse repeated subject IDs; it is not the new attempt-level measurement or gate.'
+  - 'This proposal specifies local collection and CI probe artifacts, not a telemetry upload service or a new HUD implementation.'
 
 sections:
-  - title: "Why one metric, not five"
+  - title: "1. Measurement population and window"
     body: |
-      The 5-component scorecard in `lib/harness_effectiveness.py` is a research
-      framework: it tells you what is and is not measurable, with honest
-      `INSUFFICIENT_EVIDENCE` where evidence is missing. That is correct
-      behavior for a reducer that must never invent numbers. But it is the
-      wrong shape for a CI gate: a gate needs a single, reliable number
-      whose absence means "the harness is broken", not "the harness has
-      insufficient evidence for this corner".
+      The controller enrolls an expected unit before dispatch, separately from the
+      event emitter. Identity is (root_id, run_id, workflow_id, subject_id, attempt_id).
+      root_id is the canonical absolute payload project/worktree path, never
+      git-common-dir/..; module lookup uses the installed plugin root separately.
+      Missing/ambiguous root is COLLECTION_ERROR, not fallback to the main checkout.
+      Retries have distinct attempt IDs. Enrollment records producer/version,
+      expected terminal family, start time, deadline, origin and source revision.
 
-      `subject_observability` is that number. It is already defined at
-      `lib/harness_effectiveness.py:465-518`, has a denominator (every
-      `step.started` event in the corpus), and is meaningful at 0 (no subject
-      ever terminates) and at 1 (every subject terminates). The threshold 0.95
-      is the smallest value at which the harness can credibly claim "we know
-      where our work ended".
+      Cohort is the set enrolled in a UTC half-open interval [start, end), scoped to
+      one root and origin (runtime or ci-probe). Default runtime interval is the UTC
+      day of enrollment; active and prior unfinalized days are refreshed automatically.
+      Terminal events after end still join the enrolled unit through collected_at.
+      Units are pending until explicitly closed or their lease expires. Pending
+      units are shown separately and never silently counted as failures or successes.
+      A cohort is final only when it has no pending units; late events create a new
+      revision that supersedes the old result and marks late evidence explicitly.
 
-      The other 4 components remain in the report for `/dev-kit:evaluate` and
-      `/dev-kit:harness-effectiveness`. They are observable but not enforced.
+      Eligible denominator = enrolled closed or expired units. Numerator = eligible
+      units with a valid start and exactly one semantically consistent observed
+      terminal. Failed and blocked terminals count as observed closure, not success.
+      Report enrolled, pending, eligible, paired, missing_start, missing_terminal,
+      conflicting_terminal and unexpected_event_units separately. Unenrolled events
+      cause degraded readiness and never silently enter a successful numerator.
+      Empty eligible population means NO_OPPORTUNITY with ratio=null.
 
-  - title: "Auto-collect trigger matrix"
+      Runtime coverage policy defaults to 0.95; it is an explicit policy choice,
+      not a statistically established boundary. Minimum eligible sample is 20 for
+      runtime READY; smaller samples are INSUFFICIENT_EVIDENCE with raw ratios shown.
+      Both values and a policy version are stored in the envelope. CI probes use
+      their exact manifest and require 100% of expected observations, independent
+      of the runtime policy. Neither origin is pooled with the other.
+
+  - title: "2. Automatic triggers and missed callbacks"
     body: |
-      | Trigger | Mode | Writes | Gates? | Frequency |
-      |---|---|---|---|---|
-      | SessionEnd / Stop | `session` | `effectiveness-latest.json` + append `effectiveness-history.jsonl` | no | ~1× per session |
-      | pr-verify.yml | `ci` | `effectiveness-latest.json` | yes (`subject_observability < 0.95`) | ~1× per PR |
-      | `/dev-kit:evaluate` | `evaluate` | `effectiveness-latest.json` + history | no | on demand |
-      | `/dev-kit:harness-effectiveness` | `evaluate` (delegates) | same as `evaluate` | no | on demand |
-      | statusline render | read-only | none | no | ~1–2× per second |
+      | Boundary | Operation | Meaning |
+      |---|---|---|
+      | Session start / executor dispatch | enroll + start + monitor registration | known expected unit |
+      | Stop / executor heartbeat | renew lease + coalesced collection | provisional observation, not session completion |
+      | Actual SessionEnd / executor terminal | persist observed terminal, close registry, then collect | finalized unit |
+      | Monitor lease expiry | mark expired, collect | missing closure; never synthesized step.completed |
+      | evaluate / harness-effectiveness | call common collector | explicit refresh of the same contract |
+      | CI probe | execute adapters, collect isolated manifest cohort | instrumentation validation |
 
-      The collector (`bin/collect-effectiveness.sh`) is the single entrypoint
-      for all three write modes. The statusline and `/dev-kit:harness-effectiveness`
-      are read-only consumers.
+      A single per-worktree monitor runs while enrolled units remain active, checks
+      every 60 seconds, and coalesces collection to at most once per 60 seconds except
+      terminal boundaries. Default lease is 15 minutes; adapters renew at most every
+      60 seconds while their owner process is live, including during long tool calls.
+      Record the stable runtime/session owner PID plus process start identity to avoid
+      PID-reuse confusion, never the ephemeral hook shell/Python PID. Each adapter
+      must validate a stable owner token; unavailable ownership is UNSUPPORTED.
+      Cross-process hooks exchange persisted registry state; no context manager spans
+      them. A same-process executor may use finally for catchable exits, preserving
+      original exceptions and outcomes even if all telemetry operations fail.
 
-  - title: "The producer fix: try/finally context manager"
+      A monitor crash is restarted at the next hook/CLI boundary. Collection records
+      freshness and monitor health; snapshots older than 5 minutes are STALE for an
+      active cohort. Closed snapshots remain valid historical observations and show
+      their cutoff rather than pretending to be a current live measurement.
+      Supported adapters must prove their enrollment and callback behavior in CI;
+      otherwise their readiness is UNSUPPORTED. Missing entire enrollment cannot be
+      inferred from an empty trace alone, so readiness also requires a producer
+      manifest/version and a successful capability probe for that adapter version.
+
+  - title: "3. Coherent storage and snapshot contract"
     body: |
-      Today `lib/execute.py` and the SessionEnd hook emit `step.started` and
-      `step.completed` as separate `append_event` calls. Every code path that
-      does not reach the second call (exception, interrupt, timeout) leaves a
-      started subject without a terminal.
+      Store registry and collector outputs under <root>/.dev-kit/trace. One advisory
+      lock coordinates strict lifecycle writes, enrollment, registry transitions,
+      raw trace capture and archive updates. Failure to acquire the lock within
+      two seconds produces COLLECTION_ERROR and a bounded error record; do not
+      continue unlocked or replace a valid snapshot with a misleading empty one.
+      Hooks preserve workflow exit status, while the collector CLI returns 2 on
+      collection errors and CI treats that as failure.
 
-      The fix is a context manager in `lib/trace_log.py`:
+      Semantic key is (unit identity, lifecycle transition); a retry with identical
+      content is a no-op returning the original event identity. Different terminal
+      content for the same unit is a conflict finding, not regenerated success.
+      Legacy writers lacking this contract are identified as legacy provenance.
+      Copy raw bytes plus registry revision under lock, then reduce that immutable
+      capture. Preserve malformed rows in the capture so integrity sees them.
+      Publish only if its capture sequence is newer than latest; a slow older
+      collector must not overwrite a newer result. Record source byte length and
+      SHA-256, registry revision and policy version for reproduction.
 
-      ```python
-      from contextlib import contextmanager
+      Envelope schema_version=1 contains collected_at, snapshot_id, capture_sequence,
+      source identity/hash, cohort interval/cutoff/revision, policy, provenance,
+      producer_health, lifecycle counts/ratio/status, quality readiness and
+      legacy_report (existing report schema_version=3). Thus the reducer schema
+      remains compatible while the new envelope is explicitly versioned.
+      Write effectiveness-latest.json by same-directory temp file + atomic replace.
+      Append compact history only for a new source/registry/policy revision; repeated
+      Stop notifications with unchanged evidence do not add duplicate snapshots.
 
-      @contextmanager
-      def step(subject_id, *, stage="unknown", parent_id=None, run_id=None,
-               workflow_id=None):
-          _, started_id = append_event(root, {
-              "event_id": new_event_id(),
-              "event_type": "step.started",
-              "subject_id": subject_id,
-              "stage": stage,
-              "parent_id": parent_id,
-              "run_id": run_id,
-              "workflow_id": workflow_id,
-              "outcome": "started",
-              "source": "trace_log.step",
-              "evidence_ref": {},
-              "ts": now_utc(),
-          })
-          outcome = "passed"
-          try:
-              yield started_id
-          except Exception:
-              outcome = "failed"
-              raise
-          except BaseException:
-              outcome = "interrupted"
-              raise
-          finally:
-              try:
-                  append_event(root, {
-                      "event_id": new_event_id(),
-                      "event_type": "step.completed",
-                      "subject_id": subject_id,
-                      "stage": stage,
-                      "parent_id": started_id,
-                      "run_id": run_id,
-                      "workflow_id": workflow_id,
-                      "outcome": outcome,
-                      "source": "trace_log.step",
-                      "evidence_ref": {},
-                      "ts": now_utc(),
-                  })
-              except Exception:
-                  pass  # telemetry must not change workflow outcome
-      ```
+      Retain the newest 200 compact history records, maximum 1 MiB each, and four
+      gzip archives of at most 200 records each. Oversized reports remain available
+      as latest with evidence counts/hash in history; archive the oldest records,
+      keep the newest records hot, and delete excess archives under the same lock.
+      Bound collection errors to 100 records. Registry compaction may remove only
+      finalized units already represented in retained snapshots; never prune pending
+      units. Retain immutable source captures referenced by retained snapshots, with
+      a 256 MiB total cap. Before publication, evict the oldest retained history
+      record and its unshared capture together until the new capture fits; preserve
+      latest and pending-unit state. Publish the reduced retention horizon explicitly.
+      If the new capture plus protected state alone exceeds the cap, report
+      COLLECTION_ERROR; ordinary history growth must not deadlock publication. Never
+      leave a retained snapshot referencing deleted bytes. This does not rotate the
+      original event log.
 
-      Every existing call site migrates from
-
-      ```python
-      append_event(root, {"event_type": "step.started", ...})
-      try:
-          ...
-      except Exception:
-          ...
-      append_event(root, {"event_type": "step.completed", ...})
-      ```
-
-      to
-
-      ```python
-      with step(subject_id=..., stage=..., parent_id=..., run_id=...,
-                workflow_id=...) as sid:
-          ...
-      ```
-
-      After migration every started subject terminates regardless of return
-      path. The live corpus (currently 0.4%) moves to ≥ 0.95 on the next
-      snapshot.
-
-  - title: "Cost model"
+  - title: "4. Readiness and outcome-quality contract"
     body: |
-      | Operation | Per-call cost |
-      |---|---|
-      | `lib.trace_log.read_events` over 54k events | ~80ms |
-      | `lib.harness_effectiveness.build_report` | ~50ms |
-      | `archive()` write (atomic, gzip on rotate) | ~5ms |
-      | `bin/collect-effectiveness.sh --mode=ci` total | ~135ms |
-      | `step()` context manager per body | ~5ms (2 `append_event` + dict alloc) |
+      Decision precedence is COLLECTION_ERROR, UNSUPPORTED, STALE, DEGRADED
+      (malformed/conflicting/unexpected/unattributed evidence), NO_OPPORTUNITY
+      (no eligible or pending units), INSUFFICIENT_EVIDENCE (pending or eligible
+      sample below policy), then READY or COVERAGE_BELOW_POLICY. Numeric ratios remain visible with their
+      counts even when readiness prevents a passing claim. A missing population or
+      broken collector never passes a threshold by coercing null to zero or one.
+      The CLI emits a structured status;
+      local automatic collection is observational and never blocks user work.
 
-      Total SessionEnd overhead: ~135ms one-time. Total CI overhead: ~200ms per
-      PR. Total per-step overhead: ~5ms (negligible vs typical step duration
-      of seconds).
+      Preserve all five existing diagnostic components, including learning_quality.
+      Do not gate on legacy overall_score or equate it with readiness. The broader
+      evidence-collection work owns independent verification, guard ground truth,
+      recovery outcome and learning cohorts. Each quality dimension must supply
+      an independent opportunity manifest before being labeled measurable:
 
-      For comparison, the existing `hooks/secret-scan.sh` PostToolUse hook
-      costs ~200ms on every Write. SessionEnd is strictly less frequent.
+      - First pass: all eligible writes, including missing verification; independently
+        verified first-attempt success / eligible writes. Missing checks are unknown,
+        observed failed checks are failures, no writes is NO_OPPORTUNITY.
+      - Recovery: all observed eligible errors, including unrecovered errors;
+        independently verified recovery / eligible errors. No successful heals with
+        known failed recovery is measured failure, not missing opportunity.
+      - Prevention: precision/recall only for independently labeled decisions; report
+        label coverage and keep calibration probes separate from ambient activity.
+      - Learning: only comparable treatment/control evidence supports a measured
+        effect; observational changes remain labeled observational, without causal claims.
 
-  - title: "Verification plan"
+      These are readiness requirements, not permission to rewrite legacy formulas
+      in the collector. Until the corresponding producer contract is implemented,
+      show each quality dimension as unavailable with its exact missing evidence.
+      Lifecycle readiness can be READY while quality readiness is unavailable.
+
+  - title: "5. CI evidence and verification"
     body: |
-      Every gate uses quoted evidence (Iron Law L3):
+      Add a normal step to the existing ci.yml test job. In a temporary initialized
+      project, invoke the production session hooks and executor boundary adapters,
+      run controlled subprocesses with known exit outcomes, and record an independent
+      expected-unit manifest before execution. Read emitted events through the same
+      collector used at runtime. No live LLM calls, personal telemetry upload or
+      required local .dev-kit files. No hand-written matching events as the sole
+      integration evidence. Pure reducer fixtures remain useful unit tests.
 
-      1. `pytest -q tests/test_subject_observability.py` — quoted exit code + 12
-         test counts.
-      2. Live metric: after the migration, run
-         `/dev-kit:harness-effectiveness` and quote
-         `components.measurement_integrity.submetrics.subject_observability.coverage`
-         ≥ 0.95.
-      3. Live CI gate: open a PR with a synthetic low-ratio event, quote the
-         failing `subject-observability` check-run with the threshold in the
-         message.
-      4. Live statusline: enable
-         `subject_observability.show_in_statusline: true`, quote the status line
-         showing `[subj-obs NN.N%]`.
-      5. History rotation: append 250 snapshots, quote head file at 50 lines
-         and tail gzipped.
+      The probe artifact includes checked-out SHA, adapter versions, origin=ci-probe,
+      expected manifest, raw redacted source capture, envelope and per-scenario verdict.
+      Empty/missing artifacts, wrong SHA/origin, missing registered adapter, unexpected
+      terminals, or collector errors fail this job. The ordinary job result is the
+      check; no checks:write permission or actions/github-script check creation.
+      Summary/artifact publication runs with always() so failed probes stay reviewable.
+      Passing probes demonstrate instrumentation behavior under those scenarios,
+      not effectiveness of developer activity absent from the CI runner.
 
-  - title: "Rejected alternatives"
+      Required acceptance scenarios:
+
+      - Real adapter success, nonzero exit, blocked output and catchable exception
+        preserve workflow outcome and emit exactly the expected lifecycle semantics.
+      - Two Stop events keep a session pending; SessionEnd closes it once. A duplicate
+        SessionEnd refresh does not duplicate history or semantic terminal events.
+      - Killed owner, missed callback and monitor restart leave missing closure visible;
+        late genuine termination revises the original enrollment cohort.
+      - Cross-midnight completion joins the enrollment day; same subject ID in two
+        runs/retries remains two units; an open long-running unit stays pending.
+      - Missing start, terminal-only unit, missing whole adapter, malformed row and
+        conflicting retry produce explicit non-ready states rather than a clean ratio.
+      - Two worktrees never share registry or latest paths; module resolution still
+        works when invoked outside the plugin checkout and paths contain spaces.
+      - Concurrent emit/collect, lock timeout, crash before atomic replace, duplicate
+        retry and out-of-order publication retain a coherent newest snapshot.
+      - Empty runtime corpus is NO_OPPORTUNITY, too-small cohort is insufficient,
+        known failed outcomes remain failures in quality evidence but valid paired
+        closures in lifecycle coverage, and CI fixtures never inflate
+        runtime coverage or quality readiness.
+      - Missing independent verification, missing recovery outcomes and missing
+        control cohorts remain unavailable even when legacy overall_score is numeric.
+      - Archive boundaries, capture storage cap and stale-cache display obey the
+        documented limits, including collector failure without workflow failure.
+
+  - title: "6. Delivery and sibling proposal boundary"
     body: |
-      - **5-component CI gate.** The reducer reports `INSUFFICIENT_EVIDENCE`
-        for 3 components today; gating on those deadlocks every PR. Gating on
-        `ROT` alone is workable but opaque (a reviewer must read each
-        component's findings). One explicit metric is sharper.
-      - **Per-tool-call `step.completed` in PostToolUse.** Couples telemetry
-        to the harness's tool surface; the context manager decouples it.
-      - **Tighten the threshold to 0.99.** Too strict for the first ship;
-        0.95 leaves room for genuine edge cases. Configurable per project.
-      - **5 distinct history files (one per component).** Premature: one
-        metric, one file. Per-component history is a follow-up if the team
-        wants to gate other components later.
-      - **A separate `/dev-kit:harness-metrics` skill.** Forbidden by the
-        umbrella's own §3 ("별도 metrics skill ... 만들지 않는다"). The bin
-        script is enough.
+      Implement the population/envelope and coherent snapshot contract first, then
+      lifecycle adapters plus monitor, then automatic consumers and CI probes. The
+      release criterion is the acceptance matrix above passing on each declared
+      supported runtime; unsupported lifecycle semantics must remain visible.
+      This PR changes proposal YAML and rendered HTML only; it does not claim those
+      contracts are already implemented or validated as production behavior.
 
-  - title: "Open questions for the reviewer"
-    body: |
-      1. **Threshold default 0.95.** Right starting value, or should v1 ship
-         at 0.90 (laxer) / 0.98 (stricter)? Configurable per project via
-         `subject_observability.threshold`; default is the question.
-      2. **Per-subject exemption list.** Out of scope for v1, but worth
-         filing as a follow-up if the team uses async background jobs whose
-         subjects legitimately never terminate in this snapshot.
-      3. **Cross-host aggregation.** Out of scope here; a follow-up
-         `bin/collect-effectiveness-sync.sh` could add a syncable JSON-per-snapshot
-         stream. The data model is already shaped for it.
-      4. **Schema version bump.** No bump needed (`schema_version 3` already
-         carries the `subject_observability` submetric per issue #702). Worth
-         a sanity check that no consumer assumes an older shape.
+      [evidence-collection](evidence-collection.html) remains the design for broader
+      producer quality. It also contains historical statements that need revalidation
+      against the current reducer; do not import its old score assumptions as facts.
+      Auto-collection owns lifecycle population, automatic scheduling, provenance and
+      storage. Quality producers supply their independent manifests into that contract.
+      No duplicate session instrumentation or speculative statusline files are added.
