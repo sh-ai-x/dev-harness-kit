@@ -417,11 +417,20 @@ def write_report(
     results: List[Dict],
     config: Optional[Dict] = None,
     effectiveness: Optional[Dict] = None,
+    measurement_envelope: Optional[Dict] = None,
 ) -> Path:
     """Write `.dev-kit/eval-report.md`. Thin dispatcher (issue #93).
 
     Composes header + the three renderers (_render_summary, _render_per_dim_table,
     _render_per_case) and writes the assembled markdown to disk.
+
+    ``measurement_envelope`` (PR #817) is the bounded journal
+    projection from :mod:`lib.effectiveness_collection`. It is
+    written to ``.dev-kit/effectiveness-envelope.json`` so the CI
+    adapter probe and downstream consumers can inspect readiness
+    without re-walking the journal. The eval report itself does NOT
+    embed the envelope — the reducer remains the canonical quality
+    surface; the envelope is a separate, narrowly-scoped artifact.
     """
     path = project_root / ".dev-kit" / "eval-report.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -441,6 +450,8 @@ def write_report(
     path.write_text(f"{header}\n{body}\n", encoding="utf-8")
     if effectiveness is not None:
         atomic_write_json(project_root / ".dev-kit" / "harness-effectiveness-report.json", effectiveness)
+    if measurement_envelope is not None:
+        atomic_write_json(project_root / ".dev-kit" / "effectiveness-envelope.json", measurement_envelope)
     return path
 
 
@@ -503,7 +514,23 @@ def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict)
     """Tally verdicts, write the report, return the run summary dict."""
     results_dicts = [asdict(r) for r in results]
     effectiveness = build_effectiveness_report(project_root)
-    write_report(project_root, results_dicts, config, effectiveness)
+    # PR #817: bounded measurement envelope from the journal/projection.
+    # Best-effort: a collection error must not fail the eval run; the
+    # envelope's own readiness field surfaces the failure.
+    measurement_envelope: Optional[Dict] = None
+    try:
+        from effectiveness_collection import collect as _eff_collect  # noqa: WPS433 — local import
+        envelope = _eff_collect(project_root)
+        measurement_envelope = envelope.to_dict()
+    except Exception:  # noqa: BLE001
+        measurement_envelope = None
+    write_report(
+        project_root,
+        results_dicts,
+        config,
+        effectiveness,
+        measurement_envelope=measurement_envelope,
+    )
     summary: Dict[str, int] = {
         v: 0 for v in ("OK", "DRIFT_WARNING", "ROT", "SKIPPED", "NO_FIXTURES")
     }
@@ -512,6 +539,7 @@ def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict)
     return {
         "results": results_dicts,
         "harness_effectiveness": effectiveness,
+        "measurement_envelope": measurement_envelope,
         "config": {k: v for k, v in config.items() if k != "api_key"},
         "summary": summary,
     }

@@ -59,6 +59,34 @@ Each component returns:
 
 `overall_score` is `null` when **any** component is `null` (i.e. when **any** component reports `INSUFFICIENT_EVIDENCE`). Otherwise it is the weighted sum of component scores.
 
+## Incremental measurement envelope (PR #817)
+
+The 5-component reducer above remains the canonical
+`harness-effectiveness` contract. A complementary bounded envelope is
+available from `lib.effectiveness_collection.collect(root)` and is
+exposed by this skill under the `envelope` field of the printed JSON.
+The envelope:
+
+* Carries `schema_version: 1` and `contract_version:
+  "effectiveness-collection-v1"`.
+* Reports `counts.{enrolled,closed,unresolved,paired,missing_start,
+  missing_terminal,conflicting_terminal,unexpected_units,success,
+  distinct_units}`.
+* Reports `ratios.coverage` (paired / closed) and `ratios.success`
+  (completed / paired).
+* Reports `readiness` ∈ `READY` / `INSUFFICIENT_EVIDENCE` / `DEGRADED` /
+  `COLLECTION_ERROR` / `NO_OPPORTUNITY` / `UNSUPPORTED` /
+  `COVERAGE_BELOW_POLICY`.
+* Identifies its `origin` (`runtime` or `ci-probe`) and `retention_floor`
+  (oldest cohort still in the journal).
+* Lists `findings` and `bounded_errors` separately so the reducer can
+  surface what is missing vs what is broken.
+
+The envelope is read-only with respect to the existing
+`harness_effectiveness` reducer. Callers that want a hard gate check
+the envelope's `readiness == "READY"`; callers that want quality
+scores use the 5-component report above.
+
 ## Stability submetric (issue #663)
 
 Nested under `components.measurement_integrity.submetrics.stability`. It is a

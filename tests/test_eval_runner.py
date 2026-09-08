@@ -674,8 +674,14 @@ class TestReportDictsPreserved(unittest.TestCase):
 
     def test_run_eval_summary_keys_locked(self):
         report = eval_runner.run_eval(self.root, dry_run=True)
+        # PR #817: measurement_envelope is the bounded journal projection
+        # from lib.effectiveness_collection. It is additive to the locked
+        # summary key set; consumers that ignore unknown keys continue to
+        # work. The locked superset is therefore the union of the original
+        # four keys plus the new envelope key.
         self.assertEqual(set(report.keys()),
-                         {"results", "config", "summary", "harness_effectiveness"})
+                         {"results", "config", "summary",
+                          "harness_effectiveness", "measurement_envelope"})
         self.assertEqual(
             set(report["summary"].keys()),
             {"OK", "DRIFT_WARNING", "ROT", "SKIPPED", "NO_FIXTURES"},

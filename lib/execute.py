@@ -28,6 +28,18 @@ from typing import Callable, Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atomic import atomic_write_json, now_iso  # noqa: E402
 from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
+from effectiveness_collection import (  # noqa: E402 — bounded journal + projection
+    ORIGIN_RUNTIME,
+)
+from effectiveness_collection import (
+    collect as _eff_collect,
+)
+from effectiveness_collection import (
+    enroll as _eff_enroll,
+)
+from effectiveness_collection import (
+    observe as _eff_observe,
+)
 from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
 from harness_mode_state import resolved_gate  # noqa: E402 — workflow-fast-mode-lean gate resolution
 from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
@@ -168,6 +180,70 @@ SKIPPABLE_STATUSES = ("completed", "unimplemented")
 # parallelize typical multi-file work, small enough to bound the OS
 # process / file-descriptor / memory footprint on a 4-vCPU runner.
 _PARALLEL_MAX_CONCURRENT = 8
+
+
+def _record_step_terminal(
+    root: Path,
+    phase: str,
+    step_num: int,
+    ctx: dict,
+    outcome: str,
+    payload: dict,
+) -> None:
+    """Record the observed terminal + controller close for one step.
+
+    Best-effort: a journal failure must not change the workflow exit
+    code. If the executor never enrolled (e.g. telemetry was unavailable
+    at pre-spawn), the helper silently drops the terminal — the unit
+    stays unresolved and the envelope's ``missing_terminal`` counter
+    surfaces it.
+    """
+    attempt_token = ctx.get("attempt_token")
+    if not attempt_token:
+        return
+    try:
+        run_id = os.environ.get("DEV_KIT_RUN_ID", f"build-{phase}")
+        workflow_id = os.environ.get("DEV_KIT_WORKFLOW_ID", f"execute:{phase}")
+        subject_id = f"{phase}:step:{step_num}"
+        _eff_observe(
+            root,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            subject_id=subject_id,
+            attempt_id=attempt_token,
+            transition="observed_terminal",
+            outcome=outcome,
+            origin=ORIGIN_RUNTIME,
+            payload=payload,
+        )
+        _eff_observe(
+            root,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            subject_id=subject_id,
+            attempt_id=attempt_token,
+            transition="controller_close",
+            outcome=outcome,
+            origin=ORIGIN_RUNTIME,
+            payload={"event_id": ctx.get("started_event_id")},
+        )
+    except (OSError, ValueError, TypeError):
+        # Telemetry failure is a bounded error inside the envelope,
+        # never a workflow failure.
+        return
+
+
+def _safe_collect(root: Path) -> None:
+    """Refresh the projection envelope after each step boundary.
+
+    Swallows every exception — the helper exists so the executor never
+    has to wrap collect() in its own try/except. A COLLECTION_ERROR
+    envelope is the surface; the workflow exit code is unchanged.
+    """
+    try:
+        _eff_collect(root, origin=ORIGIN_RUNTIME)
+    except Exception:  # noqa: BLE001
+        return
 
 
 def _emit_effectiveness_event(
@@ -658,12 +734,51 @@ def _step_pre_spawn(
         root, phase, step_num, "step.started", "started",
         {"branch": branch, "worktree": str(wt), "step_file": str(preamble_path)},
     )
+    # Bounded journal enrollment + observed start (proposal §3).
+    # Both calls are best-effort: a collection error never changes the
+    # workflow outcome. Executor retries get a fresh attempt_token; the
+    # ``attempt_id`` is carried in ``ctx`` so the matching terminal
+    # records parent back to the same unit.
+    attempt_token: Optional[str] = None
+    try:
+        run_id = os.environ.get("DEV_KIT_RUN_ID", f"build-{phase}")
+        workflow_id = os.environ.get("DEV_KIT_WORKFLOW_ID", f"execute:{phase}")
+        subject_id = f"{phase}:step:{step_num}"
+        enrolled = _eff_enroll(
+            root,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            subject_id=subject_id,
+            controller="executor",
+            origin=ORIGIN_RUNTIME,
+        )
+        attempt_token = enrolled.identity["attempt_id"]
+        _eff_observe(
+            root,
+            run_id=run_id,
+            workflow_id=workflow_id,
+            subject_id=subject_id,
+            attempt_id=attempt_token,
+            transition="observed_start",
+            outcome="started",
+            origin=ORIGIN_RUNTIME,
+            payload={"event_id": started_event_id, "branch": branch},
+        )
+    except (OSError, ValueError, TypeError):
+        # Telemetry must not change the workflow outcome (A10-2 /
+        # A10-4 pattern from trace_log.py). The attempt_token stays
+        # None and the post-collect stage records the terminal under
+        # the enrolled identity if available, otherwise drops the
+        # observed_terminal record (the enroll record alone is enough
+        # to surface the unresolved unit).
+        attempt_token = None
     return {
         "wt": wt,
         "branch": branch,
         "full_prompt": full_prompt,
         "started_at_iso": now_iso(),
         "started_event_id": started_event_id,
+        "attempt_token": attempt_token,
     }
 
 
@@ -741,6 +856,8 @@ def _step_post_collect(
              "independent": False, "reason": blocked_reason, "via": "executor"},
             ctx.get("started_event_id"),
         )
+        _record_step_terminal(root, phase, step_num, ctx, "blocked", {"reason": blocked_reason})
+        _safe_collect(root)
         return 2
     if exit_code != 0:
         update_step_status(root, phase, step_num, status="error", error_message=f"claude exited {exit_code}")
@@ -759,6 +876,8 @@ def _step_post_collect(
              "exit_code": exit_code, "via": "executor"},
             ctx.get("started_event_id"),
         )
+        _record_step_terminal(root, phase, step_num, ctx, "failed", {"exit_code": exit_code})
+        _safe_collect(root)
         return exit_code
 
     # Issue #221 RC2: --allow-empty is GONE. add-A + conditional commit.
@@ -826,6 +945,8 @@ def _step_post_collect(
         {"exit_code": exit_code, "duration_seconds": duration},
         ctx.get("started_event_id"),
     )
+    _record_step_terminal(root, phase, step_num, ctx, "completed", {"exit_code": exit_code, "duration_seconds": duration})
+    _safe_collect(root)
     return 0
 
 

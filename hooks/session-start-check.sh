@@ -78,6 +78,40 @@ if [ -n "$SESSION_ID" ] && [ -n "$EFFECTIVE_CWD" ]; then
     --outcome started --source "hook:trace-session-start" \
     --evidence-json "$(jq -nc --arg sid "$SESSION_ID" '{session_id:$sid, hook_event:"SessionStart"}')" \
     >/dev/null 2>&1 || true
+  # Bounded journal enrollment + observed_start (proposal §3, PR #817).
+  # The hook enrolls once at session start; the matching terminal is
+  # recorded by trace-session-end.sh on actual SessionEnd, not Stop.
+  # Best-effort: a collection error must not change session start.
+  #
+  # Security: A05 injection defense-in-depth. The hook payload
+  # (SESSION_ID, EFFECTIVE_CWD) is untrusted from the shell's
+  # perspective. Single-quoted heredoc + os.environ avoids any
+  # string-literal injection via the payload (see also
+  # trace-session-end.sh for the matching pattern).
+  LIB_DIR="${BASH_SOURCE[0]%/*}/../lib"
+  EFFECTIVE_CWD="$EFFECTIVE_CWD" \
+    SESSION_ID="$SESSION_ID" \
+    LIB_DIR="$LIB_DIR" \
+    python3 - <<'PY' 2>/dev/null || true
+import os, sys
+sys.path.insert(0, os.environ["LIB_DIR"])
+from effectiveness_collection import (
+    collect, enroll, observe, TRANSITION_OBSERVED_START,
+)
+root = os.environ["EFFECTIVE_CWD"]
+sid = os.environ["SESSION_ID"]
+try:
+    enroll(root, run_id=f"session:{sid}", workflow_id="session-lifecycle",
+           subject_id=f"session:{sid}", attempt_id=f"sess-{sid}",
+           controller="session")
+    observe(root, run_id=f"session:{sid}", workflow_id="session-lifecycle",
+            subject_id=f"session:{sid}", attempt_id=f"sess-{sid}",
+            transition=TRANSITION_OBSERVED_START, outcome="started",
+            payload={"hook_event": "SessionStart"})
+    collect(root)
+except Exception:
+    pass
+PY
 fi
 
 case "$WORKTREE_DETECT" in

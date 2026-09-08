@@ -29,6 +29,32 @@ The skill is 0-arg and delegates entirely to `lib/harness_effectiveness.build_re
 
 `overall_score` is `null` when **any** component is `null`. Otherwise it is the weighted sum of component scores. The full spec lives at [`eval/rubrics/harness-effectiveness.yaml`](../../eval/rubrics/harness-effectiveness.yaml) and the design rationale is at [`docs/proposals/harness-effectiveness/00-index.html`](../proposals/harness-effectiveness/00-index.html).
 
+## Incremental measurement envelope (PR #817)
+
+A complementary bounded envelope is available from
+`lib.effectiveness_collection.collect(root)`. It is exposed at
+`.dev-kit/effectiveness-envelope.json` (schema_version 1,
+contract_version `effectiveness-collection-v1`) and surfaces:
+
+- `counts.{enrolled, closed, unresolved, paired, missing_start,
+  missing_terminal, conflicting_terminal, unexpected_units, success,
+  distinct_units}`
+- `ratios.coverage` (paired / closed) and `ratios.success` (completed / paired)
+- `readiness` ∈ `READY` / `INSUFFICIENT_EVIDENCE` / `DEGRADED` /
+  `COLLECTION_ERROR` / `NO_OPPORTUNITY` / `UNSUPPORTED` /
+  `COVERAGE_BELOW_POLICY`
+- `origin` (`runtime` or `ci-probe`) + `retention_floor` (oldest cohort
+  still in the journal)
+- `findings` and `bounded_errors` so the reducer surfaces what is
+  missing vs what is broken
+
+The envelope is read-only with respect to the 5-component reducer. The
+journal lives at `<root>/.dev-kit/trace/measurement/journal/*.jsonl`
+and the disposable cache at
+`<root>/.dev-kit/trace/measurement/effectiveness-latest.json`. CI
+runs the adapter probe with `--origin ci-probe --gate-ci` so a
+non-`READY` envelope fails the gate.
+
 ## Invocation
 
 ```bash

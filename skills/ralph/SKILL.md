@@ -45,7 +45,7 @@ This is an invariant, not convention.
 | 2 | PROPOSAL_GATE | yes | `docs/proposals/<bucket>/<main>/<sub>.html` | transition to PLAN_GATE |
 | 3 | PLAN_GATE | yes | `PRD.md` + `phases/<name>/{index.json, step<N>.md}` | transition to SHIP_CONFIRM_GATE |
 | 4 | SHIP_CONFIRM_GATE | yes | `ship-confirm.md` (10-line summary) | SET attended_lock; enter ATTENDED_RUN |
-| 5 | ATTENDED_RUN | **no** | (none) | chain runs `build --push` → `babysit-pr` → `ship` to terminal |
+| 5 | ATTENDED_RUN | **no** | (none) | chain runs `babysit-pr --operator-is-only-human --rationale "ralph-session=<id>"` then `ship` to terminal |
 
 Every gate has the same three options: **Approve**, **Edit-then-approve**
 (rewinds via `RalphState.rewind_to(stage)`), **Abort** (state preserved;
@@ -80,6 +80,88 @@ once `attended_lock` is set (the one-way boundary is crossed).
 
 The test `tests/test_ralph_skill.py::test_attended_run_forbids_ask`
 is the invariant guard.
+
+## ATTENDED_RUN chain contract (mandatory)
+
+After SHIP_CONFIRM_GATE approves and `attended_lock` flips to True,
+the chain MUST walk the unattended execution phase without ever
+calling `AskUserQuestion`. Two layers enforce this:
+
+### Layer 1 — state machine invariant (`lib/ralph_state.py`)
+
+`RalphState.can_ask_question()` returns False once `attended_lock=True`
+or `current_stage=ATTENDED_RUN`. The orchestrator MUST call
+`assert_can_ask(state, ...)` before every AskUserQuestion. If the
+guard fires, the call raises `AttendedLockError` and the state
+machine records `last_blocked_ask` for forensics.
+
+### Layer 2 — mechanical hook (`hooks/ralph-attended-lock.sh`)
+
+`hooks/hooks.json` wires the AskUserQuestion matcher to
+`hooks/ralph-attended-lock.sh`. The hook reads
+`.dev-kit/ralph/<session>.json` via the canonical `ralph_state`
+module and exits 2 with a deny JSON envelope whenever
+`attended_lock=True` or `current_stage=ATTENDED_RUN`. Toolchain-missing
+fails OPEN with a stderr WARN — the state-machine layer still enforces
+the invariant, so the deny decision is correct on any host.
+
+### babysit-pr flag recipe (mandatory during ATTENDED_RUN)
+
+`skills/babysit-pr/SKILL.md:71-74` declares the default human-gate
+path: with no flags, babysit-pr prints `REVIEW_REQUIRED -> human-gate`
+and exits 0 without iterating. The unattended chain MUST pass BOTH
+flags:
+
+```text
+/dev-kit:babysit-pr \
+  --operator-is-only-human \
+  --rationale "ralph-session=<session-id> unattended after SHIP_CONFIRM_GATE approve; operator=<handle>"
+```
+
+`RealDispatch.babysit()` in `lib/ralph_chain.py` emits exactly this
+argv. The `--operator-is-only-human` flag is what flips babysit-pr into
+its unattended repair loop; the `--rationale` is what the operator's
+audit comment requires per `skills/babysit-pr/SKILL.md:494-588`.
+
+### Exit-code mapping (`run_attended` in `lib/ralph_chain.py`)
+
+| Dispatch outcome | Terminal landed | Operator action |
+|---|---|---|
+| `BUILD` exit 0 → `BABYSIT` exit 0 (`terminal="USER_MERGE_REQUIRED"`) | `USER_MERGE_REQUIRED` | `gh pr merge` |
+| `BUILD` exit 0 → `BABYSIT` exit 0 (clean ship) → `SHIP` exit 0 | `DONE` | review final state |
+| `BUILD` exit != 0 (build 3-cycle self-fix / state-machine reject / env error) | `RECOVERY_REQUIRED` | investigate + retry |
+| `BABYSIT` exit != 0 (MAX_ITERS / watchdog / 3-consecutive-no-progress) | `RECOVERY_REQUIRED` | investigate + retry |
+| Same sub_stage re-entered twice (same-stage-repeat=2 trip wire) | `RECOVERY_REQUIRED` | review loop log |
+| Sub-skill crashed (any other Exception) | `RECOVERY_REQUIRED` | review crash + retry |
+| `SHIP` pre-condition failed but build green + review approved | `USER_MERGE_REQUIRED` | `gh pr merge` |
+| `AttendedLockError` raised mid-dispatch | (propagates) | forensic field already populated |
+
+`USER_MERGE_REQUIRED` is the **expected landing** on a healthy single-
+operator repo: build green, review approved, tag pushed, but the
+human operator runs `gh pr merge` themselves per babysit-pr's
+iron laws (`skills/babysit-pr/SKILL.md:476-483`).
+
+### Recovery & re-entry
+
+`RECOVERY_REQUIRED` is terminal but non-fatal. An operator who wakes
+up to it inspects `.dev-kit/ralph/<session>.json` (canonical record)
++ the per-skill output captured in `state.build_state`,
+`state.babysit_state`, `state.ship_state`. Re-invoking `/dev-kit:ralph`
+with the same idea resumes from the persisted state — the on-disk
+JSON is the recovery source-of-truth, not the assistant's memory.
+
+### CLI surface
+
+```bash
+python3 -m skills.ralph.lib.ralph_chain \
+  --project-root . --session default \
+  run-attended --dispatch noop   # dry-run: BABYSIT exits 0 → USER_MERGE_REQUIRED
+```
+
+The `run-attended --dispatch noop` form uses a `RecordingDispatch`
+that bypasses subprocess and returns a successful USER_MERGE_REQUIRED
+landing; useful for state-machine smoke tests without spawning
+babysit-pr. `tests/test_ralph_chain.py::test_cli_dry_run_*` pins this.
 
 ## State machine — `skills/ralph/lib/ralph_state.py`
 
