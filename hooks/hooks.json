@@ -195,6 +195,16 @@
         ]
       },
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/ralph-attended-lock.sh",
+            "fail_closed": false
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {

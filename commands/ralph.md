@@ -7,9 +7,15 @@ model: opus
 
 # /dev-kit:ralph — end-to-end autonomous loop
 
-Forward to `skills/ralph/SKILL.md`. Implementation lives in
-`skills/ralph/lib/ralph_state.py` (state machine) +
-`skills/ralph/scripts/ralph_drive.sh` (chain glue).
+Forward to `skills/ralph/SKILL.md`. Implementation lives in:
+- `skills/ralph/lib/ralph_state.py` (state machine + `attended_lock`
+  invariant)
+- `skills/ralph/lib/ralph_chain.py` (unattended chain executor: BUILD →
+  BABYSIT → SHIP → terminal)
+- `hooks/ralph-attended-lock.sh` (mechanical AskUserQuestion refusal
+  once `attended_lock` is set — wired in `hooks/hooks.json` +
+  `.codex-plugin/hooks/hooks.json`)
+- `skills/ralph/scripts/ralph_drive.sh` (bash glue for the state machine)
 
 Arguments:
 - `<idea>` — 1-line idea to take through RESEARCH_GATE → PROPOSAL_GATE →
@@ -18,6 +24,11 @@ Arguments:
 After SHIP_CONFIRM_GATE exits Approve, `attended_lock` is set and
 AskUserQuestion is invariant-forbidden during ATTENDED_RUN. Each gate
 supports Approve / Edit-then-approve (rewinds to that gate) / Abort.
+
+The unattended chain invokes
+`babysit-pr --operator-is-only-human --rationale "..."` and `ship`
+without ever asking the user. See `skills/ralph/SKILL.md`
+§"ATTENDED_RUN chain contract" for the full exit-code mapping.
 
 Linear is OUT OF SCOPE — see `skills/ralph/SKILL.md` §"Linear is OUT OF
 SCOPE" for the rationale.
