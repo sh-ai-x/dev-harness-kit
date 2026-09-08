@@ -83,7 +83,6 @@ table warrants action. For read-only classification (`safe-to-remove` vs
 
 ## Related
 
-- [`commands/worktree-prune.md`](../../commands/worktree-prune.md) — slash dispatch + user-facing argument hint
 - `bin/worktree-prune.sh` — CLI parsing, interactive prompts, dispatch contract
 - `lib/worktree_prune.py` — deterministic half (porcelain parse, epoch map, table sort)
 - `bin/worktree-remove-safe.sh` — per-worktree safe-removal wrapper (log archive runs first)

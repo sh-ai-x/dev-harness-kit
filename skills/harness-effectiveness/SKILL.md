@@ -130,7 +130,6 @@ When the harness emits the required evidence, the table fills in — no skill or
 
 The skill body is the reducer. There is no algorithm loop, no LLM call, no fixture. The contract is the deterministic one already documented at `lib/harness_effectiveness.py:build_report`; the `alpha: enforcement` declaration pins that contract as Iron Law L6 (the part the model cannot self-impose).
 
-The slash command (canonical `commands/harness-effectiveness.md`) is a thin wrapper around this reducer. Both `bin/install-commands.sh --claude-only` and `bin/install-commands.sh --codex-only` install the slash to `.claude/commands/` and `.codex/commands/` respectively.
 
 ## Backward-compat
 
@@ -177,7 +176,6 @@ All stdout/stderr messages in **English only**.
   submetric (issue #663): model swap, provider swap, replay compatibility,
   missing evidence, and backward compat.
 - `/dev-kit:evaluate` — runs the 5-component reducer + the 12-case judge pass in one report. Use that when you want the full picture; use this skill when you want the reducer in isolation.
-- `commands/harness-effectiveness.md` — the slash command registered by `bin/install-commands.sh`.
 
 ## Next step
 

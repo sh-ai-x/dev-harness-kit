@@ -14,14 +14,14 @@ rules on every PR:
 2. **Skill/command registry check** (added 2026-09, PR #802; root
    README made mandatory 2026-09, PR #803). When the PR adds a NEW
    (`changeType=ADDED`) `skills/<name>/SKILL.md` or
-   `commands/<name>.md`, it MUST also touch the **root `README.md`**:
+   new `skills/<name>/SKILL.md`, it MUST also touch the **root `README.md`**:
 
    | Doc | Status |
    |---|---|
    | `README.md` (top level) | **MANDATORY** — the check passes on this file alone |
    | `docs/skills/README.md` (English) | good practice, not a substitute |
    | `docs/skills/README.ko.md` (Korean) | good practice, not a substitute |
-   | `commands/README.md` (future-proof) | good practice, not a substitute |
+   | n/a (commands/ removed) | n/a |
    | `skills/README.md` | never counts — auto-generated |
 
    OR carry the `docs-not-required:` marker.

@@ -95,8 +95,8 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`log`](log.md) | `state` | Toggle session loghooks (`setup`/`on`/`off`/`status`) per project. |
 | [`codex-cache-update`](codex-cache-update.md) | `analysis` | Refresh the Codex marketplace checkout + versioned plugin cache. |
 | [`llm-refresh`](llm-refresh.md) | `analysis` | Refresh `docs/llm-info/<provider>.json` from each vendor's pricing page. |
-| [`review-local`](../../commands/review-local.md) | `state` | Local equivalent of the GH-Actions review chain (`/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance`) via `bin/review-local.sh`. |
-| [`skill-usage`](../../commands/skill-usage.md) | `analysis` | Skill-usage telemetry CLI — turns + invocations per project, from `tools/skill_usage.py`. |
+| [`review-local`](../../skills/review-local/SKILL.md) | `state` | Local equivalent of the GH-Actions review chain (`/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance`) via `bin/review-local.sh`. |
+| [`skill-usage`](../../skills/skill-usage/SKILL.md) | `analysis` | Skill-usage telemetry CLI — turns + invocations per project, from `tools/skill_usage.py`. |
 
 ### Design
 
@@ -168,11 +168,11 @@ step inside their parent skill's flow; you never type them directly.
 | [`refactor`](refactor.md) | `build` | `analysis` | human |
 | [`research`](research.md) | `design` | `enforcement` | human |
 | [`review`](review.md) | `review` | `analysis` | human |
-| [`review-local`](../../commands/review-local.md) | `shortcuts` | `state` | human |
+| [`review-local`](../../skills/review-local/SKILL.md) | `shortcuts` | `state` | human |
 | [`security`](security.md) | `security` | `enforcement` | human |
 | [`security-metrics`](security-metrics.md) | `security` | `enforcement` | human |
 | [`ship`](ship.md) | `ship` | `state` | human |
-| [`skill-usage`](../../commands/skill-usage.md) | `shortcuts` | `analysis` | human |
+| [`skill-usage`](../../skills/skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | human |
 | [`status`](status.md) | `status` | `state` | human |
 | [`sync-version`](sync-version.md) | `config` | `state` | human |

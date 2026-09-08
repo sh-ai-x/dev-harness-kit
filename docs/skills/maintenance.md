@@ -79,7 +79,7 @@ item flagged, and the docs-updated sub-gate verdict.
 - [`evaluate`](evaluate.md) — full eval pass; maintenance is one of three
   rubric outputs (review / security / maintenance) chained in
   `.github/workflows/review.yml`.
-- [`review-local`](../../commands/review-local.md) — local mirror of the
+- [`review-local`](../../skills/review-local/SKILL.md) — local mirror of the
   review chain, including this maintenance verdict loop.
 - `eval/prompts/judge-code-sanity.md` — the canonical 20-checkbox rubric.
 - `lib/maintenance_gate.py::combine_verdict` — verdict-extraction helper.

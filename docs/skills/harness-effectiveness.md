@@ -70,4 +70,3 @@ Use `/dev-kit:evaluate` for the full report (judges + 5-component); use `/dev-ki
 - [`eval/prompts/judge-harness-effectiveness.md`](../../eval/prompts/judge-harness-effectiveness.md) — the LLM-judge prompt used only by `/dev-kit:evaluate --harness-quality`.
 - [`docs/proposals/harness-effectiveness/00-index.html`](../proposals/harness-effectiveness/00-index.html) — the design proposal (the canonical "why this metric").
 - [`docs/skills/evaluate.md`](evaluate.md) — the parent eval skill; the harness-effectiveness table there is the same reducer.
-- `commands/harness-effectiveness.md` — the slash command source. `bin/install-commands.sh` already syncs this to `.claude/commands/` + `.codex/commands/` at SessionStart.
