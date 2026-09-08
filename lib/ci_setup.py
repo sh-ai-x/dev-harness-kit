@@ -114,7 +114,13 @@ _CI_PATHS_BEFORE_HOOKS: tuple[str, ...] = (
     # CI workflows + scripts
     ".github/workflows/ci.yml",
     ".github/workflows/auto-fix-pr.yml",
+    # Issue #823: review.yml + security.yml are independent workflows.
+    # gate-select's `review only` pick installs ONLY review.yml; the
+    # `review + security` pick installs both. The security job + its own
+    # severity gate live in security.yml (was bundled in review.yml
+    # pre-#823). ci-setup --force copies each present template.
     ".github/workflows/review.yml",
+    ".github/workflows/security.yml",
     # Provider selection is env-based: locally `.env:CI_REVIEW_PROVIDER`
     # (managed via `bin/set-provider.sh <provider>`, gitignored, per-user),
     # in CI `vars.CI_REVIEW_PROVIDER` (per-repo, set via `gh variable set`).
@@ -841,7 +847,7 @@ def _build_marker() -> dict:
         "installed_at": _now_utc_iso(),
         "installed_by": "dev-kit:ci-setup",
         "installed_dev_kit_version": plugin_version(_PLUGIN_ROOT),
-        "runners": ["ci.yml", "auto-fix-pr.yml", "review.yml"],
+        "runners": ["ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"],
         "provider_env_key": "CI_REVIEW_PROVIDER",
         "scripts": [
             "scripts/validate.py",

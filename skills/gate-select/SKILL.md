@@ -21,9 +21,9 @@ One skill that exposes the three gate dimensions the rest of dev-kit fragments a
 
 | Dimension | SSOT file | Picker today | What gate-select does |
 |---|---|---|---|
-| **Project** (CI workflow gates) | `.dev-kit/ci-config.json` | `/dev-kit:ci-setup` | Reports which of `ci.yml` / `auto-fix-pr.yml` / `review.yml` are installed; dispatches to `ci-setup` to install missing ones. |
+| **Project** (CI workflow gates) | `.dev-kit/ci-config.json` | `/dev-kit:ci-setup` | Reports which of `ci.yml` / `auto-fix-pr.yml` / `review.yml` / `security.yml` are installed; dispatches to `ci-setup` to install missing ones. |
 | **Session** (local-hook gates) | `.dev-kit/harness-mode.session.json` | `/dev-kit:harness-mode` | Reports mode + per-gate values; dispatches to `harness-mode` to change. |
-| **AI-judge** (LLM-judge skills) | (skill-shipped; CI wiring in `.github/workflows/review.yml`) | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` | Reports which judge skills are enabled and whether they are wired into CI; dispatches to the right skill. |
+| **AI-judge** (LLM-judge skills) | (skill-shipped; CI wiring in `.github/workflows/{review,security}.yml`) | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` | Reports which judge skills are enabled and whether they are wired into CI; dispatches to the right skill. |
 
 **No new state file** — gate-select reads the three existing sources above. `pick` dispatches writes to the same writers `ci-setup` / `harness-mode` / judge skills already use.
 
@@ -50,7 +50,8 @@ One skill that exposes the three gate dimensions the rest of dev-kit fragments a
 PROJECT GATES (CI workflows, .dev-kit/ci-config.json marker)
   ci.yml (branch-policy + test + validate):   installed | /dev-kit:ci-setup
   auto-fix-pr.yml:                            installed | /dev-kit:ci-setup
-  review.yml (review + security LLM judge):   installed | /dev-kit:ci-setup
+  review.yml (review LLM judge, 3-dim):       installed | /dev-kit:ci-setup
+  security.yml (security LLM judge, 11-dim):   installed | /dev-kit:ci-setup
   maintenance.yml (maintenance LLM judge):    NOT INSTALLED — template not shipped yet
 
 SESSION GATES (.dev-kit/harness-mode.session.json, reset every SessionStart)
@@ -62,7 +63,7 @@ SESSION GATES (.dev-kit/harness-mode.session.json, reset every SessionStart)
 
 AI-JUDGE GATES (skills shipped with the plugin; wired into CI by ci-setup)
   /dev-kit:review        enabled (CI: review.yml, local: bin/review-local.sh)
-  /dev-kit:security      enabled (CI: review.yml, local: bin/review-local.sh)
+  /dev-kit:security      enabled (CI: security.yml, local: bin/review-local.sh)
   /dev-kit:maintenance   enabled (CI: not shipped, local: /dev-kit:maintenance or bin/review-local.sh)
 ```
 
@@ -70,10 +71,13 @@ AI-JUDGE GATES (skills shipped with the plugin; wired into CI by ci-setup)
 
 ```bash
 # Project — marker presence + per-workflow file presence.
-# Loop matches the spec table above (4 workflows, including maintenance.yml
-# which is NOT YET shipped as a template).
+# Loop matches the spec table above (5 workflows, including maintenance.yml
+# which is NOT YET shipped as a template). Issue #823: review.yml and
+# security.yml are independent workflows post-#823; the `review only`
+# pick installs review.yml without security.yml, so each must be reported
+# separately instead of bundled under "review.yml".
 [ -f .dev-kit/ci-config.json ] && echo "ci-config marker: present"
-for f in ci.yml auto-fix-pr.yml review.yml; do
+for f in ci.yml auto-fix-pr.yml review.yml security.yml; do
   [ -f ".github/workflows/$f" ] && echo "$f: installed" || echo "$f: missing"
 done
 # maintenance.yml ships in a separate PR; while absent, `show` MUST report
@@ -101,7 +105,7 @@ Two `AskUserQuestion` calls, 3 questions each (mirrors `harness-mode` lines 61�
 |---|---|
 | Install **project gates** (CI workflow + pre-push + scripts + `.dev-kit/ci-config.json`)? | Install via `/dev-kit:ci-setup` (Recommended) / Skip — bootstrap stays minimal |
 | Set **session gates** mode? | `full` (Recommended) / `fast` / `custom` (delegate to `/dev-kit:harness-mode custom`) |
-| Wire **AI-judge gates** into CI? | `review + security` via review.yml (Recommended, ships today) / `review + security + maintenance` (blocked until template lands) / Skip — leave AI-judge skill-only |
+| Wire **AI-judge gates** into CI? | `review` (Recommended for new repos — 3-dim correctness, lower cost; issue #823) / `review + security` (review.yml + security.yml, full coverage) / `review + security + maintenance` (blocked until template lands) / Skip — leave AI-judge skill-only |
 
 ### Call 2 (project pick follow-ups + persistent session mode)
 
@@ -136,13 +140,20 @@ elif session_pick == "custom":
     Skill(name="harness-mode", args={"mode": "custom"})
 
 # AI-judge pick — no installer; the echo below is a status report, not a write.
-# Gate the "Wired via review.yml" claim on actual file presence. If the
-# operator skipped the project pick, review.yml is not installed, so the
-# status must say so — otherwise the echo is a pure lie.
+# Gate each "Wired via *.yml" claim on actual file presence. If the
+# operator skipped the project pick, the relevant workflow is not
+# installed, so the status must say so — otherwise the echo is a lie.
+# Issue #823: each workflow (review.yml, security.yml) is wired and
+# reported independently.
 case ai_judge_pick:
+    case "review":
+        if project_pick == "Install" or Path(".github/workflows/review.yml").is_file():
+            print("✓ review.yml wired (3-dim correctness + reuse/simplification only)")
+        else:
+            print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
     case "review + security":
         if project_pick == "Install" or Path(".github/workflows/review.yml").is_file():
-            print("✓ Wired via .github/workflows/review.yml (installed by ci-setup)")
+            print("✓ Wired via review.yml + security.yml (installed by ci-setup)")
         else:
             print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
     case "review + security + maintenance":
