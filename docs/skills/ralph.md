@@ -16,6 +16,27 @@ The contract: after SHIP_CONFIRM_GATE exits Approve, the chain enters
 every Ask during `ATTENDED_RUN` is rejected with `AttendedLockError` and a
 forensic `last_blocked_ask` field.
 
+Two layers enforce the Ask-refusal invariant during `ATTENDED_RUN`:
+
+1. **State machine** — `lib/ralph_state.py::RalphState.can_ask_question()`
+   returns `False` once `attended_lock=True`; the orchestrator raises
+   `AttendedLockError` if any sub-skill tries to call
+   `assert_can_ask` mid-chain.
+2. **Mechanical hook** — `hooks/ralph-attended-lock.sh` is wired as a
+   `PreToolUse` matcher on `AskUserQuestion` in `hooks/hooks.json` and
+   `.codex-plugin/hooks/hooks.json`. The hook reads the canonical
+   ralph_state from disk and exits 2 with a deny JSON envelope so even a
+   misbehaving sub-skill cannot surface an Ask. The hook fails OPEN on
+   toolchain-missing (the state machine remains the source of truth).
+
+The unattended chain runs via `lib/ralph_chain.py::run_attended()`,
+which walks `BUILD → BABYSIT → SHIP` with injectable dispatch shims.
+`RealDispatch.babysit()` always invokes
+`babysit-pr --operator-is-only-human --rationale "ralph-session=<id>..."`
+— without both flags, `babysit-pr` defaults to the human-gate (issue #324,
+see `skills/babysit-pr/SKILL.md:71-74`). The bash glue
+`scripts/ralph_drive.sh run-attended` is the operator-facing entrypoint.
+
 ## When to use it
 
 - The user types `/dev-kit:ralph <idea>` with a 1-line idea they want taken

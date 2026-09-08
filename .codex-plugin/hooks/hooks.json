@@ -61,6 +61,16 @@
             "fail_closed": true
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/ralph-attended-lock.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
