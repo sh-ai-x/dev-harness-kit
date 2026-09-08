@@ -274,4 +274,4 @@ sections:
       | Sub-proposal | Status | One-line scope |
       |---|---|---|
       | [evidence-collection](evidence-collection.html) | design-discussion | Fix the seven producer root causes (RC-1..7) so the reducer has evidence to score against. |
-      | [auto-collection](auto-collection.html) | design-discussion | Automatic measurement with enrolled attempt cohorts, honest lifecycle timing, coherent snapshots, producer readiness and production-adapter CI probes; legacy scores remain diagnostic. |
+      | [auto-collection](auto-collection.html) | design-discussion | Boundary-driven automatic measurement with one journal, incremental collection, explicit unresolved outcomes and real adapter probes; no resident monitor or legacy-log rescan. |
