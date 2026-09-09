@@ -344,18 +344,32 @@ jobs:
         run: |
           set -uo pipefail
           # Pick the MOST RECENT claude[bot] comment whose body actually
-          # contains a `**Verdict:**` line — NOT the most recent comment
-          # overall (the track_progress placeholder "Claude Code is
-          # working…" otherwise wins and the verdict is reported MISSING
-          # even when the run produced one). The `?per_page=100`
-          # ensures we read the latest comment on PRs with 30+ comments
-          # (pagination bug fix from PR #566). Delegate the line-level
-          # extraction to the python helper so the same regex the unit
-          # tests pin governs CI (no shell-only awk drift that collapses
-          # "Changes Requested" to "Requested").
-          comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp \
-            | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
+          # contains a `**Verdict:**` line AND whose created_at is at or
+          # after the PR's current head commit's authored date. The head
+          # date filter is the close for the stale-comment selector bug
+          # (PR #822 round-1: judge ran again on a doc-only follow-up,
+          # posted no fresh inline comment, and the previous selector
+          # picked the round-1 "Changes Requested" comment forever).
+          # The `?per_page=100` ensures we read the latest comment on
+          # PRs with 30+ comments (pagination bug fix from PR #566).
+          # Delegate the line-level extraction to the python helper so
+          # the same regex the unit tests pin governs CI (no shell-only
+          # awk drift that collapses "Changes Requested" to "Requested").
+          # If the head_date fetch fails (rate-limit / API outage), we
+          # fall back to the legacy updated_at selector with a warning
+          # so the gate degrades open instead of locking up the PR.
+          head_date="$(gh api "repos/${{ github.repository }}/commits/${{ steps.pr_meta.outputs.head_sha }}" \
+            --jq '.commit.committer.date // .commit.author.date // ""' 2>/dev/null || true)"
+          if [ -n "$head_date" ]; then
+            comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate --slurp \
+              | jq -r --arg head_date "$head_date" '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not) | select((.created_at // "") >= $head_date)] | sort_by(.created_at) | .[-1].body // ""')"
+          else
+            echo "::warning::head_date fetch failed; falling back to legacy updated_at selector (no stale-comment filter)"
+            comment="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate --slurp \
+              | jq -r '[.[] | .[] | select((.user.login // "") | (startswith("claude") or . == "github-actions[bot]")) | select(.body | test("\\*\\*Verdict:\\*\\*")) | select((.body | test("<!-- dev-kit-verdict-audit -->")) | not)] | sort_by(.updated_at) | .[-1].body // ""')"
+          fi
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "maintenance_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"

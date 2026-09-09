@@ -531,6 +531,15 @@ Full detail and the Codex-side setup live in
 PR lifecycle (In Progress → In Review → Done/Canceled). Non-blocking, drafts
 skipped. State mapping in [`docs/tools/LINEAR-PR-SYNC.md`](docs/tools/LINEAR-PR-SYNC.md).
 
+**GitHub issue sync (blocking)** — `tools/issue_sync.py` (run from
+`.github/workflows/issue-sync.yml`) enforces the PR ↔ GitHub-issue sync
+contract: every `#N` / `owner/repo#N` reference in the PR body or title must
+point at an `open` issue at gate time. A closed reference fails the PR (vs.
+`linear-pr-sync.yml`'s non-blocking shape — a stale GitHub-issue link is a
+contract violation worth surfacing in CI rather than at merge time). No
+references → gate skipped. Parser details in
+[`docs/tools/ISSUE-SYNC.md`](docs/tools/ISSUE-SYNC.md).
+
 ---
 
 ## Under the hood
