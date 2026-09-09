@@ -1699,9 +1699,8 @@ def auto_sync() -> int:
 def _last_handoff_scope(repo: Path) -> str | None:
     """Return the scope-key recorded in the handoff, or None.
 
-    Used by `task_change_sync` to detect mid-session scope shifts
-    (a new commit, a fresh prompt, a branch change) without
-    round-tripping to Linear on every prompt. Returns `None` when:
+    The handoff records the last-known scope for diagnostics and
+    same-scope short-circuits. Returns `None` when:
 
       - the handoff is missing (no prior sync round),
       - the handoff is unreadable (corrupt JSON),
@@ -1728,8 +1727,8 @@ def _last_handoff_scope(repo: Path) -> str | None:
 def _current_scope(repo: Path) -> str:
     """Return the scope-key that *would* be used if sync() ran now.
 
-    Mirrors the prompt + branch resolution in `sync()` so the
-    `task_change_sync` check stays consistent with the eventual
+    Mirrors the prompt + branch resolution in `sync()` so any
+    same-scope short-circuit stays consistent with the eventual
     sync round. Branch is read directly from git (cheap) and the
     prompt from the latest commit subject, falling back to the
     branch name when no commit exists yet on the branch.
@@ -1737,51 +1736,6 @@ def _current_scope(repo: Path) -> str:
     prompt = _resolve_prompt(repo)
     branch = _current_branch(repo)
     return _scope_key(prompt, branch)
-
-
-def task_change_sync() -> int:
-    """Hook entry point for UserPromptSubmit (plan/task change).
-
-    Compares the current scope (branch + latest commit subject)
-    against the handoff's last-recorded scope. When they differ,
-    delegates to `auto_sync` (which re-validates against the
-    Linear API and creates / updates the matching issue). When
-    they match, returns 0 without forking a Linear round-trip —
-    the goal is "sync on change", not "sync on every prompt".
-
-    The handoff scope is the only signal we trust: the handoff
-    was written by a previous sync round and reflects the scope
-    that was last registered. A new prompt with the same scope
-    is a continuation, not a change.
-
-    Always returns 0 (non-blocking). On a non-owner, the gate
-    inside `auto_sync` bails silently — same contract as
-    `auto_sync`.
-    """
-    repo = _repo_root()
-    if not is_repo_owner(repo):
-        if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
-            print(
-                f"[linear-sync] task_change_sync: skipped (non-owner, repo={_repo_name(repo)})",
-                file=sys.stderr,
-            )
-        return 0
-    current = _current_scope(repo)
-    last = _last_handoff_scope(repo)
-    if last == current:
-        if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
-            print(
-                f"[linear-sync] task_change_sync: scope unchanged ({current!r})",
-                file=sys.stderr,
-            )
-        return 0
-    if os.environ.get("LINEAR_DEBUG", "").strip() == "1":
-        print(
-            f"[linear-sync] task_change_sync: scope changed "
-            f"last={last!r} current={current!r}",
-            file=sys.stderr,
-        )
-    return auto_sync()
 
 
 def sync() -> int:
@@ -1966,8 +1920,6 @@ def main(argv: list[str] | None = None) -> int:
         return sync()
     if argv[0] == "auto-sync":
         return auto_sync()
-    if argv[0] == "task-change-sync":
-        return task_change_sync()
     cmd, rest = argv[0], argv[1:]
     if cmd == "status":
         cfg = _read_worktree_config(repo)

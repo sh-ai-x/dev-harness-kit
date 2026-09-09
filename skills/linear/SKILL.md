@@ -11,7 +11,6 @@ when_to_use: |
   - Every Edit|Write|MultiEdit fires the auto-sync hook (when configured)
   - A new worktree is created (fires linear-worktree-create)
   - A new session starts in a worktree (fires linear-session-start)
-  - A UserPromptSubmit signals a scope change (fires linear-task-change)
 allowed-tools: Read Write Bash Glob
 model: sonnet
 disable-model-invocation: false
@@ -59,11 +58,8 @@ The Edit|Write hook is one of FOUR auto-trigger points. The other three — **wo
 |---|---|---|---|
 | Edit\|Write\|MultiEdit | `hooks/linear-autosync.sh` | PreToolUse | session cwd |
 | New worktree | `hooks/linear-worktree-create.sh` | PostToolUse:Bash (after `git worktree add`) | the new worktree path |
-| Auto-cut worktree | `hooks/worktree-auto-cut.sh` (extension) | UserPromptSubmit (after `git worktree add`) | the new worktree path |
 | Session start | `hooks/linear-session-start.sh` | SessionStart (worktree-only) | session cwd |
-| Plan / task change | `hooks/linear-task-change.sh` | UserPromptSubmit | session cwd |
-
-The four hooks all delegate to a single Python entry point: `tools/linear_sync.py auto-sync` (for the always-fire triggers) or `task-change-sync` (for the scope-diff trigger). Both entry points are **owner-gated** via `is_repo_owner()`:
+The three hooks all delegate to a single Python entry point: `tools/linear_sync.py auto-sync`. The entry point is **owner-gated** via `is_repo_owner()`:
 
 ```text
 is_repo_owner(repo)

@@ -414,10 +414,21 @@ class TestRegenRejectsForbiddenUserPromptSubmitTokens(unittest.TestCase):
 
 
 class TestContextWindowGuardUsesTailSample(unittest.TestCase):
-    """`context-window-guard.sh` MUST sample the tail of the transcript,
-    not walk the full file. The prior implementation `jq -rs [...]` read
-    every record and timed out on long babysit sessions; the rewrite uses
-    `.[-100:]` for a constant-time window.
+    """`context-window-guard.sh` MUST bound the file read to the last 100
+    records via `tail -n 100 | jq -s`, not walk the full JSONL.
+
+    The prior implementation `jq -rs [...]` read every record and
+    timed out on long babysit sessions. Two rewrites were tried in
+    this branch: the first (`jq -rs '[ .[-100:] | select(...)]'`)
+    errored on the array slice under `-s` and was silently swallowed
+    by `|| echo 0`, making the guard dead. The current shape —
+    `tail -n 100 "$TRANSCRIPT" | jq -s '[ .[] | select(...) ] | add'` —
+    bounds the file walk via tail (constant-time in transcript length)
+    and uses `.[]` to iterate the slurped array unambiguously.
+
+    Source-shape tests pin the rewrite; behavioural tests below run
+    the hook end-to-end against synthetic JSONL transcripts and
+    assert the WARN reaches stderr.
     """
 
     def setUp(self):
@@ -425,30 +436,103 @@ class TestContextWindowGuardUsesTailSample(unittest.TestCase):
         if not self.path.exists():
             raise unittest.SkipTest("context-window-guard.sh not found")
         self.src = self.path.read_text(encoding="utf-8")
+        # Strip `#` comment lines so the lint assertions don't false-
+        # positive on tokens that appear in docstring history notes
+        # describing the OLD shape. Mirrors tools/regenerate_active_hooks.py
+        # body-check behavior so the two lints agree.
+        self.src_active = "\n".join(
+            line for line in self.src.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    def _run_hook_with_transcript(self, transcript_path: Path) -> subprocess.CompletedProcess:
+        """Invoke `context-window-guard.sh` with a payload naming the
+        transcript path, exactly as the harness does on UserPromptSubmit.
+        """
+        payload = json.dumps({"transcript_path": str(transcript_path)})
+        return subprocess.run(
+            ["bash", str(self.path)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=str(REPO_ROOT),
+        )
+
+    def _write_jsonl(self, tmp: Path, records: list[dict]) -> Path:
+        p = tmp / "transcript.jsonl"
+        with p.open("w", encoding="utf-8") as fh:
+            for r in records:
+                fh.write(json.dumps(r) + "\n")
+        return p
+
+    def test_over_threshold_emits_hard_warn(self):
+        """Last 100 records summing ≥ 300K (HARD_KB) → `[context-window-guard] HARD:`
+        on stderr. Would have caught the prior silently-dead jq filter.
+        """
+        # 6 records × (input_tokens=60000, cache_read_input_tokens=50000) = 110K each
+        # → 660K total, well above the 300K HARD threshold.
+        records = [
+            {"message": {"usage": {
+                "input_tokens": 60000, "cache_read_input_tokens": 50000,
+            }}}
+            for _ in range(6)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            tp = self._write_jsonl(Path(tmp), records)
+            result = self._run_hook_with_transcript(tp)
+        self.assertEqual(
+            result.returncode, 0, msg=f"hook crashed: {result.stderr}",
+        )
+        self.assertIn(
+            "[context-window-guard] HARD",
+            result.stderr,
+            f"expected HARD WARN on stderr; got: {result.stderr!r}",
+        )
+
+    def test_under_threshold_emits_no_warn(self):
+        """Sub-threshold tail (sum < 100K WARN_KB) → stderr is empty.
+        The hook is advisory; a quiet session must not raise a tier.
+        """
+        records = [
+            {"message": {"usage": {
+                "input_tokens": 1000, "cache_read_input_tokens": 500,
+            }}}
+            for _ in range(5)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            tp = self._write_jsonl(Path(tmp), records)
+            result = self._run_hook_with_transcript(tp)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stderr, "",
+            f"sub-threshold session must be silent; got: {result.stderr!r}",
+        )
 
     def test_does_not_use_full_file_jq_rs(self):
-        """The full-file `jq -rs [...]` shape MUST be gone. We allow `jq`
-        with `-r` and other flags as long as the slurp (`-s`) is paired
-        with a slice (`.[-N:]`) rather than the whole array.
-        """
-        # Negative: a bare `jq -rs` (without the `.[-N:]` slice) on the
-        # full array is the buggy shape. We check for a `jq -rs` call
-        # that does NOT also include a `.[-` slice.
-        if "jq -rs" in self.src:
-            # Allow only if paired with a tail slice.
-            self.assertIn(
-                ".[-", self.src,
-                "context-window-guard.sh uses `jq -rs` (full-file slurp) "
-                "without a tail slice; that walks the whole transcript "
-                "and is exactly the shape we are deleting",
-            )
+        """The full-file `jq -rs` shape MUST be gone.
 
-    def test_uses_tail_slice(self):
-        """The hook MUST sample via `.[-N:]` (constant-time window)."""
+        The prior rewrite errored silently (`Cannot index array with
+        string "message"` swallowed by `|| echo 0`); the current shape
+        uses `tail -n 100` to bound the file walk before jq sees it.
+        This test pins both halves: no full-file slurp AND a tail bound.
+        """
+        self.assertNotIn(
+            "jq -rs", self.src_active,
+            "context-window-guard.sh uses `jq -rs` (full-file slurp); "
+            "that walks the whole transcript and is the shape we deleted",
+        )
+
+    def test_uses_tail_to_bound_file_walk(self):
+        """The hook MUST bound the file read via `tail -n 100` before jq.
+
+        Without `tail -n 100`, jq reads the entire transcript regardless
+        of any later `.[]` iteration — the constant-time claim is empty.
+        """
         self.assertIn(
-            ".[-", self.src,
-            "context-window-guard.sh must sample a tail window "
-            "(`.[-N:]`) instead of walking the full transcript",
+            "tail -n 100", self.src_active,
+            "context-window-guard.sh must bound the file read via "
+            "`tail -n 100` so jq never sees the whole transcript",
         )
 
     def test_bash_n_clean(self):

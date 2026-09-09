@@ -1706,9 +1706,9 @@ class TestDedupeSkipsTerminal(unittest.TestCase):
 class TestIsRepoOwner(unittest.TestCase):
     """Unit tests for `is_repo_owner` — the gate that decides whether
     the auto-sync hooks (linear-autosync, linear-session-start,
-    linear-worktree-create, linear-task-change) fire for the current
-    user. The manual CLI path (`/dev-kit:linear`) intentionally does
-    not consult this gate.
+    linear-worktree-create) fire for the current user. The manual
+    CLI path (`/dev-kit:linear`) intentionally does not consult
+    this gate.
     """
 
     def setUp(self):
@@ -1807,7 +1807,7 @@ class TestIsRepoOwner(unittest.TestCase):
 class TestAutoSync(unittest.TestCase):
     """Tests for the owner-gated auto-sync entry point used by
     every Linear auto-trigger hook (linear-autosync,
-    linear-session-start, linear-worktree-create, linear-task-change).
+    linear-session-start, linear-worktree-create).
 
     The contract under test:
       - When `is_repo_owner` is False, `auto_sync` bails without
@@ -1842,60 +1842,6 @@ class TestAutoSync(unittest.TestCase):
                  mock.patch.object(linear_sync, "sync", return_value=0) as sync:
                 self.assertEqual(linear_sync.auto_sync(), 0)
                 sync.assert_called_once()
-
-
-class TestTaskChangeSync(unittest.TestCase):
-    """Tests for the scope-change short-circuit used by
-    linear-task-change. The hook is meant to fire ONLY when the
-    current scope (branch + latest commit subject) differs from
-    the handoff's last-recorded scope. A same-scope prompt is a
-    continuation, not a change.
-    """
-
-    def setUp(self):
-        linear_sync._OWNER_CACHE = {}
-
-    def tearDown(self):
-        linear_sync._OWNER_CACHE = {}
-
-    def test_non_owner_bails_silently(self):
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement foo",
-                        handoff={"scope": "feat/x::implement foo"}):
-            os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
-            with mock.patch.object(linear_sync, "is_repo_owner", return_value=False), \
-                 mock.patch("urllib.request.urlopen") as urlopen:
-                self.assertEqual(linear_sync.task_change_sync(), 0)
-                urlopen.assert_not_called()
-
-    def test_same_scope_bails_without_network(self):
-        with _fake_repo(linear_api_key="test-key", branch="feat/x",
-                        commit_subject="implement foo",
-                        handoff={"scope": "feat/x::implement foo"}):
-            os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
-            with mock.patch.object(linear_sync, "is_repo_owner", return_value=True), \
-                 mock.patch("urllib.request.urlopen") as urlopen:
-                self.assertEqual(linear_sync.task_change_sync(), 0)
-                urlopen.assert_not_called()
-
-    def test_changed_scope_triggers_auto_sync(self):
-        # Commit subject moved to a new task; handoff still has the old scope.
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement bar",
-                        handoff={"scope": "feat/x::implement foo"}):
-            os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
-            with mock.patch.object(linear_sync, "is_repo_owner", return_value=True), \
-                 mock.patch.object(linear_sync, "auto_sync", return_value=0) as auto:
-                self.assertEqual(linear_sync.task_change_sync(), 0)
-                auto.assert_called_once()
-
-    def test_missing_handoff_triggers_auto_sync(self):
-        # No prior handoff means the scope is "unknown" → always sync.
-        with _fake_repo(linear_api_key="test-key", commit_subject="implement foo",
-                        handoff=None):
-            os.environ.pop("LINEAR_REPO_OWNER_AUTO_SYNC", None)
-            with mock.patch.object(linear_sync, "is_repo_owner", return_value=True), \
-                 mock.patch.object(linear_sync, "auto_sync", return_value=0) as auto:
-                self.assertEqual(linear_sync.task_change_sync(), 0)
-                auto.assert_called_once()
 
 
 class TestLinearAutosyncHookCallsAutoSync(unittest.TestCase):
