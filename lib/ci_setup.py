@@ -67,6 +67,28 @@ try:
 except ImportError:
     from read_env_key import read_env_key as _read_env_key_helper  # type: ignore
 
+# Dual-import gates_state so consumer installs that land `lib/gates_state.py`
+# next to `lib/ci_setup.py` (the flat-bundle layout) keep working. The
+# `lib/install.sh` consumer copy ships every `lib/*.py`, so the package
+# form resolves in the source repo; the flat form is the 3-file minimal
+# fixture path used by `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`.
+# When gates_state is absent (the 3-file fixture), `is_enabled` and
+# `runners_from_gates` are stubbed to legacy behaviour so install_ci_config
+# keeps working via the `exclude=` path.
+try:
+    from .gates_state import is_enabled, runners_from_gates  # type: ignore
+except ImportError:
+    try:
+        from gates_state import is_enabled, runners_from_gates  # type: ignore
+    except ImportError:
+        # 3-file fixture path: no gates.json possible, install proceeds
+        # via the legacy `exclude=` contract. The two stubs never run
+        # when gates.json is absent (the precedence block short-circuits).
+        def is_enabled(*args, **kwargs):  # type: ignore[no-redef]
+            return True
+        def runners_from_gates(*args, **kwargs):  # type: ignore[no-redef]
+            return None
+
 # Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
 # lives at `lib/gh_cli.py`. The in-package form is preferred; the inline
 # fallback below exists for the flat 3-file bundle staged by
@@ -121,6 +143,12 @@ _CI_PATHS_BEFORE_HOOKS: tuple[str, ...] = (
     # pre-#823). ci-setup --force copies each present template.
     ".github/workflows/review.yml",
     ".github/workflows/security.yml",
+    # Issue TBD: maintenance.yml ships as a consumer template so the
+    # maintenance gate is one of the three first-class CI gates the
+    # operator can toggle via `.dev-kit/gates.json` + `gate-select
+    # enable/disable`. The local `.github/workflows/maintenance.yml`
+    # is the source-of-truth copy.
+    ".github/workflows/maintenance.yml",
     # Provider selection is env-based: locally `.env:CI_REVIEW_PROVIDER`
     # (managed via `bin/set-provider.sh <provider>`, gitignored, per-user),
     # in CI `vars.CI_REVIEW_PROVIDER` (per-repo, set via `gh variable set`).
@@ -832,7 +860,94 @@ def plugin_version(plugin_root: Path | None = None) -> str:
     except (OSError, json.JSONDecodeError):
         pass
     return "0.0.0"  # sentinel — not a published release
-def _build_marker(exclude: frozenset[str] | None = None) -> dict:
+def _resolve_runners_from_gates(target: "Path") -> "list[str] | None":
+    """Return the `runners` list derived from `.dev-kit/gates.json`.
+
+    Reads the gates.json SSOT (via `lib.gates_state.runners_from_gates`)
+    and returns the per-judge workflow basenames that are enabled. When
+    the file is absent or unreadable, returns `None` so the caller falls
+    back to the legacy `exclude=` path. A corrupt file is downgraded to
+    a `::warning::` and the install still proceeds (gates.json is
+    committed; a malformed file is a regression the user must fix, but
+    blocking the install would cascade unrelated damage).
+
+    Issue TBD: this is the precedence point — gates.json wins over
+    `exclude=` when present. `ci-setup --exclude security.yml` on a
+    consumer WITH gates.json is logged as a `::notice::` so a stale
+    caller doesn't silently regress.
+    """
+    from gates_state import STATE_REL_PATH, ValidationError  # type: ignore
+    path = target / STATE_REL_PATH
+    if not path.exists():
+        return None
+    try:
+        return runners_from_gates(target)
+    except ValidationError:
+        # Corrupt gates.json — log + fall back to legacy contract so
+        # the install still completes (the user can fix the file next
+        # run; `ci-doctor` surfaces the malformed file as a FAIL row).
+        import sys as _sys
+        print(
+            f"::warning::gates.json present at {path} but invalid; "
+            f"falling back to exclude= (issue TBD)",
+            file=_sys.stderr,
+        )
+        return None
+
+
+def _resolve_gates_precedence(
+    target: "Path",
+    exclude: "frozenset[str] | None",
+) -> "tuple[tuple[str, ...], list[str] | None, str]":
+    """Resolve the gates.json vs exclude= precedence.
+
+    Returns `(paths_to_install, gates_runners, gates_source)` where:
+      * `paths_to_install` is the EXPECTED_PATHS-tuple to feed the
+        copy loop (after either gates-based or exclude-based filtering).
+      * `gates_runners` is the per-judge workflow basename list when
+        gates.json drives the install (None when exclude= drives it).
+      * `gates_source` is "gates.json" or "ci-setup" — the audit breadcrumb
+        that lands in the marker's `gates_source` field.
+
+    Precedence rules (issue TBD):
+      1. gates.json present → its enabled flags drive both
+         `paths_to_install` and the marker `runners` list. The legacy
+         `exclude=` kwarg is logged as `::notice::` and IGNORED so a stale
+         caller doesn't silently regress.
+      2. gates.json absent → the `exclude=` kwarg drives both (legacy
+         contract).
+      3. Corrupt gates.json → falls back to legacy `exclude=` (warned).
+    """
+    import sys as _sys
+    gates_runners = _resolve_runners_from_gates(target)
+    if gates_runners is not None:
+        if exclude:
+            print(
+                "::notice::gates.json present; ignoring --exclude "
+                f"{sorted(exclude)} (issue TBD)",
+                file=_sys.stderr,
+            )
+        # The 3 first-class gates are the operator-toggleable set;
+        # ci.yml + auto-fix-pr.yml are always-on infrastructure so they
+        # are never in `gates_runners`. Compute the effective exclude
+        # by inverting the gates list.
+        first_class = {"review.yml", "security.yml", "maintenance.yml"}
+        effective_exclude = frozenset(first_class - set(gates_runners))
+        return (
+            tuple(_filter_expected_paths(effective_exclude)),
+            gates_runners,
+            "gates.json",
+        )
+    paths_to_install = _filter_expected_paths(exclude)
+    return (paths_to_install, gates_runners, "ci-setup")
+
+
+def _build_marker(
+    exclude: frozenset[str] | None = None,
+    *,
+    gates_runners: "list[str] | None" = None,
+    gates_source: str = "ci-setup",
+) -> dict:
     """Build the `.dev-kit/ci-config.json` payload.
 
     Records `installed_dev_kit_version` (from `.claude-plugin/plugin.json:version`
@@ -845,16 +960,39 @@ def _build_marker(exclude: frozenset[str] | None = None) -> dict:
     Issue #823: `exclude` (basename set) drops the matching workflow from
     the `runners` list so the marker honestly reflects what was installed
     (a `review only` consumer shows review.yml, not security.yml). Default
-    install — no exclude — emits both.
+    install — no exclude — emits all five.
+
+    Issue TBD: maintenance.yml is the third first-class CI gate. It
+    ships via `_CI_PATHS_BEFORE_HOOKS` and is recorded here so the
+    marker's `runners` field matches the on-disk workflow set.
+    Issue TBD: when `gates_runners` is passed (the SSOT-derived list),
+    it overrides the static list — gates.json is the post-refactor SSOT,
+    `exclude=` is the legacy contract. `gates_source` records which path
+    filled the list ("gates.json" | "ci-setup") so `ci-doctor` can audit.
     """
-    runners = ["ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"]
-    if exclude:
-        runners = [r for r in runners if r not in exclude]
+    if gates_runners is None:
+        runners = ["ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml", "maintenance.yml"]
+        if exclude:
+            runners = [r for r in runners if r not in exclude]
+    else:
+        # ci.yml + auto-fix-pr.yml are always-on infrastructure (branch
+        # policy + test loop); the per-judge gates are sourced from
+        # `gates.json` so the operator's on/off choice is honored. The
+        # `exclude=` kwarg is ignored at the install call site (logged
+        # as a `::notice::`) so we don't re-apply it here either.
+        runners = ["ci.yml", "auto-fix-pr.yml"] + list(gates_runners)
     return {
         "schema_version": MARKER_SCHEMA_VERSION,
         "installed_at": _now_utc_iso(),
         "installed_by": "dev-kit:ci-setup",
         "installed_dev_kit_version": plugin_version(_PLUGIN_ROOT),
+        # Issue TBD: gates audit breadcrumbs. `gates_source` records
+        # which path filled `runners` so ci-doctor can spot a
+        # mid-migration consumer (marker says "ci-setup" but gates.json
+        # exists = the consumer is one install away from "gates.json").
+        # `gates_path` is informational only.
+        "gates_source": gates_source,
+        "gates_path": ".dev-kit/gates.json",
         "runners": runners,
         "provider_env_key": "CI_REVIEW_PROVIDER",
         "scripts": [
@@ -1176,10 +1314,15 @@ def install_ci_config(
     target = _validate_target(target_dir)
     report = InstallReport()
 
-    # Filter EXPECTED_PATHS by `exclude` so the rest of the install
-    # operates on the post-filter set. Empty / None `exclude` is the
-    # default install path; non-empty `exclude` shrinks the set.
-    paths_to_install = _filter_expected_paths(exclude)
+    # Issue TBD: gates.json precedence. The helper returns the
+    # post-filter `paths_to_install`, the `gates_runners` value to thread
+    # into `_build_marker`, and the `gates_source` audit string. When
+    # gates.json is absent, `gates_runners` is None and the helper falls
+    # back to the legacy `exclude=` contract. See the helper for the
+    # full precedence rules.
+    paths_to_install, gates_runners, gates_source = _resolve_gates_precedence(
+        target, exclude
+    )
 
     # Read prior marker (if any) so the drift-detection pass (issue #202)
     # can compare current file SHAs against the SHAs recorded at the last
@@ -1217,7 +1360,11 @@ def install_ci_config(
     # Issue #823: `_build_marker(exclude=...)` reflects the post-filter
     # install set in the `runners` field, so a `review only` consumer
     # shows review.yml (not security.yml) as a runner it owns.
-    marker_payload = _build_marker(exclude=exclude)
+    marker_payload = _build_marker(
+        exclude=exclude,
+        gates_runners=gates_runners,
+        gates_source=gates_source,
+    )
     new_shas: dict[str, str] = {}
     for rel in EXPECTED_PATHS:
         p = target / rel

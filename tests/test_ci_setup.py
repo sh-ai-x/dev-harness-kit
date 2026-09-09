@@ -136,7 +136,7 @@ class TestCiSetup(unittest.TestCase):
                 self.assertIn(key, data, f"missing key: {key}")
             self.assertEqual(data["schema_version"], "1.0.0")
             self.assertEqual(data["installed_by"], "dev-kit:ci-setup")
-            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"})
+            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml", "maintenance.yml"})
             self.assertEqual(set(data["scripts"]), {
                 "scripts/validate.py", "scripts/test.sh",
                 "scripts/branch-policy.sh", "scripts/ci-local.sh",
