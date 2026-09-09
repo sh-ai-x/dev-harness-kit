@@ -430,6 +430,67 @@ def sync(
 # ----------------------------------------------------------------------------
 
 
+# First-class workflows the operator CANNOT toggle via gates.json.
+# ci.yml + auto-fix-pr.yml are always-on infrastructure (branch-policy +
+# the auto-fix loop). Gates.json only governs the three judge workflows.
+_ALWAYS_ON_RUNNERS = frozenset({"ci.yml", "auto-fix-pr.yml"})
+
+
+def _init_synthesize(root: Optional[Path]) -> dict:
+    """Build a fresh gates.json payload from `marker.runners`.
+
+    Reads `.dev-kit/ci-config.json:runners`. Each first-class gate
+    (`review.yml`, `security.yml`, `maintenance.yml`) becomes a gate
+    entry: enabled when the corresponding workflow is in `marker.runners`
+    (or when no marker is present — i.e. operator never ran ci-setup),
+    disabled otherwise. ci.yml + auto-fix-pr.yml are always-on so they
+    are NOT represented as gates.
+
+    Writes the synthesized payload via `write_state` so the resulting
+    file passes the same schema check a hand-edited gates.json would.
+    Prints the payload + a one-line migration hint.
+    """
+    import json as _json
+    import sys as _sys
+    marker_path = (root or Path(".")) / Path(".dev-kit") / "ci-config.json"
+    installed = set()
+    # Treat a missing OR unreadable/corrupt marker as "no marker" — we
+    # don't want a corrupt file to silently disable gates by accident.
+    # The operator can `ci-doctor` to find the corrupt marker.
+    no_marker = True
+    if marker_path.is_file():
+        try:
+            payload = _json.loads(marker_path.read_text(encoding="utf-8"))
+            runners = payload.get("runners") or []
+            if isinstance(runners, list):
+                installed = {r for r in runners if isinstance(r, str)}
+                no_marker = False
+        except (OSError, ValueError):
+            pass
+    # Build per-gate enabled flags. When no marker is present (fresh
+    # install OR corrupt marker), default everything to enabled; the
+    # operator can `disable` after init.
+    gates = {}
+    for key, default in DEFAULT_GATES.items():
+        workflow = default["workflow"]
+        enabled = True if no_marker else (workflow in installed)
+        gates[key] = dict(default, enabled=enabled)
+    synthesized = {
+        "schema_version": SCHEMA_VERSION,
+        "installed_by": "dev-kit:gate-select",
+        "provider_env_key": "CI_REVIEW_PROVIDER",
+        "gates": gates,
+    }
+    written = write_state(synthesized, root)
+    # Migration hint goes to stderr so it doesn't pollute a JSON capture.
+    print(
+        f"::notice::synthesized gates.json with {sum(g['enabled'] for g in gates.values())} "
+        f"enabled + {sum(not g['enabled'] for g in gates.values())} disabled gates",
+        file=_sys.stderr,
+    )
+    return written
+
+
 def _set_field(state: dict, gate: str, key: str, value: str) -> dict:
     """Set one nested field on the gate entry, parsing stringy bools.
 
@@ -506,6 +567,17 @@ def main(argv=None) -> int:
     sync_p.add_argument("--root", default=None)
     sync_p.add_argument("--repo", default=None)
 
+    init_p = sub.add_parser(
+        "init",
+        help=(
+            "synthesize .dev-kit/gates.json from .dev-kit/ci-config.json runner list. "
+            "Each runner in marker.runners (other than ci.yml + auto-fix-pr.yml) "
+            "becomes a gate with enabled=true; each non-installed workflow "
+            "becomes enabled=false."
+        ),
+    )
+    init_p.add_argument("--root", default=None)
+
     validate_p = sub.add_parser(
         "validate", help="read + validate; exit 0 ok, 2 ValidationError"
     )
@@ -576,6 +648,11 @@ def _dispatch(args) -> int:
                 file=sys.stderr,
             )
             return 1
+        return 0
+    if args.command == "init":
+        root = Path(args.root) if args.root else None
+        out = _init_synthesize(root)
+        print(json.dumps(out, indent=2, sort_keys=True))
         return 0
     if args.command == "validate":
         root = Path(args.root) if args.root else None

@@ -76,16 +76,13 @@ except ImportError:
 # `runners_from_gates` are stubbed to legacy behaviour so install_ci_config
 # keeps working via the `exclude=` path.
 try:
-    from .gates_state import is_enabled, runners_from_gates  # type: ignore
+    from .gates_state import runners_from_gates  # type: ignore
 except ImportError:
     try:
-        from gates_state import is_enabled, runners_from_gates  # type: ignore
+        from gates_state import runners_from_gates  # type: ignore
     except ImportError:
         # 3-file fixture path: no gates.json possible, install proceeds
-        # via the legacy `exclude=` contract. The two stubs never run
-        # when gates.json is absent (the precedence block short-circuits).
-        def is_enabled(*args, **kwargs):  # type: ignore[no-redef]
-            return True
+        # via the legacy `exclude=` contract.
         def runners_from_gates(*args, **kwargs):  # type: ignore[no-redef]
             return None
 
