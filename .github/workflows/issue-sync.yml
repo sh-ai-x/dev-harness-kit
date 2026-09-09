@@ -46,6 +46,14 @@ jobs:
       - name: checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          # Disable credential persistence so a PR-controlled parser
+          # cannot read the `GITHUB_TOKEN` out of `.git/config`. The
+          # default leaves the token in the local git credential
+          # helper; `pull_request` workflows then run untrusted code
+          # from the PR checkout against a credential-bearing Git
+          # config. Setting `persist-credentials: false` keeps the
+          # token out of the filesystem where the parser can see it.
+          persist-credentials: false
           # Sparse-checkout the parser only — the runner doesn't need
           # the full source tree, only the issue-reference parser and
           # its sibling `_repo_name` helper (used by some scripts in
