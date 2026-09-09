@@ -36,59 +36,72 @@ sections:
 
       **Effort**: 3.5 days, 1 developer.
 
-  - title: Phase 1 — Local pre-push hook (Tier A subset)
+  - title: Phase 1 — Local pre-push hook (issue-sync only)
     body: |
-      **Goal**: `hooks/pre-push.sh` runs the deterministic CI subset
-      + issue-sync on every `git push`. Dev-loop time-to-signal drops
-      from 30-60s (GH Actions queue) to <10s.
+      **Goal**: `hooks/pre-push.sh` runs **only the issue-sync stage**.
+      **Local CPU/memory footprint: <10MB RSS, ~9s wall-clock**.
+      **Provider tokens saved per caught stale-ref push: $1-3**
+      (the PR #829 failure mode).
+
+      Branch-policy and cost-flag are **not** in this hook:
+      - `branch-policy` already enforced by `hooks/git-guard.sh`.
+      - `cost-flag` doesn't save tokens (just adds a PR label).
 
       | Task | Owner | LoC | Days |
       |---|---|---|---|
-      | Create `hooks/pre-push.sh` | (TBD) | +120 | 1 |
+      | Create `hooks/pre-push.sh` (issue-sync stage only) | (TBD) | +60 | 0.5 |
+      | Add `tools/issue_sync.py pre-push` subcommand | (TBD) | +50 | 0.5 |
       | Create `bin/install-pre-push.sh` | (TBD) | +30 | 0.3 |
-      | Add `tests/test_pre_push_hook.py` | (TBD) | +80 | 0.7 |
+      | Add `tests/test_pre_push_hook.py` (issue-sync-only fixtures) | (TBD) | +50 | 0.5 |
+      | Add `tests/test_issue_sync_pre_push.py` | (TBD) | +40 | 0.4 |
       | Update `.claude/settings.json` to register hook | (TBD) | +15 | 0.2 |
       | Update `.dev-kit/.active-hooks.json` | (TBD) | +5 | 0.1 |
       | Author `docs/gates/local-pre-push.md` | (TBD) | +150 | 0.5 |
 
       **Acceptance criteria**:
-      - [ ] `git push` from a clean tree exits 0 in <60s.
-      - [ ] `git push` from a tree with a failing test exits 1 with
-            `::error title=pre-push::pytest failed`.
+      - [ ] `git push` from a clean tree exits 0 in <10s.
       - [ ] `git push` from a tree with a stale `Issue #N` ref in the
             latest commit message exits 1 with
             `::error title=pre-push::issue-sync found stale refs`.
-      - [ ] Direct push to `main` blocked with the existing
-            `git-guard.sh` message (no regression).
+      - [ ] **CPU/memory footprint measured**: <50MB RSS during hook
+            execution, no Python process spawn beyond the parser.
+      - [ ] Direct push to `main` still blocked by `git-guard.sh`
+            (no regression; verified by smoke test).
       - [ ] `bin/install-pre-push.sh` is idempotent.
-      - [ ] `docs/gates/local-pre-push.md` covers each gate per
-            the user's request ("각 게이트에 대한 설명을 문서로").
+      - [ ] `docs/gates/local-pre-push.md` covers the issue-sync
+            gate per the user's request ("각 게이트에 대한 설명을 문서로").
 
-      **Effort**: 3 days, 1 developer.
+      **Effort**: 3.0 days, 1 developer.
 
-  - title: Phase 2 — Coverage extension + Tier B fallback polish
+  - title: Phase 2 — Opt-in stages + Tier B fallback polish
     body: |
-      **Goal**: Add the remaining Tier A gates (linear-pr-sync,
-      cost-flag, cache-decay-audit G4+G5) and polish the local
-      fallback for Tier B judges (`bin/review-local.sh` already
-      exists but needs docs + ergonomics).
+      **Goal**: Add **opt-in stages** (`validate`, `lint`, `pytest`,
+      `cache-decay-audit`) under `.dev-kit/local-gates.yaml` config.
+      **All off by default** to preserve local resources. Plus
+      polish the local fallback for Tier B judges
+      (`bin/review-local.sh` already exists but needs docs + ergonomics).
 
       | Task | Owner | LoC | Days |
       |---|---|---|---|
-      | Add `linear-pr-sync --check-only` to pre-push | (TBD) | +30 | 0.5 |
-      | Add `cost-flag` stage to pre-push | (TBD) | +20 | 0.2 |
-      | Add `cache-decay-audit` G4+G5 stage | (TBD) | +30 | 0.5 |
+      | Add opt-in `validate` stage | (TBD) | +15 | 0.2 |
+      | Add opt-in `lint` stage | (TBD) | +10 | 0.2 |
+      | Add opt-in `pytest` stage | (TBD) | +20 | 0.3 |
+      | Add opt-in `cache-decay-audit` stage | (TBD) | +15 | 0.2 |
       | Polish `bin/review-local.sh` ergonomics | (TBD) | +40 | 0.5 |
       | Document `bin/review-local.sh` invocation pattern | (TBD) | +60 | 0.3 |
 
       **Acceptance criteria**:
-      - [ ] All 8 Tier A gates covered.
+      - [ ] `local-gates.yaml.example` ships with all 4 opt-in
+            stages commented out (`enabled: false`).
+      - [ ] Users who copy it to `local-gates.yaml` and set
+            `test: true` see pytest run on every push (other
+            stages stay off).
       - [ ] `bin/review-local.sh --help` shows 1-line examples for
             each provider.
-      - [ ] `docs/gates/local-pre-push.md` updated with linear-pr-sync
-            and cost-flag sections.
+      - [ ] `docs/gates/local-pre-push.md` documents the opt-in
+            contract explicitly.
 
-      **Effort**: 2 days, 1 developer.
+      **Effort**: 1.7 days, 1 developer.
 
   - title: Phase 3 — Branch-protection hardening
     body: |
@@ -131,7 +144,9 @@ sections:
           branch-protection hardening                :p3a, after p2b, 1d
       ```
 
-      **Total**: 9.2 days, single developer.
+      **Total**: 7.9 days, single developer (Phase 1: 3.0d issue-sync
+      only; Phase 2: 1.7d opt-in stages; Phase 3: 0.7d branch-protection;
+      rest is testing + docs).
 
   - title: Per-phase risk + rollback
     body: |
@@ -146,17 +161,23 @@ sections:
     body: |
       | Metric | Baseline (2026-09-09) | Target (post-Phase 3) |
       |---|---|---|
+      | **Provider tokens spent on caught Tier-A failures** | $1-3 per caught failure | **$0** (push blocked pre-LLM) |
       | PRs merged with a red `issue-sync` gate | 1 (PR #829) | **0** |
-      | Mean time from `git push` to first red signal | 30-60s (GH Actions queue) | **<10s** (pre-push) |
-      | Local `git push` rejection rate for Tier A gates | 0% (no signal) | **5-15%** (catches real bugs) |
-      | LLM-judge API spend per PR | $1-3.50 | **unchanged** (Tier B unchanged) |
-      | GH Actions minutes per PR (average) | 8-12 min | **8-12 min** (no change) |
-      | Developer-reported "rerun CI until green" incidents | ~3-5/week (qualitative) | **0** |
+      | Provider tokens spent on a successful PR (3 push iterations) | $3-9 | **$3-9** (unchanged — judges fire on green pushes) |
+      | GH Actions minutes per PR (average) | 8-12 min | **8-12 min** (unchanged) |
+      | Local pre-push hook install rate | 0% | **>80%** of active contributors |
+      | Severity review (LLM fan-out + PR comments) location | GH Actions | **GH Actions** (unchanged — must stay) |
+
+      **The headline metric is provider token spend on caught Tier-A
+      failures, not wall-clock time.** If we save $0 of provider tokens,
+      the proposal has failed — even if developer wall-clock improves
+      50%.
 
       Track via:
-      - `.dev-kit/.active-hooks.json` (pre-push install count)
-      - `gh api repos/:owner/:repo/actions/runs` (red-push rate over time)
-      - `tools/token_efficiency_analyzer.py` (developer-side cost)
+      - `tools/token_efficiency_analyzer.py` — per-session provider cost
+      - `gh api repos/:owner/:repo/actions/runs` — red-push rate over time
+      - `tools/cost_dashboard.py` — gate-by-gate provider spend
+      - `.dev-kit/.active-hooks.json` — pre-push hook install count
 
   - title: Cross-references
     body: |

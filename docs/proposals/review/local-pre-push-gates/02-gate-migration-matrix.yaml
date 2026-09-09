@@ -4,40 +4,89 @@ date: 2026-09-09
 tags: [ci, gates, tier-a, tier-b, tier-c, migration-matrix]
 
 sections:
-  - title: Decision rule
+  - title: Decision rule (3-axis)
     body: |
       For each gate, ask three questions in order:
 
-      1. **Is it deterministic?** (Same input → same output.)
-         If no → Tier B (remote) or Tier C (post-merge).
-      2. **Does it need network state that the developer doesn't have?**
-         (e.g. `gh api` for issue states, Linear API, provider LLM key.)
-         If yes → Tier B.
-      3. **Does it take >5s to complete locally?**
-         If yes → Tier B (pre-push hook would make pushes feel slow).
+      1. **Does it cost provider tokens?** (i.e. does it call an
+         LLM judge — `/dev-kit:review`, `/dev-kit:security`,
+         `/dev-kit:maintenance`?)
+         If yes → **Tier B (must stay remote)**. Severity review
+         comments belong in GH Actions because that's where the
+         provider tokens are intentionally spent and where the PR
+         comments land.
 
-      A gate is **Tier A** iff all three answers are: deterministic, no-network-required, <5s.
+      2. **Does it consume significant local CPU/memory?**
+         (`pytest tests/` on a large suite can run 30-120s + several
+         GB RAM; `cache-decay-audit` runs a subset of pytest too.)
+         If yes → **Tier A optional** (opt-in via config flag, NOT
+         on by default). The user's local machine has bounded
+         resources; the pre-push hook must not become a battery/CPU
+         drain on every push.
 
-      A gate is **Tier C** iff it is triggered by a merge event (e.g.
-      `version-bump.yml`).
+      3. **Does it fail in a way the developer can fix before
+         pushing?** (i.e. is the failure mode visible in the diff,
+         commit message, or staged file content — not external state?)
+         If yes → **Tier A (local pre-push)**. The point is to
+         **prevent LLM judges from firing on a known-broken push**.
+         Tokens saved per caught failure: $1-3.
 
-      Everything else is **Tier B** (remote-only).
+      4. **Is it triggered by a merge event?** (e.g. `version-bump.yml`
+         fires on `pull_request: closed` after main merge.)
+         If yes → **Tier C (post-merge only)**. No pre-push mirror
+         needed.
 
-  - title: Tier A — local pre-push (8 gates)
+      A gate is **Tier A core** iff: cheap locally (axis 2 = no)
+      AND fixable pre-push (axis 3 = yes).
+      A gate is **Tier A opt-in** iff: expensive locally (axis 2 = yes)
+      AND fixable pre-push (axis 3 = yes).
+      A gate is **Tier B** iff: costs provider tokens (axis 1 = yes).
+      A gate is **Tier C** iff: post-merge trigger (axis 4 = yes).
+
+  - title: "Tier A — local pre-push (split: core vs opt-in)"
     body: |
-      | Gate | Local command | Hook stage | Wall-clock | Determinism |
-      |---|---|---|---|---|
-      | `test` | `python -m pytest tests/ -q --tb=line -x` | stage 1 (fail-fast) | ~30s | yes (no API) |
-      | `validate` | `python scripts/validate.py` | stage 1 | ~10s | yes |
-      | `lint` | `ruff check .` | stage 1 | ~7s | yes |
-      | `branch-policy` | `git rev-parse --abbrev-ref HEAD` | stage 0 (cheapest) | <1s | yes |
-      | **`issue-sync`** | `tools/issue_sync.py parse` + optional `gh api` | stage 2 (post-test) | ~9s | yes (parser) + optional network |
-      | `linear-pr-sync` | `tools/linear_sync.py --check-only` | stage 2 | ~7s | yes + optional network |
-      | `cost-flag` | `git diff --name-only origin/main...HEAD \| grep` | stage 0 | <1s | yes |
-      | `cache-decay-audit` (G4+G5) | `pytest tests/test_cache_decay.py tests/test_skill_frontmatter.py -q` | stage 1 | ~30s | yes |
+      ### Tier A core — **RECOMMENDED DEFAULT** (always on; cheap locally)
 
-      **Total deterministic wall-clock**: ~30-90s on a clean tree,
-      <10s on warm pytest cache. Acceptable for a `git push`.
+      **Recommended shipping scope**: `issue-sync` only. This is the
+      only stage that actually saves provider tokens; everything else
+      in this proposal is opt-in.
+
+      | Gate | Local command | Wall-clock | CPU/mem | Token-saving |
+      |---|---|---|---|---|
+      | **`issue-sync`** | `tools/issue_sync.py pre-push --remote origin --base origin/main --strict` | ~9s + 1 `gh api` per ref | <10MB RSS | **$1-3 per caught stale-ref push** |
+
+      **Tier A core wall-clock**: ~9s on a warm tree. CPU/memory
+      footprint: <10MB RSS (just the parser). Zero pytest, zero ruff,
+      zero validate — until user opts in below.
+
+      **Why issue-sync is the only recommended default**: it is the
+      only Tier A gate that catches a failure mode invisible to GH
+      Actions' deterministic gates AND saves provider tokens by blocking
+      the LLM judges. Other Tier A gates are token-neutral (they catch
+      failures that GH Actions would catch anyway) or only marginally
+      useful (faster feedback, but the failure doesn't waste tokens).
+
+      ### Tier A additional (default-off; cheap but not token-saving)
+
+      These stages are also off by default. They consume negligible
+      resources but don't save provider tokens. Listed for completeness —
+      may ship as opt-in in a future iteration if user feedback shows demand.
+
+      | Gate | Local command | Wall-clock | Why not default |
+      |---|---|---|---|
+      | `branch-policy` | `git rev-parse --abbrev-ref HEAD` | <1s | **Already covered by `hooks/git-guard.sh`** (PreToolUse `Bash`). Re-implementing here would be a duplicate |
+      | `cost-flag` | `git diff --name-only origin/main...HEAD \| grep` | <1s | Doesn't save tokens; just adds a PR label. Remote gate handles this |
+
+      ### Tier A omitted (not migrated)
+
+      These gates are **NOT migrated** even as opt-in:
+
+      | Gate | Why omitted |
+      |---|---|
+      | `linear-pr-sync --check-only` | Network call + Python; Linear API state is rarely fixable pre-push (best-effort remote sync is fine) |
+      | `prompt-injection static filter` | Pattern scan over the full diff can be CPU-expensive on large PRs; the workflow's regex set is stricter than the local one anyway |
+      | `merge-queue-ready-check` | GH API state aggregator (read-only) |
+      | `cache-decay-audit` (full G4) | G4 alone is the heaviest pytest subset (~60s); the user explicitly said local resources matter |
 
       **The `gh api` call in issue-sync is optional**:
       - With `--offline`: parser emits the ref list and warns
@@ -45,9 +94,6 @@ sections:
         if they want the fail-fast signal.
       - Without `--offline` (default): runs the same `gh api` check
         as the workflow. The developer needs `gh auth status` green.
-      - **Alternative**: use `gh pr view --json body,title` after
-        `git push` to fill in the missing metadata. Documented
-        in `03-implementation.yaml`.
 
   - title: Tier B — remote-only GH Actions (5 gates)
     body: |
@@ -76,14 +122,21 @@ sections:
 
   - title: Migration deltas
     body: |
-      | Metric | Before | After Tier-A migration |
-      |---|---|---|
-      | Gates with local pre-push mirror | 0 | **8** |
-      | Gates that still surface red only on GH Actions | 11 | **3** (LLM judges + fork-pr) |
-      | Average time-to-signal on a bad push | 30-60s (queue) + gate-runtime | **<10s** (pre-push) |
-      | Pushes that go through a red deterministic gate | baseline (PR #829: 1) | **0** (for Tier-A gates) |
-      | LLM-judge API spend per PR | $1-3.50 | unchanged (Tier B unchanged) |
-      | GH Actions minutes saved | 0 | ~3-5 min/PR on Tier-A failures |
+      | Metric | Before | After Phase 1 (Tier A core only) | After Phase 2 (Tier A core + opt-in) |
+      |---|---|---|---|
+      | Provider tokens spent on a stale-ref push | $1-3 (LLM judges fire) | **$0** (issue-sync catches pre-LLM) | $0 (same) |
+      | Provider tokens spent on a failing-test push | $1-3 | $1-3 (Tier A opt-in off by default) | **$0** (if user opts in) |
+      | Provider tokens spent on a successful PR | $3-9 (3 push iterations × 3 judges) | $3-9 unchanged | $3-9 unchanged |
+      | Local CPU/memory cost per push | 0 | ~10s + negligible RAM | ~30-120s + 200-500MB RAM (if opt-in enabled) |
+      | Pushes that reach GH Actions with a known-broken state | baseline (PR #829: 1) | **0** for issue-sync / branch-policy / cost-flag | **0** for all Tier A gates (if opted in) |
+      | Severity review / LLM fan-out location | GH Actions | **GH Actions** (unchanged — must stay) | GH Actions (unchanged) |
+      | GH Actions minutes per PR | 8-12 min | 8-12 min unchanged | 8-12 min unchanged |
+
+      **Headline win**: Phase 1 alone saves $1-3 of provider tokens
+      per stale-ref push (the PR #829 failure mode) at <10s wall-clock
+      + negligible local resource cost. **No opt-in config needed.**
+      Phase 2's opt-in stages (test/validate/lint) are for users who
+      explicitly want to save more tokens at the cost of local CPU.
 
   - title: Why this is NOT a CI runtime optimizer
     body: |
@@ -102,8 +155,18 @@ sections:
   - title: What this is NOT
     body: |
       - **Not a wholesale CI migration.** No remote gate is removed.
-      - **Not a substitute for LLM judges.** Tier B stays remote.
-      - **Not a CI runtime cost reduction.** See above.
+      - **Not a substitute for LLM judges / severity review.** Tier B
+        stays remote. PR comments from `/dev-kit:review` / `/dev-kit:security`
+        / `/dev-kit:maintenance` must land in GH Actions because that's
+        where the comments are posted.
+      - **Not a CI runtime cost reduction.** GH Actions minutes per PR
+        are unchanged. The win is **provider token spend on caught
+        Tier-A failures**, not GH Actions minutes.
+      - **Not a mandate to migrate `test` / `validate` / `lint`.** Those
+        gates cost zero provider tokens and can stay in GH Actions.
+        They land in `hooks/pre-push.sh` because they're already part
+        of the orchestration; the user has explicitly said they're not
+        the bottleneck.
       - **Not a magic bullet for fork-PRs.** `fork-pr-review.yml`
         is a different problem (GitHub security model — fork PRs
         can't access secrets) and stays as-is.

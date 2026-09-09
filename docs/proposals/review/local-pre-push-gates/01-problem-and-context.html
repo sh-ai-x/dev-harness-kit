@@ -375,10 +375,10 @@ fi</code></pre>
 <hr class="section-divider">
 
 <h2 id="sec-4">Cost profile (why per-push LLM judges are non-starter)</h2>
-<p>Adding the <strong>wall-clock</strong> of all blocking gates per push:</p>
-<ul><li><code>test</code> + <code>validate</code> + <code>lint</code>: ~2m30s (mostly test install)</li><li><code>cache-decay-audit</code> (G4+G5): ~2m12s</li><li><code>prompt-injection static filter</code>: ~10s</li><li><code>/dev-kit:review</code> (3-dim): ~1m44s, <strong>+provider API cost</strong></li><li><code>/dev-kit:security</code> (10-dim): ~2m22s, <strong>+provider API cost</strong></li><li><code>/dev-kit:maintenance</code>: ~3m45s, <strong>+provider API cost</strong></li><li><code>issue-sync</code>: ~9s, <strong>+`gh api` call</strong></li></ul>
-<p>Total <strong>deterministic</strong> wall-clock: ~5m (testable locally) Total <strong>LLM-judge</strong> wall-clock: ~8m <strong>+ ~$0.50-2.00 per push</strong></p>
-<p>Running LLM judges per push is <strong>3 orders of magnitude</strong> more expensive than the deterministic subset. The migration matrix must reflect this.</p>
+<p>Adding the <strong>provider-token cost</strong> of all blocking gates per push (the headline metric; wall-clock shown for context):</p>
+<ul><li><code>test</code> + <code>validate</code> + <code>lint</code>: ~2m30s wall-clock, <strong>$0 tokens</strong></li><li><code>cache-decay-audit</code> (G4+G5): ~2m12s, <strong>$0 tokens</strong></li><li><code>prompt-injection static filter</code>: ~10s, <strong>$0 tokens</strong></li><li><code>/dev-kit:review</code> (3-dim): ~1m44s, <strong>~$0.10-0.50 per push</strong></li><li><code>/dev-kit:security</code> (10-dim): ~2m22s, <strong>~$0.50-2.00 per push</strong></li><li><code>/dev-kit:maintenance</code>: ~3m45s, <strong>~$0.30-1.00 per push</strong></li><li><code>issue-sync</code>: ~9s, <strong>$0 tokens</strong> (uses <code>gh api</code>)</li></ul>
+<p>Total <strong>deterministic</strong> cost per push: <strong>$0</strong> (no provider tokens) Total <strong>LLM-judge</strong> cost per push: <strong>~$1-3.50</strong></p>
+<p>Running LLM judges per push is <strong>2-3 orders of magnitude</strong> more expensive than the deterministic subset in provider tokens, and <strong>the only metric that matters for this proposal</strong>. Wall-clock is secondary. The migration matrix must reflect this.</p>
 <hr class="section-divider">
 
 <h2 id="sec-5">Local hook inventory (what already exists)</h2>

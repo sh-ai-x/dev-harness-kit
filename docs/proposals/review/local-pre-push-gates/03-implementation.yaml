@@ -8,15 +8,20 @@ sections:
     body: |
       | File | Action | LoC | Purpose |
       |---|---|---|---|
-      | `hooks/pre-push.sh` | CREATE | ~120 | Single orchestrator that runs Tier A in stages 0-2 |
-      | `tools/issue_sync.py` | MODIFY | +40 / -5 | Add `--lenient` flag, `--offline` flag, `--body-from-pr <N>` helper |
-      | `tests/test_pre_push_hook.py` | CREATE | ~80 | Hook smoke test (3 fixtures: clean / fail-test / fail-issue-sync) |
+      | `hooks/pre-push.sh` | CREATE | ~60 | Single orchestrator; only always-on stage is issue-sync. Opt-in stages (validate/lint/pytest/cache-decay) wired via config |
+      | `tools/issue_sync.py` | MODIFY | +50 / -5 | Add `--lenient` flag, `--offline` flag, `--strict` (default for hook), `pre-push` subcommand |
+      | `.dev-kit/local-gates.yaml.example` | CREATE | ~20 | Opt-in config template (copy to `local-gates.yaml` to enable) |
+      | `tests/test_pre_push_hook.py` | CREATE | ~50 | Hook smoke test (3 fixtures: clean / fail-issue-sync / opt-in-on) |
+      | `tests/test_issue_sync_pre_push.py` | CREATE | ~40 | pre-push subcommand parity |
       | `tests/test_issue_sync_lenient.py` | CREATE | ~60 | Lenient vs strict parser parity |
-      | `.git/hooks/pre-push` (or `bin/install-pre-push.sh`) | CREATE | ~30 | Install script that symlinks/copies the hook |
-      | `.dev-kit/.active-hooks.json` | MODIFY | +5 | Register new hook as advisory |
+      | `bin/install-pre-push.sh` | CREATE | ~30 | Install script (idempotent, worktree-aware) |
+      | `.github/workflows/issue-sync.yml` | MODIFY | -50 / +20 | Switch from bash loop to `pre-push` subcommand; honor `audit-trail` label |
+      | `.claude/settings.json` | MODIFY | +15 | Register hook as advisory (Claude Code integration) |
+      | `.dev-kit/.active-hooks.json` | MODIFY | +5 | Register new hook |
       | `docs/gates/local-pre-push.md` | CREATE | ~150 | Per-gate contract (the doc the user asked for) |
 
-      **Total**: 6 files, ~+485 LoC, all additive.
+      **Total**: 11 files, ~+455 LoC, all additive (was ~540 — reduced by
+      removing branch-policy/cost-flag stages).
 
   - title: "hooks/pre-push.sh design"
     body: |
@@ -32,74 +37,107 @@ sections:
       REPO_ROOT="$(git rev-parse --show-toplevel)"
       cd "$REPO_ROOT"
 
-      # ── Stage 0: branch-policy (<1s, fail-fast) ─────────────────────
-      BRANCH=$(git rev-parse --abbrev-ref HEAD)
-      if [ "$BRANCH" = "main" ]; then
-          echo "::error title=pre-push::direct push to main is policy violation" >&2
-          echo "  Fix: create a worktree (\`/dev-kit:bootstrap\` or \`git worktree add\`)" >&2
-          exit 1
-      fi
-
-      # ── Stage 0: cost-flag (<1s, label-only) ────────────────────────
-      COST_FILES=$(git diff --name-only origin/main...HEAD \
-          | grep -E '^(docs/llm-info/|bin/set-provider\.sh|tools/(llm_refresh|set_provider)\.py)' || true)
-      if [ -n "$COST_FILES" ]; then
-          echo "::notice title=pre-push::cost-impacting files changed:"
-          echo "$COST_FILES" | sed 's/^/    /'
-          echo "  Action: add 'cost-flag' label to PR (or skip if no LLM cost impact)" >&2
-      fi
-
-      # ── Stage 1: deterministic CI subset (~30s warm) ───────────────
-      echo "[1/3] pytest..."
-      python -m pytest tests/ -q --tb=line -x \
-          --ignore=tests/test_review_gate.py \
-          --ignore=tests/test_security_gate.py \
-          || { echo "::error title=pre-push::pytest failed"; exit 1; }
-
-      echo "[1/3] validate..."
-      python scripts/validate.py \
-          || { echo "::error title=pre-push::validate failed"; exit 1; }
-
-      echo "[1/3] ruff..."
-      ruff check . \
-          || { echo "::error title=pre-push::ruff failed"; exit 1; }
-
-      # ── Stage 1: cache-decay-audit subset (~30s) ───────────────────
-      echo "[1/3] cache-decay-audit (G4+G5)..."
-      python -m pytest tests/test_cache_decay.py tests/test_skill_frontmatter.py -q --tb=line -x \
-          || { echo "::error title=pre-push::G4/G5 cache-decay failed"; exit 1; }
-
-      # ── Stage 2: issue-sync (~9s, optional gh api) ─────────────────
-      echo "[2/3] issue-sync (with gh api state check)..."
+      # ── Stage 1: issue-sync (RECOMMENDED DEFAULT; ~9s + 1 gh api per ref) ───
+      # This is the ONLY always-on stage. It is the only Tier A gate that
+      # saves provider tokens by preventing LLM judges from firing on
+      # pushes with stale Issue #N refs in commit messages.
+      echo "[core] issue-sync..."
       python tools/issue_sync.py pre-push \
           --remote origin \
           --base origin/main \
+          --strict \
           || { echo "::error title=pre-push::issue-sync found stale refs"; exit 1; }
 
-      # ── Stage 3: linear-pr-sync (~7s, best-effort) ─────────────────
-      if [ -n "${LINEAR_API_KEY:-}" ]; then
-          echo "[3/3] linear-pr-sync (best-effort)..."
-          python tools/linear_sync.py --check-only \
-              || echo "::notice title=pre-push::linear check failed (continuing — non-blocking)"
+      # ── Stage 2: opt-in stages (off by default; expensive locally) ──
+      # Read opt-in config from .dev-kit/local-gates.yaml. Absence = opt-out.
+      OPT_IN_CONFIG="$REPO_ROOT/.dev-kit/local-gates.yaml"
+      if [ -f "$OPT_IN_CONFIG" ]; then
+          RUN_TEST=$(yq -r '.test // false' "$OPT_IN_CONFIG" 2>/dev/null || echo "false")
+          RUN_VALIDATE=$(yq -r '.validate // false' "$OPT_IN_CONFIG" 2>/dev/null || echo "false")
+          RUN_LINT=$(yq -r '.lint // false' "$OPT_IN_CONFIG" 2>/dev/null || echo "false")
+          RUN_CACHE_DECAY=$(yq -r '.cache_decay_audit // false' "$OPT_IN_CONFIG" 2>/dev/null || echo "false")
       else
-          echo "[3/3] linear-pr-sync skipped (LINEAR_API_KEY not set)"
+          RUN_TEST=false; RUN_VALIDATE=false; RUN_LINT=false; RUN_CACHE_DECAY=false
       fi
 
+      # ── Stage 2a: validate (~10s, 50MB RAM) ───────────────────────
+      if [ "$RUN_VALIDATE" = "true" ]; then
+          echo "[opt-in] validate..."
+          python scripts/validate.py \
+              || { echo "::error title=pre-push::validate failed"; exit 1; }
+      fi
+
+      # ── Stage 2b: ruff (~7s, 30MB RAM) ────────────────────────────
+      if [ "$RUN_LINT" = "true" ]; then
+          echo "[opt-in] ruff..."
+          ruff check . \
+              || { echo "::error title=pre-push::ruff failed"; exit 1; }
+      fi
+
+      # ── Stage 2c: pytest subset (~30-120s, 200-500MB RAM) ─────────
+      if [ "$RUN_TEST" = "true" ]; then
+          echo "[opt-in] pytest subset..."
+          python -m pytest tests/ -q --tb=line -x \
+              --ignore=tests/test_review_gate.py \
+              --ignore=tests/test_security_gate.py \
+              || { echo "::error title=pre-push::pytest failed"; exit 1; }
+      fi
+
+      # ── Stage 2d: cache-decay-audit (~30s, 200MB RAM) ─────────────
+      if [ "$RUN_CACHE_DECAY" = "true" ]; then
+          echo "[opt-in] cache-decay-audit (G4+G5)..."
+          python -m pytest tests/test_cache_decay.py tests/test_skill_frontmatter.py -q --tb=line -x \
+              || { echo "::error title=pre-push::G4/G5 cache-decay failed"; exit 1; }
+      fi
+
+      # ── Summary ────────────────────────────────────────────────────
+      ENABLED_STAGES="issue-sync"
+      [ "$RUN_VALIDATE" = "true" ]   && ENABLED_STAGES="$ENABLED_STAGES + validate"
+      [ "$RUN_LINT" = "true" ]       && ENABLED_STAGES="$ENABLED_STAGES + lint"
+      [ "$RUN_TEST" = "true" ]       && ENABLED_STAGES="$ENABLED_STAGES + pytest"
+      [ "$RUN_CACHE_DECAY" = "true" ] && ENABLED_STAGES="$ENABLED_STAGES + cache-decay-audit"
+
       echo ""
-      echo "✓ pre-push gates passed (branch-policy, cost-flag, test, validate, lint, G4/G5, issue-sync, linear-pr-sync)"
+      echo "✓ pre-push gates passed: $ENABLED_STAGES"
+      echo "  (opt-in stages off by default — see .dev-kit/local-gates.yaml)"
       ```
 
       **Stages**:
-      - **Stage 0** (1s): branch + cost label. Fail-fast.
-      - **Stage 1** (30s): deterministic CI subset. `--ignore=`
-        the LLM-judge-dependent tests so a developer without
-        provider keys can still push.
-      - **Stage 2** (10s): issue-sync with `gh api` check.
-      - **Stage 3** (10s): linear-pr-sync, best-effort.
+      - **Stage 1** (always on, recommended default): **issue-sync** with
+        `gh api` check. ~9s wall-clock + <10MB RSS. **The load-bearing
+        stage** — saves $1-3 of provider tokens per caught stale-ref push.
+      - **Stage 2** (opt-in, off by default): validate, lint, pytest,
+        cache-decay-audit. Each requires `enabled: true` in
+        `.dev-kit/local-gates.yaml` because they consume measurable
+        local CPU/memory (30-120s + 200-500MB RAM).
 
-      **Total wall-clock**: 30-60s warm, 60-120s cold. Below the
-      5-minute wall-clock threshold the user explicitly mentioned
-      ("반복적으로 돌릴 필요 없이").
+      **Default Tier A wall-clock** (always-on stage only):
+      ~9s + <10MB RSS. **Local resource footprint: zero pytest, zero ruff,
+      zero validate until user opts in.**
+
+      **Why branch-policy and cost-flag are NOT in this hook**:
+      - `branch-policy` is already enforced by `hooks/git-guard.sh`
+        (PreToolUse `Bash`). Re-implementing it in `pre-push.sh` would
+        duplicate the same check.
+      - `cost-flag` adds a PR label but doesn't save provider tokens —
+        the remote gate handles labeling.
+
+      **Why this is the right shape (minimal patch)**:
+      - Stage 1 (issue-sync) catches **the failure mode that triggered
+        PR #829** — stale `Issue #N` refs in commit messages.
+      - Stage 1 alone saves $1-3 of provider tokens per caught
+        stale-ref push.
+      - Stage 2 stages (test/validate/lint/cache-decay) catch other
+        common failure modes but consume 30-120s + 200-500MB RAM.
+        They ship as opt-in so users with constrained local resources
+        (battery-powered laptops, CI runners, dev containers) don't
+        pay the CPU cost on every push.
+      - The user explicitly flagged local CPU/memory as a concern:
+        "로컬의 메모리나 CPU 자원을 최대한 아껴야하는 문제가 있긴해."
+        Opt-in stages honor that constraint.
+      - **Minimal patch principle**: existing functionality (the broader
+        Tier A matrix, opt-in config plumbing, all 4 opt-in stages)
+        stays. We only amend the **default** to be issue-sync-only.
 
   - title: "tools/issue_sync.py — new flags"
     body: |
@@ -108,12 +146,21 @@ sections:
       ### `--lenient`
       Softens the gate contract:
       - `Closes #N` / `Fixes #N` / `Resolves #N` against a closed issue → **HARD FAIL** (unchanged)
-      - `Related to #N` / `See #N` / `Part of #N` / `Tracking #N` / `Ref #N` against a closed issue → **WARN** (pass with `::warning`)
+      - `Related to #N` / `See #N` / `Part of #N` / `Tracking #N` / `Ref #N` / `Issue #N` against a closed issue → **WARN** (pass with `::warning`)
       - Bare `#N` against a closed issue → **HARD FAIL** (ambiguous)
 
-      Rationale: PR #829's body had `Related to #N` for closed issues
-      (audit-trail preservation). The user wants to keep those refs
-      in the body; the gate just shouldn't fail on them.
+      Rationale: PR #829's body had `Issue #N` (not `Closes #N`)
+      for closed issues — audit-trail preservation. The user wants
+      to keep those refs in the body; the gate just shouldn't fail
+      on them. **The keyword set expansion (`Issue` added to
+      `_REF_KEYWORDS`) is the load-bearing change** — without it,
+      the lenient branch doesn't fire and the gate still fails on
+      `Issue #N` refs.
+
+      Default for the **remote** gate: `--lenient` (so audit-trail
+      refs don't block merges).
+      Default for the **local** pre-push hook: **strict** (so the
+      developer catches real bugs early, before LLM judges fire).
 
       ### `--offline`
       Skips the `gh api` call. Parser emits:
@@ -210,6 +257,46 @@ sections:
 
       All tests use `pytest` fixtures; no live `gh api` calls.
       `gh api` is mocked with `unittest.mock.patch`.
+
+  - title: PR body refs — `audit-trail` label approach (closes PR #829)
+    body: |
+      **The gap**: PR #829's failure was on the PR **body** (the
+      developer's PR description on GitHub), not the commit message.
+      A pre-push hook that only checks commit messages catches the
+      **same bug class** but on a different surface. To handle the
+      PR body case without breaking audit-trail preservation, the
+      remote gate adopts an `audit-trail` label:
+
+      ```
+      # Remote workflow behavior
+      if has_label("audit-trail"):
+          # Lenient: warn on `Issue #N (closed)`, fail on `Closes #N (closed)`
+          run_issue_sync(strict_for_close_keywords_only=True)
+      else:
+          # Default strict: fail on ANY closed ref
+          run_issue_sync(strict=True)
+      ```
+
+      **How a developer uses it**: open a PR with `Issue #N (closed)`
+      refs in the body for audit-trail preservation, then apply the
+      `audit-trail` label before requesting review. The remote gate
+      runs in lenient mode and warns (but does not fail) on the
+      closed refs. The LLM judges still fire (because that's where
+      provider tokens are intentionally spent), and the developer
+      explains the audit trail in the PR conversation.
+
+      **Implementation**: `tools/issue_sync.py pre-pash` (the new
+      subcommand) reads `--audit-trail` flag. The remote workflow
+      checks `github.event.pull_request.labels` for the label and
+      passes the flag accordingly. No breaking changes to the
+      default behavior.
+
+      **Why this is a minimal patch**:
+      - The existing `--lenient` flag is reused. We just add a
+        workflow-side label-check to set it conditionally.
+      - Existing keyword set (after adding `Issue`) is unchanged.
+      - Local pre-push hook stays strict (commit message refs
+        should always be live, no audit-trail rationale for commits).
 
   - title: Cross-references
     body: |

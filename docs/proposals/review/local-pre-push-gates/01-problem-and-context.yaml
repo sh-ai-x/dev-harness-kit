@@ -121,21 +121,23 @@ sections:
 
   - title: Cost profile (why per-push LLM judges are non-starter)
     body: |
-      Adding the **wall-clock** of all blocking gates per push:
-      - `test` + `validate` + `lint`: ~2m30s (mostly test install)
-      - `cache-decay-audit` (G4+G5): ~2m12s
-      - `prompt-injection static filter`: ~10s
-      - `/dev-kit:review` (3-dim): ~1m44s, **+provider API cost**
-      - `/dev-kit:security` (10-dim): ~2m22s, **+provider API cost**
-      - `/dev-kit:maintenance`: ~3m45s, **+provider API cost**
-      - `issue-sync`: ~9s, **+`gh api` call**
+      Adding the **provider-token cost** of all blocking gates per push
+      (the headline metric; wall-clock shown for context):
+      - `test` + `validate` + `lint`: ~2m30s wall-clock, **$0 tokens**
+      - `cache-decay-audit` (G4+G5): ~2m12s, **$0 tokens**
+      - `prompt-injection static filter`: ~10s, **$0 tokens**
+      - `/dev-kit:review` (3-dim): ~1m44s, **~$0.10-0.50 per push**
+      - `/dev-kit:security` (10-dim): ~2m22s, **~$0.50-2.00 per push**
+      - `/dev-kit:maintenance`: ~3m45s, **~$0.30-1.00 per push**
+      - `issue-sync`: ~9s, **$0 tokens** (uses `gh api`)
 
-      Total **deterministic** wall-clock: ~5m (testable locally)
-      Total **LLM-judge** wall-clock: ~8m **+ ~$0.50-2.00 per push**
+      Total **deterministic** cost per push: **$0** (no provider tokens)
+      Total **LLM-judge** cost per push: **~$1-3.50**
 
-      Running LLM judges per push is **3 orders of magnitude** more
-      expensive than the deterministic subset. The migration matrix
-      must reflect this.
+      Running LLM judges per push is **2-3 orders of magnitude** more
+      expensive than the deterministic subset in provider tokens, and
+      **the only metric that matters for this proposal**. Wall-clock
+      is secondary. The migration matrix must reflect this.
 
   - title: Local hook inventory (what already exists)
     body: |
