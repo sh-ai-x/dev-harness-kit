@@ -60,16 +60,18 @@ class TestMaintenanceGateJobIf(unittest.TestCase):
         cls.body = WORKFLOW.read_text(encoding="utf-8")
 
     def test_gate_job_has_if(self) -> None:
-        # The `gate:` job header must include the `if:` line that reads
-        # the GHA repo variable. Pin the literal string so the SSOT
-        # contract is enforced verbatim.
+        # The `gate:` job header must include an `if:` expression that
+        # reads `vars.GATES_MAINTENANCE_ENABLED != 'false'`. maintenance.yml
+        # uses a folded scalar (`if: |`) so the variable reference lives
+        # inside a multi-line block; the regex pins the variable token
+        # along with its comparison operator (verbatim literal 'false').
         self.assertRegex(
             self.body,
             re.compile(
-                r"^\s*if:\s*vars\.GATES_MAINTENANCE_ENABLED\s*!=\s*'false'\s*$",
+                r"vars\.GATES_MAINTENANCE_ENABLED\s*!=\s*'false'",
                 re.MULTILINE,
             ),
-            "gate job must `if: vars.GATES_MAINTENANCE_ENABLED != 'false'`",
+            "gate job must reference `vars.GATES_MAINTENANCE_ENABLED != 'false'`",
         )
 
     def test_gate_job_var_matches_lib_gates_state(self) -> None:
@@ -94,16 +96,13 @@ class TestMaintenanceGateJobIf(unittest.TestCase):
         # gate if: — the judge must always run so the verdict is posted
         # and the human gate (REVIEW_REQUIRED / CHANGES_REQUESTED) can
         # decide merge even when vars.GATES_MAINTENANCE_ENABLED is 'false'.
-        # We check there's exactly ONE `if: vars.GATES_MAINTENANCE_ENABLED`
-        # line in the file (on the gate job), and zero `if:` lines on
-        # the maintenance_judge job header.
-        lines_with_if = [
-            ln.strip() for ln in self.body.splitlines()
-            if ln.strip().startswith("if: vars.GATES_MAINTENANCE_ENABLED")
-        ]
+        # The substring `vars.GATES_MAINTENANCE_ENABLED` must appear exactly
+        # once (on the gate job's folded `if:` block) and never as a
+        # standalone `if:` line on the judge job.
+        var_occurrences = self.body.count("vars.GATES_MAINTENANCE_ENABLED")
         self.assertEqual(
-            len(lines_with_if), 1,
-            f"expected exactly 1 GATES_MAINTENANCE_ENABLED if: line, found {len(lines_with_if)}",
+            var_occurrences, 1,
+            f"expected exactly 1 GATES_MAINTENANCE_ENABLED occurrence, found {var_occurrences}",
         )
 
 

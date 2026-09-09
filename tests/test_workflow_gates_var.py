@@ -35,6 +35,11 @@ class TestEachWorkflowGateIf(unittest.TestCase):
     ]
 
     def test_each_template_has_correct_gate_if(self) -> None:
+        # The contract is `vars.<VAR> != 'false'` somewhere in the gate
+        # job's effective `if:` expression. review.yml + security.yml use
+        # a single-line `if:`; maintenance.yml uses a folded scalar that
+        # AND-s the var check with the existing expression. Either form
+        # is acceptable; the test pins the variable token + comparison.
         for fname, gate_key in self.CASES:
             with self.subTest(workflow=fname, gate=gate_key):
                 path = TEMPLATES / fname
@@ -42,31 +47,30 @@ class TestEachWorkflowGateIf(unittest.TestCase):
                 body = path.read_text(encoding="utf-8")
                 expected_var = gates_state.DEFAULT_GATES[gate_key]["var"]
                 expected_pattern = re.compile(
-                    rf"^\s*if:\s*vars\.{re.escape(expected_var)}\s*!=\s*'false'\s*$",
-                    re.MULTILINE,
+                    rf"vars\.{re.escape(expected_var)}\s*!=\s*'false'",
                 )
                 self.assertRegex(
                     body,
                     expected_pattern,
-                    f"{fname} must have `if: vars.{expected_var} != 'false'` on the gate job",
+                    f"{fname} must reference `vars.{expected_var} != 'false'` on the gate job",
                 )
 
     def test_each_template_has_exactly_one_gate_if(self) -> None:
-        # Exactly one such line per workflow — the gate job. Agent/judge
-        # jobs intentionally do NOT carry the `if:` so the human gate
-        # (REVIEW_REQUIRED) still fires from the verdict comment.
+        # Exactly one occurrence of the var reference per workflow. The
+        # maintenance.yml folded scalar puts the var token on its own
+        # line inside an `if: |` block — the count is still 1.
         for fname, gate_key in self.CASES:
             with self.subTest(workflow=fname):
                 path = TEMPLATES / fname
                 body = path.read_text(encoding="utf-8")
                 expected_var = gates_state.DEFAULT_GATES[gate_key]["var"]
                 matches = re.findall(
-                    rf"if:\s*vars\.{re.escape(expected_var)}\s*!=\s*'false'",
+                    rf"vars\.{re.escape(expected_var)}\s*!=\s*'false'",
                     body,
                 )
                 self.assertEqual(
                     len(matches), 1,
-                    f"{fname}: expected exactly 1 `if: vars.{expected_var} != 'false'` line, "
+                    f"{fname}: expected exactly 1 `vars.{expected_var} != 'false'` occurrence, "
                     f"found {len(matches)}",
                 )
 
