@@ -1,0 +1,85 @@
+title: Local pre-push gate migration — fix PR #829's silent sync-gate failure
+status: draft
+date: 2026-09-09
+tags: [ci, gates, hooks, pre-push, issue-sync, workflow]
+umbrella: local-pre-push-gates
+
+sections:
+  - title: One-paragraph summary
+    body: |
+      PR #829 was merged with `GitHub issue sync check` failing because
+      the PR body referenced three closed issues (`#726`, `#397`, `#625`)
+      alongside the one it closed (`#823`). The gate is deterministic
+      (Python parser + `gh api`) and ran on GH Actions only — so the
+      developer had no signal until after push. This proposal migrates
+      every deterministic gate to a local pre-push hook (Tier A),
+      leaves LLM-judge gates remote-only (Tier B), and reserves
+      post-merge automation as Tier C. Net: failures surface in <10s
+      on the developer's workstation, no more "rerun CI until green."
+
+  - title: Sub-topic map
+    body: |
+      | File | Topic |
+      |---|---|
+      | [01-problem-and-context.yaml](01-problem-and-context.yaml) | PR #829 root cause + full GH Actions gate inventory (11 workflows, 6 LLM-judge gates) |
+      | [02-gate-migration-matrix.yaml](02-gate-migration-matrix.yaml) | Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge) decision per gate |
+      | [03-implementation.yaml](03-implementation.yaml) | `hooks/pre-push.sh` design, `tools/issue_sync.py` `--lenient` flag, `tools/issue_sync.py` API-call bypass for offline mode |
+      | [04-rollout.yaml](04-rollout.yaml) | 3-phase rollout with per-phase acceptance criteria + cost deltas |
+      | [05-meta-eval.yaml](05-meta-eval.yaml) | Risk register, open questions, cross-references, sources |
+
+  - title: Why now (triggering evidence)
+    body: |
+      Three converging signals:
+
+      1. **PR #829 merged with a red gate** (run #102301168018, 2026-09-09).
+         The merge queue did not block on `issue-sync`, but the failure
+         is still in `gh pr checks` output. The author had no local
+         signal during development.
+
+      2. **The user's repeated pattern**: "local에서 실패시에 계속 돌려야한
+         문제가 있는게 반복적으로 돌릴 필요 없이" — the user has
+         explicitly asked for a pre-push mirror of GH-Actions gates
+         that is fast enough to run on every push.
+
+      3. **The gate surface has grown**: 11 workflows (was 8 in 2026-08),
+         6 of them LLM-judge gates. The marginal cost of running
+         `pytest tests/ + ruff + issue_sync` on every push is <10s;
+         running LLM judges is 1-3 min per push and is the
+         user-visible "rerun until green" pain.
+
+  - title: What this proposal is NOT
+    body: |
+      - **Not** a removal of any remote GH Actions gate. The remote
+        stays as the authoritative source of truth (PR branch
+        protection cannot be enforced locally).
+      - **Not** a replacement for LLM judges. Tier B gates stay
+        remote-only because they need provider API keys and 1-3 min
+        of judge time — too expensive to run per-push.
+      - **Not** a CI runtime optimizer. Tier A gates don't reduce
+        GH Actions minutes; they only reduce the **rate of red pushes**.
+        The two metrics are decoupled.
+
+  - title: Proposal lifecycle
+    body: |
+      ```
+      ┌──────────────────────────────────────────────────────────────────┐
+      │  draft (now) → ready-for-review → accepted → implemented        │
+      └──────────────────────────────────────────────────────────────────┘
+                       │
+                       └→ rejected (kept for audit; see playbook-application/02-reanalysis.yaml for an example of a re-scored proposal)
+      ```
+
+      Current status: `draft`. Bucket: `review/`. Auto-routed by
+      `status: draft` per `skills/proposal/SKILL.md:STATUS_TO_BUCKET`.
+
+  - title: Net-net
+    body: |
+      | Dimension | Before | After | Delta |
+      |---|---|---|---|
+      | Time from "bad PR" to "know it's bad" | push → GH Actions queue → 9s | push → pre-push hook → <1s | **-90%** |
+      | LLM-judge runs per push | 1 (review) + 1 (security) | 0 (deferred to remote) | **-2 calls** |
+      | Local hooks added | 0 | 1 (`hooks/pre-push.sh`) | +1 hook |
+      | Existing behavior changed | n/a | none (additive only) | 0 |
+      | Lines of code changed | n/a | ~250 (1 hook + 1 parser flag + 4 tests) | additive |
+
+      **Apply? YES (Phase 1 — issue-sync + tier-A migration matrix).**

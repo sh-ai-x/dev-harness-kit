@@ -1,0 +1,222 @@
+title: "03 — Implementation: hooks/pre-push.sh + tools/issue_sync.py lenient flag"
+status: draft
+date: 2026-09-09
+tags: [ci, hooks, implementation, pre-push, issue-sync, design]
+
+sections:
+  - title: File-by-file change list
+    body: |
+      | File | Action | LoC | Purpose |
+      |---|---|---|---|
+      | `hooks/pre-push.sh` | CREATE | ~120 | Single orchestrator that runs Tier A in stages 0-2 |
+      | `tools/issue_sync.py` | MODIFY | +40 / -5 | Add `--lenient` flag, `--offline` flag, `--body-from-pr <N>` helper |
+      | `tests/test_pre_push_hook.py` | CREATE | ~80 | Hook smoke test (3 fixtures: clean / fail-test / fail-issue-sync) |
+      | `tests/test_issue_sync_lenient.py` | CREATE | ~60 | Lenient vs strict parser parity |
+      | `.git/hooks/pre-push` (or `bin/install-pre-push.sh`) | CREATE | ~30 | Install script that symlinks/copies the hook |
+      | `.dev-kit/.active-hooks.json` | MODIFY | +5 | Register new hook as advisory |
+      | `docs/gates/local-pre-push.md` | CREATE | ~150 | Per-gate contract (the doc the user asked for) |
+
+      **Total**: 6 files, ~+485 LoC, all additive.
+
+  - title: "hooks/pre-push.sh design"
+    body: |
+      ```bash
+      #!/usr/bin/env bash
+      # dev-harness-kit — local pre-push gate mirror.
+      # Runs Tier-A gates (deterministic, <5s network, no LLM) on
+      # every `git push`. Tier-B (LLM judges) stays remote-only.
+
+      set -euo pipefail
+
+      # Resolve repo root regardless of where the hook was triggered from.
+      REPO_ROOT="$(git rev-parse --show-toplevel)"
+      cd "$REPO_ROOT"
+
+      # ── Stage 0: branch-policy (<1s, fail-fast) ─────────────────────
+      BRANCH=$(git rev-parse --abbrev-ref HEAD)
+      if [ "$BRANCH" = "main" ]; then
+          echo "::error title=pre-push::direct push to main is policy violation" >&2
+          echo "  Fix: create a worktree (\`/dev-kit:bootstrap\` or \`git worktree add\`)" >&2
+          exit 1
+      fi
+
+      # ── Stage 0: cost-flag (<1s, label-only) ────────────────────────
+      COST_FILES=$(git diff --name-only origin/main...HEAD \
+          | grep -E '^(docs/llm-info/|bin/set-provider\.sh|tools/(llm_refresh|set_provider)\.py)' || true)
+      if [ -n "$COST_FILES" ]; then
+          echo "::notice title=pre-push::cost-impacting files changed:"
+          echo "$COST_FILES" | sed 's/^/    /'
+          echo "  Action: add 'cost-flag' label to PR (or skip if no LLM cost impact)" >&2
+      fi
+
+      # ── Stage 1: deterministic CI subset (~30s warm) ───────────────
+      echo "[1/3] pytest..."
+      python -m pytest tests/ -q --tb=line -x \
+          --ignore=tests/test_review_gate.py \
+          --ignore=tests/test_security_gate.py \
+          || { echo "::error title=pre-push::pytest failed"; exit 1; }
+
+      echo "[1/3] validate..."
+      python scripts/validate.py \
+          || { echo "::error title=pre-push::validate failed"; exit 1; }
+
+      echo "[1/3] ruff..."
+      ruff check . \
+          || { echo "::error title=pre-push::ruff failed"; exit 1; }
+
+      # ── Stage 1: cache-decay-audit subset (~30s) ───────────────────
+      echo "[1/3] cache-decay-audit (G4+G5)..."
+      python -m pytest tests/test_cache_decay.py tests/test_skill_frontmatter.py -q --tb=line -x \
+          || { echo "::error title=pre-push::G4/G5 cache-decay failed"; exit 1; }
+
+      # ── Stage 2: issue-sync (~9s, optional gh api) ─────────────────
+      echo "[2/3] issue-sync (with gh api state check)..."
+      python tools/issue_sync.py pre-push \
+          --remote origin \
+          --base origin/main \
+          || { echo "::error title=pre-push::issue-sync found stale refs"; exit 1; }
+
+      # ── Stage 3: linear-pr-sync (~7s, best-effort) ─────────────────
+      if [ -n "${LINEAR_API_KEY:-}" ]; then
+          echo "[3/3] linear-pr-sync (best-effort)..."
+          python tools/linear_sync.py --check-only \
+              || echo "::notice title=pre-push::linear check failed (continuing — non-blocking)"
+      else
+          echo "[3/3] linear-pr-sync skipped (LINEAR_API_KEY not set)"
+      fi
+
+      echo ""
+      echo "✓ pre-push gates passed (branch-policy, cost-flag, test, validate, lint, G4/G5, issue-sync, linear-pr-sync)"
+      ```
+
+      **Stages**:
+      - **Stage 0** (1s): branch + cost label. Fail-fast.
+      - **Stage 1** (30s): deterministic CI subset. `--ignore=`
+        the LLM-judge-dependent tests so a developer without
+        provider keys can still push.
+      - **Stage 2** (10s): issue-sync with `gh api` check.
+      - **Stage 3** (10s): linear-pr-sync, best-effort.
+
+      **Total wall-clock**: 30-60s warm, 60-120s cold. Below the
+      5-minute wall-clock threshold the user explicitly mentioned
+      ("반복적으로 돌릴 필요 없이").
+
+  - title: "tools/issue_sync.py — new flags"
+    body: |
+      Three additive flags on the existing parser:
+
+      ### `--lenient`
+      Softens the gate contract:
+      - `Closes #N` / `Fixes #N` / `Resolves #N` against a closed issue → **HARD FAIL** (unchanged)
+      - `Related to #N` / `See #N` / `Part of #N` / `Tracking #N` / `Ref #N` against a closed issue → **WARN** (pass with `::warning`)
+      - Bare `#N` against a closed issue → **HARD FAIL** (ambiguous)
+
+      Rationale: PR #829's body had `Related to #N` for closed issues
+      (audit-trail preservation). The user wants to keep those refs
+      in the body; the gate just shouldn't fail on them.
+
+      ### `--offline`
+      Skips the `gh api` call. Parser emits:
+      ```
+      ::notice title=pre-push::offline mode — 3 issue refs found, state NOT verified.
+      ```
+      Developer who wants fail-fast can pass `--offline=false` (default).
+
+      ### `pre-push` subcommand
+      A new subcommand that combines `parse` + the loop logic from
+      `.github/workflows/issue-sync.yml:Check issue states` into one
+      Python call. The bash loop is removed from the workflow and
+      inlined into Python. The hook does:
+      ```
+      python tools/issue_sync.py pre-push --remote origin --base origin/main
+      ```
+      The Python script reads `git log origin/main..HEAD --format=%B`,
+      parses the merge commit body, and runs the same `gh api` check
+      the workflow does. **The workflow's bash loop is removed** —
+      single source of truth.
+
+      ### Backward compatibility
+      The existing `parse` subcommand is unchanged. New flags are
+      additive. `tools/issue_sync.py parse --json` still produces the
+      same output as before, so the existing workflow keeps working
+      (it just needs to switch from bash loop to `pre-push` subcommand).
+
+  - title: The workflow's bash loop is removed
+    body: |
+      Before (in `.github/workflows/issue-sync.yml:Check issue states`):
+      ```bash
+      while IFS=$'\t' read -r REF _KEYWORD _SOURCE; do
+          NUMBER="${REF##*#}"
+          ...
+          STATE="$(gh api "$API_PATH" --jq '.state' 2>/dev/null || true)"
+          ...
+      done < <(jq -r '.[] | [.ref, (.keyword // ""), .source] | @tsv' /tmp/refs.json)
+      ```
+
+      After:
+      ```yaml
+      - name: Check issue states (lenient by default for remote gate)
+        if: steps.parse.outputs.reference_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python tools/issue_sync.py pre-push \
+              --remote origin \
+              --pr-title "$PR_TITLE" \
+              --pr-body "$PR_BODY" \
+              --lenient \
+              --json > /tmp/issue-sync-result.json
+          EXIT=$?
+          if [ "$EXIT" -ne 0 ]; then
+              jq -r '.errors[] | "::error title=issue-sync::\(.message)"' /tmp/issue-sync-result.json
+              exit 1
+          fi
+          jq -r '.warnings[]? | "::warning title=issue-sync::\(.message)"' /tmp/issue-sync-result.json || true
+      ```
+
+      The `--lenient` flag is the **default for the remote gate**.
+      The local hook uses **strict** (default for `pre-push` subcommand).
+      This is intentional: the local hook catches real bugs early;
+      the remote gate is a softer "don't merge with closed refs" reminder.
+
+  - title: "git/hooks/pre-push install"
+    body: |
+      Two install paths:
+      1. **Git native** (preferred): `bin/install-pre-push.sh` symlinks
+         `.git/hooks/pre-push` → `hooks/pre-push.sh`. Idempotent.
+      2. **Claude Code integration**: register the hook in
+         `.claude/settings.json` under `PreToolUse` with `when: Bash`
+         and a guard for `git push`.
+
+      The Claude Code path is preferable for *our* repo (dev-harness-kit
+      uses Claude Code), but the git-native path is portable to any
+      consumer repo. Both paths ship; the install script picks based
+      on whether `.claude/settings.json` is present.
+
+  - title: Test coverage
+    body: |
+      | File | Fixture | Asserts |
+      |---|---|---|
+      | `tests/test_pre_push_hook.py` | Clean tree (mocked) | exit 0, all stages run |
+      | `tests/test_pre_push_hook.py` | Failing pytest | exit 1, stage 1 error |
+      | `tests/test_pre_push_hook.py` | Stale issue ref in mocked commit message | exit 1, stage 2 error |
+      | `tests/test_issue_sync_lenient.py` | `Closes #N` against closed issue | HARD FAIL |
+      | `tests/test_issue_sync_lenient.py` | `Related to #N` against closed issue | WARN (pass) |
+      | `tests/test_issue_sync_lenient.py` | Bare `#N` against closed issue | HARD FAIL |
+      | `tests/test_issue_sync_offline.py` | `--offline` with refs | exit 0, notice emitted |
+      | `tests/test_issue_sync_pre_push.py` | `pre-push` subcommand | exit 0 / 1 / 2 (lenient) |
+
+      All tests use `pytest` fixtures; no live `gh api` calls.
+      `gh api` is mocked with `unittest.mock.patch`.
+
+  - title: Cross-references
+    body: |
+      - [`01-problem-and-context.yaml`](01-problem-and-context.yaml) — why this is needed
+      - [`02-gate-migration-matrix.yaml`](02-gate-migration-matrix.yaml) — Tier A/B/C split
+      - [`04-rollout.yaml`](04-rollout.yaml) — phased delivery
+      - `tools/issue_sync.py` v1.0.0 — current parser
+      - `hooks/git-guard.sh` — existing pattern reference
+      - `hooks/tdd-guard.sh` — pattern reference for hook ergonomics
+      - `bin/review-local.sh` — local fallback for Tier B

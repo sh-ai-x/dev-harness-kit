@@ -1,0 +1,105 @@
+title: "05 — Meta-eval: risk register, open questions, sources"
+status: draft
+date: 2026-09-09
+tags: [meta-eval, risk, open-questions, sources]
+
+sections:
+  - title: Risk register
+    body: |
+      | ID | Risk | Likelihood | Impact | Mitigation |
+      |---|---|---|---|---|
+      R1 | Pre-push hook adds 30-60s to every push; developers disable with `--no-verify` | Medium | Low (defeats the purpose, but doesn't break anything) | Make hook fast (<30s warm) by using `pytest -x --tb=line --ignore=` for the slow tests; document `--no-verify` as a hotfix-only escape (per existing `feedback-pre-commit-auto-fix-loop.md`) |
+      | R2 | `--lenient` flag softens the contract too much; real `Closes #N (closed)` slips through | Low | Medium | `Closes`/`Fixes`/`Resolves` keywords stay HARD FAIL regardless of `--lenient`. Only `Related to`/`See`/`Part of`/`Tracking`/`Ref`/`Issue` are softened |
+      | R3 | `tools/issue_sync.py pre-push` subcommand diverges from the workflow's behavior | Medium | High | Phase 0 explicitly migrates the workflow to use the same Python subcommand — single source of truth. Bash loop is removed |
+      | R4 | Tier A gates don't reduce GH Actions minutes; user expectation mismatch | High | Low | Document this explicitly in `00-index.yaml` "What this is NOT". Primary metric is dev time-to-signal, not CI spend |
+      | R5 | `bin/install-pre-push.sh` breaks under worktrees (`.worktrees/*` already has `.git` as a file, not a dir) | Medium | Medium | Detect worktree root via `git rev-parse --git-common-dir` and `git rev-parse --git-dir`. Install to the common `hooks/pre-push`, not the per-worktree one |
+      | R6 | Adding `Issue` to `_REF_KEYWORDS` shifts existing parser behavior | High | Medium | Add a `--strict` flag (default true) for backward compat. New test fixture: `tests/test_issue_sync_keyword_set.py` covers the v1.0.0 → v1.1.0 keyword expansion |
+      | R7 | Branch-protection change in Phase 3 blocks PRs mid-merge | Low | High | Document the change in CONTRIBUTING.md. Required-checks toggle is reversible in <1 min. Phase 3 is gated on Phase 0+1+2 success |
+      | R8 | The proposal addresses only the issue-sync gate; user might want all 8 Tier A gates in Phase 1 | Medium | Low | Phase ordering reflects cost/benefit: issue-sync is the failure that triggered the proposal. Other gates land in Phase 2 because they're additive on top of the hook skeleton |
+
+  - title: Open questions
+    body: |
+      1. **Should `Issue #N` be added to `_REF_KEYWORDS`?**
+         - PR #829's body used `Issue #N` (not `Related to #N`).
+         - If we don't add it, the lenient branch doesn't fire and
+           the PR still fails — which defeats the purpose.
+         - **Recommendation**: add it. It's case-insensitive and
+           matches GitHub's web UI behavior (which counts `Issue #N`
+           as a reference). Document the addition in
+           `tools/issue_sync.py` docstring.
+
+      2. **Should `pre-push` subcommand accept `--from-pr <N>` to
+         skip `git log` parsing and use the PR body directly?**
+         - Pros: same code path as the remote gate (single source of truth).
+         - Cons: requires `gh pr view --json body` which adds a network
+           call we want to avoid in `--offline` mode.
+         - **Recommendation**: support both. `--from-pr <N>` is the
+           default for the remote workflow (after push). `--from-log`
+           is the default for the local pre-push hook (no network).
+
+      3. **Should `cache-decay-audit` G4+G5 ship in Phase 1 or Phase 2?**
+         - Pro Phase 1: it's deterministic, ~30s, catches real bugs.
+         - Pro Phase 2: it's a separate concern from the issue-sync
+           fix and can ship independently.
+         - **Recommendation**: Phase 2. Phase 1 ships the *minimum*
+           hook that would have caught PR #829's bug; Phase 2 covers
+           the rest of Tier A.
+
+      4. **Should `bin/review-local.sh` replace `/dev-kit:review-local`?**
+         - Pro: `bin/review-local.sh` is already a wrapper; the skill
+           adds LLM-judge ergonomics on top.
+         - Con: skill vs script is a known pattern in this repo
+           (skills add value-judgment; scripts are deterministic).
+         - **Recommendation**: keep both. Skill is the human-facing
+           entry; script is the engine.
+
+      5. **Does the local hook need `gh auth status` to run?**
+         - For `gh api` (issue-sync, linear-sync): yes.
+         - For pytest/ruff: no.
+         - **Recommendation**: if `gh auth status` fails, run the
+           hook in `--offline` mode and emit a `::notice` explaining
+           why state isn't verified. Developer can re-push after
+           `gh auth login`.
+
+  - title: Comparison with prior proposals
+    body: |
+      | Proposal | Topic | Phase 1 scope | Effort |
+      |---|---|---|---|
+      | `playbook-application/02-reanalysis.yaml` | Agent harness playbook patterns | Pattern 2 (long-running templates) + Pattern 3 (research-plan-build binder) | 14 hours |
+      | `cache-hit-rate/structural-fix.yaml` | Prompt-cache hit rate structural fix | (single-phase) | n/a |
+      | `workflow-fast-mode/` | Per-push CI cost reduction | Different scope (remote workflow runtime) | n/a |
+      | **`local-pre-push-gates/` (this)** | Pre-push mirror of GH Actions gates | Phase 0 (parser migration) + Phase 1 (hook + per-gate doc) | 9.2 days |
+
+      The closest analog is `workflow-fast-mode/`. Both proposals
+      target per-push cost, but from different angles:
+      - `workflow-fast-mode/`: reduce the **GH Actions runtime** by
+        slimming the workflow definitions.
+      - `local-pre-push-gates/`: reduce the **rate of red pushes**
+        by catching failures locally.
+
+      Both proposals are complementary — neither invalidates the other.
+
+  - title: Sources
+    body: |
+      - PR #829: [feat(ci): split review.yml into review + security templates (Closes #823)](https://github.com/sh-ai-x/dev-harness-kit/pull/829)
+      - PR #829 failed run: [actions/runs/34298820072/job/102301168018](https://github.com/sh-ai-x/dev-harness-kit/actions/runs/34298820072/job/102301168018)
+      - Issue #823: [gate-select: AI-judge pick has no `review-only` option](https://github.com/sh-ai-x/dev-harness-kit/issues/823)
+      - Gate that failed: `.github/workflows/issue-sync.yml`
+      - Parser: `tools/issue_sync.py` v1.0.0
+      - Related issue refs: #726, #397, #625 (all closed at gate time)
+      - Existing closest analog: `hooks/git-guard.sh`
+      - Pattern reference: `hooks/tdd-guard.sh`
+      - Tier B local fallback: `bin/review-local.sh`, `/dev-kit:review-local`
+      - Iron Laws: `iron-laws/index.md` (L2 cartography, L3 volatile tail, L4 no deferred-work markers)
+      - Hook matrix: `hooks/index.md`
+      - Auto-fix loop policy: `feedback-pre-commit-auto-fix-loop.md`
+      - [GitHub: Linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue)
+      - [GitHub: About required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks)
+
+  - title: Cross-references
+    body: |
+      - [00-index.yaml](00-index.yaml) — umbrella
+      - [01-problem-and-context.yaml](01-problem-and-context.yaml)
+      - [02-gate-migration-matrix.yaml](02-gate-migration-matrix.yaml)
+      - [03-implementation.yaml](03-implementation.yaml)
+      - [04-rollout.yaml](04-rollout.yaml)

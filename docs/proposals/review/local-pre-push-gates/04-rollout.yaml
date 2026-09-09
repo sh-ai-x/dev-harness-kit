@@ -1,0 +1,168 @@
+title: "04 — Rollout: 3-phase delivery with per-phase acceptance criteria"
+status: draft
+date: 2026-09-09
+tags: [rollout, phases, acceptance-criteria, gates, pre-push]
+
+sections:
+  - title: Phase 0 — Parser migration (no behavior change, foundation)
+    body: |
+      **Goal**: `tools/issue_sync.py` gains `--lenient`, `--offline`, and
+      `pre-push` subcommand. The remote workflow switches from bash loop
+      to the Python subcommand. **Zero behavior change** for users.
+
+      | Task | Owner | LoC | Days |
+      |---|---|---|---|
+      | Add `--lenient` flag to `tools/issue_sync.py` | (TBD) | +30 | 0.5 |
+      | Add `--offline` flag | (TBD) | +10 | 0.2 |
+      | Add `pre-push` subcommand | (TBD) | +60 | 1 |
+      | Migrate `.github/workflows/issue-sync.yml` to use it | (TBD) | -50 / +20 | 0.5 |
+      | Add `tests/test_issue_sync_lenient.py` | (TBD) | +60 | 0.5 |
+      | Add `tests/test_issue_sync_offline.py` | (TBD) | +30 | 0.3 |
+      | Add `tests/test_issue_sync_pre_push.py` | (TBD) | +50 | 0.5 |
+
+      **Acceptance criteria**:
+      - [ ] All existing tests pass.
+      - [ ] `tools/issue_sync.py parse --json` produces byte-identical
+            output to v1.0.0.
+      - [ ] Remote `issue-sync` workflow still passes on PR #829's body
+            (since `--lenient` is default for remote, but PR #829's
+            refs are `Issue #N` — let me verify the parser keyword).
+            **Note**: PR #829's body actually uses `Issue #N`, not
+            `Related to #N`. The keyword set needs to include `Issue`
+            for the lenient branch to fire. **Phase 0 task**: add
+            `issue` to `_REF_KEYWORDS` (case-insensitive).
+      - [ ] `tests/test_issue_sync_lenient.py` covers the lenient
+            keyword expansion.
+
+      **Effort**: 3.5 days, 1 developer.
+
+  - title: Phase 1 — Local pre-push hook (Tier A subset)
+    body: |
+      **Goal**: `hooks/pre-push.sh` runs the deterministic CI subset
+      + issue-sync on every `git push`. Dev-loop time-to-signal drops
+      from 30-60s (GH Actions queue) to <10s.
+
+      | Task | Owner | LoC | Days |
+      |---|---|---|---|
+      | Create `hooks/pre-push.sh` | (TBD) | +120 | 1 |
+      | Create `bin/install-pre-push.sh` | (TBD) | +30 | 0.3 |
+      | Add `tests/test_pre_push_hook.py` | (TBD) | +80 | 0.7 |
+      | Update `.claude/settings.json` to register hook | (TBD) | +15 | 0.2 |
+      | Update `.dev-kit/.active-hooks.json` | (TBD) | +5 | 0.1 |
+      | Author `docs/gates/local-pre-push.md` | (TBD) | +150 | 0.5 |
+
+      **Acceptance criteria**:
+      - [ ] `git push` from a clean tree exits 0 in <60s.
+      - [ ] `git push` from a tree with a failing test exits 1 with
+            `::error title=pre-push::pytest failed`.
+      - [ ] `git push` from a tree with a stale `Issue #N` ref in the
+            latest commit message exits 1 with
+            `::error title=pre-push::issue-sync found stale refs`.
+      - [ ] Direct push to `main` blocked with the existing
+            `git-guard.sh` message (no regression).
+      - [ ] `bin/install-pre-push.sh` is idempotent.
+      - [ ] `docs/gates/local-pre-push.md` covers each gate per
+            the user's request ("각 게이트에 대한 설명을 문서로").
+
+      **Effort**: 3 days, 1 developer.
+
+  - title: Phase 2 — Coverage extension + Tier B fallback polish
+    body: |
+      **Goal**: Add the remaining Tier A gates (linear-pr-sync,
+      cost-flag, cache-decay-audit G4+G5) and polish the local
+      fallback for Tier B judges (`bin/review-local.sh` already
+      exists but needs docs + ergonomics).
+
+      | Task | Owner | LoC | Days |
+      |---|---|---|---|
+      | Add `linear-pr-sync --check-only` to pre-push | (TBD) | +30 | 0.5 |
+      | Add `cost-flag` stage to pre-push | (TBD) | +20 | 0.2 |
+      | Add `cache-decay-audit` G4+G5 stage | (TBD) | +30 | 0.5 |
+      | Polish `bin/review-local.sh` ergonomics | (TBD) | +40 | 0.5 |
+      | Document `bin/review-local.sh` invocation pattern | (TBD) | +60 | 0.3 |
+
+      **Acceptance criteria**:
+      - [ ] All 8 Tier A gates covered.
+      - [ ] `bin/review-local.sh --help` shows 1-line examples for
+            each provider.
+      - [ ] `docs/gates/local-pre-push.md` updated with linear-pr-sync
+            and cost-flag sections.
+
+      **Effort**: 2 days, 1 developer.
+
+  - title: Phase 3 — Branch-protection hardening
+    body: |
+      **Goal**: Update branch protection so `issue-sync` is a
+      **required** check. Currently it's advisory and PR #829 was
+      merged with it failing.
+
+      | Task | Owner | Days |
+      |---|---|---|
+      | Add `issue-sync` to branch-policy required-checks | (TBD) | 0.2 |
+      | Communicate change in CONTRIBUTING.md | (TBD) | 0.2 |
+      | Update `merge-queue-ready-check` to include `issue-sync` | (TBD) | 0.3 |
+
+      **Acceptance criteria**:
+      - [ ] PR cannot be merged with `issue-sync: failure`.
+      - [ ] `gh pr checks --required` includes `issue-sync`.
+
+      **Effort**: 0.7 days, 1 developer.
+
+  - title: Cumulative timeline
+    body: |
+      ```mermaid
+      gantt
+          title Local pre-push gate migration (2026-09-09)
+          dateFormat YYYY-MM-DD
+          axisFormat %m-%d
+          section Phase 0
+          issue_sync --lenient + pre-push subcommand :p0a, 2026-09-10, 2d
+          workflow migration to Python subcommand    :p0b, after p0a, 1d
+          test_issue_sync_lenient/offline/pre_push   :p0c, after p0a, 1d
+          section Phase 1
+          hooks/pre-push.sh (Tier A subset)          :p1a, after p0b, 1d
+          bin/install-pre-push.sh                    :p1b, after p1a, 0.5d
+          tests/test_pre_push_hook.py                :p1c, after p1a, 1d
+          docs/gates/local-pre-push.md (per-gate SSOT):p1d, after p1c, 1d
+          section Phase 2
+          linear-pr-sync + cost-flag + G4/G5 stages  :p2a, after p1d, 1d
+          bin/review-local.sh ergonomics             :p2b, after p2a, 1d
+          section Phase 3
+          branch-protection hardening                :p3a, after p2b, 1d
+      ```
+
+      **Total**: 9.2 days, single developer.
+
+  - title: Per-phase risk + rollback
+    body: |
+      | Phase | Risk | Rollback |
+      |---|---|---|
+      | 0 | Parser keyword change (`Issue` added to `_REF_KEYWORDS`) shifts existing behavior | Revert commit, restore `_REF_KEYWORDS` to v1.0.0 set |
+      | 1 | Pre-push hook adds 30-60s to every push; developers complain | `bin/install-pre-push.sh --uninstall`; users opt out via `git push --no-verify` |
+      | 2 | Linear-pr-sync `--check-only` introduces a new failure mode if Linear API is down | Continue with `continue-on-error` semantics in `tools/linear_sync.py` |
+      | 3 | Branch protection change blocks PRs mid-merge | Required-checks toggle is reversible in <1 min via `gh api` |
+
+  - title: Success metrics (post-rollout)
+    body: |
+      | Metric | Baseline (2026-09-09) | Target (post-Phase 3) |
+      |---|---|---|
+      | PRs merged with a red `issue-sync` gate | 1 (PR #829) | **0** |
+      | Mean time from `git push` to first red signal | 30-60s (GH Actions queue) | **<10s** (pre-push) |
+      | Local `git push` rejection rate for Tier A gates | 0% (no signal) | **5-15%** (catches real bugs) |
+      | LLM-judge API spend per PR | $1-3.50 | **unchanged** (Tier B unchanged) |
+      | GH Actions minutes per PR (average) | 8-12 min | **8-12 min** (no change) |
+      | Developer-reported "rerun CI until green" incidents | ~3-5/week (qualitative) | **0** |
+
+      Track via:
+      - `.dev-kit/.active-hooks.json` (pre-push install count)
+      - `gh api repos/:owner/:repo/actions/runs` (red-push rate over time)
+      - `tools/token_efficiency_analyzer.py` (developer-side cost)
+
+  - title: Cross-references
+    body: |
+      - [`01-problem-and-context.yaml`](01-problem-and-context.yaml)
+      - [`02-gate-migration-matrix.yaml`](02-gate-migration-matrix.yaml)
+      - [`03-implementation.yaml`](03-implementation.yaml)
+      - [`05-meta-eval.yaml`](05-meta-eval.yaml) — risk register + open questions
+      - `docs/proposals/review/playbook-application/02-reanalysis.yaml` — example of a re-scored proposal (Phase 1 reordered based on v0.3.199 findings)
+      - `docs/proposals/review/workflow-fast-mode/` — earlier precedent for reducing per-push cost

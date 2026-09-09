@@ -1,0 +1,117 @@
+title: "02 — Gate migration matrix: Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge)"
+status: draft
+date: 2026-09-09
+tags: [ci, gates, tier-a, tier-b, tier-c, migration-matrix]
+
+sections:
+  - title: Decision rule
+    body: |
+      For each gate, ask three questions in order:
+
+      1. **Is it deterministic?** (Same input → same output.)
+         If no → Tier B (remote) or Tier C (post-merge).
+      2. **Does it need network state that the developer doesn't have?**
+         (e.g. `gh api` for issue states, Linear API, provider LLM key.)
+         If yes → Tier B.
+      3. **Does it take >5s to complete locally?**
+         If yes → Tier B (pre-push hook would make pushes feel slow).
+
+      A gate is **Tier A** iff all three answers are: deterministic, no-network-required, <5s.
+
+      A gate is **Tier C** iff it is triggered by a merge event (e.g.
+      `version-bump.yml`).
+
+      Everything else is **Tier B** (remote-only).
+
+  - title: Tier A — local pre-push (8 gates)
+    body: |
+      | Gate | Local command | Hook stage | Wall-clock | Determinism |
+      |---|---|---|---|---|
+      | `test` | `python -m pytest tests/ -q --tb=line -x` | stage 1 (fail-fast) | ~30s | yes (no API) |
+      | `validate` | `python scripts/validate.py` | stage 1 | ~10s | yes |
+      | `lint` | `ruff check .` | stage 1 | ~7s | yes |
+      | `branch-policy` | `git rev-parse --abbrev-ref HEAD` | stage 0 (cheapest) | <1s | yes |
+      | **`issue-sync`** | `tools/issue_sync.py parse` + optional `gh api` | stage 2 (post-test) | ~9s | yes (parser) + optional network |
+      | `linear-pr-sync` | `tools/linear_sync.py --check-only` | stage 2 | ~7s | yes + optional network |
+      | `cost-flag` | `git diff --name-only origin/main...HEAD \| grep` | stage 0 | <1s | yes |
+      | `cache-decay-audit` (G4+G5) | `pytest tests/test_cache_decay.py tests/test_skill_frontmatter.py -q` | stage 1 | ~30s | yes |
+
+      **Total deterministic wall-clock**: ~30-90s on a clean tree,
+      <10s on warm pytest cache. Acceptable for a `git push`.
+
+      **The `gh api` call in issue-sync is optional**:
+      - With `--offline`: parser emits the ref list and warns
+        (does not fail). Developer runs the full check on push
+        if they want the fail-fast signal.
+      - Without `--offline` (default): runs the same `gh api` check
+        as the workflow. The developer needs `gh auth status` green.
+      - **Alternative**: use `gh pr view --json body,title` after
+        `git push` to fill in the missing metadata. Documented
+        in `03-implementation.yaml`.
+
+  - title: Tier B — remote-only GH Actions (5 gates)
+    body: |
+      | Gate | Why remote-only | Local fallback (manual) |
+      |---|---|---|
+      | `/dev-kit:review` (3-dim LLM judge) | Provider API key, ~1m44s, $0.10-0.50/push | `bin/review-local.sh` |
+      | `/dev-kit:security` (10-dim OWASP fan-out) | Provider API key, ~2m22s, $0.50-2.00/push | `bin/review-local.sh` |
+      | `/dev-kit:maintenance` | Provider API key, ~3m45s, $0.30-1.00/push | `/dev-kit:maintenance` skill |
+      | `severity gate` | Aggregates Tier-B outputs | n/a (composite only) |
+      | `prompt-injection static filter` | Can run locally, but runner has stricter rules + LLM-grade regex | `tools/prompt_injection_scan.py` |
+      | `merge-queue-ready-check` | GH API state aggregator (PR checks rollup) | `gh pr checks --json` |
+      | `Fork PR review` | GitHub-side approval workflow | n/a |
+
+      **Net cost of Tier B per push**: ~8m + $1-3.50. Moving these
+      to local pre-push would **multiply cost by the number of pushes
+      per PR** (typically 3-10) without adding signal.
+
+  - title: Tier C — post-merge (2 gates)
+    body: |
+      | Gate | Trigger | Why not pre-push |
+      |---|---|---|
+      | `version-bump` | `pull_request: closed` after main merge | Operates on merged state |
+      | `auto-fix-pr` | `workflow_dispatch` only (manual repair adapter) | Operator-initiated |
+
+      These stay remote. No local mirror needed.
+
+  - title: Migration deltas
+    body: |
+      | Metric | Before | After Tier-A migration |
+      |---|---|---|
+      | Gates with local pre-push mirror | 0 | **8** |
+      | Gates that still surface red only on GH Actions | 11 | **3** (LLM judges + fork-pr) |
+      | Average time-to-signal on a bad push | 30-60s (queue) + gate-runtime | **<10s** (pre-push) |
+      | Pushes that go through a red deterministic gate | baseline (PR #829: 1) | **0** (for Tier-A gates) |
+      | LLM-judge API spend per PR | $1-3.50 | unchanged (Tier B unchanged) |
+      | GH Actions minutes saved | 0 | ~3-5 min/PR on Tier-A failures |
+
+  - title: Why this is NOT a CI runtime optimizer
+    body: |
+      The proposal **does not reduce GH Actions minutes**. It only
+      reduces the **rate of red pushes**. A developer who fixes a
+      failing gate locally still pushes the green version to GH
+      Actions, which then runs the same Tier-A gates (plus Tier B).
+
+      The only GH Actions savings are:
+      1. Pushes blocked at pre-push never reach `pull_request` events.
+      2. Fewer `rerun` calls on already-red workflows.
+
+      Both are second-order effects. The primary metric is
+      **developer time-to-fix**, not GH Actions spend.
+
+  - title: What this is NOT
+    body: |
+      - **Not a wholesale CI migration.** No remote gate is removed.
+      - **Not a substitute for LLM judges.** Tier B stays remote.
+      - **Not a CI runtime cost reduction.** See above.
+      - **Not a magic bullet for fork-PRs.** `fork-pr-review.yml`
+        is a different problem (GitHub security model — fork PRs
+        can't access secrets) and stays as-is.
+
+  - title: Cross-references
+    body: |
+      - [`01-problem-and-context.yaml`](01-problem-and-context.yaml) — gate inventory + cost profile
+      - [`03-implementation.yaml`](03-implementation.yaml) — hook design + parser flag
+      - [`04-rollout.yaml`](04-rollout.yaml) — phased delivery
+      - `hooks/git-guard.sh` — existing closest analog (already covers branch-policy)
+      - `bin/review-local.sh` — existing local fallback for Tier B judges

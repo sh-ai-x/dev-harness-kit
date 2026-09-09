@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 — Rollout: 3-phase delivery with per-phase acceptance criteria</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>04 — Rollout: 3-phase delivery with per-phase acceptance criteria</h1>
+<p class="meta">2026-09-09 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">rollout</span><span class="tag tag-info">phases</span><span class="tag tag-info">acceptance-criteria</span><span class="tag tag-info">gates</span><span class="tag tag-info">pre-push</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Phase 0 — Parser migration (no behavior change, foundation)</a></li><li><a href="#sec-1">Phase 1 — Local pre-push hook (Tier A subset)</a></li><li><a href="#sec-2">Phase 2 — Coverage extension + Tier B fallback polish</a></li><li><a href="#sec-3">Phase 3 — Branch-protection hardening</a></li><li><a href="#sec-4">Cumulative timeline</a></li><li><a href="#sec-5">Per-phase risk + rollback</a></li><li><a href="#sec-6">Success metrics (post-rollout)</a></li><li><a href="#sec-7">Cross-references</a></li></ol></div>
+<h2 id="sec-0">Phase 0 — Parser migration (no behavior change, foundation)</h2>
+<p><strong>Goal</strong>: <code>tools/issue_sync.py</code> gains <code>--lenient</code>, <code>--offline</code>, and <code>pre-push</code> subcommand. The remote workflow switches from bash loop to the Python subcommand. <strong>Zero behavior change</strong> for users.</p>
+<table><thead><tr><th>Task</th><th>Owner</th><th>LoC</th><th>Days</th></tr></thead><tbody><tr><td>Add <code>--lenient</code> flag to <code>tools/issue_sync.py</code></td><td>(TBD)</td><td>+30</td><td>0.5</td></tr><tr><td>Add <code>--offline</code> flag</td><td>(TBD)</td><td>+10</td><td>0.2</td></tr><tr><td>Add <code>pre-push</code> subcommand</td><td>(TBD)</td><td>+60</td><td>1</td></tr><tr><td>Migrate <code>.github/workflows/issue-sync.yml</code> to use it</td><td>(TBD)</td><td>-50 / +20</td><td>0.5</td></tr><tr><td>Add <code>tests/test_issue_sync_lenient.py</code></td><td>(TBD)</td><td>+60</td><td>0.5</td></tr><tr><td>Add <code>tests/test_issue_sync_offline.py</code></td><td>(TBD)</td><td>+30</td><td>0.3</td></tr><tr><td>Add <code>tests/test_issue_sync_pre_push.py</code></td><td>(TBD)</td><td>+50</td><td>0.5</td></tr></tbody></table>
+<p><strong>Acceptance criteria</strong>:</p>
+<ul><li>[ ] All existing tests pass.</li><li>[ ] <code>tools/issue_sync.py parse --json</code> produces byte-identical output to v1.0.0.</li><li>[ ] Remote <code>issue-sync</code> workflow still passes on PR #829's body (since <code>--lenient</code> is default for remote, but PR #829's refs are <code>Issue #N</code> — let me verify the parser keyword). <strong>Note</strong>: PR #829's body actually uses <code>Issue #N</code>, not <code>Related to #N</code>. The keyword set needs to include <code>Issue</code> for the lenient branch to fire. <strong>Phase 0 task</strong>: add <code>issue</code> to <code>_REF_KEYWORDS</code> (case-insensitive).</li><li>[ ] <code>tests/test_issue_sync_lenient.py</code> covers the lenient keyword expansion.</li></ul>
+<p><strong>Effort</strong>: 3.5 days, 1 developer.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Phase 1 — Local pre-push hook (Tier A subset)</h2>
+<p><strong>Goal</strong>: <code>hooks/pre-push.sh</code> runs the deterministic CI subset + issue-sync on every <code>git push</code>. Dev-loop time-to-signal drops from 30-60s (GH Actions queue) to &lt;10s.</p>
+<table><thead><tr><th>Task</th><th>Owner</th><th>LoC</th><th>Days</th></tr></thead><tbody><tr><td>Create <code>hooks/pre-push.sh</code></td><td>(TBD)</td><td>+120</td><td>1</td></tr><tr><td>Create <code>bin/install-pre-push.sh</code></td><td>(TBD)</td><td>+30</td><td>0.3</td></tr><tr><td>Add <code>tests/test_pre_push_hook.py</code></td><td>(TBD)</td><td>+80</td><td>0.7</td></tr><tr><td>Update <code>.claude/settings.json</code> to register hook</td><td>(TBD)</td><td>+15</td><td>0.2</td></tr><tr><td>Update <code>.dev-kit/.active-hooks.json</code></td><td>(TBD)</td><td>+5</td><td>0.1</td></tr><tr><td>Author <code>docs/gates/local-pre-push.md</code></td><td>(TBD)</td><td>+150</td><td>0.5</td></tr></tbody></table>
+<p><strong>Acceptance criteria</strong>:</p>
+<ul><li>[ ] <code>git push</code> from a clean tree exits 0 in &lt;60s.</li><li>[ ] <code>git push</code> from a tree with a failing test exits 1 with <code>::error title=pre-push::pytest failed</code>.</li><li>[ ] <code>git push</code> from a tree with a stale <code>Issue #N</code> ref in the latest commit message exits 1 with <code>::error title=pre-push::issue-sync found stale refs</code>.</li><li>[ ] Direct push to <code>main</code> blocked with the existing <code>git-guard.sh</code> message (no regression).</li><li>[ ] <code>bin/install-pre-push.sh</code> is idempotent.</li><li>[ ] <code>docs/gates/local-pre-push.md</code> covers each gate per the user's request ("각 게이트에 대한 설명을 문서로").</li></ul>
+<p><strong>Effort</strong>: 3 days, 1 developer.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Phase 2 — Coverage extension + Tier B fallback polish</h2>
+<p><strong>Goal</strong>: Add the remaining Tier A gates (linear-pr-sync, cost-flag, cache-decay-audit G4+G5) and polish the local fallback for Tier B judges (<code>bin/review-local.sh</code> already exists but needs docs + ergonomics).</p>
+<table><thead><tr><th>Task</th><th>Owner</th><th>LoC</th><th>Days</th></tr></thead><tbody><tr><td>Add <code>linear-pr-sync --check-only</code> to pre-push</td><td>(TBD)</td><td>+30</td><td>0.5</td></tr><tr><td>Add <code>cost-flag</code> stage to pre-push</td><td>(TBD)</td><td>+20</td><td>0.2</td></tr><tr><td>Add <code>cache-decay-audit</code> G4+G5 stage</td><td>(TBD)</td><td>+30</td><td>0.5</td></tr><tr><td>Polish <code>bin/review-local.sh</code> ergonomics</td><td>(TBD)</td><td>+40</td><td>0.5</td></tr><tr><td>Document <code>bin/review-local.sh</code> invocation pattern</td><td>(TBD)</td><td>+60</td><td>0.3</td></tr></tbody></table>
+<p><strong>Acceptance criteria</strong>:</p>
+<ul><li>[ ] All 8 Tier A gates covered.</li><li>[ ] <code>bin/review-local.sh --help</code> shows 1-line examples for each provider.</li><li>[ ] <code>docs/gates/local-pre-push.md</code> updated with linear-pr-sync and cost-flag sections.</li></ul>
+<p><strong>Effort</strong>: 2 days, 1 developer.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Phase 3 — Branch-protection hardening</h2>
+<p><strong>Goal</strong>: Update branch protection so <code>issue-sync</code> is a <strong>required</strong> check. Currently it's advisory and PR #829 was merged with it failing.</p>
+<table><thead><tr><th>Task</th><th>Owner</th><th>Days</th></tr></thead><tbody><tr><td>Add <code>issue-sync</code> to branch-policy required-checks</td><td>(TBD)</td><td>0.2</td></tr><tr><td>Communicate change in CONTRIBUTING.md</td><td>(TBD)</td><td>0.2</td></tr><tr><td>Update <code>merge-queue-ready-check</code> to include <code>issue-sync</code></td><td>(TBD)</td><td>0.3</td></tr></tbody></table>
+<p><strong>Acceptance criteria</strong>:</p>
+<ul><li>[ ] PR cannot be merged with <code>issue-sync: failure</code>.</li><li>[ ] <code>gh pr checks --required</code> includes <code>issue-sync</code>.</li></ul>
+<p><strong>Effort</strong>: 0.7 days, 1 developer.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Cumulative timeline</h2>
+<pre><code class="language-mermaid">gantt
+    title Local pre-push gate migration (2026-09-09)
+    dateFormat YYYY-MM-DD
+    axisFormat %m-%d
+    section Phase 0
+    issue_sync --lenient + pre-push subcommand :p0a, 2026-09-10, 2d
+    workflow migration to Python subcommand    :p0b, after p0a, 1d
+    test_issue_sync_lenient/offline/pre_push   :p0c, after p0a, 1d
+    section Phase 1
+    hooks/pre-push.sh (Tier A subset)          :p1a, after p0b, 1d
+    bin/install-pre-push.sh                    :p1b, after p1a, 0.5d
+    tests/test_pre_push_hook.py                :p1c, after p1a, 1d
+    docs/gates/local-pre-push.md (per-gate SSOT):p1d, after p1c, 1d
+    section Phase 2
+    linear-pr-sync + cost-flag + G4/G5 stages  :p2a, after p1d, 1d
+    bin/review-local.sh ergonomics             :p2b, after p2a, 1d
+    section Phase 3
+    branch-protection hardening                :p3a, after p2b, 1d</code></pre>
+<p><strong>Total</strong>: 9.2 days, single developer.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Per-phase risk + rollback</h2>
+<table><thead><tr><th>Phase</th><th>Risk</th><th>Rollback</th></tr></thead><tbody><tr><td>0</td><td>Parser keyword change (<code>Issue</code> added to <code>_REF_KEYWORDS</code>) shifts existing behavior</td><td>Revert commit, restore <code>_REF_KEYWORDS</code> to v1.0.0 set</td></tr><tr><td>1</td><td>Pre-push hook adds 30-60s to every push; developers complain</td><td><code>bin/install-pre-push.sh --uninstall</code>; users opt out via <code>git push --no-verify</code></td></tr><tr><td>2</td><td>Linear-pr-sync <code>--check-only</code> introduces a new failure mode if Linear API is down</td><td>Continue with <code>continue-on-error</code> semantics in <code>tools/linear_sync.py</code></td></tr><tr><td>3</td><td>Branch protection change blocks PRs mid-merge</td><td>Required-checks toggle is reversible in &lt;1 min via <code>gh api</code></td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-6">Success metrics (post-rollout)</h2>
+<table><thead><tr><th>Metric</th><th>Baseline (2026-09-09)</th><th>Target (post-Phase 3)</th></tr></thead><tbody><tr><td>PRs merged with a red <code>issue-sync</code> gate</td><td>1 (PR #829)</td><td><strong>0</strong></td></tr><tr><td>Mean time from <code>git push</code> to first red signal</td><td>30-60s (GH Actions queue)</td><td><strong>&lt;10s</strong> (pre-push)</td></tr><tr><td>Local <code>git push</code> rejection rate for Tier A gates</td><td>0% (no signal)</td><td><strong>5-15%</strong> (catches real bugs)</td></tr><tr><td>LLM-judge API spend per PR</td><td>$1-3.50</td><td><strong>unchanged</strong> (Tier B unchanged)</td></tr><tr><td>GH Actions minutes per PR (average)</td><td>8-12 min</td><td><strong>8-12 min</strong> (no change)</td></tr><tr><td>Developer-reported "rerun CI until green" incidents</td><td>~3-5/week (qualitative)</td><td><strong>0</strong></td></tr></tbody></table>
+<p>Track via:</p>
+<ul><li><code>.dev-kit/.active-hooks.json</code> (pre-push install count)</li><li><code>gh api repos/:owner/:repo/actions/runs</code> (red-push rate over time)</li><li><code>tools/token_efficiency_analyzer.py</code> (developer-side cost)</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-7">Cross-references</h2>
+<ul><li><a href="01-problem-and-context.yaml">`01-problem-and-context.yaml`</a></li><li><a href="02-gate-migration-matrix.yaml">`02-gate-migration-matrix.yaml`</a></li><li><a href="03-implementation.yaml">`03-implementation.yaml`</a></li><li><a href="05-meta-eval.yaml">`05-meta-eval.yaml`</a> — risk register + open questions</li><li><code>docs/proposals/review/playbook-application/02-reanalysis.yaml</code> — example of a re-scored proposal (Phase 1 reordered based on v0.3.199 findings)</li><li><code>docs/proposals/review/workflow-fast-mode/</code> — earlier precedent for reducing per-push cost</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-09 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 — Problem &amp; context: PR #829 sync-gate failure + GH Actions gate inventory</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>01 — Problem &amp; context: PR #829 sync-gate failure + GH Actions gate inventory</h1>
+<p class="meta">2026-09-09 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">ci</span><span class="tag tag-info">gates</span><span class="tag tag-info">issue-sync</span><span class="tag tag-info">pr-829</span><span class="tag tag-info">inventory</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">PR</a></li><li><a href="#sec-1">Why the gate caught this is correct (the contract is right)</a></li><li><a href="#sec-2">Full GH Actions gate inventory (11 workflows)</a></li><li><a href="#sec-3">Gate-by-gate contract (the SSOT for migration decisions)</a></li><li><a href="#sec-4">Cost profile (why per-push LLM judges are non-starter)</a></li><li><a href="#sec-5">Local hook inventory (what already exists)</a></li><li><a href="#sec-6">Cross-references</a></li></ol></div>
+<h2 id="sec-0">PR</h2>
+<p><strong>Run</strong>: <a href="https://github.com/sh-ai-x/dev-harness-kit/actions/runs/34298820072/job/102301168018">`actions/runs/34298820072/job/102301168018`</a> — <code>conclusion: failure</code>, 9s wall-clock.</p>
+<p><strong>Gate</strong>: <code>.github/workflows/issue-sync.yml:issue-sync</code> ("GitHub issue sync check").</p>
+<p><strong>Parser</strong>: <code>tools/issue_sync.py</code> v1.0.0. Captures every <code>#N</code> / <code>owner/repo#N</code> reference in the PR title + body (HTML comments and fenced code blocks stripped) with <strong>any</strong> leading keyword (<code>Closes</code>, <code>Fixes</code>, <code>Resolves</code>, <code>Ref</code>, <code>See</code>, <code>Part of</code>, <code>Tracking</code>, <code>Related to</code>, …) <strong>or bare `#N` mention</strong>.</p>
+<p><strong>Closing contract</strong> (<code>.github/workflows/issue-sync.yml:Check issue states</code>):</p>
+<pre><code>if [ &quot;${#CLOSED_REFS[@]}&quot; -gt 0 ]; then
+    echo &quot;::error title=issue-sync::PR references ${#CLOSED_REFS[@]} closed issue(s); sync cannot match.&quot;
+    exit 1
+fi</code></pre>
+<p>Unconditional. Any closed ref → hard fail.</p>
+<p><strong>PR #829 body section "Related:"</strong> (verbatim):</p>
+<pre><code>- Issue #823 — the gap this closes
+- Issue #726 — bootstrap-PR tolerance (preserved per-judge)
+- Issue #397 — PARSE_FAILED hard-fail (preserved per-judge)
+- Issue #625 — verdict_source split (preserved per-judge)</code></pre>
+<p><strong>Parser output</strong> (<code>/tmp/refs.json</code> from the failed run):</p>
+<table><thead><tr><th>ref</th><th>source</th><th>state</th><th>verdict</th></tr></thead><tbody><tr><td><code>#823</code></td><td>title (<code>Closes</code>)</td><td>open</td><td>OK</td></tr><tr><td><code>#823</code></td><td>body</td><td>open</td><td>OK (dup)</td></tr><tr><td><code>#726</code></td><td>body</td><td><strong>closed</strong></td><td><strong>FAIL</strong></td></tr><tr><td><code>#397</code></td><td>body</td><td><strong>closed</strong></td><td><strong>FAIL</strong></td></tr><tr><td><code>#625</code></td><td>body</td><td><strong>closed</strong></td><td><strong>FAIL</strong></td></tr></tbody></table>
+<p><strong>Final error</strong>:</p>
+<pre><code>##[error]PR references 3 closed issue(s); sync cannot match.
+##[error]Closed refs: #726 #397 #625
+##[error]Fix: either re-open the issue(s), remove the reference from the PR body,
+          or open a new issue and replace the ref.</code></pre>
+<p><strong>Why it merged anyway</strong>: PR #829 was merged via squash with admin override; <code>issue-sync</code> is not a <code>required</code> check on the branch protection rule (only <code>CI / test</code>, <code>CI / validate</code>, <code>CI / lint</code>, <code>Review</code>, <code>Security</code>, <code>Maintenance</code> are required). The failure is <strong>silent in the merge queue</strong> and still shows <code>fail</code> on <code>gh pr checks</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Why the gate caught this is correct (the contract is right)</h2>
+<p>The sync contract is real and load-bearing:</p>
+<ul><li>"Closes #N against a closed issue" is a <strong>stale ref</strong> — the work is no longer owed, the PR description lies.</li><li>"Bare #N against a closed issue" is ambiguous at best — the contributor linked to an issue that doesn't accept contributions.</li><li>The gate's job is to surface the contradiction at PR time, not at merge time.</li></ul>
+<p>The <strong>bug is not the gate</strong>. The bug is that:</p>
+<ol><li>The local developer got no signal.</li><li>The gate does not distinguish between <code>Closes #N (closed)</code> (genuinely stale) and <code>Related to #N (closed)</code> (intentional audit-trail preservation).</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-2">Full GH Actions gate inventory (11 workflows)</h2>
+<p>From <code>gh api repos/sh-ai-x/dev-harness-kit/actions/workflows</code>:</p>
+<table><thead><tr><th>#</th><th>Workflow</th><th>File</th><th>LoC</th><th>Trigger</th><th>Blocking?</th></tr></thead><tbody><tr><td>1</td><td>CI</td><td><code>ci.yml</code></td><td>288</td><td><code>pull_request</code>, <code>push:main</code>, <code>workflow_dispatch</code></td><td>YES</td></tr><tr><td>2</td><td>PR Review</td><td><code>review.yml</code></td><td>1066</td><td><code>pull_request</code>, <code>workflow_dispatch</code></td><td>YES</td></tr><tr><td>3</td><td>PR Maintenance</td><td><code>maintenance.yml</code></td><td>551</td><td><code>pull_request</code>, <code>workflow_dispatch</code></td><td>YES</td></tr><tr><td>4</td><td>GitHub issue sync gate</td><td><code>issue-sync.yml</code></td><td>171</td><td><code>pull_request:[opened,synchronize,reopened,edited]</code>, <code>workflow_dispatch</code></td><td>YES</td></tr><tr><td>5</td><td>linear-pr-sync</td><td><code>linear-pr-sync.yml</code></td><td>108</td><td><code>pull_request</code>, <code>workflow_dispatch</code></td><td>NO (<code>continue-on-error</code>)</td></tr><tr><td>6</td><td>Fork PR Review</td><td><code>fork-pr-review.yml</code></td><td>248</td><td><code>pull_request</code> (fork-only)</td><td>YES</td></tr><tr><td>7</td><td>cache-decay-audit</td><td><code>cache-decay-audit.yml</code></td><td>178</td><td><code>pull_request</code>, <code>workflow_dispatch</code></td><td>YES</td></tr><tr><td>8</td><td>cost-flag</td><td><code>cost-flag.yml</code></td><td>195</td><td><code>pull_request</code></td><td>YES (label)</td></tr><tr><td>9</td><td>merge-queue-ready-check</td><td><code>merge-queue-ready-check.yml</code></td><td>113</td><td><code>pull_request</code> (queue)</td><td>YES</td></tr><tr><td>10</td><td>auto-fix-pr</td><td><code>auto-fix-pr.yml</code></td><td>214</td><td><code>workflow_dispatch</code> only</td><td>NO</td></tr><tr><td>11</td><td>version-bump</td><td><code>version-bump.yml</code></td><td>208</td><td><code>pull_request: closed</code> (post-merge)</td><td>NO</td></tr></tbody></table>
+<p><strong>8 are pull_request triggers</strong>. <strong>6 are LLM-judge gates</strong> (<code>review.yml</code> runs <code>/dev-kit:review</code> + <code>/dev-kit:security</code>; <code>maintenance.yml</code> runs <code>/dev-kit:maintenance</code>).</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Gate-by-gate contract (the SSOT for migration decisions)</h2>
+<table><thead><tr><th>Gate</th><th>What</th><th>Blocking contract</th><th>Runtime</th><th>Network</th><th>Owner</th></tr></thead><tbody><tr><td><code>branch-policy</code></td><td>Warns on direct push to main</td><td>Warning (advisory)</td><td>&lt;1s</td><td>No</td><td><code>ci.yml</code></td></tr><tr><td><code>test (python 3.12)</code></td><td><code>pytest tests/ -v</code></td><td>Any failure → fail</td><td>~2m</td><td>No</td><td><code>ci.yml</code></td></tr><tr><td><code>validate</code></td><td>Plugin/manifest schema</td><td>Schema invalid → fail</td><td>~10s</td><td>No</td><td><code>ci.yml</code></td></tr><tr><td><code>lint (ruff)</code></td><td>Ruff over tracked files</td><td>Any violation → fail</td><td>~7s</td><td>No</td><td><code>ci.yml</code></td></tr><tr><td><code>scope (production code?)</code></td><td>Detects prod-code touches</td><td>Sets gate output</td><td>&lt;5s</td><td>No</td><td><code>review.yml</code></td></tr><tr><td><code>prompt-injection static filter</code></td><td>Pattern scan over diff</td><td>Suspect → fail</td><td>~10s</td><td>No</td><td><code>review.yml</code></td></tr><tr><td><code>/dev-kit:review (3-dim)</code></td><td>LLM judge correctness + reuse/simplification</td><td>Verdict=Approve → pass</td><td>~1m44s</td><td>YES</td><td><code>review.yml</code></td></tr><tr><td><code>/dev-kit:security (10-dim)</code></td><td>OWASP A01–A10 + LLM01</td><td>Verdict=Approve → pass</td><td>~2m22s</td><td>YES</td><td><code>review.yml</code></td></tr><tr><td><code>severity gate (review + security)</code></td><td>Aggregates R+S verdicts</td><td>Any high → fail</td><td>~5s</td><td>No</td><td><code>review.yml</code></td></tr><tr><td><code>/dev-kit:maintenance</code></td><td>CC-1..8 / OE-1..8 / VM-1..4 + docs</td><td>Verdict=Pass → pass</td><td>~3m45s</td><td>YES</td><td><code>maintenance.yml</code></td></tr><tr><td><code>maintenance gate (verdict + docs)</code></td><td>Doc-updated check</td><td>docs-not-required flag or verdict=Pass</td><td>~7s</td><td>No</td><td><code>maintenance.yml</code></td></tr><tr><td><code>cache-decay-audit (G4+G5)</code></td><td>F1 cache_decay + skill frontmatter</td><td>Any failure → fail</td><td>~2m12s</td><td>No</td><td><code>cache-decay-audit.yml</code></td></tr><tr><td><code>cost-flag</code></td><td>Labels PR if it touched LLM-cost config</td><td>Label only</td><td>&lt;5s</td><td>No</td><td><code>cost-flag.yml</code></td></tr><tr><td><code>merge-queue-ready-check</code></td><td>Required-check aggregator</td><td>All required pass → ready</td><td>&lt;5s</td><td>No</td><td><code>merge-queue-ready-check.yml</code></td></tr><tr><td><code>Fork PR review</code></td><td>Awaits maintainer approval</td><td>No approval → fail</td><td>indefinite</td><td>No</td><td><code>fork-pr-review.yml</code></td></tr><tr><td><strong>`GitHub issue sync check`</strong></td><td>Every <code>#N</code> ref → must be <code>open</code></td><td>Any closed → fail</td><td>~9s</td><td>YES (<code>gh api</code>)</td><td><code>issue-sync.yml</code></td></tr><tr><td><code>linear-pr-sync</code></td><td>Mirrors PR state to Linear</td><td><code>continue-on-error</code> (best-effort)</td><td>~7s</td><td>YES</td><td><code>linear-pr-sync.yml</code></td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-4">Cost profile (why per-push LLM judges are non-starter)</h2>
+<p>Adding the <strong>wall-clock</strong> of all blocking gates per push:</p>
+<ul><li><code>test</code> + <code>validate</code> + <code>lint</code>: ~2m30s (mostly test install)</li><li><code>cache-decay-audit</code> (G4+G5): ~2m12s</li><li><code>prompt-injection static filter</code>: ~10s</li><li><code>/dev-kit:review</code> (3-dim): ~1m44s, <strong>+provider API cost</strong></li><li><code>/dev-kit:security</code> (10-dim): ~2m22s, <strong>+provider API cost</strong></li><li><code>/dev-kit:maintenance</code>: ~3m45s, <strong>+provider API cost</strong></li><li><code>issue-sync</code>: ~9s, <strong>+`gh api` call</strong></li></ul>
+<p>Total <strong>deterministic</strong> wall-clock: ~5m (testable locally) Total <strong>LLM-judge</strong> wall-clock: ~8m <strong>+ ~$0.50-2.00 per push</strong></p>
+<p>Running LLM judges per push is <strong>3 orders of magnitude</strong> more expensive than the deterministic subset. The migration matrix must reflect this.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Local hook inventory (what already exists)</h2>
+<p>From <code>.dev-kit/.active-hooks.json</code>:</p>
+<table><thead><tr><th>Hook</th><th>When</th><th>fail_closed</th><th>Already covers</th></tr></thead><tbody><tr><td><code>git-guard.sh</code></td><td>PreToolUse <code>Bash</code></td><td>true</td><td>direct-main push (worktree-aware)</td></tr><tr><td><code>tdd-guard.sh</code></td><td>PreToolUse <code>Edit|Write</code></td><td>true</td><td>RED-evidence enforcement</td></tr><tr><td><code>secret-scan.sh</code></td><td>PostToolUse <code>Edit|Write</code></td><td>true</td><td>accidental key commit</td></tr><tr><td><code>slop-detector.sh</code></td><td>PostToolUse <code>Edit|Write</code></td><td>true</td><td>AI-slop patterns</td></tr><tr><td><code>l4-todo-scan.sh</code></td><td>PostToolUse <code>Edit|Write</code></td><td>true</td><td>forbidden deferred-work markers</td></tr><tr><td><code>injection-content-guard.sh</code></td><td>PostToolUse <code>Agent|WebFetch</code></td><td>false</td><td>prompt-injection on fetched text</td></tr><tr><td><code>loop-detect.sh</code></td><td>PostToolUse <code>Bash</code></td><td>true</td><td>bash doom-loop</td></tr><tr><td><code>sub-agent-handoff.sh</code></td><td>PostToolUse <code>Agent</code></td><td>true</td><td>missing evidence block</td></tr><tr><td><code>linear-worktree-create.sh</code></td><td>PostToolUse <code>Bash</code></td><td>false</td><td>Linear mirror</td></tr><tr><td><code>worktree-log-auto-install.sh</code></td><td>PostToolUse <code>Bash</code></td><td>false</td><td>session start log hooks</td></tr><tr><td><code>stop-verify.sh</code></td><td>Stop</td><td>true</td><td>build-stop verify</td></tr></tbody></table>
+<p><strong>No pre-push hook exists today.</strong> Claude Code's <code>Stop</code> hook is the closest analog but fires only at session-end, not at <code>git push</code>.</p>
+<p>Git's native <code>pre-push</code> hook (<code>git/hooks/pre-push</code>) is unconfigured across this repo. This proposal installs it.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Cross-references</h2>
+<ul><li>PR #829: feat(ci): split review.yml into review + security templates (Closes #823)</li><li>Issue #823: gate-select AI-judge pick has no <code>review-only</code> option</li><li><code>.github/workflows/issue-sync.yml</code> — gate that failed</li><li><code>tools/issue_sync.py</code> — parser (v1.0.0)</li><li><code>hooks/git-guard.sh</code> — existing closest analog</li><li><code>hooks/tdd-guard.sh</code> — pattern reference for hook ergonomics</li><li><code>skills/proposal/SKILL.md</code> — proposal lifecycle</li><li><code>docs/proposals/review/playbook-application/02-reanalysis.yaml</code> — example of a re-scored proposal</li><li><code>iron-laws/index.md</code> — Iron Law L2 ("Cartography, not re-reads"); L3 ("Volatile content stays in the prompt tail")</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-09 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
