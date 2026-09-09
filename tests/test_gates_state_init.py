@@ -1,4 +1,4 @@
-"""Pin the `init` sub-command contract (issue TBD reviewer finding)."""
+"""Pin the `init` sub-command contract (issue #834 reviewer finding)."""
 import io
 import json
 import sys

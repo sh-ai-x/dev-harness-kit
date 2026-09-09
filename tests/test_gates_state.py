@@ -421,6 +421,54 @@ class TestSetField(unittest.TestCase):
             )
 
 
+class TestDetectOwnerRepoBodyEquivalence(unittest.TestCase):
+    """Body-equivalence guard for `detect_owner_repo` between gates_state and ci_setup.
+
+    The two implementations are functionally equivalent today; this test is
+    git-free and runs in any sandbox. If a future commit drifts them, the
+    test fails with a normalized diff and points at the offending line. Per
+    PR #834 review (round 2, MAJOR #3): the previous `@unittest.skip` on
+    the git-init-based TestDetectOwnerRepo left drift invisible; this
+    test fills that gap without requiring `git init`.
+
+    Normalization: drop docstrings, drop Python line-comments, and
+    collapse whitespace. Trivial reformatting (multi-line vs single-line
+    kwarg, extra `# SSH:` comment, etc.) does not trip the assertion —
+    only actual logic drift does.
+    """
+
+    @staticmethod
+    def _normalize(fn) -> str:
+        import inspect
+        import io
+        import re as _re
+        import tokenize as _tokenize
+
+        src = inspect.getsource(fn)
+        # 1. Strip the docstring (different prose across the two copies).
+        src = _re.sub(r'"""[\s\S]*?"""', "", src)
+        # 2. Strip Python line-comments via the tokenize module so the
+        #    `# SSH: git@github.com:OWNER/REPO(.git)` notes in ci_setup
+        #    don't surface as false-positive drift.
+        try:
+            tokens = list(_tokenize.tokenize(io.BytesIO(src.encode("utf-8")).readline))
+            tokens = [t for t in tokens if t.type != _tokenize.COMMENT]
+            src = _tokenize.untokenize(tokens).decode("utf-8")
+        except _tokenize.TokenizeError:
+            pass  # fall through; whitespace-collapsed raw source is still useful
+        # 3. Collapse whitespace.
+        return _re.sub(r"\s+", " ", src).strip()
+
+    def test_bodies_are_byte_equivalent_after_normalization(self) -> None:
+        import ci_setup  # imported lazily so the heavy chain stays out of unit-test paths
+        self.assertEqual(
+            self._normalize(gates_state.detect_owner_repo),
+            self._normalize(ci_setup.detect_owner_repo),
+            "lib/gates_state.py:detect_owner_repo drifted from lib/ci_setup.py:detect_owner_repo; "
+            "consolidate into lib/gh_cli.py or sync by hand.",
+        )
+
+
 @unittest.skip("git init is flaky/slow in this sandbox; detect_owner_repo itself is not core to the SSOT")
 class TestDetectOwnerRepo(unittest.TestCase):
     """Best-effort owner/repo probe. Mirrors lib/ci_setup.detect_owner_repo."""

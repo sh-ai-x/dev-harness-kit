@@ -8,7 +8,7 @@ Issue #823 acceptance (unchanged behaviour, new wiring):
   - gate-select's `show` reports each workflow's presence/absence
     independently — no lie when only one of the two is installed.
 
-Issue TBD rewire:
+issue #834 rewire:
   - The legacy `pick → review` path threads `--exclude security.yml` to
     ci-setup. After the gates.json refactor, the pick writes
     gates.json (enable review / disable security) and dispatches
@@ -50,7 +50,7 @@ class TestExpectedPathsContainSecurityYml(unittest.TestCase):
         )
 
     def test_maintenance_yml_in_expected_paths(self) -> None:
-        # Issue TBD: maintenance.yml is the third first-class gate.
+        # issue #834: maintenance.yml is the third first-class gate.
         self.assertIn(
             ".github/workflows/maintenance.yml",
             ci_setup.EXPECTED_PATHS,
@@ -163,7 +163,7 @@ class TestMarkerListsAllThreeWorkflows(unittest.TestCase):
 
 
 class TestCiSetupReviewOnlyViaGatesJson(unittest.TestCase):
-    """Issue TBD acceptance: gates.json with `security.enabled=false` lands
+    """issue #834 acceptance: gates.json with `security.enabled=false` lands
     review.yml but leaves security.yml absent, and the marker `runners`
     list reflects only review.yml + maintenance.yml — NOT security.yml.
 
@@ -242,7 +242,7 @@ class TestCiSetupReviewOnlyViaGatesJson(unittest.TestCase):
 
 
 class TestGateSelectPickWritesGatesJson(unittest.TestCase):
-    """Issue TBD rewire: gate-select's pick flow must write gates.json,
+    """issue #834 rewire: gate-select's pick flow must write gates.json,
     not thread `--exclude security.yml` to ci-setup.
 
     The behavioural contract (review-only pick → review.yml only) is
@@ -262,7 +262,7 @@ class TestGateSelectPickWritesGatesJson(unittest.TestCase):
         self.assertIsNone(
             bad,
             "gate-select SKILL.md still threads `exclude=` in a Skill() dispatch — "
-            "the SSOT moved to gates.json (issue TBD)",
+            "the SSOT moved to gates.json (issue #834)",
         )
 
     def test_pick_writes_gates_json(self) -> None:
@@ -284,7 +284,7 @@ class TestGateSelectPickWritesGatesJson(unittest.TestCase):
         self.assertNotIn(
             'exclude_arg = "security.yml" if ai_judge_pick == "review"',
             self.skill_text,
-            "SKILL.md still has the legacy `exclude_arg` thread — issue TBD says gates.json is the SSOT",
+            "SKILL.md still has the legacy `exclude_arg` thread — issue #834 says gates.json is the SSOT",
         )
 
 

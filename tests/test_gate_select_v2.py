@@ -57,7 +57,7 @@ class TestPickRewritesGatesJson(unittest.TestCase):
     def test_pick_dispatches_cisetup_without_exclude(self) -> None:
         # The pick flow ends by dispatching ci-setup. It must NOT thread
         # `--exclude=` anymore — the legacy thread is gone (issue #823
-        # contract moved to gates.json per issue TBD).
+        # contract moved to gates.json per issue #834).
         # Pin by negative assertion: the literal `exclude=` should NOT
         # appear in a gate-select dispatch line.
         import re
@@ -65,7 +65,7 @@ class TestPickRewritesGatesJson(unittest.TestCase):
         self.assertIsNone(
             bad,
             "gate-select SKILL.md still threads `exclude=` in a Skill() dispatch — "
-            "the SSOT moved to gates.json (issue TBD)",
+            "the SSOT moved to gates.json (issue #834)",
         )
 
     def test_pick_writes_gates_json(self) -> None:

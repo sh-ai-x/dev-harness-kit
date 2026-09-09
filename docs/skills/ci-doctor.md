@@ -29,6 +29,10 @@ The skill is 0-arg (optionally `--target DIR`, default `$PWD`) and delegates ent
 | `workflow triggers` / `fork-PR secret gap` / `concurrency:` / `branch policy` | Root-cause diagnostics — always WARN or INFO, never FAIL; they never flip the verdict. |
 | `open PR mergeable` / `open PR draft` / `open PR title` / `open PR state` | Issue #249: surfaces when the open PR's state would silently skip CI. |
 
+### Gates.json consistency check (issue #834)
+
+When `.dev-kit/gates.json` is present, the audit runs `_check_gates_consistency` (`lib/ci_doctor.py:check_gates_consistency`) to surface drift between the committed SSOT and the live `gh variable get GATES_<NAME>_ENABLED` state. One row per gate emits PASS / WARN / SKIP — drift is WARN, never FAIL, because the operator may intentionally have a pending `gate-select sync` between local commit and `gh variable set`. SKIP fires when `gh` is absent / unauthenticated or the target repo can't be resolved. This check is the post-PR #834 follow-up to the maintenance gate's `if:`-uniqueness verification; a consumer who edits `gates.json` but forgets to `sync` now sees a WARN instead of a silently-stale CI run.
+
 Every FAIL row prints the exact remediation command (e.g. `gh secret set NAME --repo OWNER/REPO`), so the workflow is audit → paste commands → re-audit, instead of push PR → CI red → read log → grep for the secret name.
 
 ### Workflow diagnostics (WARN/INFO only, verdict-neutral)

@@ -1,6 +1,6 @@
 """test_ci_setup_gates.py — pin ci_setup ↔ gates.json precedence contract.
 
-Issue TBD acceptance:
+issue #834 acceptance:
   - gates.json absent + ci-setup (no --exclude) → all 5 runners; marker
     `gates_source = "ci-setup"`.
   - gates.json present + disable security → marker records only review

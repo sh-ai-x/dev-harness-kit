@@ -546,7 +546,7 @@ def _list_repo_secrets(repo: str) -> tuple[set[str], str]:
 
 
 def required_files_for(marker_payload):
-    """Issue TBD: derive required-files list from marker.runners.
+    """issue #834: derive required-files list from marker.runners.
 
     Source-repo mode (no marker) falls back to the static
     `REQUIRED_FILES` tuple. Consumer mode honors the marker so a
@@ -696,7 +696,7 @@ def _check_templates_current(target: Path, source_repo: bool = False) -> list[Ch
 
 
 def _check_gates_consistency(target: Path) -> list[Check]:
-    """Audit `.dev-kit/gates.json` vs GH repo variables (issue TBD)."""
+    """Audit `.dev-kit/gates.json` vs GH repo variables (issue #834)."""
     import shutil as _shutil
     import subprocess as _subprocess
     report: list[Check] = []

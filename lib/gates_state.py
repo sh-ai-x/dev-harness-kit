@@ -316,32 +316,31 @@ def runners_from_gates(root: Optional[Path] = None) -> list:
 # ----------------------------------------------------------------------------
 
 # Best-effort owner/repo probe. Mirrors `lib/ci_setup.detect_owner_repo`
-# (lines 1282-1312) but is duplicated here so `gates_state` does not
-# depend on the heavyweight `ci_setup` import chain. The two copies
-# MUST stay in sync; the assertion in `tests/test_gates_state.py`
-# guards against drift.
-_GH_REPO_RE = re.compile(r"github\.com[:/]([^/]+)/([^/\s]+?)(?:\.git)?/?$")
-
-
+# (lines 1426-1458) byte-for-byte so the body-equivalence test
+# `tests/test_gates_state.py::TestDetectOwnerRepoBodyEquivalence` passes
+# without depending on `git init`. The two copies MUST stay in sync;
+# the assertion guards against drift (issue #834 round 2 MAJOR #3).
 def detect_owner_repo(target_dir: Path) -> str:
     """Best-effort `<OWNER>/<REPO>` from git remote.
 
-    Returns the literal `<OWNER>/<REPO>` placeholder with an
-    `(auto-detect failed: <ExceptionType>)` suffix on any failure so
-    the caller can still render a useful error message. Never raises.
+    Returns `<OWNER>/<REPO>` on success. On failure (no git, no remote,
+    non-GitHub remote, timeout), returns the literal `<OWNER>/<REPO>`
+    placeholder with a `(auto-detect failed: <ExceptionType>)` suffix
+    so the post-install checklist still renders usefully AND the user
+    sees WHY auto-detection failed. Never raises.
     """
     placeholder = "<OWNER>/<REPO>"
     try:
         cp = subprocess.run(
             ["git", "-C", str(target_dir), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
+            capture_output=True, text=True, timeout=5,
         )
         if cp.returncode != 0 or not cp.stdout.strip():
             return f"{placeholder} (auto-detect failed: no remote)"
         url = cp.stdout.strip()
-        m = _GH_REPO_RE.search(url)
+        # SSH: git@github.com:OWNER/REPO(.git)
+        # HTTPS: https://github.com/OWNER/REPO(.git)
+        m = re.search(r"github\.com[:/]([^/]+)/([^/\s]+?)(?:\.git)?/?$", url)
         if m:
             return f"{m.group(1)}/{m.group(2)}"
         return f"{placeholder} (auto-detect failed: remote is not GitHub)"
@@ -428,12 +427,6 @@ def sync(
 # ----------------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------------
-
-
-# First-class workflows the operator CANNOT toggle via gates.json.
-# ci.yml + auto-fix-pr.yml are always-on infrastructure (branch-policy +
-# the auto-fix loop). Gates.json only governs the three judge workflows.
-_ALWAYS_ON_RUNNERS = frozenset({"ci.yml", "auto-fix-pr.yml"})
 
 
 def _init_synthesize(root: Optional[Path]) -> dict:

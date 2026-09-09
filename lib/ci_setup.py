@@ -72,9 +72,9 @@ except ImportError:
 # `lib/install.sh` consumer copy ships every `lib/*.py`, so the package
 # form resolves in the source repo; the flat form is the 3-file minimal
 # fixture path used by `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`.
-# When gates_state is absent (the 3-file fixture), `is_enabled` and
-# `runners_from_gates` are stubbed to legacy behaviour so install_ci_config
-# keeps working via the `exclude=` path.
+# When gates_state is absent (the 3-file fixture), `runners_from_gates`
+# is stubbed to legacy behaviour so install_ci_config keeps working via
+# the `exclude=` path.
 try:
     from .gates_state import runners_from_gates  # type: ignore
 except ImportError:
@@ -140,7 +140,7 @@ _CI_PATHS_BEFORE_HOOKS: tuple[str, ...] = (
     # pre-#823). ci-setup --force copies each present template.
     ".github/workflows/review.yml",
     ".github/workflows/security.yml",
-    # Issue TBD: maintenance.yml ships as a consumer template so the
+    # issue #834: maintenance.yml ships as a consumer template so the
     # maintenance gate is one of the three first-class CI gates the
     # operator can toggle via `.dev-kit/gates.json` + `gate-select
     # enable/disable`. The local `.github/workflows/maintenance.yml`
@@ -868,7 +868,7 @@ def _resolve_runners_from_gates(target: "Path") -> "list[str] | None":
     committed; a malformed file is a regression the user must fix, but
     blocking the install would cascade unrelated damage).
 
-    Issue TBD: this is the precedence point — gates.json wins over
+    issue #834: this is the precedence point — gates.json wins over
     `exclude=` when present. `ci-setup --exclude security.yml` on a
     consumer WITH gates.json is logged as a `::notice::` so a stale
     caller doesn't silently regress.
@@ -886,7 +886,7 @@ def _resolve_runners_from_gates(target: "Path") -> "list[str] | None":
         import sys as _sys
         print(
             f"::warning::gates.json present at {path} but invalid; "
-            f"falling back to exclude= (issue TBD)",
+            f"falling back to exclude= (issue #834)",
             file=_sys.stderr,
         )
         return None
@@ -906,7 +906,7 @@ def _resolve_gates_precedence(
       * `gates_source` is "gates.json" or "ci-setup" — the audit breadcrumb
         that lands in the marker's `gates_source` field.
 
-    Precedence rules (issue TBD):
+    Precedence rules (issue #834):
       1. gates.json present → its enabled flags drive both
          `paths_to_install` and the marker `runners` list. The legacy
          `exclude=` kwarg is logged as `::notice::` and IGNORED so a stale
@@ -921,7 +921,7 @@ def _resolve_gates_precedence(
         if exclude:
             print(
                 "::notice::gates.json present; ignoring --exclude "
-                f"{sorted(exclude)} (issue TBD)",
+                f"{sorted(exclude)} (issue #834)",
                 file=_sys.stderr,
             )
         # The 3 first-class gates are the operator-toggleable set;
@@ -959,10 +959,10 @@ def _build_marker(
     (a `review only` consumer shows review.yml, not security.yml). Default
     install — no exclude — emits all five.
 
-    Issue TBD: maintenance.yml is the third first-class CI gate. It
+    issue #834: maintenance.yml is the third first-class CI gate. It
     ships via `_CI_PATHS_BEFORE_HOOKS` and is recorded here so the
     marker's `runners` field matches the on-disk workflow set.
-    Issue TBD: when `gates_runners` is passed (the SSOT-derived list),
+    issue #834: when `gates_runners` is passed (the SSOT-derived list),
     it overrides the static list — gates.json is the post-refactor SSOT,
     `exclude=` is the legacy contract. `gates_source` records which path
     filled the list ("gates.json" | "ci-setup") so `ci-doctor` can audit.
@@ -983,7 +983,7 @@ def _build_marker(
         "installed_at": _now_utc_iso(),
         "installed_by": "dev-kit:ci-setup",
         "installed_dev_kit_version": plugin_version(_PLUGIN_ROOT),
-        # Issue TBD: gates audit breadcrumbs. `gates_source` records
+        # issue #834: gates audit breadcrumbs. `gates_source` records
         # which path filled `runners` so ci-doctor can spot a
         # mid-migration consumer (marker says "ci-setup" but gates.json
         # exists = the consumer is one install away from "gates.json").
@@ -1311,7 +1311,7 @@ def install_ci_config(
     target = _validate_target(target_dir)
     report = InstallReport()
 
-    # Issue TBD: gates.json precedence. The helper returns the
+    # issue #834: gates.json precedence. The helper returns the
     # post-filter `paths_to_install`, the `gates_runners` value to thread
     # into `_build_marker`, and the `gates_source` audit string. When
     # gates.json is absent, `gates_runners` is None and the helper falls
