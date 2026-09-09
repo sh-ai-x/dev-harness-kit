@@ -90,8 +90,8 @@ A single `python3 << 'PY' ... PY` heredoc embedded in `SKILL.md` (no `bin/`, `to
 
 1. **Walk** target recursively — collect all files, classify by directory + extension.
 2. **Map** every discovered path to domain pillars via `PILLAR_PATTERNS`.
-3. **Parse** optional surfaces: `skills/*/SKILL.md` (frontmatter + body), `commands/*.md`, `hooks/hooks.json`, `.github/workflows/*.yml`, `lib/*.py`, `bin/*.py`, `tools/*.py`, `.mcp.json`, `.claude/settings.json`, `.codex/settings.json`.
-4. **Infer relationships** by scanning every `SKILL.md` + `commands/*.md` body for `/skill:<name>` / `/dev-kit:<name>` refs — real cross-references only.
+3. **Parse** optional surfaces: `skills/*/SKILL.md` (frontmatter + body), `hooks/hooks.json`, `.github/workflows/*.yml`, `lib/*.py`, `bin/*.py`, `tools/*.py`, `.mcp.json`, `.claude/settings.json`, `.codex/settings.json`.
+4. **Infer relationships** by scanning every `SKILL.md` for `/skill:<name>` / `/dev-kit:<name>` refs — real cross-references only.
 5. **Extract cycles + loop-backs** from each `user_invocable: true` skill body (5-strategy extraction + `find_loop_back()`) — the top N (`visualized_skills`) get a `flowchart TD` per-skill workflow diagram, row-chunked and loop-annotated.
 6. **Emit** `/tmp/code-viz.html` with stat tiles (surface + pillar), 4 inventory tables, 26+ diagrams (click-to-expand modal at natural viewBox size), CSS-variable light + dark theme, `theme: 'base'` + `themeVariables` for high-contrast Mermaid text, `@media print` for clean ⌘P → PDF.
 7. **(Optional)** Export one PNG per diagram via `--screenshots DIR`.

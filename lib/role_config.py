@@ -70,8 +70,7 @@ class RoleConfigError(Exception):
 # listing additional skills explicitly; the wildcard is a convenience
 # for "this role can invoke everything".
 #
-# Generated at import time from `commands/*.md` and `skills/*/SKILL.md`
-# (the two places that actually declare a `/dev-kit:*` slash). The
+# Generated at import time from `skills/*/SKILL.md`
 # previous hand-maintained tuple drifted from the on-disk inventory
 # (LLM judge review round 3 finding): three entries listed skills
 # that no longer exist, and four actual skills (`ralph`, `adapt`,
@@ -80,15 +79,11 @@ class RoleConfigError(Exception):
 # per Python process; the result is cached in the module attribute
 # `_DEV_KIT_SKILL_PREFIXES` for fast repeated reads.
 def _discover_dev_kit_skill_prefixes() -> tuple[str, ...]:
-    """Scan `commands/*.md` + `skills/*/SKILL.md` for slash names."""
+    """Scan `skills/*/SKILL.md` for slash names (commands/ removed in
+    the prefix-only consolidation; every slash now lives under skills/)."""
     from pathlib import Path
     seen: set[str] = set()
     repo_root = Path(__file__).resolve().parent.parent
-    for cmd_path in (repo_root / "commands").glob("*.md"):
-        name = cmd_path.stem
-        if name == "README":
-            continue
-        seen.add(f"dev-kit:{name}")
     for skill_path in (repo_root / "skills").glob("*/SKILL.md"):
         seen.add(f"dev-kit:{skill_path.parent.name}")
     return tuple(sorted(seen))

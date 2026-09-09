@@ -1064,7 +1064,7 @@ log "combined verdict: $WORST"
 # still runs the L3 regex on the PR body -- the flag is a "treat every
 # PR as production-touching" toggle, NOT a "skip the gate" toggle.
 # Touch-probe regex covers every directory that ships production code,
-# including `bin/` and `commands/` which were missing in the previous
+# including `bin/` which was missing in the previous
 # version.
 # ---------------------------------------------------------------------------
 L3_OK=1
@@ -1076,7 +1076,7 @@ if [ "$TOUCH_PROBE" = "0" ]; then
   # gating, not bypass.
   TOUCHES_PROD="forced (--no-touch-probe)"
 elif [ "$TOUCH_PROBE" = "1" ]; then
-  TOUCHES_PROD="$(printf '%s\n' "$PR_FILES" | grep -E '^(bin|commands|lib|tools|hooks|skills|\.githooks|\.claude|\.codex|\.github)/' || true)"
+  TOUCHES_PROD="$(printf '%s\n' "$PR_FILES" | grep -E '^(bin|lib|tools|hooks|skills|\.githooks|\.claude|\.codex|\.github)/' || true)"
 fi
 if [ -n "$TOUCHES_PROD" ]; then
   if [ "$(extract_pytest_tail "$PR_BODY")" = "yes" ]; then

@@ -130,6 +130,26 @@ workflows' judge steps changed.
 
   Closes the substrate work; PRs #457 #458 #459 #460 #461 closed with pointers to this entry. The historical branches (`feat/lcs-perf-evidence`, `feat/lcs-ux-proposal`, `feat/lcs-ux-discovery`, `feat/lcs-ux-summary-blocks`, `feat/lcs-ux-nl-router`, `feat/lcs-ux-reserved-routes`) remain on disk for archaeology but are not targeted at this repo.
 
+- **fix(commands):** drop `commands/` shims so every dev-kit slash resolves as
+  `/dev-kit:<name>`. The bare `commands/*.md` were copied to `.claude/commands/`
+  by `bin/install-commands.sh` on every session start, registering duplicates
+  next to the prefixed `skills/<n>/SKILL.md` forms — `/mode`, `/ralph`, `/team`,
+  `/gate-select`, `/guard-mode` showed up in slash search instead of the
+  prefixed form, and any post-merge cache refresh left the prefixed form
+  invisible until the next session started (cache `0.3.350/skills/` was
+  missing `mode/`, `ralph/`, `gate-select/`, `guard-mode/`, `team/` until the
+  `plugin-cache-refresh` hook could finish its rsync past the `.in_use/<pid>`
+  lock). `commands/` + `bin/install-commands.sh` + `tests/test_commands_install.py`
+  deleted; `commands` field removed from both plugin manifests; SessionStart
+  install-commands hook removed from `.claude/settings.json` + `.codex/hooks.json`;
+  `_is_new_command` + `commands/` removed from `lib/maintenance_gate.py` and
+  `lib/role_config.py`; 17 stale references rebased across docs/skills/tests/
+  workflows/.gitignore/REPOSITORY-MAP/bin/review-local.sh. Two orphaned
+  `commands/review-local.md` + `commands/skill-usage.md` were recreated as
+  `skills/review-local/SKILL.md` + `skills/skill-usage/SKILL.md` so the
+  prefixed slashes still resolve. Net: -1023 lines in commit `3e466c9`, +183
+  in commit `e0888388`.
+
 ## [0.1.4] - 2026-07-07
 
 ### Changed — split into PR A and PR B (this PR = A)

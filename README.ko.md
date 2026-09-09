@@ -461,7 +461,7 @@ sequenceDiagram
 | [`/dev-kit:docs-maintenance`](docs/skills/docs-maintenance.md) | 오래된 문서를 감사하고 README를 새로 고치되 시점에 따라 변하는 사실은 박아두지 않는다. |
 | [`/dev-kit:ci-triage`](docs/skills/ci-triage.md) | 최근 커밋의 실패한 GitHub Actions 런을 분류하고 영속화된 케이스 저장소와 중복 제거 후 모델/컨텍스트/하네스 분류로 새 실패를 판정 — 모든 케이스는 재현 가능한 repro + 실행 가능한 회귀 테스트를 가져야 한다. |
 | [`/dev-kit:log`](docs/skills/log.md) | 세션 로깅을 켜고 끈다. `token-analyzer`, `skill-usage`, 세션 모니터가 데이터로 쓸 수 있게 한다. |
-| [`/dev-kit:skill-usage`](commands/skill-usage.md) | 어떤 스킬을 실제로 얼마나 쓰는지 보여준다 — 가지치기에 유용. |
+| [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | 어떤 스킬을 실제로 얼마나 쓰는지 보여준다 — 가지치기에 유용. |
 | [`/dev-kit:sot-harness-writer`](docs/skills/sot-harness-writer.md) | 5라운드 × 2–3개의 증거 기반 추천을 인터뷰하는 Single Source of Truth 하네스 문서 작성기 — `/dev-kit:plan`으로 핸드오프한다. |
 | [`/dev-kit:learn`](docs/skills/learn.md) | 소스 텍스트(파일, URL, 산문, 또는 세션 트랜스크립트)를 후보 `SKILL.md`로 증류 — 결정론적 G1–G5 검사 + 후보별 승인 단계를 거친다. |
 

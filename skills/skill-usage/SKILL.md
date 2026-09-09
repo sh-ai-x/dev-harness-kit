@@ -2,15 +2,23 @@
 name: skill-usage
 category: shortcuts
 description: Run the skill usage telemetry CLI and inspect turns, invocations, and per-project usage.
-alpha: analysis
+when_to_use: |
+  - User types /dev-kit:skill-usage
+  - User wants to see per-skill invocation counts
+  - User is planning a /dev-kit:prune pass and wants usage data first
+argument-hint: ""
+allowed-tools: Read Bash
+disallowed-tools: Edit WebFetch Agent
+model: sonnet
+disable-model-invocation: false
 user-invocable: true
+alpha: analysis
 ---
+> [← Skills index](../../README.md)
 
-## Invocation
+# /dev-kit:skill-usage — usage telemetry CLI
 
-Arguments: `$ARGUMENTS` — pass any supported `tools/skill_usage.py` options.
-
-## Behavior
+## What it does
 
 Run the usage report from the repository root:
 

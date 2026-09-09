@@ -19,6 +19,5 @@
     "ax",
     "harness"
   ],
-  "commands": "./commands/",
   "skills": "./skills/"
 }

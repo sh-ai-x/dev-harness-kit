@@ -1033,7 +1033,7 @@ class TestCiSetup(unittest.TestCase):
 
     # === /dev-kit:skill-usage's tools/*.py must ship to consumers ===
     #
-    # commands/skill-usage.md shells out to a bare relative path
+    # skills/skill-usage/SKILL.md shells out to a bare relative path
     # (`python3 tools/skill_usage.py`). ${CLAUDE_PLUGIN_ROOT} does not
     # expand inside command markdown bodies (anthropics/claude-code#9354),
     # so any consumer that only ran ci-setup or bootstrap — and never cloned

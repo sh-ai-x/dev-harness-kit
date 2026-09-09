@@ -1,17 +1,22 @@
 ---
 name: review-local
+category: ship
 description: Local equivalent of the GH-Actions review workflow. Runs /dev-kit:review + /dev-kit:security + /dev-kit:maintenance (via local `claude` CLI) with the same verdict extraction + combined gate + L3-evidence enforcement + optional auto-approve as `.github/workflows/review.yml`. Saves Action minutes when private repos hit the GH-Actions budget cap.
+when_to_use: |
+  - User types /dev-kit:review-local
+  - GH-Actions minutes are exhausted on the active PR
+  - Operator wants to iterate on review verdicts locally before pushing
 argument-hint: --pr N [--provider minimax|anthropic|deepseek] [--auto-approve] [--review-only|--security-only|--maintenance-only] [--dry-run]
-alpha: state
+allowed-tools: Read Bash
+disallowed-tools: Edit WebFetch Agent
+model: sonnet
+disable-model-invocation: false
 user-invocable: true
+alpha: state
 ---
+> [← Skills index](../../README.md)
 
-## Invocation
-
-Arguments: `$ARGUMENTS` — pass `bin/review-local.sh` flags directly. The
-script is the canonical implementation; this command is a thin wrapper
-that keeps `commands/` inventory consistent with the other slash
-commands.
+# /dev-kit:review-local — local-mode review chain
 
 ## What it does
 

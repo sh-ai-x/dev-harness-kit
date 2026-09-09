@@ -21,16 +21,7 @@
         ]
       }
     ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "bash \"$PWD/bin/install-commands.sh\"",
-            "type": "command"
-          }
-        ]
-      }
-    ],
+    "SessionStart": [],
     "Stop": [
       {
         "hooks": [

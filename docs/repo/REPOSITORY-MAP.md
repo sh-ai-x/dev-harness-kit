@@ -12,7 +12,6 @@ dev-harness-kit/
 ├── .codex-plugin/    # plugin.json + bundled hooks (Codex manifest)
 ├── skills/           # one SKILL.md per user-facing / internal skill
 │   └── README.md     # canonical human-readable index of all skills
-├── commands/         # slash-command wrappers (skill-usage, review-local, …)
 ├── hooks/            # hook scripts + lib/ + hooks.json + references/slop/
 ├── lib/              # Python engine (state, execute, ci_setup, eval, cost_gate, …)
 ├── bin/              # devkit-refresh.sh + set-provider.sh + dev-kit-* status scripts
