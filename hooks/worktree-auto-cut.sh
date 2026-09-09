@@ -35,6 +35,23 @@ fi
 PROMPT="$(printf '%s' "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)"
 [ -z "$PROMPT" ] && exit 0
 
+# Session-cooldown: same session re-cutting within WORKTREE_AUTO_CUT_COOLDOWN_SECS
+# (default 300) is silently skipped. Marker lives at .dev-kit/.auto-cut-cooldown.
+# Prevents the 1759-deep fix-classify-request-<hash> bloat when a single session
+# issues many follow-up prompts (each whitespace/punctuation change hashes to a
+# distinct slug, so without this the same session can pile up dozens of worktrees).
+COOLDOWN_FILE=".dev-kit/.auto-cut-cooldown"
+COOLDOWN_SECS="${WORKTREE_AUTO_CUT_COOLDOWN_SECS:-300}"
+SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // .sessionId // empty' 2>/dev/null)"
+if [ -n "$SESSION_ID" ] && [ -f "$COOLDOWN_FILE" ]; then
+  last_sid="$(head -1 "$COOLDOWN_FILE" 2>/dev/null)"
+  last_ts="$(sed -n '2p' "$COOLDOWN_FILE" 2>/dev/null)"
+  now="$(date +%s 2>/dev/null || echo 0)"
+  if [ "$last_sid" = "$SESSION_ID" ] && [ -n "$last_ts" ]       && [ "$now" -gt "$last_ts" ]       && [ $((now - last_ts)) -lt "$COOLDOWN_SECS" ]; then
+    exit 0   # silent skip — same session, within cooldown window
+  fi
+fi
+
 # Prefer cwd from the hook payload; fall back to PWD.
 HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
@@ -289,6 +306,16 @@ if [ -f "$WT_PATH/tools/linear_sync.py" ]; then
       break
     fi
   done
+fi
+
+# Persist the cooldown marker atomically (so a crash between cut and emit
+# does not leave the next prompt inside the cooldown window).
+if [ -n "$SESSION_ID" ]; then
+  mkdir -p .dev-kit
+  {
+    printf '%s\n' "$SESSION_ID"
+    date +%s
+  } > "$COOLDOWN_FILE.tmp" 2>/dev/null && mv "$COOLDOWN_FILE.tmp" "$COOLDOWN_FILE" || true
 fi
 
 # Build additionalContext — the harness consumes this as a client-specific

@@ -62,8 +62,24 @@ every session that makes tool calls, regardless of branch or task.
 | 5 — model overspec | `/dev-kit:token-analyzer` `MODEL_OVERSPEC` warning |
 | 6 — repeated user-message context | `/dev-kit:token-analyzer` `REPEATED_USER_MSG` warning |
 
+## Log retention
+
+Every Claude Code session writes a `*.jsonl` transcript under
+`~/.claude/projects/<repo-slug>/`. Without retention, the directory grows
+unbounded. `bin/log-retention.sh` gzips files older than
+`LOG_RETENTION_DAYS` (default 30) and deletes the `.jsonl.gz` after
+`LOG_RETENTION_ARCHIVE_DAYS` (default 180). Both thresholds are tunable
+via env vars or flags; default is dry-run so an explicit `-y` (or
+`APPROVE=1`) is required to mutate.
+
+A read-only `SessionStart` advisory (`hooks/session-start-hygiene.sh`)
+emits a soft-limit hint via `additionalContext` when `.worktrees/` exceeds
+`WORKTREE_SOFT_LIMIT` (default 50) OR the transcript root exceeds
+`LOG_SOFT_LIMIT_MB` (default 200). The hook never blocks; it nudges the
+user toward `/dev-kit:worktree-prune` or `bin/log-retention.sh --dry-run`.
+
 ## Related
 
 - `tools/token_efficiency_analyzer.py` — per-session cost dashboard.
-- `.claude/rules/git-workflow.md` — branch + worktree protocol.
+- `.claude/rules/git-workflow.md` — branch + worktree protocol + janitor.
 - `iron-laws/index.md` — project Iron Laws (L1-L8).

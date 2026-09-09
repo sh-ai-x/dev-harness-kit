@@ -144,6 +144,33 @@ verification requirements to a spawned subagent.
 - Merge queue / protected-branch GitHub settings (operational concern, lives in repo Settings — see ADR-0021 if added later).
 - Issue template enforcement (handled by `.github/ISSUE_TEMPLATE/`).
 
+## Worktree retention
+
+`hooks/worktree-auto-cut.sh` (UserPromptSubmit, advisory) auto-cuts a
+worktree on every task-intent prompt. Without a session-cooldown, a single
+session that fires many follow-up prompts can stack dozens of worktrees
+under `.worktrees/<verb>-<noun>-<hash>/` (the same prompt re-typed with
+a space, punctuation shift, or language switch hashes to a distinct slug).
+The cooldown is session-scoped and silent: same `session_id` re-cutting
+within `WORKTREE_AUTO_CUT_COOLDOWN_SECS` (default 300) exits 0 without
+touching the worktree tree. Tune per environment; 0 disables.
+
+Auto-cut is best-effort. Stale worktrees accumulate across many sessions,
+so a non-interactive janitor runs in CI or via cron:
+
+```bash
+bin/worktree-janitor.sh --dry-run       # report candidates only
+bin/worktree-janitor.sh -y              # remove (archives logs/ first)
+```
+
+Candidates are worktrees older than `JANITOR_AGE_DAYS` (default 14) whose
+branch has no open PR and is not under `babysit-pr` retention (honors
+`.dev-kit/babysit-retention.json` via `lib/babysit_pr_retention.is_retained`).
+Removal routes through `bin/worktree-remove-safe.sh`, which archives
+`logs/` to `<repo>/logs/.archive/<branch>/<ts>/` (or `<AGENT_LOG_ROOT>`
+when set) before `git worktree remove --force`. The interactive
+`/dev-kit:worktree-prune` skill stays for one-off user-driven cleanup.
+
 ## Exceptions
 
 - **`hotfix/*`**: only used to revert a merged main commit. PR is auto-mergeable. Still requires a worktree (the revert is a real change). Still requires CI green.
