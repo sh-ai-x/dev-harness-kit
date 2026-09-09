@@ -64,6 +64,24 @@ from atomic import atomic_write_json, read_json_or_default  # noqa: E402
 
 SCHEMA_VERSION = "1.0.0"
 
+# UserPromptSubmit is a synchronous gate in front of every prompt — any
+# hook that runs Python, hits the network, or walks a full file stalls
+# the user. `tools/regenerate_active_hooks.py` enforces this with a
+# regen-time lint (issue tracked in `fix/remove-userpromptsubmit-advisories`).
+#
+# Forbidden tokens are matched as bare substrings in the command string.
+# These are intentionally permissive: a `python` substring catches
+# `python3 -m`, `python -c`, heredoc `python3 -`, etc.; `git fetch`
+# catches any nested invocation even when piped through env expansion.
+_USERPROMPT_SUBMIT_FORBIDDEN_TOKENS = (
+    "python",        # any python invocation: -m, -c, heredoc, path-resolved
+    "curl",          # any HTTP roundtrip
+    "git fetch",     # network-bound
+    "git worktree",  # touches the worktree config; the PreToolUse guard is the right place
+    "jq -rs",        # full-file slurp + reduce; the prior context-window-guard shape
+)
+_USERPROMPT_SUBMIT_MAX_TIMEOUT = 5  # seconds; anything more is a design smell
+
 # Path-prefix tokens we strip from a hook command string. The harness
 # substitutes the env var at runtime; we only care about the script path.
 _ENV_PREFIX_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/")
@@ -174,6 +192,42 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
                         file=sys.stderr,
                     )
                     sys.exit(1)
+                # UserPromptSubmit is a synchronous gate in front of
+                # every prompt. Anything that runs Python, hits the
+                # network, walks a full file, or carries a generous
+                # timeout stalls the user. The regen tool hard-rejects
+                # such entries so a slow hook can never re-enter the
+                # wiring — the only "allowed" UserPromptSubmit hook is
+                # one that does an in-process regex / tail sample on
+                # stdin within 5 seconds.
+                if event == "UserPromptSubmit":
+                    for token in _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS:
+                        if token in cmd:
+                            print(
+                                f"regenerate_active_hooks: UserPromptSubmit "
+                                f"hook {rel} contains forbidden token "
+                                f"{token!r}. UserPromptSubmit is a "
+                                f"synchronous gate; anything that runs "
+                                f"Python, hits the network, or walks a "
+                                f"full file stalls the user. Move the "
+                                f"work to a PreToolUse / PostToolUse / "
+                                f"SessionStart hook, an explicit skill, "
+                                f"or a tail-sample regex.",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                    timeout = hook.get("timeout", 0)
+                    if isinstance(timeout, (int, float)) and timeout > _USERPROMPT_SUBMIT_MAX_TIMEOUT:
+                        print(
+                            f"regenerate_active_hooks: UserPromptSubmit "
+                            f"hook {rel} has timeout={timeout}s, exceeds "
+                            f"the {_USERPROMPT_SUBMIT_MAX_TIMEOUT}s cap. "
+                            f"A UserPromptSubmit hook that needs a "
+                            f"timeout is doing too much work — redesign "
+                            f"or move it off UserPromptSubmit.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
                 entries.append({
                     "name": _derive_name(rel),
                     "path": rel,

@@ -1929,15 +1929,6 @@ class TestLinearAutosyncHookCallsAutoSync(unittest.TestCase):
         # The hook must parse the bash command for `git worktree add`.
         self.assertIn("git worktree add", text)
 
-    def test_task_change_hook_invokes_task_change_sync(self):
-        path = ROOT / "hooks" / "linear-task-change.sh"
-        text = path.read_text(encoding="utf-8")
-        # task-change-sync is the scope-diff entry point; auto-sync
-        # would always fire and defeat the diff.
-        self.assertIn("linear_sync.py\" task-change-sync", text,
-                      "the hook must pass task-change-sync as the subcommand argument")
-
-
 class TestAutoArchiveDone(unittest.TestCase):
     """Auto-archive flag drives whether the Done transition also archives."""
 

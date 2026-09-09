@@ -36,7 +36,6 @@ EXPECTED = {
     "linear-autosync":         ("PreToolUse",      "Write|Edit|MultiEdit"),
     "linear-session-start":    ("SessionStart",    None),
     "linear-worktree-create":  ("PostToolUse",     "Bash"),
-    "linear-task-change":      ("UserPromptSubmit", None),
 }
 
 

@@ -41,7 +41,6 @@
 | linear-autosync       |  -    |  ✅*   |  -    |  ✅*   |  -    |  -    |  -    |
 | linear-session-start  |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |
 | linear-worktree-create|  -    |  ✅*   |  -    |  ✅*   |  -    |  -    |  -    |
-| linear-task-change    |  -    |  ✅*   |  -    |  ✅*   |  -    |  -    |  -    |
 | l4-todo-scan           |  -    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
 | sub-agent-handoff     |  A    |  A    |  A    |  A    |  A    |  A    |  A    |
 ```
@@ -70,8 +69,20 @@ the terminal trace record before `save_log.py` runs with
 | `linear-autosync` | always (gated) | PreToolUse Edit/Write block (gated) that calls `tools/linear_sync.py auto-sync`. No-op when `LINEAR_API_KEY` and `.dev-kit/.enabled.json:mcp.linear` are both absent. Always exit 0 (non-blocking per #539). The `auto-sync` entry point applies the **repo-owner gate** — non-owners bail silently so contributors never leak their work into the owner's Linear workspace. |
 | `linear-session-start` | all (gated, worktree-only) | SessionStart hook. Fires once at every session start inside a Linear-configured worktree and triggers one auto-sync round so a fresh session is reflected in Linear immediately, without waiting for the first Edit/Write. Same owner-gate contract as `linear-autosync`. |
 | `linear-worktree-create` | all (gated) | PostToolUse:Bash hook. Catches a `git worktree add` after the Bash tool returns and runs an auto-sync from inside the new worktree, so the handoff is registered before the first Edit/Write or SessionStart in the new path. Falls back to `git worktree list --porcelain` when the bash command cannot be parsed (e.g. multi-line commands). |
-| `linear-task-change` | all (gated) | UserPromptSubmit hook. Detects plan / task changes mid-session and triggers one auto-sync round only when the scope (branch + latest commit subject) differs from the last-recorded handoff scope. Delegates to `tools/linear_sync.py task-change-sync` for the diff. |
 | `sub-agent-handoff` | all (opt-out per worktree) | PostToolUse Agent advisory verifying the agent response carries the STATUS / EVIDENCE / NEXT-ACTION pieces needed for the standard handoff template (SHO-154). **Always-on** (the handoff contract applies regardless of stage); per-worktree opt-out via `.dev-kit/.sub-agent-handoff-disabled`. Non-blocking on parse errors (per #539). Fail-closed (exit 2 + plain stderr ERROR) when `jq` or `python3` is missing — PostToolUse cannot actually block, so we emit a stderr signal instead of a `permissionDecision: deny` envelope (which is decorative in PostToolUse; see `slop-detector.sh` / `secret-scan.sh` for the precedent). |
+
+### UserPromptSubmit policy
+
+UserPromptSubmit hooks fire *synchronously* in front of every prompt — anything beyond a trivial regex check on stdin stalls the user. The current policy is therefore restrictive:
+
+- **Allowed**: in-process string/regex matches on stdin (e.g. `notification-collapse`, `context-window-guard` sampling the last 100 records of the JSONL).
+- **Forbidden**: `python`, `curl`, `git fetch`, `git worktree`, full-file `jq -rs`, or any `timeout > 5`. The regen tool (`tools/regenerate_active_hooks.py`) hard-rejects any UserPromptSubmit entry that violates this so a slow hook can never re-enter the wiring.
+
+Three advisory hooks that previously lived here were removed in `fix/remove-userpromptsubmit-advisories`:
+
+- `tdd-scope-judge` — coverage migrated to `tdd-guard` reading `.dev-kit/.tdd-scope.json` (written by `/dev-kit:build-tdd`).
+- `worktree-auto-cut` — coverage migrated to `session-start-check` (SessionStart nudge) + `worktree-guard` (PreToolUse Edit/Write block); auto-cut per prompt was semantically wrong.
+- `linear-task-change` — coverage migrated to `linear-autosync` (PreToolUse) + `linear-worktree-create` (PostToolUse) + `linear-session-start` (SessionStart).
 | `session-start-harness-mode-reset` | all (SessionStart) | Resets `.dev-kit/harness-mode.session.json` to `{"mode": "full"}` at the start of every session. New window = strict by default; `fast`/`custom` must be chosen explicitly via `/dev-kit:harness-mode` every session (workflow-fast-mode-lean design). Best-effort — silent no-op when `python3` is missing. |
 | `session-start-guard-mode-reset` | all (SessionStart) | Resets `.dev-kit/guard-mode.session.json` to both guards `"on"` at the start of every session. `tdd-guard.sh` and `worktree-guard.sh` each check this state near the top of their own logic and no-op (exit 0) when their guard is `"off"`; `/dev-kit:guard-mode off` sets it, but it never persists past the session that set it. Best-effort — silent no-op when `python3` is missing. |
 | `plugin-cache-refresh` | all (SessionStart) | If `dev-kit` marketplace HEAD short-SHA differs from the marker at `<cache-dir>/.devkit-refresh-head`, rsync marketplace → cache and update the marker. Closes the same-version-update gap left by `/reload-plugins` (cache is keyed by `plugin.json:version`, so a new commit at the same version is invisible until `claude plugin install dev-kit --force` is run manually). Fails open — never blocks session start. |

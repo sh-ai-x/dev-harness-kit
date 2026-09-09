@@ -78,29 +78,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-auto-cut.sh",
-            "fail_closed": false
-          },
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/linear-task-change.sh",
-            "fail_closed": false
-          },
-          {
-            "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/notification-collapse.sh",
-            "timeout": 10,
             "fail_closed": false
           },
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/context-window-guard.sh",
-            "timeout": 30,
             "fail_closed": false
           }
         ]

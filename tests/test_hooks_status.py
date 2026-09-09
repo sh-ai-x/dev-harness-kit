@@ -105,7 +105,7 @@ class TestHooksStatus(unittest.TestCase):
                 "tdd-guard.sh", "worktree-guard.sh", "bash-guard.sh",
                 "git-guard.sh",
             },
-            "UserPromptSubmit": {"worktree-auto-cut.sh"},
+            "UserPromptSubmit": {"notification-collapse.sh", "context-window-guard.sh"},
             "SessionStart": {
                 "session-start-check.sh", "log-on-session-start.sh",
             },

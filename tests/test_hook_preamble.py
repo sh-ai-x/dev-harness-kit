@@ -12,9 +12,8 @@ land cleanly:
      production) and verified to handle valid + empty + jq-missing
      payloads without crashing.
 
-     The 6 hooks: session-start-check, log-on-session-start,
-     worktree-auto-cut, acp-tier-assert, worktree-guard,
-     worktree-log-auto-install.
+     The 5 hooks: session-start-check, log-on-session-start,
+     acp-tier-assert, worktree-guard, worktree-log-auto-install.
 
   2. Each entry in `SECRET_PATTERNS` fires on its corresponding test
      fixture — AWS access key, GitHub PAT, OpenAI sk-, Anthropic admin,
@@ -43,11 +42,10 @@ PREAMBLE = LIB / "hook-preamble.sh"
 PATTERNS_FILE = LIB / "secret-patterns.sh"
 PAYLOAD_PARSE = LIB / "payload-parse.sh"
 
-# The 6 hooks wired to the preamble.
+# The 5 hooks wired to the preamble.
 PREAMBLE_HOOKS = [
     "session-start-check.sh",
     "log-on-session-start.sh",
-    "worktree-auto-cut.sh",
     "acp-tier-assert.sh",
     "worktree-guard.sh",
     "worktree-log-auto-install.sh",
