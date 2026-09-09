@@ -560,8 +560,12 @@ def required_files_for(marker_payload):
     )
     if not marker_payload or not isinstance(marker_payload, dict):
         return REQUIRED_FILES
-    runners = marker_payload.get("runners") or []
-    if not isinstance(runners, list):
+    runners = marker_payload.get("runners")
+    if runners is None or not isinstance(runners, list):
+        # Marker without `runners` (a test fixture, or a marker written
+        # by an older dev-kit version that predates the field) falls back
+        # to the static `REQUIRED_FILES` set so file-present checks still
+        # cover review.yml etc.
         return REQUIRED_FILES
     return tuple(sorted(set(base) | {f".github/workflows/{r}" for r in runners if isinstance(r, str)}))
 
