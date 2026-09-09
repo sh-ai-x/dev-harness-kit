@@ -147,7 +147,10 @@ def _derive_name(path: str) -> str:
     return base
 
 
-def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]]:
+def _walk_hooks_json(
+    hooks_json_path: Path,
+    repo_root: Path | None = None,
+) -> Dict[str, List[Dict[str, object]]]:
     """Read hooks/hooks.json and emit the event -> entries mapping.
 
     Returns a dict keyed by event name; each value is a list of hook
@@ -159,6 +162,13 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
     inference). Missing entries raise SystemExit(1) — the explicit
     field is the SSOT and silent defaults would re-introduce the
     drift the field replaced.
+
+    `repo_root` is used by the UserPromptSubmit lint to read each
+    hook's script body and reject forbidden tokens there too (the
+    command-string check alone leaves a gap: a script can call
+    `python` from a wrapper without the word appearing in the
+    command). Pass `None` to skip the body check (e.g. from tests
+    that don't ship real hook files).
     """
     raw = json.loads(hooks_json_path.read_text(encoding="utf-8"))
     hooks_section = raw.get("hooks", {})
@@ -216,6 +226,50 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
                                 file=sys.stderr,
                             )
                             sys.exit(1)
+                    # Defense-in-depth: also read the script body and
+                    # reject forbidden tokens there. A wrapper script
+                    # can call `python` / `curl` / `git fetch` without
+                    # the word appearing in the command string. The
+                    # body check closes that gap; failure to read the
+                    # script (missing file) is treated as a hard
+                    # fail — a broken hook must not silently pass.
+                    if repo_root is not None and rel.endswith(".sh"):
+                        script_path = repo_root / rel
+                        if not script_path.is_file():
+                            print(
+                                f"regenerate_active_hooks: UserPromptSubmit "
+                                f"hook references missing script: {rel}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                        try:
+                            script_body = script_path.read_text(encoding="utf-8")
+                        except OSError as exc:
+                            print(
+                                f"regenerate_active_hooks: UserPromptSubmit "
+                                f"hook {rel} unreadable: {exc}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                        # Strip comment lines so the lint doesn't false-
+                        # positive on tokens that appear in docstrings
+                        # describing the OLD shape. The lint is meant
+                        # to gate NEW calls, not historical commentary.
+                        body_non_comment = "\n".join(
+                            line for line in script_body.splitlines()
+                            if not line.lstrip().startswith("#")
+                        )
+                        for token in _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS:
+                            if token in body_non_comment:
+                                print(
+                                    f"regenerate_active_hooks: UserPromptSubmit "
+                                    f"hook {rel} script body contains forbidden "
+                                    f"token {token!r}. The command-string lint "
+                                    f"alone is not sufficient — the body must "
+                                    f"also stay cheap.",
+                                    file=sys.stderr,
+                                )
+                                sys.exit(1)
                     timeout = hook.get("timeout", 0)
                     if isinstance(timeout, (int, float)) and timeout > _USERPROMPT_SUBMIT_MAX_TIMEOUT:
                         print(
@@ -282,7 +336,7 @@ def regenerate(root: Path) -> Path:
             file=sys.stderr,
         )
         sys.exit(1)
-    hooks_by_event = _walk_hooks_json(hooks_json)
+    hooks_by_event = _walk_hooks_json(hooks_json, repo_root=root)
     target = root / ".dev-kit" / ".active-hooks.json"
     existing = read_json_or_default(target, {})
     payload = _build_payload(hooks_by_event, existing)

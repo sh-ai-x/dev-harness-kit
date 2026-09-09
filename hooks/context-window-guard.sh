@@ -49,11 +49,11 @@ TRANSCRIPT="$(printf '%s' "$INPUT" | jq -r '.transcript_path // ""' 2>/dev/null)
 # array. The result is a constant-time tail sample — the prior full-file
 # `jq -rs [...] | add` walked every record and timed out on long sessions.
 TOKENS_RAW="$(
-  jq -rs '
-    [ .[-100:] | select(.message.usage) | .message.usage
+  tail -n 100 "$TRANSCRIPT" 2>/dev/null | jq -s '
+    [ .[] | select(.message.usage) | .message.usage
       | ((.input_tokens // 0) + (.cache_read_input_tokens // 0)) ]
     | add // 0
-  ' "$TRANSCRIPT" 2>/dev/null || echo 0
+  ' 2>/dev/null || echo 0
 )"
 
 # Sanitize: jq -r on a numeric yields a number string; fall back to 0

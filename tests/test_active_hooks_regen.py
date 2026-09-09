@@ -61,6 +61,13 @@ class TestActiveHooksRegeneration(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "hooks").mkdir(parents=True, exist_ok=True)
         shutil.copy(FIXTURE_HOOKS_JSON, self.root / "hooks" / "hooks.json")
+        # The UserPromptSubmit lint reads each hook's script body and
+        # fails closed on a missing file. Copy the UserPromptSubmit
+        # shells referenced in hooks.json so the lint passes; the
+        # regen-matrix check only enumerates UserPromptSubmit entries.
+        hooks_dir = FIXTURE_HOOKS_JSON.parent
+        for shell in ("notification-collapse.sh", "context-window-guard.sh"):
+            shutil.copy(hooks_dir / shell, self.root / "hooks" / shell)
         # Make sure no stale .dev-kit dir survives from a prior run.
         target = self.root / ".dev-kit" / ".active-hooks.json"
         if target.exists():

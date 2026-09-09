@@ -143,6 +143,19 @@ class TestRegenMatrixDropsRemovedHooks(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "hooks").mkdir(parents=True, exist_ok=True)
         shutil.copy(CC_HOOKS_JSON, self.root / "hooks" / "hooks.json")
+        # The lint now reads each UserPromptSubmit hook's script body,
+        # so the temp dir must contain the shell files referenced in
+        # hooks.json. Copy the UserPromptSubmit hooks explicitly
+        # (notification-collapse.sh, context-window-guard.sh); the
+        # regen matrix check only enumerates UserPromptSubmit entries.
+        shutil.copy(
+            REPO_ROOT / "hooks" / "notification-collapse.sh",
+            self.root / "hooks" / "notification-collapse.sh",
+        )
+        shutil.copy(
+            REPO_ROOT / "hooks" / "context-window-guard.sh",
+            self.root / "hooks" / "context-window-guard.sh",
+        )
         target = self.root / ".dev-kit" / ".active-hooks.json"
         if target.exists():
             target.unlink()
@@ -212,13 +225,26 @@ class TestRegenRejectsForbiddenUserPromptSubmitTokens(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _inject_userpromptsubmit(self, command: str, *, timeout: int = 0) -> None:
-        """Replace the first UserPromptSubmit entry with a single forbidden hook."""
+    def _inject_userpromptsubmit(
+        self,
+        command: str,
+        *,
+        timeout: int = 0,
+        script_body: str = "# trivial hook body\n",
+    ) -> None:
+        """Replace the first UserPromptSubmit entry with a single hook.
+
+        The lint reads the script body when checking forbidden tokens, so
+        the helper also creates a `hooks/<name>.sh` file (or rewrites the
+        referenced one) with the caller-supplied `script_body`. Pass an
+        empty body to test the missing-file path; pass a body with a
+        forbidden token to verify the script-body lint.
+        """
         path = self.root / "hooks" / "hooks.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         # Drop all existing UserPromptSubmit entries (they were valid
         # but irrelevant to this test) and insert one synthetic entry
-        # that the lint should reject.
+        # that the lint should reject or accept.
         data["hooks"]["UserPromptSubmit"] = [
             {
                 "hooks": [
@@ -232,6 +258,16 @@ class TestRegenRejectsForbiddenUserPromptSubmitTokens(unittest.TestCase):
             }
         ]
         path.write_text(json.dumps(data, indent=2))
+        # Materialize the referenced script so the lint's body check
+        # has something to read. The path is extracted from the
+        # command's trailing `hooks/<name>.sh` token.
+        import re
+        match = re.search(r"hooks/([A-Za-z0-9_.\-]+\.sh)\b", command)
+        if match:
+            script_rel = "hooks/" + match.group(1)
+            script_path = self.root / script_rel
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text(script_body, encoding="utf-8")
 
     def test_regen_rejects_each_forbidden_token(self):
         for token in self.FORBIDDEN_TOKENS:
@@ -297,6 +333,84 @@ class TestRegenRejectsForbiddenUserPromptSubmitTokens(unittest.TestCase):
             msg=f"regen rejected a clean UserPromptSubmit entry; "
                 f"stderr={result.stderr!r}",
         )
+
+    def test_regen_rejects_forbidden_token_in_script_body(self):
+        """The lint MUST also read each script body and reject forbidden
+        tokens there. A wrapper script that invokes `python` from a
+        comment-free line is still a UserPromptSubmit blocker; the
+        command-string check alone leaves that gap open.
+        """
+        # A body whose `#` lines are stripped still contains `python`
+        # on the active line — the lint must catch it.
+        body = (
+            "#!/usr/bin/env bash\n"
+            "# explanatory comment with python\n"
+            "exec python3 -m my_module\n"
+        )
+        self._inject_userpromptsubmit(
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/dummy.sh",
+            script_body=body,
+        )
+        result = _run_regen(self.root)
+        self.assertNotEqual(
+            result.returncode, 0,
+            msg=f"regen accepted a script body containing 'python'; "
+                f"stderr={result.stderr!r}",
+        )
+        self.assertIn("script body", result.stderr)
+
+    def test_regen_ignores_forbidden_tokens_in_comment_lines(self):
+        """The lint MUST strip `#` comment lines so a token that only
+        appears in a docstring (describing the OLD shape, e.g. `jq -rs`
+        in `context-window-guard.sh`'s history note) does NOT trip the
+        body check.
+        """
+        body = (
+            "#!/usr/bin/env bash\n"
+            "# historical: the old shape used `jq -rs` here.\n"
+            "# describing the python invocation we used to call.\n"
+            "tail -n 100 \"$1\" | jq -s '.'\n"
+        )
+        self._inject_userpromptsubmit(
+            "bash ${CLAUDE_PLUGIN_ROOT}/hooks/dummy.sh",
+            script_body=body,
+        )
+        result = _run_regen(self.root)
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"regen rejected a script whose only forbidden tokens "
+                f"live inside `#` comments; stderr={result.stderr!r}",
+        )
+
+    def test_regen_rejects_missing_script_file(self):
+        """A UserPromptSubmit hook whose referenced script file does not
+        exist MUST fail closed. A broken hook must not silently pass
+        regen — the matrix snapshot would then list a shell that
+        consumers cannot invoke.
+        """
+        # Write the manifest referencing a script we never create.
+        path = self.root / "hooks" / "hooks.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["hooks"]["UserPromptSubmit"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/does-not-exist.sh",
+                        "fail_closed": False,
+                    }
+                ]
+            }
+        ]
+        path.write_text(json.dumps(data, indent=2))
+        # Intentionally do NOT create the script.
+        result = _run_regen(self.root)
+        self.assertNotEqual(
+            result.returncode, 0,
+            msg=f"regen accepted a UserPromptSubmit entry whose "
+                f"script file is missing; stderr={result.stderr!r}",
+        )
+        self.assertIn("missing", result.stderr)
 
 
 class TestContextWindowGuardUsesTailSample(unittest.TestCase):
