@@ -185,7 +185,11 @@ class TestCrossCodecCoexistence(unittest.TestCase):
         # fails closed on a missing file. Copy the UserPromptSubmit
         # shells referenced in hooks.json so the lint passes.
         hooks_dir = FIXTURE_HOOKS_JSON.parent
-        for shell in ("notification-collapse.sh", "context-window-guard.sh"):
+        for shell in (
+            "tdd-scope-judge.sh",
+            "notification-collapse.sh",
+            "context-window-guard.sh",
+        ):
             shutil.copy(hooks_dir / shell, self.root / "hooks" / shell)
         # Clean any stale `.dev-kit/`.
         dev_kit = self.root / ".dev-kit"

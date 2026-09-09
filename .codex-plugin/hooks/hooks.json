@@ -78,6 +78,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
+            "fail_closed": false
+          },
+          {
+            "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/notification-collapse.sh",
             "fail_closed": false
           },

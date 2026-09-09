@@ -69,12 +69,32 @@ SCHEMA_VERSION = "1.0.0"
 # the user. `tools/regenerate_active_hooks.py` enforces this with a
 # regen-time lint (issue tracked in `fix/remove-userpromptsubmit-advisories`).
 #
-# Forbidden tokens are matched as bare substrings in the command string.
-# These are intentionally permissive: a `python` substring catches
-# `python3 -m`, `python -c`, heredoc `python3 -`, etc.; `git fetch`
-# catches any nested invocation even when piped through env expansion.
+# Forbidden tokens are matched as bare substrings in the command string
+# AFTER stripping the canonical `python3 -m lib.<module>` pattern (the
+# in-plugin library invocation shape — used by the TDD scope judge
+# hook, which has its own 45s subprocess timeout baked in and a
+# fail-safe `tdd_required: true` default).
+#
+# Outside the canonical `python3 -m lib.<x>` shape, the lint rejects:
+#   - `python` (any other invocation — `python -c`, heredoc `python3 -`,
+#     bare `python script.py`) — those can stall on a long script.
+#   - `curl` (any HTTP roundtrip).
+#   - `git fetch` (network-bound).
+#   - `git worktree` (touches the worktree config; the PreToolUse guard
+#     is the right place).
+#   - `jq -rs` (full-file slurp + reduce; the prior context-window-guard
+#     shape).
+#
+# Tokens are matched in the post-strip command so the canonical patterns
+# don't false-positive. `python3 -m lib.<x>` is the in-plugin library
+# invocation shape (tdd-scope-judge); `command -v python3` is the
+# interpreter-availability check that precedes the canonical call.
+_USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS = (
+    "python3 -m lib.",
+    "command -v python3",
+)
 _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS = (
-    "python",        # any python invocation: -m, -c, heredoc, path-resolved
+    "python",        # any python invocation OUTSIDE the canonical patterns
     "curl",          # any HTTP roundtrip
     "git fetch",     # network-bound
     "git worktree",  # touches the worktree config; the PreToolUse guard is the right place
@@ -211,18 +231,32 @@ def _walk_hooks_json(
                 # one that does an in-process regex / tail sample on
                 # stdin within 5 seconds.
                 if event == "UserPromptSubmit":
+                    # Strip the canonical patterns before scanning —
+                    # those are the in-plugin library invocation
+                    # (`python3 -m lib.<x>`) and the interpreter check
+                    # (`command -v python3`). Both are documented
+                    # exceptions; everything else containing `python`
+                    # is forbidden.
+                    cmd_scanned = cmd
+                    for pat in _USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS:
+                        cmd_scanned = cmd_scanned.replace(pat, "")
                     for token in _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS:
-                        if token in cmd:
+                        if token in cmd_scanned:
                             print(
                                 f"regenerate_active_hooks: UserPromptSubmit "
                                 f"hook {rel} contains forbidden token "
                                 f"{token!r}. UserPromptSubmit is a "
                                 f"synchronous gate; anything that runs "
                                 f"Python, hits the network, or walks a "
-                                f"full file stalls the user. Move the "
-                                f"work to a PreToolUse / PostToolUse / "
-                                f"SessionStart hook, an explicit skill, "
-                                f"or a tail-sample regex.",
+                                f"full file stalls the user. The "
+                                f"documented exceptions are "
+                                f"{_USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS} "
+                                f"(in-plugin library invocation / "
+                                f"interpreter-availability check, both with "
+                                f"subprocess timeouts + fail-safe defaults). "
+                                f"Move the work to a PreToolUse / "
+                                f"PostToolUse / SessionStart hook, an "
+                                f"explicit skill, or a tail-sample regex.",
                                 file=sys.stderr,
                             )
                             sys.exit(1)
@@ -259,8 +293,17 @@ def _walk_hooks_json(
                             line for line in script_body.splitlines()
                             if not line.lstrip().startswith("#")
                         )
+                        # Strip the canonical patterns before scanning — the in-plugin
+                        # library invocation (`python3 -m lib.<x>`,
+                        # e.g. tdd-scope-judge) and the interpreter
+                        # check (`command -v python3`) are documented
+                        # exceptions; everything else containing
+                        # `python` is forbidden.
+                        body_scanned = body_non_comment
+                        for pat in _USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS:
+                            body_scanned = body_scanned.replace(pat, "")
                         for token in _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS:
-                            if token in body_non_comment:
+                            if token in body_scanned:
                                 print(
                                     f"regenerate_active_hooks: UserPromptSubmit "
                                     f"hook {rel} script body contains forbidden "

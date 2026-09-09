@@ -40,16 +40,27 @@ TOOL = REPO_ROOT / "tools" / "regenerate_active_hooks.py"
 # Hooks that were removed by this fix and must NOT exist on disk, must
 # NOT appear in either manifest, and must NOT appear in the regenerated
 # matrix snapshot.
+# Note: tdd-scope-judge.sh was originally deleted by this PR, but a
+# follow-up commit (4114eb49 / 6f3...8a) restored it as the canonical
+# exception to the UserPromptSubmit "no Python" rule — it has its own
+# 45s `claude -p` subprocess timeout and a fail-safe default to
+# `tdd_required: true`, so a stalled judge cannot accidentally allow an
+# edit that should require TDD. It is now the only remaining Python
+# entry on UserPromptSubmit, with the documented `python3 -m lib.<x>`
+# shape that the regen lint allows.
 REMOVED_HOOKS = (
-    "tdd-scope-judge.sh",
     "worktree-auto-cut.sh",
     "linear-task-change.sh",
 )
 
-# Hooks that remain under UserPromptSubmit in both runtimes. The set
-# must stay small — every entry here must be provably < 100 ms on a
-# representative prompt (no Python, no network, no full-file walk).
+# Hooks that remain under UserPromptSubmit in both runtimes.
+#
+# `tdd-scope-judge.sh` — canonical lib invocation (`python3 -m
+#   lib.tdd_scope_judge`), 45s subprocess timeout, fail-safe default.
+# `notification-collapse.sh` — pure bash regex on stdin, sub-100ms.
+# `context-window-guard.sh` — `tail -n 100 | jq -s`, sub-100ms.
 REMAINING_HOOKS = (
+    "tdd-scope-judge.sh",
     "notification-collapse.sh",
     "context-window-guard.sh",
 )
@@ -146,16 +157,18 @@ class TestRegenMatrixDropsRemovedHooks(unittest.TestCase):
         # The lint now reads each UserPromptSubmit hook's script body,
         # so the temp dir must contain the shell files referenced in
         # hooks.json. Copy the UserPromptSubmit hooks explicitly
-        # (notification-collapse.sh, context-window-guard.sh); the
-        # regen matrix check only enumerates UserPromptSubmit entries.
-        shutil.copy(
-            REPO_ROOT / "hooks" / "notification-collapse.sh",
-            self.root / "hooks" / "notification-collapse.sh",
-        )
-        shutil.copy(
-            REPO_ROOT / "hooks" / "context-window-guard.sh",
-            self.root / "hooks" / "context-window-guard.sh",
-        )
+        # (tdd-scope-judge.sh, notification-collapse.sh,
+        # context-window-guard.sh); the regen matrix check only
+        # enumerates UserPromptSubmit entries.
+        for shell in (
+            "tdd-scope-judge.sh",
+            "notification-collapse.sh",
+            "context-window-guard.sh",
+        ):
+            shutil.copy(
+                REPO_ROOT / "hooks" / shell,
+                self.root / "hooks" / shell,
+            )
         target = self.root / ".dev-kit" / ".active-hooks.json"
         if target.exists():
             target.unlink()

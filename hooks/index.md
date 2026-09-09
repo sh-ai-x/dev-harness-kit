@@ -79,10 +79,10 @@ the terminal trace record before `save_log.py` runs with
 UserPromptSubmit hooks fire *synchronously* in front of every prompt — anything beyond a trivial regex check on stdin stalls the user. The current policy is therefore restrictive:
 
 - **Allowed**: in-process string/regex matches on stdin (e.g. `notification-collapse`, `context-window-guard` sampling the last 100 records of the JSONL).
-- **Forbidden**: `python`, `curl`, `git fetch`, `git worktree`, full-file `jq -rs`, or any `timeout > 5`. The regen tool (`tools/regenerate_active_hooks.py`) hard-rejects any UserPromptSubmit entry that violates this so a slow hook can never re-enter the wiring.
+- **Canonical exception**: `python3 -m lib.<module>` (the in-plugin library invocation shape, used by `tdd-scope-judge`) and `command -v python3` (the interpreter-availability check). Both have their own subprocess timeouts and fail-safe defaults — `tdd-scope-judge` defaults to `tdd_required: true` on error so a stalled judge cannot accidentally allow an edit that should require TDD.
+- **Forbidden**: `python` (outside the canonical pattern), `curl`, `git fetch`, `git worktree`, full-file `jq -rs`, or any `timeout > 5`. The regen tool (`tools/regenerate_active_hooks.py`) hard-rejects any UserPromptSubmit entry that violates this so a slow hook can never re-enter the wiring.
 
-Three advisory hooks that previously lived here were removed in `fix/remove-userpromptsubmit-advisories`:
+Two advisory hooks that previously lived here were removed in `fix/remove-userpromptsubmit-advisories`:
 
-- `tdd-scope-judge` — coverage migrated to `tdd-guard` reading `.dev-kit/.tdd-scope.json` (written by `/dev-kit:build-tdd`).
-- `worktree-auto-cut` — coverage migrated to `session-start-check` (SessionStart nudge) + `worktree-guard` (PreToolUse Edit/Write block); auto-cut per prompt was semantically wrong.
+- `worktree-auto-cut` — coverage migrated to `session-start-check` (SessionStart nudge) + `worktree-guard` (PreToolUse Edit/Write block); auto-cut per prompt was semantically wrong. **Restored** as `session-start-worktree-cut.sh` on SessionStart so the auto-route-to-worktree enforcement still fires once per session.
 - `linear-task-change` — coverage migrated to `linear-autosync` (PreToolUse) + `linear-worktree-create` (PostToolUse) + `linear-session-start` (SessionStart).
