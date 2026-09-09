@@ -19,7 +19,7 @@ disable-model-invocation: false
 
 ## Iron Law
 
-**0-arg default OK; `--force` and `--setup-secrets` are the visible flags. Hidden flags: `--target DIR`, `--skip-verify`, `--provider NAME`. Never modifies the dev-kit repo (only writes into target). `dev-kit:build` will refuse to start without the `.dev-kit/ci-config.json` marker this skill writes.**
+**0-arg default OK; `--force` and `--setup-secrets` are the visible flags. Hidden flags: `--target DIR`, `--skip-verify`, `--provider NAME`, `--exclude NAME[,NAME...]` (issue #823; drops matching workflow basenames from the install set so a `review only` pick does not land `security.yml`). Never modifies the dev-kit repo (only writes into target). `dev-kit:build` will refuse to start without the `.dev-kit/ci-config.json` marker this skill writes.**
 
 The skill surfaces **lint warnings** (non-fatal) via `lib/ci_setup.py:lint_installed_workflows()`. Warnings flag known-stale patterns in previously-installed workflows -- e.g. the pre-0.1.3 gate in `templates/ci/.github/workflows/review.yml` that hard-failed in `pull_request` mode on missing verdicts while defaulting to Approve in `workflow_dispatch` mode (an internal inconsistency that produced spurious CI failures whenever the `/dev-kit:*` agents skipped posting a verdict comment). Warnings never block the install; the user acts on them by re-running with `--force` to refresh the template.**
 
@@ -27,7 +27,7 @@ The skill surfaces **lint warnings** (non-fatal) via `lib/ci_setup.py:lint_insta
 
 ### Phase 1 — Detect (deterministic, no LLM call)
 
-1.1. Parse arguments: `--target DIR` defaults to `$PWD`; `--force` overwrites existing files; `--setup-secrets` prompts for and configures required repo secrets via `gh secret set` (issue #212-B1/B2/B3); `--skip-verify` skips Phase 3.
+1.1. Parse arguments: `--target DIR` defaults to `$PWD`; `--force` overwrites existing files; `--setup-secrets` prompts for and configures required repo secrets via `gh secret set` (issue #212-B1/B2/B3); `--skip-verify` skips Phase 3; `--exclude NAME[,NAME...]` filters the install set by basename so a `review only` consumer lands review.yml but not security.yml (issue #823).
 1.2. Check `python3 ≥ 3.10` (dev-kit requirement).
 1.3. **Delegate presence short-circuit to `lib/ci_setup.py:install_ci_config()`** — it reads the existing marker and returns a no-op `InstallReport` (all paths in `skipped`, no files touched, marker not rewritten) when the marker AND every `EXPECTED_PATHS` file already exist AND `force=False`. The skill body surfaces this as "already installed; pass `--force` to refresh" and exits 0. No version comparison — content presence is the only check.
 1.4. Probe target prerequisites: `.git/` (warn if absent — CI is git-themed), `.github/` (create if absent).
@@ -41,7 +41,8 @@ from pathlib import Path
 import sys
 sys.path.insert(0, 'lib')
 from ci_setup import install_ci_config
-report = install_ci_config(Path('${TARGET_DIR}'), force=${FORCE})
+exclude = frozenset('${EXCLUDE}'.split(',')) if '${EXCLUDE}' else None
+report = install_ci_config(Path('${TARGET_DIR}'), force=${FORCE}, exclude=exclude)
 print(f'created={len(report.created)} overwritten={len(report.overwritten)} skipped={len(report.skipped)} errors={len(report.errors)}')
 sys.exit(0 if report.ok and not report.errors else 1)
 "

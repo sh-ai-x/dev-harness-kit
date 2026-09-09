@@ -1,0 +1,171 @@
+name: GitHub issue sync gate
+
+# One-time check gate. Reads each PR's body + title, extracts every
+# GitHub-issue reference (`#N` or `owner/repo#N`, with or without a
+# close-keyword), and enforces the contract:
+#
+#   * If a PR references an issue, every referenced issue MUST be
+#     `open` at the moment the gate runs. A PR cannot "sync" against
+#     an already-closed issue — the work is no longer owed.
+#   * If a PR references no issue, the gate is skipped (sync is not
+#     owed, nothing to check).
+#
+# Mirrors the structure of `linear-pr-sync.yml` (same PR triggers, same
+# one-time-check philosophy) but flips the contract: linear is
+# non-blocking ("best-effort state sync"), this is a blocking sync
+# gate. The `linear-pr-sync.yml` workflow ships with `continue-on-error:
+# true` on every step so a flaky Linear API never blocks a PR; this
+# workflow hard-fails on a closed issue so a stale reference surfaces
+# in CI rather than at merge time.
+#
+# Trigger surface matches `ci.yml` and `linear-pr-sync.yml` so the
+# gate runs at the same moments (open / re-open / new commit / body
+# edit). `closed` and `ready_for_review` are intentionally absent —
+# they do not change the issue-state contract.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+
+jobs:
+  issue-sync:
+    name: GitHub issue sync check
+    runs-on: ubuntu-latest
+    # `issues: read` is enough to GET /repos/{owner}/{repo}/issues/{N}.
+    # No write scope is needed — the gate is read-only. `contents: read`
+    # is required so `actions/checkout` can clone the repo under the
+    # sparse-checkout shape below (the runner needs read access to the
+    # source tree to materialize `tools/issue_sync.py`). Mirrors the
+    # permission block in `linear-pr-sync.yml`.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Disable credential persistence so a PR-controlled parser
+          # cannot read the `GITHUB_TOKEN` out of `.git/config`. The
+          # default leaves the token in the local git credential
+          # helper; `pull_request` workflows then run untrusted code
+          # from the PR checkout against a credential-bearing Git
+          # config. Setting `persist-credentials: false` keeps the
+          # token out of the filesystem where the parser can see it.
+          persist-credentials: false
+          # Sparse-checkout the parser only — the runner doesn't need
+          # the full source tree, only the issue-reference parser and
+          # its sibling `_repo_name` helper (used by some scripts in
+          # this repo). Mirrors `linear-pr-sync.yml`'s sparse-checkout
+          # shape so the two one-time-check workflows share the same
+          # checkout pattern.
+          sparse-checkout: tools/issue_sync.py
+
+      - name: Parse PR body for GitHub issue references
+        id: parse
+        env:
+          # Move attacker-influenced fields out of the `run:` block.
+          # GitHub Actions substitutes `${{ … }}` textually into the
+          # shell source before bash ever sees it, so a PR title or
+          # body containing `'` / `;` / `$()` could otherwise break
+          # out of an unquoted shell variable and run arbitrary code
+          # on the runner. `env:` values are passed via the step's
+          # environment, not spliced into shell source.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 tools/issue_sync.py parse \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --json > /tmp/refs.json
+
+          COUNT=$(jq 'length' /tmp/refs.json)
+          echo "reference_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "References parsed:"
+          jq -r '.[] | "  \(.source)\t\(.ref)\t\(.keyword // "-")"' /tmp/refs.json
+
+      - name: Skip — no issue references
+        # When the PR body + title parse to zero references, sync is
+        # not owed and the gate is a no-op. Use a distinct job output
+        # `skipped=true` so the summary step below can render the
+        # "no references → skipped" branch without grepping logs.
+        if: steps.parse.outputs.reference_count == '0'
+        id: skip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "::notice title=issue-sync::PR does not reference any GitHub issue — sync check skipped."
+
+      - name: Check issue states
+        # Only runs when at least one reference was parsed. For each
+        # ref, GETs the issue via `gh api` and emits one of:
+        #   * state=open   → ok (gate passes)
+        #   * state=closed → error (gate fails)
+        # Cross-repo references (`owner/repo#N`) hit the named repo's
+        # issue endpoint; same-repo references hit the current repo
+        # (the default `repos/{owner}/{repo}/issues/{N}` path). The
+        # issue number is extracted from the ref by `awk` so the
+        # `owner/repo#N` syntax doesn't trip the URL path.
+        if: steps.parse.outputs.reference_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Aggregate state-tracking arrays. Using parallel arrays
+          # (rather than a JSON accumulator) keeps the script
+          # transparent — each failure line reads naturally in CI logs.
+          OPEN_REFS=()
+          CLOSED_REFS=()
+
+          while IFS=$'\t' read -r REF _KEYWORD _SOURCE; do
+            NUMBER="${REF##*#}"
+            if [[ "$REF" == *"/"* ]]; then
+              OWNER="${REF%%/*}"
+              REST="${REF#*/}"
+              REPO="${REST%%#*}"
+              API_PATH="repos/${OWNER}/${REPO}/issues/${NUMBER}"
+            else
+              API_PATH="repos/${{ github.repository }}/issues/${NUMBER}"
+            fi
+
+            # `gh api` exit codes:
+            #   * 0   — issue fetched (open or closed)
+            #   * non-0 — fetch failed (404 for missing issue, 403 for
+            #     token scope, etc.). We treat any non-0 as a hard
+            #     failure so a stale ref surfaces immediately.
+            STATE="$(gh api "$API_PATH" --jq '.state' 2>/dev/null || true)"
+            if [ -z "$STATE" ]; then
+              echo "::error title=issue-sync::failed to fetch ${REF} (${API_PATH}). Reference is stale or token scope is insufficient."
+              exit 1
+            fi
+            echo "  ${REF} → state=${STATE}"
+            case "$STATE" in
+              open)
+                OPEN_REFS+=("$REF")
+                ;;
+              closed)
+                CLOSED_REFS+=("$REF")
+                ;;
+              *)
+                echo "::error title=issue-sync::${REF} returned unexpected state '${STATE}' (expected open|closed)."
+                exit 1
+                ;;
+            esac
+          done < <(jq -r '.[] | [.ref, (.keyword // ""), .source] | @tsv' /tmp/refs.json)
+
+          # Final gate verdict. The blocking contract: any closed
+          # reference fails the gate. A 404 (issue deleted) also
+          # fails — see the empty-state branch above.
+          if [ "${#CLOSED_REFS[@]}" -gt 0 ]; then
+            echo ""
+            echo "::error title=issue-sync::PR references ${#CLOSED_REFS[@]} closed issue(s); sync cannot match."
+            echo "::error title=issue-sync::Closed refs: ${CLOSED_REFS[*]}"
+            echo "::error title=issue-sync::Fix: either re-open the issue(s), remove the reference from the PR body, or open a new issue and replace the ref."
+            exit 1
+          fi
+
+          echo ""
+          echo "::notice title=issue-sync::All ${#OPEN_REFS[@]} referenced issue(s) are open; sync gate passed."

@@ -32,7 +32,6 @@ newest) after a y/N gate.
 - `bin/worktree-remove-safe.sh` — per-row safe-removal wrapper that
   archives each worktree's `logs/` to `logs/.archive/<branch>/<ts>/`
   before invoking `git worktree remove` (issue #689 Phase 2).
-- `commands/worktree-prune.md` — slash dispatch + argument contract.
 - `tests/test_worktree_prune.py` — 21 hermetic tests covering Row age
   math, table rendering, end-to-end `collect`, and all CLI modes
   (JSON / `--table` / `--count` / `--exclude`).

@@ -79,7 +79,7 @@ class TestHooksStatus(unittest.TestCase):
             "hooks file detected').",
         )
         # Paths resolve relative to the repo root (existing convention:
-        # commands/skills are also "./<name>/" at root).
+        # skills/ are also "./<name>/" at root).
         claude_hooks = ROOT / "hooks" / "hooks.json"
         self.assertTrue(
             claude_hooks.is_file(),

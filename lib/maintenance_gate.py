@@ -31,11 +31,11 @@ from typing import Dict, Iterable, Mapping, Optional, Tuple
 # Kept in sync with bin/review-local.sh's own touch-probe regex (the
 # canonical source; pinned by tests/test_review_yml_touch_probe.py
 # against .github/workflows/review.yml's scope job too). All three
-# copies previously drifted -- this list was missing bin/, commands/,
+# copies previously drifted -- this list was missing bin/,
 # .claude/, .codex/, and .github/ entirely, so a PR that only touched
 # e.g. bin/*.sh scripts was never flagged as needing a docs update.
 _PROD_ROOTS: Tuple[str, ...] = (
-    "bin/", "commands/", "lib/", "tools/", "hooks/", "skills/",
+    "bin/", "lib/", "tools/", "hooks/", "skills/",
     ".githooks/", ".claude/", ".codex/", ".github/",
 )
 
@@ -49,7 +49,7 @@ _AUTO_MANAGED_DOCS: frozenset = frozenset({
 
 # The root README is the PRIMARY registry doc — the front door every
 # operator reads first. When the PR adds a new ``skills/<name>/SKILL.md``
-# or ``commands/<name>.md``, this exact path MUST be in the change set
+# or a new skills/* path, this exact path MUST be in the change set
 # (or the PR body must carry the ``docs-not-required:`` marker).
 #
 # It is deliberately MANDATORY rather than one-of-many: the previous
@@ -72,7 +72,6 @@ _PRIMARY_REGISTRY_DOC = "README.md"
 _SECONDARY_REGISTRY_DOCS: frozenset = frozenset({
     "docs/skills/README.md",           # manual English
     "docs/skills/README.ko.md",        # manual Korean
-    "commands/README.md",              # future-proof; file doesn't exist yet
 })
 
 # File-status values that indicate a brand-new path. ``renamed`` is
@@ -210,21 +209,6 @@ def _is_new_skill(path: str, status: str) -> bool:
     return bool(rest)
 
 
-def _is_new_command(path: str, status: str) -> bool:
-    """True iff ``path`` is a newly-added ``commands/<name>.md`` file.
-    Excludes ``commands/README.md`` itself (the registry doc — counting
-    it as a "new command" would defeat the check).
-    """
-    if status not in _ADDED_FILE_STATUSES:
-        return False
-    if not path.startswith("commands/"):
-        return False
-    if not path.endswith(".md"):
-        return False
-    if path == "commands/README.md":
-        return False
-    return True
-
 
 def registry_index_updated_ok(
     changed_files: Iterable[str],
@@ -233,8 +217,7 @@ def registry_index_updated_ok(
     """Return ``(passes, reason)`` for the skill/command registry check.
 
     Pass conditions (any one):
-      - No new (status==``"added"``) ``skills/<name>/SKILL.md`` or
-        ``commands/<name>.md`` in the diff.
+      - No new (status==``"added"``) ``skills/<name>/SKILL.md`` in the diff.
       - The PR touches the root ``README.md``.
       - The PR body carries the ``docs-not-required:`` marker.
 
@@ -253,10 +236,10 @@ def registry_index_updated_ok(
     new_entries = [
         (path, status)
         for path, status in parsed
-        if _is_new_skill(path, status) or _is_new_command(path, status)
+        if _is_new_skill(path, status)
     ]
     if not new_entries:
-        return True, "no new skills or commands added"
+        return True, "no new skills added"
 
     if _pr_body_justifies_no_docs(pr_body):
         return True, "docs-not-required justified in PR body"
@@ -332,7 +315,7 @@ def docs_updated_ok(
     # file change. Delegated to the single implementation above so the
     # two entry points can never drift.
     has_new_entry = any(
-        _is_new_skill(p, s) or _is_new_command(p, s) for p, s in parsed
+        _is_new_skill(p, s) for p, s in parsed
     )
     if has_new_entry:
         return registry_index_updated_ok(files, pr_body)

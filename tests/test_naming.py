@@ -6,7 +6,7 @@ Tests verify:
 - Skill directory names = SKILL.md frontmatter `name:` field
 - Skill `category:` ∈ 9 allowed categories
 - Slash command files exist
-- File kebab-case naming in lib/ + commands/ + skills/
+- File kebab-case naming in lib/ + skills/
 """
 from __future__ import annotations
 
@@ -81,13 +81,6 @@ class TestNaming(unittest.TestCase):
                     violations.append(str(d.relative_to(PROJECT_ROOT)))
         self.assertEqual(violations, [], f"Non-kebab-case dirs: {violations}")
 
-    def test_commands_exist(self):
-        commands_dir = PROJECT_ROOT / "commands"
-        if not commands_dir.exists():
-            self.skipTest("no commands dir yet")
-        existing = {p.name for p in commands_dir.glob("*.md")}
-        # Incremental wrapper installs are valid, but the directory must not be empty.
-        self.assertTrue(existing, "commands dir empty")
 
     def test_lib_python_kebab_or_snake(self):
         lib_dir = PROJECT_ROOT / "lib"

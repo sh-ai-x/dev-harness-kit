@@ -324,8 +324,8 @@ tell which skill held the lock. The stale-lock TTL is the same
   parent).
 - `skills/babysit-pr-local/recipes/canonical-wiring.md` — parent
   preflight block + sub-agent prompt body.
-- `commands/babysit-pr-local.md` — slash command description
-  (mirrors `commands/review-local.md`).
+- `skills/babysit-pr-local/SKILL.md` — slash command description
+  (mirrors `skills/review-local/SKILL.md`).
 
 ---
 
@@ -333,8 +333,8 @@ tell which skill held the lock. The stale-lock TTL is the same
 
 - `bin/review-local.sh` — local equivalent of the GH-Actions review workflow.
 - `bin/babysit-pr-local.sh` — local-mode babysit wrapper (executable; refuses `--auto-appearing`).
-- `commands/review-local.md` — slash command wrapper (one-shot local review).
-- `commands/babysit-pr-local.md` — slash command wrapper (local-mode babysit).
+- `skills/review-local/SKILL.md` — slash command wrapper (one-shot local review).
+- `skills/babysit-pr-local/SKILL.md` — slash command wrapper (local-mode babysit).
 - `skills/babysit-pr/SKILL.md` — babysit-pr skill (GH-Actions-driven; no local-test flag).
 - `skills/babysit-pr-local/SKILL.md` — local-mode babysit skill (additive sibling; replaces `gh pr checks --watch` with `bin/review-local.sh`).
 - `skills/babysit-pr-local/recipes/canonical-wiring.md` — local-mode sub-agent prompt + parent preflight.

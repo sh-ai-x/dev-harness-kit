@@ -136,7 +136,7 @@ class TestCiSetup(unittest.TestCase):
                 self.assertIn(key, data, f"missing key: {key}")
             self.assertEqual(data["schema_version"], "1.0.0")
             self.assertEqual(data["installed_by"], "dev-kit:ci-setup")
-            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml"})
+            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"})
             self.assertEqual(set(data["scripts"]), {
                 "scripts/validate.py", "scripts/test.sh",
                 "scripts/branch-policy.sh", "scripts/ci-local.sh",
@@ -1033,7 +1033,7 @@ class TestCiSetup(unittest.TestCase):
 
     # === /dev-kit:skill-usage's tools/*.py must ship to consumers ===
     #
-    # commands/skill-usage.md shells out to a bare relative path
+    # skills/skill-usage/SKILL.md shells out to a bare relative path
     # (`python3 tools/skill_usage.py`). ${CLAUDE_PLUGIN_ROOT} does not
     # expand inside command markdown bodies (anthropics/claude-code#9354),
     # so any consumer that only ran ci-setup or bootstrap — and never cloned

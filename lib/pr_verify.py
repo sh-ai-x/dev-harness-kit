@@ -1035,7 +1035,7 @@ def _resolve_current_pr_number() -> int | None:
 
 
 def main(argv: list[str]) -> int:
-    """CLI entry. Supports both forms advertised by `commands/pr-verify.md`
+    """CLI entry. Slash command registered as `/dev-kit:pr-verify` (was also at `commands/pr-verify.md` before the prefix-only consolidation).
     and `skills/pr-verify/SKILL.md`:
 
       python3 -m lib.pr_verify                            (current branch)

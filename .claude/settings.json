@@ -22,17 +22,7 @@
         "_loghooks_managed": true
       }
     ],
-    "SessionStart": [
-      {
-        "_commands_dir_registered_by_install_commands": true,
-        "hooks": [
-          {
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/bin/install-commands.sh\"",
-            "type": "command"
-          }
-        ]
-      }
-    ],
+    "SessionStart": [],
     "Stop": [
       {
         "hooks": [

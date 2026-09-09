@@ -94,13 +94,13 @@ jobs:
           # Kept in sync with bin/review-local.sh's own touch-probe
           # regex (the canonical source; pinned by
           # tests/test_review_yml_touch_probe.py). Previously missing
-          # bin/ and commands/ here meant a PR that only touched
-          # bin/*.sh or commands/*.md scripts was silently classified
+          # bin/ here meant a PR that only touched
+          # bin/*.sh scripts was silently classified
           # as docs/infra-only, skipping the review/security jobs
           # below entirely.
           TOUCHES="$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" \
               --json files --jq '.files[].path' 2>/dev/null \
-            | grep -E '^(bin|commands|lib|tools|hooks|skills|\.githooks|\.claude|\.codex|\.github)/' \
+            | grep -E '^(bin|lib|tools|hooks|skills|\.githooks|\.claude|\.codex|\.github)/' \
             || true)"
           if [ -n "$TOUCHES" ]; then
             echo "touches_prod=true" >> "$GITHUB_OUTPUT"
@@ -108,7 +108,7 @@ jobs:
             printf '  %s\n' $TOUCHES | head -10
           else
             echo "touches_prod=false" >> "$GITHUB_OUTPUT"
-            echo "docs/infra-only PR (no bin/commands/lib/tools/hooks/skills/.githooks/.claude/.codex/.github changes)"
+            echo "docs/infra-only PR (no bin/lib/tools/hooks/skills/.githooks/.claude/.codex/.github changes)"
           fi
 
   injection_scan:
@@ -922,7 +922,7 @@ jobs:
             exit 1
           else
             echo "::notice::docs/infra-only PR; L3 evidence is advisory here."
-            echo "  (PR did not touch bin/, commands/, lib/, tools/, hooks/, skills/, .githooks/, .claude/, .codex/, .github/.)"
+            echo "  (PR did not touch bin/, lib/, tools/, hooks/, skills/, .githooks/, .claude/, .codex/, .github/.)"
             echo "  Consider still pasting a pytest tail if you ran any local verification."
           fi
 

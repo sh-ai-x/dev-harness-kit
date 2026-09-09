@@ -21,7 +21,6 @@
   "hooks": "./.codex-plugin/hooks/hooks.json",
   "skills": "./skills/",
   "agents": "./agents/",
-  "commands": "./commands/",
   "interface": {
     "displayName": "Dev Harness Kit",
     "shortDescription": "Skills for planning, TDD build, review, security, and release workflows",
