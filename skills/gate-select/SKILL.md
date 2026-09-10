@@ -1,15 +1,14 @@
 ---
 name: gate-select
 category: config
-description: Unified 3-dimension picker for project / session / AI-judge gates. Shows what's installed and dispatches to the right installer (ci-setup / harness-mode / AI-judge skills).
+description: Unified 3-dimension picker for project / session / AI-judge gates. Reads .dev-kit/gates.json + .dev-kit/ci-config.json + .dev-kit/harness-mode.session.json and dispatches writes through `python -m lib.gates_state ...`.
 alpha: state
 when_to_use:
   - User types /dev-kit:gate-select after /dev-kit:bootstrap
   - User wants one-pick visibility into which CI workflows, local hooks, and AI-judge skills are active
-  - User wants to add CI gates without running /dev-kit:ci-setup directly
+  - User wants to toggle a CI gate (review/security/maintenance) WITHOUT editing review.yml
   - User wants to switch session local-hook mode without remembering /dev-kit:harness-mode sub-commands
 allowed-tools: Read Write Bash AskUserQuestion
-model: sonnet
 disable-model-invocation: false
 user-invocable: true
 ---
@@ -17,42 +16,55 @@ user-invocable: true
 
 ## What it does
 
-One skill that exposes the three gate dimensions the rest of dev-kit fragments across separate pickers:
+Single pane of glass + dispatch surface for three gate dimensions the rest of
+dev-kit fragments across separate pickers. The project dimension is now
+JSON-driven (issue TBD): `.dev-kit/gates.json` is the SSOT for which judge
+workflows are on, and `gate-select` is its canonical writer. Workflows
+read `vars.GATES_<NAME>_ENABLED` at runtime — toggling a gate is a JSON
+edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 
 | Dimension | SSOT file | Picker today | What gate-select does |
 |---|---|---|---|
-| **Project** (CI workflow gates) | `.dev-kit/ci-config.json` | `/dev-kit:ci-setup` | Reports which of `ci.yml` / `auto-fix-pr.yml` / `review.yml` / `security.yml` are installed; dispatches to `ci-setup` to install missing ones. |
-| **Session** (local-hook gates) | `.dev-kit/harness-mode.session.json` | `/dev-kit:harness-mode` | Reports mode + per-gate values; dispatches to `harness-mode` to change. |
-| **AI-judge** (LLM-judge skills) | (skill-shipped; CI wiring in `.github/workflows/{review,security}.yml`) | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` | Reports which judge skills are enabled and whether they are wired into CI; dispatches to the right skill. |
-
-**No new state file** — gate-select reads the three existing sources above. `pick` dispatches writes to the same writers `ci-setup` / `harness-mode` / judge skills already use.
+| **Project** (CI workflow gates) | `.dev-kit/gates.json` (NEW) + `.dev-kit/ci-config.json` | `/dev-kit:ci-setup` (install) | Reads gates.json + marker; `enable/disable/sync/init` write gates.json; dispatches ci-setup to install based on it. |
+| **Session** (local-hook gates) | `.dev-kit/harness-mode.session.json` | `/dev-kit:harness-mode` | Reads mode + per-gate values; dispatches to `harness-mode` to change. |
+| **AI-judge** (LLM-judge skills) | (skill-shipped; CI wiring in `.github/workflows/{review,security,maintenance}.yml`) | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` | Reports which judge skills are enabled and whether their CI workflow is wired; dispatches to the right skill. |
 
 ## Sub-commands
 
 | Sub-command | Effect |
 |---|---|
-| `show` | Print current state of all 3 dimensions, no edits |
-| `pick` (default) | Interactive 3-question multiSelect + apply |
-| `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install) |
-| `install-session <fast\|full\|custom>` | Dispatch to `/dev-kit:harness-mode` |
+| `show` (default) | Read gates.json + marker; print the 3 dimensions. No edits. |
+| `pick` | Legacy 6-question picker; threads writes to gates.json + ci-setup. Kept as compat for the original AI-judge picker UX. |
+| `enable <gate>` | `python -m lib.gates_state enable <gate>` — flips `gates.<gate>.enabled` to true. |
+| `disable <gate>` | `python -m lib.gates_state disable <gate>` — flips `gates.<gate>.enabled` to false. |
+| `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`). |
+| `sync` | Push enabled flags to `gh variable set GATES_<NAME>_ENABLED`. |
+| `init` | Synthesize `.dev-kit/gates.json` from the current `marker.runners` so a consumer that previously used `--exclude security.yml` upgrades in one step. |
+| `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install). |
+| `install-session <fast\|full\|custom>` | Dispatch to `/dev-kit:harness-mode`. |
 
 ```bash
-/dev-kit:gate-select show            # current state, no edits
-/dev-kit:gate-select                # = pick
-/dev-kit:gate-select pick           # explicit pick
-/dev-kit:gate-select install-project
-/dev-kit:gate-select install-session full
+/dev-kit:gate-select                       # = show
+/dev-kit:gate-select show                  # explicit read-only
+/dev-kit:gate-select enable review         # turn review gate on
+/dev-kit:gate-select disable security      # turn security gate off
+/dev-kit:gate-select set review enabled true
+/dev-kit:gate-select sync                  # push to gh variable set
+/dev-kit:gate-select init                  # synthesize gates.json from marker
+/dev-kit:gate-select pick                  # legacy 6-question picker
+/dev-kit:gate-select install-project       # = /dev-kit:ci-setup
+/dev-kit:gate-select install-session full  # = /dev-kit:harness-mode full
 ```
 
 ## `show` output
 
 ```text
-PROJECT GATES (CI workflows, .dev-kit/ci-config.json marker)
-  ci.yml (branch-policy + test + validate):   installed | /dev-kit:ci-setup
-  auto-fix-pr.yml:                            installed | /dev-kit:ci-setup
-  review.yml (review LLM judge, 3-dim):       installed | /dev-kit:ci-setup
-  security.yml (security LLM judge, 11-dim):   installed | /dev-kit:ci-setup
-  maintenance.yml (maintenance LLM judge):    NOT INSTALLED — template not shipped yet
+PROJECT GATES (.dev-kit/gates.json + .dev-kit/ci-config.json marker)
+  review.yml     enabled=true   var=GATES_REVIEW_ENABLED
+  security.yml   enabled=false  var=GATES_SECURITY_ENABLED   # disabled via gates.json
+  maintenance.yml enabled=true  var=GATES_MAINTENANCE_ENABLED
+  marker.runners: [ci.yml, auto-fix-pr.yml, review.yml, maintenance.yml]
+  marker.gates_source: gates.json
 
 SESSION GATES (.dev-kit/harness-mode.session.json, reset every SessionStart)
   mode: full
@@ -61,154 +73,116 @@ SESSION GATES (.dev-kit/harness-mode.session.json, reset every SessionStart)
     maintenance, security_owasp, babysit_pr
   correctness (always on): stop_verify, secret_scan, intent_integrity, gh_ci_required
 
-AI-JUDGE GATES (skills shipped with the plugin; wired into CI by ci-setup)
-  /dev-kit:review        enabled (CI: review.yml, local: bin/review-local.sh)
-  /dev-kit:security      enabled (CI: security.yml, local: bin/review-local.sh)
-  /dev-kit:maintenance   enabled (CI: not shipped, local: /dev-kit:maintenance or bin/review-local.sh)
+AI-JUDGE GATES (skills shipped with the plugin; scheduled by .github/workflows/*.yml)
+  /dev-kit:review        enabled (CI: review.yml,  if: vars.GATES_REVIEW_ENABLED    != 'false')
+  /dev-kit:security      enabled (CI: security.yml, if: vars.GATES_SECURITY_ENABLED  != 'false' — but gates.json says disabled; CI gate job SKIPPED)
+  /dev-kit:maintenance   enabled (CI: maintenance.yml, if: vars.GATES_MAINTENANCE_ENABLED != 'false')
 ```
 
 ### How `show` reads each dimension
 
 ```bash
-# Project — marker presence + per-workflow file presence.
-# Loop matches the spec table above (5 workflows, including maintenance.yml
-# which is NOT YET shipped as a template). Issue #823: review.yml and
-# security.yml are independent workflows post-#823; the `review only`
-# pick installs review.yml without security.yml, so each must be reported
-# separately instead of bundled under "review.yml".
-[ -f .dev-kit/ci-config.json ] && echo "ci-config marker: present"
-for f in ci.yml auto-fix-pr.yml review.yml security.yml; do
-  [ -f ".github/workflows/$f" ] && echo "$f: installed" || echo "$f: missing"
-done
-# maintenance.yml ships in a separate PR; while absent, `show` MUST report
-# the gap so the single-pane view stays honest about future-PR blockers.
-if [ -f .github/workflows/maintenance.yml ]; then
-  echo "maintenance.yml: installed"
-else
-  echo "maintenance.yml: NOT INSTALLED — template not shipped yet"
-fi
+# Project — gates.json is the SSOT; marker.gates_source is the audit breadcrumb.
+python3 -m lib.gates_state show --json --root .
+python3 -c "import json; print(json.load(open('.dev-kit/ci-config.json'))['runners'])"
+python3 -c "import json; print(json.load(open('.dev-kit/ci-config.json'))['gates_source'])"
 
-# Session — delegated to the existing CLI
-python3 -m lib.harness_mode_state show
+# Session — delegated to the existing CLI.
+python3 -m lib.harness_mode_state show --json --root .
 
-# AI-judge — static; the 3 judge skills are always loaded with the plugin
-echo "/dev-kit:review: enabled"; echo "/dev-kit:security: enabled"; echo "/dev-kit:maintenance: enabled"
+# AI-judge — static; the 3 judge skills are always loaded with the plugin.
+echo "/dev-kit:review:    enabled"
+echo "/dev-kit:security:  enabled (CI gate follows gates.json)"
+echo "/dev-kit:maintenance: enabled (CI gate follows gates.json)"
 ```
 
-## `pick` flow
+## `pick` flow (legacy AI-judge picker, kept as compat)
 
-Two `AskUserQuestion` calls, 3 questions each (mirrors `harness-mode` lines 61–110).
+The `pick` flow ends by **writing gates.json** (via `lib.gates_state enable/disable`)
+and dispatching `ci-setup` (no `--exclude` — gates.json is the SSOT). The
+`pick` mapping is:
 
-### Call 1
-
-| Question | Options |
-|---|---|
-| Install **project gates** (CI workflow + pre-push + scripts + `.dev-kit/ci-config.json`)? | Install via `/dev-kit:ci-setup` (Recommended) / Skip — bootstrap stays minimal |
-| Set **session gates** mode? | `full` (Recommended) / `fast` / `custom` (delegate to `/dev-kit:harness-mode custom`) |
-| Wire **AI-judge gates** into CI? | `review` (Recommended for new repos — 3-dim correctness, lower cost; issue #823) / `review + security` (review.yml + security.yml, full coverage) / `review + security + maintenance` (blocked until template lands) / Skip — leave AI-judge skill-only |
-
-### Call 2 (project pick follow-ups + persistent session mode)
-
-The "Persist session mode" question is independent of project pick — the
-session pick in Call 1 (`full|fast|custom`) is always set, so persist it
-regardless of whether project gates were installed. The Phase 3 verify and
-post-install checklist questions stay conditional on `project_pick = Install`.
-
-| Question | When | Options |
+| AI-judge pick | gates.json writes | Result |
 |---|---|---|
-| Run **Phase 3 verify** after ci-setup install? | only if `project_pick = Install` | Run verify (Recommended) / `--skip-verify` (faster, no `bash -n` / `validate.py` / `ci-local.sh`) |
-| Persist **session mode** choice across sessions? | always | Write `.dev-kit/harness-mode.session.json` (Recommended, SessionStart will reset to `full` next session) / One-shot — leave as-is |
-| Print **post-install checklist** after ci-setup? | only if `project_pick = Install` | Print 5-step checklist (Recommended) / Skip checklist |
+| `review` | `enable review`, `disable security`, `disable maintenance` | review.yml only |
+| `review + security` | enable review + security, disable maintenance | review + security |
+| `review + security + maintenance` | enable all three | all three judges wired |
+| `Skip` | no writes | no install |
 
-### Dispatch (Skill tool invocations, not bash)
+After writing gates.json, the `pick` flow dispatches `ci-setup` which:
+1. Reads gates.json → derives the install set.
+2. Copies the matching workflow templates.
+3. Runs `gate-select sync` (prompted) so the GH repo variables are pushed.
 
-The `pick` flow ends by dispatching to existing skills and one real CLI.
-Slash commands are LLM-mediated Skill tool calls, not binaries — `lib.ci_setup`
-is a Python module (no argparse CLI), so the project pick dispatches via the
-Skill tool, not by shelling out to a non-existent `/dev-kit/ci-setup` binary.
-`lib.harness_mode_state` *does* expose a real CLI and is invoked directly.
+The legacy `--exclude=` argument is no longer threaded by gate-select — the
+SSOT moved to JSON. A `ci-setup --exclude security.yml` on a consumer WITH
+gates.json is logged as `::notice::` and ignored (defensive — a stale
+caller doesn't silently regress).
 
-```python
-# Project pick — Skill tool (slash commands are not on PATH).
-# Issue #823: `exclude` threads through to ci-setup's `--exclude` flag so
-# the `review only` AI-judge pick drops security.yml from the install set
-# (and from the marker `runners` list). The `review + security` and
-# `Skip` picks do NOT pass exclude — they land both workflows.
-exclude_arg = "security.yml" if ai_judge_pick == "review" else None
-if project_pick == "Install":
-    Skill(
-        name="ci-setup",
-        args={
-            "force": force,
-            "skip_verify": skip_verify,
-            **({"exclude": exclude_arg} if exclude_arg else {}),
-        },
-    )
-
-# Session pick — harness-mode is a real CLI for fast|full; custom goes via Skill.
-if session_pick in ("fast", "full"):
-    subprocess.run(["python3", "-m", "lib.harness_mode_state", "write", session_pick], check=True)
-elif session_pick == "custom":
-    Skill(name="harness-mode", args={"mode": "custom"})
-
-# AI-judge pick — no installer; the echo below is a status report, not a write.
-# Gate each "Wired via *.yml" claim on actual file presence. If the
-# operator skipped the project pick, the relevant workflow is not
-# installed, so the status must say so — otherwise the echo is a lie.
-# Issue #823: each workflow (review.yml, security.yml) is wired and
-# reported independently. The `review` pick must report review.yml wired
-# ONLY if review.yml is actually present AND security.yml is absent (the
-# install path's `exclude=security.yml` enforces this).
-case ai_judge_pick:
-    case "review":
-        if Path(".github/workflows/review.yml").is_file() and not Path(".github/workflows/security.yml").is_file():
-            print("✓ review.yml wired (3-dim correctness + reuse/simplification only)")
-        elif Path(".github/workflows/review.yml").is_file() and Path(".github/workflows/security.yml").is_file():
-            print("⚠ review + security actually wired — `review only` pick did not take. Re-run /dev-kit:ci-setup --exclude security.yml to drop security.yml.")
-        else:
-            print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
-    case "review + security":
-        if Path(".github/workflows/review.yml").is_file() and Path(".github/workflows/security.yml").is_file():
-            print("✓ Wired via review.yml + security.yml (installed by ci-setup)")
-        elif Path(".github/workflows/review.yml").is_file():
-            print("⚠ review.yml wired but security.yml missing — re-run /dev-kit:ci-setup --force to refresh.")
-        else:
-            print("⚠ review.yml not installed — project pick was Skip; run /dev-kit:ci-setup to wire.")
-    case "review + security + maintenance":
-        print("✗ maintenance.yml template not shipped — out of scope here")
-    case "Skip":
-        print("✓ AI-judge skills remain skill-only (no CI wiring)")
-```
-
-## `install-project` and `install-session` sub-commands
-
-Convenience aliases that wrap a single existing installer. They are for the case where the operator wants to chain one fragment of the picker without going through the full 6-question `pick`:
+## `enable` / `disable` / `set`
 
 ```bash
-# Same as /dev-kit:ci-setup (idempotent marker-driven install)
-/dev-kit:gate-select install-project
-
-# Same as /dev-kit:harness-mode full
-/dev-kit:gate-select install-session full
+# Atomic JSON write; idempotent re-runs are stable.
+python3 -m lib.gates_state enable review
+python3 -m lib.gates_state disable security
+python3 -m lib.gates_state set review enabled false
 ```
 
-These are not new installers — they exist so gate-select can serve as a single discovery + dispatch surface for all three gate dimensions.
+`enable` and `disable` are sugar for `set <gate> enabled true|false`. The
+`enabled` field accepts `true|false|1|0|yes|no` (case-insensitive). Other
+fields (`workflow`, `var`) require their canonical values — `set` calls
+`validate` and exits 2 on shape violation.
+
+## `sync`
+
+```bash
+python3 -m lib.gates_state sync [--root PATH] [--repo OWNER/REPO]
+```
+
+For each gate in `DEFAULT_GATES` order, run one `gh variable set
+GATES_<NAME>_ENABLED --repo OWNER/REPO --body true|false`. Behavior:
+
+- `gh` not on PATH or unauthenticated → `::warning::` + exit 3; gates.json
+  is the SSOT and remains updated so a follow-up `sync` after `gh auth
+  login` catches up.
+- No GitHub remote → exit 3 with a hint to set one.
+- Per-gate failure → captured in the report; exit 1 if any failed.
+- Idempotent (`gh variable set` overwrites); re-running is safe.
+
+## `init` — synthesize gates.json from a pre-refactor consumer
+
+When a consumer installed dev-kit before this refactor, their
+`.dev-kit/ci-config.json` has `runners` listing only the workflows that
+were actually installed (e.g. `[ci.yml, auto-fix-pr.yml, review.yml]` if
+they previously used `--exclude security.yml`). One-step migration:
+
+```bash
+python3 -m lib.gates_state init [--root PATH]   # reads marker.runners, writes gates.json
+```
+
+`init` synthesizes: every workflow in `marker.runners` that's NOT
+`ci.yml` or `auto-fix-pr.yml` becomes a gate with `enabled=True`; every
+workflow in the EXPECTED set NOT in marker.runners becomes a gate with
+`enabled=False`. The operator can spot-check the output, then run
+`gate-select sync` to push the flags to GH.
 
 ## What is out of scope
 
 | Surface | Today | Why |
 |---|---|---|
-| `templates/ci/.github/workflows/maintenance.yml` | Not shipped | `gate-select`'s "review + security + maintenance" pick stays blocked until a separate PR adds the template + tests. |
-| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used | Referenced only by `skills/config/SKILL.md` + `hooks/linear-*.sh`; gate-select reads from `ci-config.json` + `harness-mode.session.json`. |
-| Skill-disable mechanism for AI-judge skills | None exists | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` are always-on with the plugin; gate-select only orchestrates their **CI wiring**, not their skill-level enablement. |
+| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used | Referenced only by `skills/config/SKILL.md` + `hooks/linear-*.sh`; gate-select reads from `gates.json` + `ci-config.json` + `harness-mode.session.json`. |
+| Skill-disable mechanism for AI-judge skills | None exists | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` are always-on with the plugin; gate-select orchestrates their **CI wiring** + **on/off** via `gates.json`, not their skill-level enablement. |
 
 ## Rules (no exceptions)
 
 - **0-arg UX (MUST-21)**: zero args. Branching via `when_to_use` auto-match + sub-commands.
-- **No new state file**: `gate-select` reads the three existing sources. `pick` dispatches writes to the same writers `ci-setup` / `harness-mode` / judge skills already use.
-- **HOTL (MUST-29)**: every edit (sub-command with side effects) asks before writing. `show` is read-only.
+- **No marker-only state file**: gate-select WRITES `.dev-kit/gates.json` (the SSOT) and dispatches `ci-setup` for the marker; the marker records `gates_source` (`gates.json` | `ci-setup`) as the audit breadcrumb.
+- **HOTL (MUST-29)**: every edit (sub-command with side effects) asks before writing. `show` and `init --dry-run` are read-only.
 - **No option prompts on `show`** (MUST-NOT-13): `show` prints state and exits.
 
 ## Next step
 
-After a `pick` that installed something, run `/dev-kit:build <first-feature>` (or `/dev-kit:plan` for idea → PRD.md synthesis). `/dev-kit:ci-doctor` is also available for post-install drift verification. For `show` or a Skip-everything `pick`, no further stage is required.
+After a `pick` or `enable/disable + sync` that changed gates, run
+`/dev-kit:ci-setup` (or `install-project`) to land the matching workflow
+files. For drift verification, `/dev-kit:ci-doctor` now checks the
+gates.json ↔ vars consistency.

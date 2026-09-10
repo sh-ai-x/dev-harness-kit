@@ -378,6 +378,13 @@ jobs:
     # Issue #823: security.yml no longer bundles /dev-kit:review. This
     # gate reads the security verdict only; the review judge (if wired)
     # runs in review.yml and posts its own gate verdict there.
+    #
+    # Gates (issue TBD): gate job is skipped when .dev-kit/gates.json
+    # has `security.enabled=false`. The `security:` agent job above is
+    # unaffected — it still runs and the human gate is what blocks
+    # merge. `!= 'false'` so unset var defaults to enabled (backward
+    # compat for unsynced consumers).
+    if: vars.GATES_SECURITY_ENABLED != 'false'
     name: severity gate (security)
     runs-on: ubuntu-latest
     needs: [security]
