@@ -136,7 +136,7 @@ class TestCiSetup(unittest.TestCase):
                 self.assertIn(key, data, f"missing key: {key}")
             self.assertEqual(data["schema_version"], "1.0.0")
             self.assertEqual(data["installed_by"], "dev-kit:ci-setup")
-            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml"})
+            self.assertEqual(set(data["runners"]), {"ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml", "maintenance.yml"})
             self.assertEqual(set(data["scripts"]), {
                 "scripts/validate.py", "scripts/test.sh",
                 "scripts/branch-policy.sh", "scripts/ci-local.sh",
@@ -1238,7 +1238,7 @@ class TestCiSetup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "lib"
             target.mkdir()
-            for name in ("ci_setup.py", "atomic.py", "read_env_key.py"):
+            for name in ("ci_setup.py", "atomic.py", "read_env_key.py", "gh_cli.py"):
                 (target / name).write_bytes((plugin_root / "lib" / name).read_bytes())
             result = subprocess.run(
                 [sys.executable, "-c", "from ci_setup import install_ci_config"],

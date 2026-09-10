@@ -161,6 +161,7 @@ EXPECTED_PR_TRIGGERS: dict[str, frozenset[str]] = {
     "review.yml": frozenset({"pull_request", "pull_request_target", "workflow_run"}),
     "auto-fix-pr.yml": frozenset({"pull_request_review"}),
     "ci.yml": frozenset({"pull_request", "push"}),
+    "maintenance.yml": frozenset({"pull_request", "pull_request_target", "workflow_run"}),
 }
 
 # Workflow files we hand-parse. Order matches the install manifest.
@@ -168,6 +169,7 @@ WORKFLOW_FILES: tuple[str, ...] = (
     ".github/workflows/review.yml",
     ".github/workflows/auto-fix-pr.yml",
     ".github/workflows/ci.yml",
+    ".github/workflows/maintenance.yml",
 )
 
 
@@ -543,9 +545,42 @@ def _list_repo_secrets(repo: str) -> tuple[set[str], str]:
         return set(), f"gh secret list error: {e}"
 
 
+def required_files_for(marker_payload):
+    """issue #834: derive required-files list from marker.runners.
+
+    Source-repo mode (no marker) falls back to the static
+    `REQUIRED_FILES` tuple. Consumer mode honors the marker so a
+    consumer that disabled `security` via gates.json passes the audit
+    without the disabled gate's workflow file.
+    """
+    base = (
+        ".github/workflows/ci.yml",
+        ".github/workflows/auto-fix-pr.yml",
+        ".dev-kit/ci-config.json",
+    )
+    if not marker_payload or not isinstance(marker_payload, dict):
+        return REQUIRED_FILES
+    runners = marker_payload.get("runners")
+    if runners is None or not isinstance(runners, list):
+        # Marker without `runners` (a test fixture, or a marker written
+        # by an older dev-kit version that predates the field) falls back
+        # to the static `REQUIRED_FILES` set so file-present checks still
+        # cover review.yml etc.
+        return REQUIRED_FILES
+    return tuple(sorted(set(base) | {f".github/workflows/{r}" for r in runners if isinstance(r, str)}))
+
+
 def _check_required_files(target: Path, source_repo: bool = False) -> list[Check]:
     out: list[Check] = []
-    for rel in REQUIRED_FILES:
+    marker_payload = None
+    marker_path = target / ".dev-kit" / "ci-config.json"
+    if marker_path.is_file():
+        try:
+            marker_payload = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            marker_payload = None
+    required = required_files_for(marker_payload)
+    for rel in required:
         p = target / rel
         if p.is_file():
             size = p.stat().st_size
@@ -658,6 +693,69 @@ def _check_templates_current(target: Path, source_repo: bool = False) -> list[Ch
         # Informational; /dev-kit:ci-update can refresh.
         return [Check("templates current", "INFO", detail)]
     return [Check("templates current", "WARN", detail)]
+
+
+def _check_gates_consistency(target: Path) -> list[Check]:
+    """Audit `.dev-kit/gates.json` vs GH repo variables (issue #834)."""
+    import shutil as _shutil
+    import subprocess as _subprocess
+    report: list[Check] = []
+    gates_path = target / ".dev-kit" / "gates.json"
+    marker_payload = None
+    marker_path = target / ".dev-kit" / "ci-config.json"
+    if marker_path.is_file():
+        try:
+            marker_payload = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            marker_payload = None
+    gates_payload = None
+    if gates_path.is_file():
+        try:
+            gates_payload = json.loads(gates_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            gates_payload = None
+    if gates_payload is None:
+        if marker_payload is not None:
+            report.append(Check("gates.json present", "WARN",
+                "no .dev-kit/gates.json - run /dev-kit:gate-select init "
+                "to synthesize one from marker.runners"))
+        return report
+    for gate_key, entry in (gates_payload.get("gates") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        var = entry.get("var")
+        enabled_local = entry.get("enabled")
+        if not isinstance(var, str):
+            continue
+        gh = _shutil.which("gh")
+        if not gh:
+            report.append(Check(f"gate var {gate_key}={var}", "SKIP",
+                "gh not on PATH; cannot read GH repo variable"))
+            continue
+        try:
+            cp = _subprocess.run(
+                [gh, "variable", "get", var],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+        except (_subprocess.SubprocessError, OSError):
+            report.append(Check(f"gate var {gate_key}={var}", "SKIP",
+                "gh variable get errored (gh not authenticated?)"))
+            continue
+        if cp.returncode != 0:
+            report.append(Check(f"gate var {gate_key}={var}", "SKIP",
+                f"gh variable get {var} returned exit={cp.returncode}; cannot verify"))
+            continue
+        remote_body = (cp.stdout or "").strip().lower()
+        local_body = "true" if enabled_local is True else "false"
+        if remote_body == local_body:
+            status, detail = "PASS", f"{gate_key}: local={local_body}, remote={remote_body}"
+        else:
+            status, detail = "WARN", (
+                f"{gate_key}: drift (gates.json={local_body}, "
+                f"gh variable={remote_body!r}); run /dev-kit:gate-select sync"
+            )
+        report.append(Check(f"gate var {gate_key}={var}", status, detail))
+    return report
 
 
 def _check_provider_declared(target: Path) -> list[Check]:
@@ -1134,6 +1232,7 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
                                    "dev-kit source repo: consumer-only checks skipped"))
     report.checks.extend(_check_required_files(target, source_repo))
     report.checks.extend(_check_marker_payload(target, source_repo))
+    report.checks.extend(_check_gates_consistency(target))
     report.checks.extend(_check_templates_current(target, source_repo))
     report.checks.extend(_check_provider_declared(target))
     report.checks.append(_check_provider_consistency(target))
