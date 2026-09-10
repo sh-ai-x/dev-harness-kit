@@ -87,38 +87,19 @@ except ImportError:
             return None
 
 # Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
-# lives at `lib/gh_cli.py`. The in-package form is preferred; the inline
-# fallback below exists for the flat 3-file bundle staged by
-# `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`
-# (`ci_setup.py` + `atomic.py` + `read_env_key.py`, no `lib/__init__.py`,
-# no sibling modules), where neither `lib.gh_cli` nor a bare `gh_cli`
-# resolves. `lib/install.sh:53-55` copies ALL `lib/*.py`, so a real
-# consumer install DOES get `gh_cli.py` and takes the import branch.
-# DRIFT RISK: no test asserts the fallback body stays byte-equivalent to
-# `lib/gh_cli.py:gh_available`; keep the two in sync by hand, or add
-# `gh_cli.py` to the fixture bundle and delete the fallback outright.
+# lives at `lib/gh_cli.py`. `lib/install.sh:53-55` copies every `lib/*.py`
+# to consumer repos, so a real install always takes the `lib.` branch.
+# The minimal fixture at `tests/test_ci_setup.py::
+# test_import_succeeds_without_hooks_manifest` also stages `gh_cli.py`
+# as a flat sibling (no `lib/` package prefix), so the bare-`gh_cli`
+# branch resolves there too. With both paths satisfied by the fixture,
+# the inline reimplementation that was previously the 3-file fallback
+# is gone — there is exactly one `gh_available` body in the tree
+# (issue #834 round-3 MAJOR).
 try:
     from lib.gh_cli import gh_available  # type: ignore
 except ImportError:
-    # Flat layout: ship a local re-implementation so the call site stays
-    # a one-liner. Mirrors `lib/gh_cli.py:gh_available` exactly.
-    import shutil as _shutil  # type: ignore
-    import subprocess as _subprocess  # type: ignore
-
-    def gh_available(*, timeout: int = 10):  # type: ignore
-        gh = _shutil.which("gh")
-        if not gh:
-            return None, "gh not on PATH"
-        try:
-            cp = _subprocess.run(
-                [gh, "auth", "status"],
-                capture_output=True, text=True, timeout=timeout, check=False,
-            )
-        except (_subprocess.SubprocessError, _subprocess.TimeoutExpired, OSError) as e:
-            return None, f"gh auth error: {type(e).__name__}"
-        if cp.returncode != 0:
-            return None, "gh not authenticated"
-        return gh, ""
+    from gh_cli import gh_available  # type: ignore
 
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent

@@ -1238,7 +1238,7 @@ class TestCiSetup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "lib"
             target.mkdir()
-            for name in ("ci_setup.py", "atomic.py", "read_env_key.py"):
+            for name in ("ci_setup.py", "atomic.py", "read_env_key.py", "gh_cli.py"):
                 (target / name).write_bytes((plugin_root / "lib" / name).read_bytes())
             result = subprocess.run(
                 [sys.executable, "-c", "from ci_setup import install_ci_config"],
