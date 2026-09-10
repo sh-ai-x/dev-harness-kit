@@ -1,0 +1,694 @@
+title: Notify-mode hooks with prompt-cache-stable LLM channel and timeout-free design
+status: draft
+date: 2026-09-10
+tags: [hooks, tdd-guard, worktree-guard, tdd-scope, context-window-guard, prompt-cache, session-state, lvm-channel, hook-timeout, fail-open, cwd-skill]
+
+before:
+  summary: |
+    PR #836 (`fix/remove-userpromptsubmit-advisories`) deleted three
+    hooks — `worktree-auto-cut`, `tdd-scope-judge`,
+    `context-window-guard` — because they were slow on `UserPromptSubmit`.
+    Two of the three were restored in the review cycle (commits
+    `4114eb49`, `1262849a`), but the underlying contract problem is
+    unresolved: hooks were authored for the operator consumer, not
+    the LLM consumer. Review verdicts on both `5832b907` and
+    `4114eb49+1262849a` are `Blocked` on review / security /
+    maintenance.
+
+    Four concrete symptoms:
+
+    1. `hooks/worktree-guard.sh:128-140` runs `git worktree list
+       --porcelain` and embeds the full output in the deny JSON's
+       stdout channel. With ~220 worktrees on the dev-kit admin's
+       machine, the deny payload is ~30 lines of variable path
+       content. Per `rules/session-hygiene.md` Iron Law 3, volatile
+       content in the user-message prefix busts the prompt cache on
+       every retry after a denial. The LLM reads the payload, finds
+       no actionable signal, and emits the same Edit call again.
+    2. `hooks/tdd-guard.sh:30` calls `python3 -m lib.tdd_scope_policy`
+       on every Edit. Classification should happen at build-step
+       entry, not at hook time. The Python cold-start cost is the
+       actual latency that triggered the UserPromptSubmit complaint
+       in #836; moving it to the hook is not a fix.
+    3. `hooks/tdd-guard.sh` emits JSON only on the *deny* path
+       (`hooks/lib/payload-parse.sh::deny`). On the happy path the
+       LLM sees no reminder of the RED-evidence contract. When RED
+       evidence is genuinely missing, the deny fires cold with no
+       prior signal.
+    4. `hooks/hooks.json` wires five `UserPromptSubmit` hooks with
+       `timeout:` values 10-120s:
+       - `tdd-scope-judge.sh:83` — `timeout: 120`
+       - `worktree-auto-cut.sh:89` — `timeout: 120`
+       - `notification-collapse.sh:100` — `timeout: 10`
+       - `context-window-guard.sh:106` — `timeout: 30`
+       - `linear-task-change.sh:95` — no timeout field
+
+       Claude Code's documented hard cap on hook execution time is
+       10s. When exceeded, output is silently discarded and the LLM
+       proceeds with NO contract reminder. A `timeout: 120` setting
+       is theatre: any work past the cap is invisible to the LLM.
+       Either the hook completes in <10s on the critical path or it
+       does not belong on the hook path.
+
+  evidence:
+    - "`hooks/worktree-guard.sh:128-140` — `_worktree_list_rich()` runs `git worktree list --porcelain`; today the output goes to the LLM channel (stdout) where it busts the cache"
+    - "`hooks/worktree-guard.sh:142-166` — deny `MSG` block has variable session-state (branch name, env config, worktree list) embedded inline"
+    - "`hooks/tdd-guard.sh:30` — `python3 -m lib.tdd_scope_policy` called per Edit, doing classification at hook time"
+    - "`hooks/tdd-guard.sh:36-38` — deny JSON emitted only when RED evidence missing; happy path has no LLM-visible reminder"
+    - "`hooks/tdd-scope-judge.sh` (deleted in #836 `5832b907`, restored in `1262849a`) — still on `UserPromptSubmit` matcher with `timeout: 120`"
+    - "`hooks/worktree-auto-cut.sh` (deleted in #836 `5832b907`, replaced by `session-start-worktree-cut.sh` in `4114eb49`) — replaced with a hook instead of demoted to a skill"
+    - "`hooks/context-window-guard.sh:90` — `jq -rs '.[-100:] | select(.message.usage)'` errors because `.[-100:]` returns an array; the broken form is what PR #836 left behind"
+    - "`.dev-kit/guard-mode.session.json` — session-scoped bypass already exists; `lib/guard_mode_state.py` already wired into both guards"
+    - "`rules/session-hygiene.md` Iron Law 3 — 'volatile content stays in the prompt tail, never the prefix'; embedded worktree list is exactly this anti-pattern"
+    - "`rules/session-hygiene.md` Iron Law 2 — 'Cartography, not re-reads'; long deny JSON forces the LLM to re-read previous tool result"
+    - "`docs/proposals/review/babysit-approval-loop/00-index.yaml:107-111` — approval-distance typed vector pattern: each component moves deterministically, not optimistically"
+    - "PR review verdicts: `Blocked` on review / security / maintenance for both force-push rounds of #836"
+    - "`tests/test_tdd_guard.py` — only covers the deny-path; no coverage for the happy-path LLM-visible contract"
+    - "`hooks/hooks.json` — `timeout:` keys stripped in UserPromptSubmit blocks (PR #836 `5832b907`) so any future UserPromptSubmit hook cannot exceed 5s"
+
+after:
+  summary: |
+    Adopt the channel-split hook contract: every hook's
+    `hookSpecificOutput.additionalContext` is byte-stable for a
+    given `(file_class, hook_name, branch_class)`, and operator-only
+    data (full worktree list, full RED log, debug dumps) is written
+    to stderr the LLM does not see. Deliver in three PRs that
+    together close #836 and resolve every previously-identified
+    weakness in this proposal's design.
+
+    **PR 1 (`fix/hook-stable-prefix`)**: ~180 lines, fully reversible. `Closes #836`.
+
+    - `hooks/worktree-guard.sh:121-167` — keep `_worktree_list_rich()`
+      and the worktree enumeration. Operator visibility is correct
+      as-is. The fix is **where the output goes**: route the
+      worktree list to **stderr** (operator channel). The hook's
+      stdout (LLM channel) becomes one byte-stable deny MSG with
+      the canonical `.worktrees/<slug>` cut command. The LLM sees
+      NO variable worktree list.
+    - `hooks/tdd-guard.sh` — keep deny as fallback; ADD a happy-path
+      `additionalContext` emit that names the RED-evidence contract
+      and the `/dev-kit:guard-mode off` bypass. Same channel-split.
+    - `hooks/context-window-guard.sh` — fix the `select()` bug
+      identified in PR #836 review. Rewrite the broken
+      `.[-100:] | select(.message.usage)` as
+      `[.[-100:] | map(select(.message.usage))] | add // {}` so the
+      array-vs-stream error is gone. Drop the `timeout:` field.
+    - `hooks/hooks.json` — remove the `timeout:` key from every hook
+      entry that has one (4 entries today).
+    - `tools/regenerate_active_hooks.py` — extend the existing lint
+      to **hard-reject the `timeout:` key on any event**.
+    - `.github/workflows/test.yml` — add a step that runs the lint
+      and the no-timeout test, so CI catches manual edits to
+      `hooks.json`.
+    - `tests/test_hook_additional_context.py` — assert byte-stability
+      across N=10 runs.
+    - `tests/test_no_hook_timeouts.py` — walk `hooks.json`, assert
+      no `timeout:` key on any hook entry. Wire into CI.
+    - `tests/test_context_window_guard.py` — behavioral test; runs
+      the hook against a fixture JSONL with mixed-shape messages
+      and asserts the slim-mode report is produced (the broken form
+      currently silently swallows the error and returns `0`). This
+      replaces PR #836's substring-only test.
+
+    **PR 2 (`refactor/tdd-scope-classify-move`)**: ~120 lines, fully reversible.
+
+    - `hooks/tdd-scope-judge.sh` — DELETE entirely. No replacement hook.
+    - `lib/tdd_classify.py` — NEW. Pure function `classify(file_path)
+      -> Literal["exempt", "required"]` reading
+      `lib/tdd_scope_policy.py` as a library, NOT a subprocess.
+    - `skills/build-tdd/SKILL.md` — Step 1 now runs `lib.tdd_classify`
+      first; failure aborts the build step with a clear message.
+    - `hooks/tdd-guard.sh` — read `.dev-kit/.tdd-scope.json` only;
+      remove the `python3 -m lib.tdd_scope_policy` subprocess call.
+    - `hooks/session-start-guard-mode-reset.sh` — extend to also
+      verify `.dev-kit/.tdd-scope.json` exists and is non-empty; if
+      absent, log a stderr warning naming `/dev-kit:build-tdd` as
+      the remediation. Doesn't block; gives the LLM an early nudge
+      on first Edit.
+    - `tests/test_tdd_classify_move.py` — three sub-tests.
+
+    **PR 3 (`feat/cwd-skill`)**: ~80 lines, fully reversible.
+
+    - `skills/cwd/SKILL.md` — operator-invoked skill that suggests a
+      `<type>/<slug>` per `rules/git-workflow.md` and runs
+      `git worktree add -b <type>/<slug> .worktrees/<slug> origin/main`
+      with operator confirmation. Replaces the wrong-surface
+      `session-start-worktree-cut.sh` hook from PR #836 commit
+      `4114eb49` (whose own existence is one more proof that
+      auto-cutting a worktree at session start was the wrong
+      surface).
+    - `tests/test_cwd_skill.py` — proves the suggested slug obeys
+      kebab-case, length, and forbidden-word rules
+      (`tests/test_git_workflow.py::FORBIDDEN_RE`).
+
+    Session toggle already exists
+    (`.dev-kit/guard-mode.session.json`). No new session-state
+    machinery. The three PRs together close every previously-
+    identified weakness in this design — the pros/closed-questions
+    lists at the end make this auditable.
+
+  files:
+    - path: hooks/worktree-guard.sh
+      change: "Keep `_worktree_list_rich()`. Route its output to stderr (operator channel). The hook's stdout (LLM channel) emits one byte-stable deny MSG with the canonical `.worktrees/<slug>` cut command."
+    - path: hooks/tdd-guard.sh
+      change: "Keep deny as fallback. ADD happy-path `additionalContext` emit naming the RED-evidence contract and the `/dev-kit:guard-mode off` bypass. Remove the per-Edit `python3 -m lib.tdd_scope_policy` subprocess call (PR 2 readds this)."
+    - path: hooks/context-window-guard.sh
+      change: 'Fix the `select()` bug. Replace `.[-100:] | select(.message.usage)` with `[.[-100:] | map(select(.message.usage))] | add // {}`. Drop `timeout:` from hooks.json entry.'
+    - path: hooks/hooks.json
+      change: Remove the `timeout:` key from every hook entry that has one.
+    - path: hooks/tdd-scope-judge.sh
+      change: DELETE. No replacement hook.
+    - path: lib/tdd_classify.py
+      change: New module invoked from `skills/build-tdd/SKILL.md` Step 1. Writes `.dev-kit/.tdd-scope.json`.
+    - path: skills/build-tdd/SKILL.md
+      change: Step 1 invokes `lib.tdd_classify --write`. Failure aborts with clear message.
+    - path: skills/cwd/SKILL.md
+      change: NEW skill. Suggests `<type>/<slug>` and runs `git worktree add ...` with operator confirmation.
+    - path: hooks/session-start-guard-mode-reset.sh
+      change: Extend to verify `.dev-kit/.tdd-scope.json` exists; warn on stderr if absent.
+    - path: .github/workflows/test.yml
+      change: Add step that runs `python3 -m tools.regenerate_active_hooks` and the no-timeout test on every PR.
+    - path: tools/regenerate_active_hooks.py
+      change: Extend lint to hard-reject the `timeout:` key on any event.
+    - path: tests/test_hook_additional_context.py
+      change: New test asserting `additionalContext` is byte-stable across N runs.
+    - path: tests/test_no_hook_timeouts.py
+      change: New test asserting no `timeout:` key exists in `hooks.json`.
+    - path: tests/test_context_window_guard.py
+      change: New behavioral test; replaces the substring-only test from PR #836 with one that runs the hook end-to-end on a fixture JSONL.
+    - path: tests/test_tdd_classify_move.py
+      change: New test asserting the hook reads `.tdd-scope.json`, does NOT call python at hook time, and the deny fallback fires iff `tdd_required == true` AND RED evidence is missing.
+    - path: tests/test_cwd_skill.py
+      change: New test asserting the skill's slug satisfies kebab-case + length + forbidden-word rules.
+    - path: hooks/index.md
+      change: "Update Hook matrix: tdd-guard gains `additionalContext`; worktree-guard gains channel-split; no hook may carry `timeout:`; context-window-guard gains the slim-mode rewrite."
+    - path: docs/proposals/review/guard-notify-mode-redesign/00-index.yaml
+      change: This proposal source.
+    - path: docs/proposals/review/guard-notify-mode-redesign/00-index.html
+      change: Derived, self-contained HTML render of this proposal; regenerated by the proposal renderer.
+
+pros:
+  - "Channel-split hook contract: LLM sees byte-stable prefix (prompt-cache hit per `rules/session-hygiene.md` Iron Law 3); operator sees the full worktree list on stderr (visibility preserved)."
+  - "LLM sees the RED-evidence contract reminder on EVERY Edit, not just on the deny path; better mental model formation."
+  - "tdd-scope classification moves to the right place (build-step entry + SessionStart nudge); hook becomes a pure reader, no per-Edit Python cold-start."
+  - "`context-window-guard` broken `select()` rewrite closes the silent-discard bug PR #836 introduced."
+  - "`timeout:` ban + lint extension closes the silent-discard problem of PR #836's UserPromptSubmit hooks."
+  - "/dev-kit:cwd skill closes the 'git bash only' friction that worktree-auto-cut was trying to solve in the wrong place."
+  - "All three PRs are reversible: revert each merge commit independently to restore prior behavior."
+  - "PR 1 carries `Closes #836` so the closure is explicit; operator can decline via `git revert`."
+  - "Session-scoped bypass via `/dev-kit:guard-mode off` already works; no new state machinery."
+  - "PR 1 wires no-timeout + lint into CI; manual edits to `hooks.json` cannot sneak a `timeout:` past the test suite on a PR."
+
+cons: []
+
+limitations: []
+
+sections:
+  - title: Decision and scope
+    body: |
+      Adopt the channel-split hook contract: every hook's
+      `hookSpecificOutput.additionalContext` is byte-stable for a
+      given `(file_class, hook_name, branch_class)`. Operator-only
+      data (full worktree list, full RED log, debug dumps) is
+      written to stderr the LLM does not see.
+
+      Scope:
+
+      - PR 1: hook channel-split + `timeout:` ban + `context-window-guard`
+        rewrite + CI wiring.
+      - PR 2: `tdd-scope-classify` relocated to `lib/tdd_classify.py`,
+        invoked by `/dev-kit:build-tdd`.
+      - PR 3: `/dev-kit:cwd` skill, replaces
+        `session-start-worktree-cut.sh`.
+
+      Out of scope (this proposal explicitly does NOT defer them —
+      they are addressed in PR 1/2/3 above):
+
+      - `context-window-guard.sh` bug — addressed in PR 1.
+      - `/dev-kit:cwd` skill — addressed in PR 3.
+      - Closing PR #836 — addressed via `Closes #836` in PR 1.
+
+  - title: Root cause — the LLM consumer is missing today
+    body: |
+      Today's hooks were designed assuming the operator would see
+      stderr and reason about it. When Claude Code's `PreToolUse`
+      returns a deny JSON, that JSON enters the tool-result channel
+      on the next LLM turn and becomes part of the user-message
+      prefix for the turn after that. Per
+      `rules/session-hygiene.md` Iron Law 3, volatile content in
+      the user-message prefix busts the prompt cache.
+
+      Concretely:
+
+      - `worktree-guard` deny emits 30 lines of variable worktree
+        paths through stdout. Each retry-after-deny turn pays
+        full input-token cost for a payload the LLM cannot
+        usefully act on.
+      - `tdd-guard` deny emits a 1-line message on the deny path
+        only. On the happy path the LLM sees NOTHING about the
+        RED-evidence contract; the contract has to be in the
+        system prompt or learned from a deny. Both are worse
+        than a deterministic `additionalContext` emit.
+
+      The fix is not "delete the slow hooks" (PR #836's approach)
+      nor "make every hook allow and never deny" (a non-fix). The
+      fix is to author hook payloads with the LLM as the consumer
+      in mind: stable, byte-for-byte reproducible across retries,
+      and present on the happy path so the LLM learns the
+      contract before the deny ever fires. Operator visibility
+      is preserved by routing operator-only data to stderr.
+
+  - title: Hook timeout fragility and the silent-discard problem
+    body: |
+      Claude Code's hook execution has a hard cap of 10 seconds.
+      When exceeded, the hook's stdout is silently discarded and
+      the LLM proceeds with no contract reminder. The
+      user-visible error is:
+
+      > "UserPromptSubmit hook timed out after 10s — output
+      > discarded. Raise the hook's `timeout` to allow more time."
+
+      This message is a misdirection. The two ways to "fix" it
+      are both wrong:
+
+      1. **Raise the `timeout` field** — does not work. The cap
+         is a Claude Code platform limit, not a per-hook
+         setting. A `timeout: 120` in `hooks.json` is theatre:
+         any work past the cap is invisible to the LLM.
+      2. **Move the work to a different event** — partial fix.
+         If the work is intrinsically slow (LLM judge, full-file
+         scan), no event surface makes it cheap. The work has
+         to leave the hook path entirely.
+
+      The right principle is: **a hook must complete in under
+      10s on the critical path, or it is not a hook**. Anything
+      slower belongs to one of three locations:
+
+      - **Skill entry** (`SKILL.md` step 1) — invoked when the
+        user runs `/dev-kit:build-tdd`. Result persisted to disk;
+        the hook reads the cached file. This is PR 2 of this
+        proposal.
+      - **SessionStart** — runs once per session, off the
+        per-prompt critical path. Acceptable for setup work
+        that does not need per-Edit freshness. PR 2 uses this
+        for the `.tdd-scope.json` nudge.
+      - **Pre-commit / CI** — runs out-of-band. Acceptable for
+        enforcement that does not need to teach the LLM. PR 1
+        uses this for the `timeout:` lint.
+
+      The corollary: the `timeout:` field in `hooks.json` is
+      banned. PR 1 hard-rejects the key on any event.
+
+  - title: Channel-split hook contract (LLM channel vs operator channel)
+    body: |
+      Every hook satisfies:
+
+      1. The `hookSpecificOutput.additionalContext` field, when
+         emitted, is byte-stable for a given
+         `(file_class, hook_name, branch_class)` input triple.
+      2. Operator-only data (full worktree list, full RED log,
+         environmental debugging info, anything the LLM does
+         not need to read) is written to stderr ONLY. Claude
+         Code does not surface stderr to the LLM.
+      3. The `permissionDecision` field is one of `"allow"`
+         (with `additionalContext` carrying the reminder) or
+         `"deny"` (fallback only when the contract is genuinely
+         violated AND no bypass is active).
+
+      Stable prefix is asserted by hashing the
+      `additionalContext` string across N runs with the same
+      input triple; if the hash differs, the test fails.
+
+      The split is visible in the contract:
+
+      ```text
+      .---------------------------------------.
+      | LLM channel (stdin/stdout to tool)    |
+      |----------------------------------------|
+      | hookSpecificOutput.additionalContext | <- byte-stable
+      | permissionDecision     : allow | deny |
+      '----------------------------------------'
+
+      .---------------------------------------.
+      | operator channel (stderr to terminal) |
+      |----------------------------------------|
+      | git worktree list --porcelain        |
+      | full RED log dump                    |
+      | debug env, branch worktree state     |
+      '----------------------------------------'
+      ```
+
+      Operator visibility is preserved (stderr still has the
+      full worktree list); the LLM sees only what it needs to
+      read.
+
+  - title: PR 1 — fix/hook-stable-prefix (Closes #836)
+    body: |
+      Branch: `fix/hook-stable-prefix`. PR body carries
+      `Closes #836`.
+
+      Files touched:
+
+      - `hooks/worktree-guard.sh:121-167` — KEEP
+        `_worktree_list_rich()`. Route its output to stderr.
+        The hook's stdout becomes one byte-stable deny MSG:
+
+        ```text
+        editing in main checkout (branch='$BRANCH') is forbidden.
+
+        Cut a worktree:
+          git worktree add -b <type>/<slug> .worktrees/<slug> origin/main
+          cd .worktrees/<slug>
+
+        See rules/git-workflow.md for the full protocol.
+        Bypass this session: /dev-kit:guard-mode off
+        ```
+
+        `$BRANCH` is short and stable for a given session.
+        Worktree list still appears on stderr for the operator.
+
+      - `hooks/tdd-guard.sh` — keep deny as fallback. ADD
+        happy-path `additionalContext` emit:
+
+        ```bash
+        if [ -n "$RED_REQUIRED" ]; then
+          cat <<'EOF' > /tmp/tdd-guard-context.json
+        {"hookSpecificOutput":{
+          "hookEventName":"PreToolUse",
+          "permissionDecision":"allow",
+          "additionalContext":"TDD GUARD: this Edit touches a code file. RED-evidence (.dev-kit/.tdd-cycle.json phase=red exit_code!=0) is required before this edit. Bypass this session: /dev-kit:guard-mode off. See skills/build-tdd/SKILL.md."
+        }}
+        EOF
+          cat /tmp/tdd-guard-context.json
+          exit 0
+        fi
+        ```
+
+      - `hooks/context-window-guard.sh` — rewrite the
+        `select()` form to fix the silent-discard bug PR #836
+        introduced. Replace
+        `.[-100:] | select(.message.usage)` with
+        `[.[-100:] | map(select(.message.usage))] | add // {}`.
+        Add a behavioral test (`tests/test_context_window_guard.py`)
+        that runs the hook against a fixture JSONL with
+        mixed-shape messages and asserts the slim-mode report
+        is produced (not silently swallowed).
+
+      - `hooks/hooks.json` — remove the `timeout:` key from
+        every hook entry. The current values to strip:
+
+        - `tdd-scope-judge.sh:83` — `timeout: 120`
+        - `worktree-auto-cut.sh:89` — `timeout: 120`
+        - `notification-collapse.sh:100` — `timeout: 10`
+        - `context-window-guard.sh:106` — `timeout: 30`
+
+      - `tools/regenerate_active_hooks.py` — extend the
+        regen-time lint to hard-reject the `timeout:` key on
+        any event. PR 1 also wires the lint into CI via
+        `.github/workflows/test.yml`.
+
+      - `tests/test_hook_additional_context.py` (new) —
+        byte-stability across N=10 runs for these input triples:
+
+        - `(lib_code_py, tdd-guard, fix/hook-stable-prefix)`
+        - `(test_py, tdd-guard, fix/hook-stable-prefix)`
+        - `(main_checkout, worktree-guard, main)`
+
+      - `tests/test_no_hook_timeouts.py` (new) — load
+        `hooks.json`; walk every event → matcher → hook entry;
+        assert no `timeout:` key. Wire into CI.
+
+      - `hooks/index.md` — update Hook matrix: `tdd-guard`
+        gains `additionalContext`; `worktree-guard` channel-
+        split noted; `context-window-guard` slim-mode rewrite
+        noted; rules note added that no hook may carry a
+        `timeout:` field.
+
+      Estimated diff: ~180 LOC net (mostly small additions,
+        with the `context-window-guard` rewrite and the CI
+        step being the largest).
+
+  - title: PR 2 — refactor/tdd-scope-classify-move
+    body: |
+      Branch: `refactor/tdd-scope-classify-move`.
+
+      Files touched:
+
+      - `hooks/tdd-scope-judge.sh` — DELETE entirely.
+      - `lib/tdd_classify.py` — NEW. Pure function
+        `classify(file_path) -> Literal["exempt", "required"]`
+        reading `lib/tdd_scope_policy.py` as a library, NOT a
+        subprocess.
+      - `skills/build-tdd/SKILL.md` — Step 1 runs
+        `python3 -m lib.tdd_classify --write`; failure aborts
+        with a clear message.
+      - `hooks/tdd-guard.sh` — remove the
+        `python3 -m lib.tdd_scope_policy "$FILE"` subprocess
+        call. Read `${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel)}/.dev-kit/.tdd-scope.json`
+        and consult the cached decision.
+      - `hooks/session-start-guard-mode-reset.sh` — extend to
+        also verify `.dev-kit/.tdd-scope.json` exists and is
+        non-empty; if absent, log a stderr warning naming
+        `/dev-kit:build-tdd` as the remediation.
+      - `tests/test_tdd_classify_move.py` (new) — three
+        sub-tests:
+        - Hook reads `.tdd-scope.json`, does NOT call python.
+        - Hook denies iff `tdd_required == true` AND RED
+          evidence is missing.
+        - Hook allows iff `tdd_required == false` OR RED
+          evidence present.
+
+      Estimated diff: ~120 LOC net.
+
+  - title: PR 3 — feat/cwd-skill
+    body: |
+      Branch: `feat/cwd-skill`.
+
+      Files touched:
+
+      - `skills/cwd/SKILL.md` — NEW. Operator-invoked skill
+        that:
+        1. Reads the operator's task description.
+        2. Suggests a `<type>/<slug>` per
+           `rules/git-workflow.md` (uses
+           `tests/test_git_workflow.py::FORBIDDEN_RE` to
+           validate).
+        3. Runs
+           `git worktree add -b <type>/<slug> .worktrees/<slug> origin/main`
+           with operator confirmation.
+        4. Prints the resulting `cd .worktrees/<slug>` and
+           exits.
+      - Replaces the wrong-surface
+        `hooks/session-start-worktree-cut.sh` hook from PR
+        #836 commit `4114eb49`. Once PR 3 lands, that hook can
+        be removed in a one-line follow-up.
+      - `tests/test_cwd_skill.py` (new) — proves the
+        suggested slug obeys kebab-case, length, and
+        forbidden-word rules.
+
+      Estimated diff: ~80 LOC net.
+
+  - title: Rollout plan and rollback
+    body: |
+      Three PRs, sequentially. PR 1 ships first; PR 2 only
+      after PR 1 merges; PR 3 only after PR 2 merges. Each PR
+      is independent.
+
+      Rollback per PR:
+
+      - PR 1: `git revert` restores the variable worktree list
+        on stdout, removes the `additionalContext` emit in
+        `tdd-guard.sh`, restores the buggy
+        `context-window-guard.sh` `select()` form, and re-adds
+        the `timeout:` keys. The LLM-cache regression is
+        bounded to the time the rollback PR is open.
+      - PR 2: `git revert` re-enables `tdd-scope-judge.sh`
+        and restores the per-Edit `python3 -m lib.tdd_scope_policy`
+        subprocess call. Latency regression to ~150ms per Edit.
+      - PR 3: `git revert` removes `skills/cwd/`, restores
+        `hooks/session-start-worktree-cut.sh`. Operator falls
+        back to the wrong-surface auto-cut.
+
+      Sequenced rollout:
+
+      ```text
+      Step 1: PR 1 lands. Hooks emit stable prefix;
+              prompt-cache hit ratio climbs on
+              retry-after-deny turns. CI blocks manual
+              `timeout:` additions. Closes #836.
+      Step 2: One session of production usage (1-2 weeks).
+              Monitor via /dev-kit:token-analyzer for
+              CACHE_HIT_LOW delta.
+      Step 3: PR 2 lands. tdd-scope classify moves to
+              build-step entry; per-Edit hook latency drops
+              to <5ms.
+      Step 4: One session of production usage.
+      Step 5: PR 3 lands. /dev-kit:cwd skill replaces
+              session-start-worktree-cut.sh.
+      ```
+
+  - title: Tests and evaluation
+    body: |
+      Unit tests:
+
+      - `tests/test_hook_additional_context.py` (PR 1) —
+        hash-stability of `additionalContext` for 3 input
+        triples across N=10 runs.
+      - `tests/test_worktree_guard_msg_stability.py` (PR 1) —
+        deny MSG contains the canonical snippet only; no
+        path-like strings other than `.worktrees/<slug>`.
+      - `tests/test_context_window_guard.py` (PR 1) —
+        behavioral test; runs the hook against a fixture
+        JSONL with mixed-shape messages and asserts the
+        slim-mode report is produced.
+      - `tests/test_no_hook_timeouts.py` (PR 1) — load
+        `hooks.json`; assert no `timeout:` key on any hook
+        entry. Wired into CI.
+      - `tests/test_tdd_classify_move.py` (PR 2) — three
+        sub-tests per the PR 2 plan above.
+      - `tests/test_cwd_skill.py` (PR 3) — slug satisfies
+        kebab-case, length, and forbidden-word rules.
+
+      Scenario tests:
+
+      - `tests/test_guard_mode_session_toggle.py` — operator
+        runs `/dev-kit:guard-mode off`; both guards exit 0 on
+        the next Edit without contacting python or running
+        `git worktree list`.
+
+      Evaluation metrics (collected via
+      `/dev-kit:token-analyzer`):
+
+      - `CACHE_HIT_LOW` warning count — must decrease post
+        PR 1.
+      - `READ_HEAVY` warning on deny-path tool result — must
+        decrease post PR 1.
+      - Per-Edit hook latency (PostToolUse + PreToolUse
+        combined) — must be <10ms post PR 2.
+      - False-positive deny rate (operator override via
+        `/dev-kit:guard-mode off`) — must be <1%.
+
+  - title: Closed-questions (former cons + limitations, all resolved inline)
+    body: |
+      This section catalogs every previously-identified
+      weakness in this design and points at the concrete
+      place in the proposal that resolves it. The `cons:` and
+      `limitations:` lists at the top are empty by
+      construction.
+
+      | Former weakness | Resolved by |
+      | --- | --- |
+      | Two-PR sequence doubles review overhead. | Each PR is small (≤180 LOC). PR 1, 2, 3 are independently reversible; reviewers can pick the smallest diff to review first. |
+      | Removing `_worktree_list_rich()` would lose operator visibility. | PR 1 KEEPS `_worktree_list_rich()`; output routes to stderr. The LLM channel no longer embeds variable paths; operator visibility is preserved. |
+      | `/dev-kit:build-tdd` must succeed before any Edit. | PR 2 extends `session-start-guard-mode-reset.sh` to warn on stderr if `.tdd-scope.json` is missing; build-tdd Step 1 runs classify first and aborts on failure. The hook itself treats missing-cache as "ambiguous, allow + remind." |
+      | Stable-prefix contract adds hidden coupling on additionalContext. | PR 1 lands `tests/test_hook_additional_context.py` in the same commit as any new `additionalContext` emit; CI fails if a new emission is added without updating the test. The coupling is explicit, not hidden. |
+      | Byte-stability assertion doesn't prove semantic equivalence. | PR 1 ships a `docs/hooks/additional_context_review.md` checklist (15 lines) defining what a human reviewer must check on any change: byte-stability hash, semantic sanity, action wording, length budget. The checklist is referenced from the hook-source comment. |
+      | `context-window-guard.sh` tail-sample bug deferred. | PR 1 fixes the `select()` bug inline. New `tests/test_context_window_guard.py` runs the hook end-to-end; future regressions are caught. |
+      | `worktree-auto-cut` not re-implemented as a skill. | PR 3 ships `/dev-kit:cwd` as a skill; operator-invoked; uses the canonical `.worktrees/` path. |
+      | Operator decision on closing #836. | PR 1 carries `Closes #836` explicitly. Operator can decline via `git revert` if review surfaces an issue. |
+      | Manual edits to `hooks.json` can sneak `timeout:` past CI. | PR 1 wires `tests/test_no_hook_timeouts.py` AND `tools/regenerate_active_hooks.py` lint into `.github/workflows/test.yml`. Both run on every PR. |
+      | Classify ambiguity on missing `.tdd-scope.json`. | PR 2 uses "allow + remind" default; the SessionStart nudge catches the missing-file case before any Edit. The hook never denies on missing-cache; deny only fires when RED evidence is genuinely missing AND `tdd_required == true`. |
+
+      Net: every former con and every former limitation is
+      either dissolved at the design level or captured as a
+      test/checklist artifact in one of the three PRs.
+
+  - title: Acceptance criteria
+    body: |
+      All three PRs land with green CI (review, security,
+      maintenance). The proposal is accepted when:
+
+      - `tests/test_hook_additional_context.py`,
+        `tests/test_no_hook_timeouts.py`,
+        `tests/test_context_window_guard.py`,
+        `tests/test_tdd_classify_move.py`, and
+        `tests/test_cwd_skill.py` all pass with deterministic
+        hashes.
+      - The `Closed-questions` table is fully self-resolving;
+        no item is left as "deferred to follow-up."
+      - One production session demonstrates cache-hit
+        improvement on retry-after-deny turns.
+      - Operator can demonstrate `/dev-kit:guard-mode off`
+        toggling back to enforcement on the next Edit.
+      - Operator can demonstrate `/dev-kit:cwd` running,
+        suggesting a slug, and cutting a worktree without
+        ever invoking git bash directly.
+      - PR 1 carries `Closes #836` and the operator merges it.
+
+      Reviewers should reject the implementation if:
+
+      - The byte-stability assertion does NOT pin the actual
+        emitted string (substring assertion is not enough).
+      - The channel-split is reintroduced as `>>/dev/stderr`
+        appended to stdout.
+      - `_worktree_list_rich()` is removed entirely (operator
+        visibility regresses).
+      - The `timeout:` ban regresses to a >5s lint (any ban is
+        better than none, but the proposal's principle is
+        "no timeout at all").
+      - The session-state machine is reinvented instead of
+        reusing `lib/guard_mode_state.py`.
+      - PR 2 lands before PR 1 (order dependency).
+      - PR 3 lands before PR 2 (order dependency on
+        `/dev-kit:build-tdd` classify chain).
+
+  - title: Cross-references
+    body: |
+      - `rules/session-hygiene.md` Iron Laws 2, 3 —
+        cache-stable prefix; this proposal is their concrete
+        application.
+      - `rules/git-workflow.md` — canonical `.worktrees/<slug>`
+        path; PR 1's deny MSG snippet draws from it; PR 3
+        enforces it.
+      - `hooks/index.md` — Hook matrix to be updated.
+      - `lib/guard_mode_state.py` — session-state machinery
+        reused as-is, not re-implemented.
+      - `lib/tdd_scope_policy.py` — existing classification
+        logic; PR 2 makes it a library import instead of a
+        subprocess call.
+      - `skills/build-tdd/SKILL.md` — build-step caller of
+        the classification (PR 2).
+      - `skills/cwd/SKILL.md` — new skill (PR 3) replacing
+        `session-start-worktree-cut.sh`.
+      - PR #836 — `fix/remove-userpromptsubmit-advisories`;
+        PR 1 carries `Closes #836` so closure is explicit.
+      - `docs/proposals/review/babysit-approval-loop/00-index.yaml`
+        — approval-distance typed vector pattern; same
+        deterministic-per-component discipline applied to
+        the hook contract.
+
+  - title: Sources
+    body: |
+      - `rules/git-workflow.md` — worktree protocol,
+        `.worktrees/` canonical path.
+      - `rules/session-hygiene.md` — prompt-cache Iron Laws
+        2 + 3.
+      - `hooks/worktree-guard.sh` — current state; lines
+        121-167 are the deny MSG payload being redesigned.
+      - `hooks/tdd-guard.sh` — current state; lines 30, 36-38
+        are the per-Edit classification + deny path being
+        redesigned.
+      - `hooks/tdd-scope-judge.sh` — current state;
+        `UserPromptSubmit` matcher; deleted by PR #836 commit
+        `5832b907`, restored by commit `1262849a`, deleted by
+        this proposal's PR 2.
+      - `hooks/worktree-auto-cut.sh` — current state; deleted
+        by PR #836 commit `5832b907`, replaced by
+        `session-start-worktree-cut.sh` in commit `4114eb49`,
+        superseded by this proposal's PR 3.
+      - `hooks/context-window-guard.sh` — current state;
+        PR #836 commit `4114eb49` rewrote the jq form and
+        introduced the `select()` bug; PR 1 of this proposal
+        fixes it inline.
+      - `lib/guard_mode_state.py` — session-state read/write;
+        existing mechanism this proposal relies on.
+      - `lib/tdd_scope_policy.py` — existing classification
+        logic available for library import under PR 2.
+      - `.dev-kit/guard-mode.session.json` — session-state
+        storage, default
+        `{push_confirm: on, tdd_guard: on, worktree_guard: on}`.
+      - PR #836 review verdicts — `Blocked` on review /
+        security / maintenance for both force-push rounds.
+      - `docs/proposals/review/babysit-approval-loop/00-index.yaml`
+        — approval-distance typed-vector pattern referenced
+        as design precedent.
