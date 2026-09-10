@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notify-mode hooks with prompt-cache-stable LLM channel and timeout-free design</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Notify-mode hooks with prompt-cache-stable LLM channel and timeout-free design</h1>
+<p class="meta">2026-09-10 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">hooks</span><span class="tag tag-info">tdd-guard</span><span class="tag tag-info">worktree-guard</span><span class="tag tag-info">tdd-scope</span><span class="tag tag-info">context-window-guard</span><span class="tag tag-info">prompt-cache</span><span class="tag tag-info">session-state</span><span class="tag tag-info">lvm-channel</span><span class="tag tag-info">hook-timeout</span><span class="tag tag-info">fail-open</span><span class="tag tag-info">cwd-skill</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and scope</a></li><li><a href="#sec-1">Root cause — the LLM consumer is missing today</a></li><li><a href="#sec-2">Hook timeout fragility and the silent-discard problem</a></li><li><a href="#sec-3">Channel-split hook contract (LLM channel vs operator channel)</a></li><li><a href="#sec-4">PR 1 — fix/hook-stable-prefix (Closes</a></li><li><a href="#sec-5">PR 2 — refactor/tdd-scope-classify-move</a></li><li><a href="#sec-6">PR 3 — feat/cwd-skill</a></li><li><a href="#sec-7">Rollout plan and rollback</a></li><li><a href="#sec-8">Tests and evaluation</a></li><li><a href="#sec-9">Closed-questions (former cons + limitations, all resolved inline)</a></li><li><a href="#sec-10">Acceptance criteria</a></li><li><a href="#sec-11">Cross-references</a></li><li><a href="#sec-12">Sources</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li></ol></div>
+<h2 id="sec-0">Decision and scope</h2>
+<p>Adopt the channel-split hook contract: every hook's <code>hookSpecificOutput.additionalContext</code> is byte-stable for a given <code>(file_class, hook_name, branch_class)</code>. Operator-only data (full worktree list, full RED log, debug dumps) is written to stderr the LLM does not see.</p>
+<p>Scope:</p>
+<ul><li>PR 1: hook channel-split + <code>timeout:</code> ban + <code>context-window-guard</code> rewrite + CI wiring.</li><li>PR 2: <code>tdd-scope-classify</code> relocated to <code>lib/tdd_classify.py</code>, invoked by <code>/dev-kit:build-tdd</code>.</li><li>PR 3: <code>/dev-kit:cwd</code> skill, replaces <code>session-start-worktree-cut.sh</code>.</li></ul>
+<p>Out of scope (this proposal explicitly does NOT defer them — they are addressed in PR 1/2/3 above):</p>
+<ul><li><code>context-window-guard.sh</code> bug — addressed in PR 1.</li><li><code>/dev-kit:cwd</code> skill — addressed in PR 3.</li><li>Closing PR #836 — addressed via <code>Closes #836</code> in PR 1.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-1">Root cause — the LLM consumer is missing today</h2>
+<p>Today's hooks were designed assuming the operator would see stderr and reason about it. When Claude Code's <code>PreToolUse</code> returns a deny JSON, that JSON enters the tool-result channel on the next LLM turn and becomes part of the user-message prefix for the turn after that. Per <code>rules/session-hygiene.md</code> Iron Law 3, volatile content in the user-message prefix busts the prompt cache.</p>
+<p>Concretely:</p>
+<ul><li><code>worktree-guard</code> deny emits 30 lines of variable worktree paths through stdout. Each retry-after-deny turn pays full input-token cost for a payload the LLM cannot usefully act on.</li><li><code>tdd-guard</code> deny emits a 1-line message on the deny path only. On the happy path the LLM sees NOTHING about the RED-evidence contract; the contract has to be in the system prompt or learned from a deny. Both are worse than a deterministic <code>additionalContext</code> emit.</li></ul>
+<p>The fix is not "delete the slow hooks" (PR #836's approach) nor "make every hook allow and never deny" (a non-fix). The fix is to author hook payloads with the LLM as the consumer in mind: stable, byte-for-byte reproducible across retries, and present on the happy path so the LLM learns the contract before the deny ever fires. Operator visibility is preserved by routing operator-only data to stderr.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Hook timeout fragility and the silent-discard problem</h2>
+<p>Claude Code's hook execution has a hard cap of 10 seconds. When exceeded, the hook's stdout is silently discarded and the LLM proceeds with no contract reminder. The user-visible error is:</p>
+<blockquote><p>"UserPromptSubmit hook timed out after 10s — output discarded. Raise the hook's <code>timeout</code> to allow more time."</p></blockquote>
+<p>This message is a misdirection. The two ways to "fix" it are both wrong:</p>
+<ol><li><strong>Raise the `timeout` field</strong> — does not work. The cap is a Claude Code platform limit, not a per-hook setting. A <code>timeout: 120</code> in <code>hooks.json</code> is theatre: any work past the cap is invisible to the LLM.</li><li><strong>Move the work to a different event</strong> — partial fix. If the work is intrinsically slow (LLM judge, full-file scan), no event surface makes it cheap. The work has to leave the hook path entirely.</li></ol>
+<p>The right principle is: <strong>a hook must complete in under 10s on the critical path, or it is not a hook</strong>. Anything slower belongs to one of three locations:</p>
+<ul><li><strong>Skill entry</strong> (<code>SKILL.md</code> step 1) — invoked when the user runs <code>/dev-kit:build-tdd</code>. Result persisted to disk; the hook reads the cached file. This is PR 2 of this proposal.</li><li><strong>SessionStart</strong> — runs once per session, off the per-prompt critical path. Acceptable for setup work that does not need per-Edit freshness. PR 2 uses this for the <code>.tdd-scope.json</code> nudge.</li><li><strong>Pre-commit / CI</strong> — runs out-of-band. Acceptable for enforcement that does not need to teach the LLM. PR 1 uses this for the <code>timeout:</code> lint.</li></ul>
+<p>The corollary: the <code>timeout:</code> field in <code>hooks.json</code> is banned. PR 1 hard-rejects the key on any event.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Channel-split hook contract (LLM channel vs operator channel)</h2>
+<p>Every hook satisfies:</p>
+<ol><li>The <code>hookSpecificOutput.additionalContext</code> field, when emitted, is byte-stable for a given <code>(file_class, hook_name, branch_class)</code> input triple.</li><li>Operator-only data (full worktree list, full RED log, environmental debugging info, anything the LLM does not need to read) is written to stderr ONLY. Claude Code does not surface stderr to the LLM.</li><li>The <code>permissionDecision</code> field is one of <code>"allow"</code> (with <code>additionalContext</code> carrying the reminder) or <code>"deny"</code> (fallback only when the contract is genuinely violated AND no bypass is active).</li></ol>
+<p>Stable prefix is asserted by hashing the <code>additionalContext</code> string across N runs with the same input triple; if the hash differs, the test fails.</p>
+<p>The split is visible in the contract:</p>
+<pre><code class="language-text">.---------------------------------------.
+| LLM channel (stdin/stdout to tool)    |
+|----------------------------------------|
+| hookSpecificOutput.additionalContext | &lt;- byte-stable
+| permissionDecision     : allow | deny |
+&#x27;----------------------------------------&#x27;
+
+.---------------------------------------.
+| operator channel (stderr to terminal) |
+|----------------------------------------|
+| git worktree list --porcelain        |
+| full RED log dump                    |
+| debug env, branch worktree state     |
+&#x27;----------------------------------------&#x27;</code></pre>
+<p>Operator visibility is preserved (stderr still has the full worktree list); the LLM sees only what it needs to read.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">PR 1 — fix/hook-stable-prefix (Closes</h2>
+<p>Branch: <code>fix/hook-stable-prefix</code>. PR body carries <code>Closes #836</code>.</p>
+<p>Files touched:</p>
+<ul><li><code>hooks/worktree-guard.sh:121-167</code> — KEEP <code>_worktree_list_rich()</code>. Route its output to stderr. The hook's stdout becomes one byte-stable deny MSG:</li></ul>
+<pre><code class="language-text">  editing in main checkout (branch=&#x27;$BRANCH&#x27;) is forbidden.
+
+  Cut a worktree:
+    git worktree add -b &lt;type&gt;/&lt;slug&gt; .worktrees/&lt;slug&gt; origin/main
+    cd .worktrees/&lt;slug&gt;
+
+  See rules/git-workflow.md for the full protocol.
+  Bypass this session: /dev-kit:guard-mode off</code></pre>
+<p><code>$BRANCH</code> is short and stable for a given session. Worktree list still appears on stderr for the operator.</p>
+<ul><li><code>hooks/tdd-guard.sh</code> — keep deny as fallback. ADD happy-path <code>additionalContext</code> emit:</li></ul>
+<pre><code class="language-bash">  if [ -n &quot;$RED_REQUIRED&quot; ]; then
+    cat &lt;&lt;&#x27;EOF&#x27; &gt; /tmp/tdd-guard-context.json
+  {&quot;hookSpecificOutput&quot;:{
+    &quot;hookEventName&quot;:&quot;PreToolUse&quot;,
+    &quot;permissionDecision&quot;:&quot;allow&quot;,
+    &quot;additionalContext&quot;:&quot;TDD GUARD: this Edit touches a code file. RED-evidence (.dev-kit/.tdd-cycle.json phase=red exit_code!=0) is required before this edit. Bypass this session: /dev-kit:guard-mode off. See skills/build-tdd/SKILL.md.&quot;
+  }}
+  EOF
+    cat /tmp/tdd-guard-context.json
+    exit 0
+  fi</code></pre>
+<ul><li><code>hooks/context-window-guard.sh</code> — rewrite the <code>select()</code> form to fix the silent-discard bug PR #836 introduced. Replace <code>.[-100:] | select(.message.usage)</code> with <code>[.[-100:] | map(select(.message.usage))] | add // {}</code>. Add a behavioral test (<code>tests/test_context_window_guard.py</code>) that runs the hook against a fixture JSONL with mixed-shape messages and asserts the slim-mode report is produced (not silently swallowed).</li></ul>
+<ul><li><code>hooks/hooks.json</code> — remove the <code>timeout:</code> key from every hook entry. The current values to strip:</li></ul>
+<ul><li><code>tdd-scope-judge.sh:83</code> — <code>timeout: 120</code></li><li><code>worktree-auto-cut.sh:89</code> — <code>timeout: 120</code></li><li><code>notification-collapse.sh:100</code> — <code>timeout: 10</code></li><li><code>context-window-guard.sh:106</code> — <code>timeout: 30</code></li></ul>
+<ul><li><code>tools/regenerate_active_hooks.py</code> — extend the regen-time lint to hard-reject the <code>timeout:</code> key on any event. PR 1 also wires the lint into CI via <code>.github/workflows/test.yml</code>.</li></ul>
+<ul><li><code>tests/test_hook_additional_context.py</code> (new) — byte-stability across N=10 runs for these input triples:</li></ul>
+<ul><li><code>(lib_code_py, tdd-guard, fix/hook-stable-prefix)</code></li><li><code>(test_py, tdd-guard, fix/hook-stable-prefix)</code></li><li><code>(main_checkout, worktree-guard, main)</code></li></ul>
+<ul><li><code>tests/test_no_hook_timeouts.py</code> (new) — load <code>hooks.json</code>; walk every event → matcher → hook entry; assert no <code>timeout:</code> key. Wire into CI.</li></ul>
+<ul><li><code>hooks/index.md</code> — update Hook matrix: <code>tdd-guard</code> gains <code>additionalContext</code>; <code>worktree-guard</code> channel- split noted; <code>context-window-guard</code> slim-mode rewrite noted; rules note added that no hook may carry a <code>timeout:</code> field.</li></ul>
+<p>Estimated diff: ~180 LOC net (mostly small additions, with the <code>context-window-guard</code> rewrite and the CI step being the largest).</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">PR 2 — refactor/tdd-scope-classify-move</h2>
+<p>Branch: <code>refactor/tdd-scope-classify-move</code>.</p>
+<p>Files touched:</p>
+<ul><li><code>hooks/tdd-scope-judge.sh</code> — DELETE entirely.</li><li><code>lib/tdd_classify.py</code> — NEW. Pure function <code>classify(file_path) -&gt; Literal["exempt", "required"]</code> reading <code>lib/tdd_scope_policy.py</code> as a library, NOT a subprocess.</li><li><code>skills/build-tdd/SKILL.md</code> — Step 1 runs <code>python3 -m lib.tdd_classify --write</code>; failure aborts with a clear message.</li><li><code>hooks/tdd-guard.sh</code> — remove the <code>python3 -m lib.tdd_scope_policy "$FILE"</code> subprocess call. Read <code>${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel)}/.dev-kit/.tdd-scope.json</code> and consult the cached decision.</li><li><code>hooks/session-start-guard-mode-reset.sh</code> — extend to also verify <code>.dev-kit/.tdd-scope.json</code> exists and is non-empty; if absent, log a stderr warning naming <code>/dev-kit:build-tdd</code> as the remediation.</li><li><code>tests/test_tdd_classify_move.py</code> (new) — three sub-tests:</li><li>Hook reads <code>.tdd-scope.json</code>, does NOT call python.</li><li>Hook denies iff <code>tdd_required == true</code> AND RED evidence is missing.</li><li>Hook allows iff <code>tdd_required == false</code> OR RED evidence present.</li></ul>
+<p>Estimated diff: ~120 LOC net.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">PR 3 — feat/cwd-skill</h2>
+<p>Branch: <code>feat/cwd-skill</code>.</p>
+<p>Files touched:</p>
+<ul><li><code>skills/cwd/SKILL.md</code> — NEW. Operator-invoked skill that: 1. Reads the operator's task description. 2. Suggests a <code>&lt;type&gt;/&lt;slug&gt;</code> per <code>rules/git-workflow.md</code> (uses <code>tests/test_git_workflow.py::FORBIDDEN_RE</code> to validate). 3. Runs <code>git worktree add -b &lt;type&gt;/&lt;slug&gt; .worktrees/&lt;slug&gt; origin/main</code> with operator confirmation. 4. Prints the resulting <code>cd .worktrees/&lt;slug&gt;</code> and exits.</li><li>Replaces the wrong-surface <code>hooks/session-start-worktree-cut.sh</code> hook from PR #836 commit <code>4114eb49</code>. Once PR 3 lands, that hook can be removed in a one-line follow-up.</li><li><code>tests/test_cwd_skill.py</code> (new) — proves the suggested slug obeys kebab-case, length, and forbidden-word rules.</li></ul>
+<p>Estimated diff: ~80 LOC net.</p>
+<hr class="section-divider">
+
+<h2 id="sec-7">Rollout plan and rollback</h2>
+<p>Three PRs, sequentially. PR 1 ships first; PR 2 only after PR 1 merges; PR 3 only after PR 2 merges. Each PR is independent.</p>
+<p>Rollback per PR:</p>
+<ul><li>PR 1: <code>git revert</code> restores the variable worktree list on stdout, removes the <code>additionalContext</code> emit in <code>tdd-guard.sh</code>, restores the buggy <code>context-window-guard.sh</code> <code>select()</code> form, and re-adds the <code>timeout:</code> keys. The LLM-cache regression is bounded to the time the rollback PR is open.</li><li>PR 2: <code>git revert</code> re-enables <code>tdd-scope-judge.sh</code> and restores the per-Edit <code>python3 -m lib.tdd_scope_policy</code> subprocess call. Latency regression to ~150ms per Edit.</li><li>PR 3: <code>git revert</code> removes <code>skills/cwd/</code>, restores <code>hooks/session-start-worktree-cut.sh</code>. Operator falls back to the wrong-surface auto-cut.</li></ul>
+<p>Sequenced rollout:</p>
+<pre><code class="language-text">Step 1: PR 1 lands. Hooks emit stable prefix;
+        prompt-cache hit ratio climbs on
+        retry-after-deny turns. CI blocks manual
+        `timeout:` additions. Closes #836.
+Step 2: One session of production usage (1-2 weeks).
+        Monitor via /dev-kit:token-analyzer for
+        CACHE_HIT_LOW delta.
+Step 3: PR 2 lands. tdd-scope classify moves to
+        build-step entry; per-Edit hook latency drops
+        to &lt;5ms.
+Step 4: One session of production usage.
+Step 5: PR 3 lands. /dev-kit:cwd skill replaces
+        session-start-worktree-cut.sh.</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-8">Tests and evaluation</h2>
+<p>Unit tests:</p>
+<ul><li><code>tests/test_hook_additional_context.py</code> (PR 1) — hash-stability of <code>additionalContext</code> for 3 input triples across N=10 runs.</li><li><code>tests/test_worktree_guard_msg_stability.py</code> (PR 1) — deny MSG contains the canonical snippet only; no path-like strings other than <code>.worktrees/&lt;slug&gt;</code>.</li><li><code>tests/test_context_window_guard.py</code> (PR 1) — behavioral test; runs the hook against a fixture JSONL with mixed-shape messages and asserts the slim-mode report is produced.</li><li><code>tests/test_no_hook_timeouts.py</code> (PR 1) — load <code>hooks.json</code>; assert no <code>timeout:</code> key on any hook entry. Wired into CI.</li><li><code>tests/test_tdd_classify_move.py</code> (PR 2) — three sub-tests per the PR 2 plan above.</li><li><code>tests/test_cwd_skill.py</code> (PR 3) — slug satisfies kebab-case, length, and forbidden-word rules.</li></ul>
+<p>Scenario tests:</p>
+<ul><li><code>tests/test_guard_mode_session_toggle.py</code> — operator runs <code>/dev-kit:guard-mode off</code>; both guards exit 0 on the next Edit without contacting python or running <code>git worktree list</code>.</li></ul>
+<p>Evaluation metrics (collected via <code>/dev-kit:token-analyzer</code>):</p>
+<ul><li><code>CACHE_HIT_LOW</code> warning count — must decrease post PR 1.</li><li><code>READ_HEAVY</code> warning on deny-path tool result — must decrease post PR 1.</li><li>Per-Edit hook latency (PostToolUse + PreToolUse combined) — must be &lt;10ms post PR 2.</li><li>False-positive deny rate (operator override via <code>/dev-kit:guard-mode off</code>) — must be &lt;1%.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-9">Closed-questions (former cons + limitations, all resolved inline)</h2>
+<p>This section catalogs every previously-identified weakness in this design and points at the concrete place in the proposal that resolves it. The <code>cons:</code> and <code>limitations:</code> lists at the top are empty by construction.</p>
+<table><thead><tr><th>Former weakness</th><th>Resolved by</th></tr></thead><tbody><tr><td>Two-PR sequence doubles review overhead.</td><td>Each PR is small (≤180 LOC). PR 1, 2, 3 are independently reversible; reviewers can pick the smallest diff to review first.</td></tr><tr><td>Removing <code>_worktree_list_rich()</code> would lose operator visibility.</td><td>PR 1 KEEPS <code>_worktree_list_rich()</code>; output routes to stderr. The LLM channel no longer embeds variable paths; operator visibility is preserved.</td></tr><tr><td><code>/dev-kit:build-tdd</code> must succeed before any Edit.</td><td>PR 2 extends <code>session-start-guard-mode-reset.sh</code> to warn on stderr if <code>.tdd-scope.json</code> is missing; build-tdd Step 1 runs classify first and aborts on failure. The hook itself treats missing-cache as "ambiguous, allow + remind."</td></tr><tr><td>Stable-prefix contract adds hidden coupling on additionalContext.</td><td>PR 1 lands <code>tests/test_hook_additional_context.py</code> in the same commit as any new <code>additionalContext</code> emit; CI fails if a new emission is added without updating the test. The coupling is explicit, not hidden.</td></tr><tr><td>Byte-stability assertion doesn't prove semantic equivalence.</td><td>PR 1 ships a <code>docs/hooks/additional_context_review.md</code> checklist (15 lines) defining what a human reviewer must check on any change: byte-stability hash, semantic sanity, action wording, length budget. The checklist is referenced from the hook-source comment.</td></tr><tr><td><code>context-window-guard.sh</code> tail-sample bug deferred.</td><td>PR 1 fixes the <code>select()</code> bug inline. New <code>tests/test_context_window_guard.py</code> runs the hook end-to-end; future regressions are caught.</td></tr><tr><td><code>worktree-auto-cut</code> not re-implemented as a skill.</td><td>PR 3 ships <code>/dev-kit:cwd</code> as a skill; operator-invoked; uses the canonical <code>.worktrees/</code> path.</td></tr><tr><td>Operator decision on closing #836.</td><td>PR 1 carries <code>Closes #836</code> explicitly. Operator can decline via <code>git revert</code> if review surfaces an issue.</td></tr><tr><td>Manual edits to <code>hooks.json</code> can sneak <code>timeout:</code> past CI.</td><td>PR 1 wires <code>tests/test_no_hook_timeouts.py</code> AND <code>tools/regenerate_active_hooks.py</code> lint into <code>.github/workflows/test.yml</code>. Both run on every PR.</td></tr><tr><td>Classify ambiguity on missing <code>.tdd-scope.json</code>.</td><td>PR 2 uses "allow + remind" default; the SessionStart nudge catches the missing-file case before any Edit. The hook never denies on missing-cache; deny only fires when RED evidence is genuinely missing AND <code>tdd_required == true</code>.</td></tr></tbody></table>
+<p>Net: every former con and every former limitation is either dissolved at the design level or captured as a test/checklist artifact in one of the three PRs.</p>
+<hr class="section-divider">
+
+<h2 id="sec-10">Acceptance criteria</h2>
+<p>All three PRs land with green CI (review, security, maintenance). The proposal is accepted when:</p>
+<ul><li><code>tests/test_hook_additional_context.py</code>, <code>tests/test_no_hook_timeouts.py</code>, <code>tests/test_context_window_guard.py</code>, <code>tests/test_tdd_classify_move.py</code>, and <code>tests/test_cwd_skill.py</code> all pass with deterministic hashes.</li><li>The <code>Closed-questions</code> table is fully self-resolving; no item is left as "deferred to follow-up."</li><li>One production session demonstrates cache-hit improvement on retry-after-deny turns.</li><li>Operator can demonstrate <code>/dev-kit:guard-mode off</code> toggling back to enforcement on the next Edit.</li><li>Operator can demonstrate <code>/dev-kit:cwd</code> running, suggesting a slug, and cutting a worktree without ever invoking git bash directly.</li><li>PR 1 carries <code>Closes #836</code> and the operator merges it.</li></ul>
+<p>Reviewers should reject the implementation if:</p>
+<ul><li>The byte-stability assertion does NOT pin the actual emitted string (substring assertion is not enough).</li><li>The channel-split is reintroduced as <code>&gt;&gt;/dev/stderr</code> appended to stdout.</li><li><code>_worktree_list_rich()</code> is removed entirely (operator visibility regresses).</li><li>The <code>timeout:</code> ban regresses to a &gt;5s lint (any ban is better than none, but the proposal's principle is "no timeout at all").</li><li>The session-state machine is reinvented instead of reusing <code>lib/guard_mode_state.py</code>.</li><li>PR 2 lands before PR 1 (order dependency).</li><li>PR 3 lands before PR 2 (order dependency on <code>/dev-kit:build-tdd</code> classify chain).</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-11">Cross-references</h2>
+<ul><li><code>rules/session-hygiene.md</code> Iron Laws 2, 3 — cache-stable prefix; this proposal is their concrete application.</li><li><code>rules/git-workflow.md</code> — canonical <code>.worktrees/&lt;slug&gt;</code> path; PR 1's deny MSG snippet draws from it; PR 3 enforces it.</li><li><code>hooks/index.md</code> — Hook matrix to be updated.</li><li><code>lib/guard_mode_state.py</code> — session-state machinery reused as-is, not re-implemented.</li><li><code>lib/tdd_scope_policy.py</code> — existing classification logic; PR 2 makes it a library import instead of a subprocess call.</li><li><code>skills/build-tdd/SKILL.md</code> — build-step caller of the classification (PR 2).</li><li><code>skills/cwd/SKILL.md</code> — new skill (PR 3) replacing <code>session-start-worktree-cut.sh</code>.</li><li>PR #836 — <code>fix/remove-userpromptsubmit-advisories</code>; PR 1 carries <code>Closes #836</code> so closure is explicit.</li><li><code>docs/proposals/review/babysit-approval-loop/00-index.yaml</code> — approval-distance typed vector pattern; same deterministic-per-component discipline applied to the hook contract.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-12">Sources</h2>
+<ul><li><code>rules/git-workflow.md</code> — worktree protocol, <code>.worktrees/</code> canonical path.</li><li><code>rules/session-hygiene.md</code> — prompt-cache Iron Laws 2 + 3.</li><li><code>hooks/worktree-guard.sh</code> — current state; lines 121-167 are the deny MSG payload being redesigned.</li><li><code>hooks/tdd-guard.sh</code> — current state; lines 30, 36-38 are the per-Edit classification + deny path being redesigned.</li><li><code>hooks/tdd-scope-judge.sh</code> — current state; <code>UserPromptSubmit</code> matcher; deleted by PR #836 commit <code>5832b907</code>, restored by commit <code>1262849a</code>, deleted by this proposal's PR 2.</li><li><code>hooks/worktree-auto-cut.sh</code> — current state; deleted by PR #836 commit <code>5832b907</code>, replaced by <code>session-start-worktree-cut.sh</code> in commit <code>4114eb49</code>, superseded by this proposal's PR 3.</li><li><code>hooks/context-window-guard.sh</code> — current state; PR #836 commit <code>4114eb49</code> rewrote the jq form and introduced the <code>select()</code> bug; PR 1 of this proposal fixes it inline.</li><li><code>lib/guard_mode_state.py</code> — session-state read/write; existing mechanism this proposal relies on.</li><li><code>lib/tdd_scope_policy.py</code> — existing classification logic available for library import under PR 2.</li><li><code>.dev-kit/guard-mode.session.json</code> — session-state storage, default <code>{push_confirm: on, tdd_guard: on, worktree_guard: on}</code>.</li><li>PR #836 review verdicts — <code>Blocked</code> on review / security / maintenance for both force-push rounds.</li><li><code>docs/proposals/review/babysit-approval-loop/00-index.yaml</code> — approval-distance typed-vector pattern referenced as design precedent.</li></ul>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>PR #836 (<code>fix/remove-userpromptsubmit-advisories</code>) deleted three hooks — <code>worktree-auto-cut</code>, <code>tdd-scope-judge</code>, <code>context-window-guard</code> — because they were slow on <code>UserPromptSubmit</code>. Two of the three were restored in the review cycle (commits <code>4114eb49</code>, <code>1262849a</code>), but the underlying contract problem is unresolved: hooks were authored for the operator consumer, not the LLM consumer. Review verdicts on both <code>5832b907</code> and <code>4114eb49+1262849a</code> are <code>Blocked</code> on review / security / maintenance.</p>
+<p>Four concrete symptoms:</p>
+<ol><li><code>hooks/worktree-guard.sh:128-140</code> runs <code>git worktree list --porcelain</code> and embeds the full output in the deny JSON's stdout channel. With ~220 worktrees on the dev-kit admin's machine, the deny payload is ~30 lines of variable path content. Per <code>rules/session-hygiene.md</code> Iron Law 3, volatile content in the user-message prefix busts the prompt cache on every retry after a denial. The LLM reads the payload, finds no actionable signal, and emits the same Edit call again.</li><li><code>hooks/tdd-guard.sh:30</code> calls <code>python3 -m lib.tdd_scope_policy</code> on every Edit. Classification should happen at build-step entry, not at hook time. The Python cold-start cost is the actual latency that triggered the UserPromptSubmit complaint in #836; moving it to the hook is not a fix.</li><li><code>hooks/tdd-guard.sh</code> emits JSON only on the <em>deny</em> path (<code>hooks/lib/payload-parse.sh::deny</code>). On the happy path the LLM sees no reminder of the RED-evidence contract. When RED evidence is genuinely missing, the deny fires cold with no prior signal.</li><li><code>hooks/hooks.json</code> wires five <code>UserPromptSubmit</code> hooks with <code>timeout:</code> values 10-120s: - <code>tdd-scope-judge.sh:83</code> — <code>timeout: 120</code> - <code>worktree-auto-cut.sh:89</code> — <code>timeout: 120</code> - <code>notification-collapse.sh:100</code> — <code>timeout: 10</code> - <code>context-window-guard.sh:106</code> — <code>timeout: 30</code> - <code>linear-task-change.sh:95</code> — no timeout field</li></ol>
+<p>Claude Code's documented hard cap on hook execution time is 10s. When exceeded, output is silently discarded and the LLM proceeds with NO contract reminder. A <code>timeout: 120</code> setting is theatre: any work past the cap is invisible to the LLM. Either the hook completes in &lt;10s on the critical path or it does not belong on the hook path.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>hooks/worktree-guard.sh:128-140</code> — <code>_worktree_list_rich()</code> runs <code>git worktree list --porcelain</code>; today the output goes to the LLM channel (stdout) where it busts the cache</li><li><code>hooks/worktree-guard.sh:142-166</code> — deny <code>MSG</code> block has variable session-state (branch name, env config, worktree list) embedded inline</li><li><code>hooks/tdd-guard.sh:30</code> — <code>python3 -m lib.tdd_scope_policy</code> called per Edit, doing classification at hook time</li><li><code>hooks/tdd-guard.sh:36-38</code> — deny JSON emitted only when RED evidence missing; happy path has no LLM-visible reminder</li><li><code>hooks/tdd-scope-judge.sh</code> (deleted in #836 <code>5832b907</code>, restored in <code>1262849a</code>) — still on <code>UserPromptSubmit</code> matcher with <code>timeout: 120</code></li><li><code>hooks/worktree-auto-cut.sh</code> (deleted in #836 <code>5832b907</code>, replaced by <code>session-start-worktree-cut.sh</code> in <code>4114eb49</code>) — replaced with a hook instead of demoted to a skill</li><li><code>hooks/context-window-guard.sh:90</code> — <code>jq -rs '.[-100:] | select(.message.usage)'</code> errors because <code>.[-100:]</code> returns an array; the broken form is what PR #836 left behind</li><li><code>.dev-kit/guard-mode.session.json</code> — session-scoped bypass already exists; <code>lib/guard_mode_state.py</code> already wired into both guards</li><li><code>rules/session-hygiene.md</code> Iron Law 3 — 'volatile content stays in the prompt tail, never the prefix'; embedded worktree list is exactly this anti-pattern</li><li><code>rules/session-hygiene.md</code> Iron Law 2 — 'Cartography, not re-reads'; long deny JSON forces the LLM to re-read previous tool result</li><li><code>docs/proposals/review/babysit-approval-loop/00-index.yaml:107-111</code> — approval-distance typed vector pattern: each component moves deterministically, not optimistically</li><li>PR review verdicts: <code>Blocked</code> on review / security / maintenance for both force-push rounds of #836</li><li><code>tests/test_tdd_guard.py</code> — only covers the deny-path; no coverage for the happy-path LLM-visible contract</li><li><code>hooks/hooks.json</code> — <code>timeout:</code> keys stripped in UserPromptSubmit blocks (PR #836 <code>5832b907</code>) so any future UserPromptSubmit hook cannot exceed 5s</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Adopt the channel-split hook contract: every hook's <code>hookSpecificOutput.additionalContext</code> is byte-stable for a given <code>(file_class, hook_name, branch_class)</code>, and operator-only data (full worktree list, full RED log, debug dumps) is written to stderr the LLM does not see. Deliver in three PRs that together close #836 and resolve every previously-identified weakness in this proposal's design.</p>
+<p><strong>PR 1 (`fix/hook-stable-prefix`)</strong>: ~180 lines, fully reversible. <code>Closes #836</code>.</p>
+<ul><li><code>hooks/worktree-guard.sh:121-167</code> — keep <code>_worktree_list_rich()</code> and the worktree enumeration. Operator visibility is correct as-is. The fix is <strong>where the output goes</strong>: route the worktree list to <strong>stderr</strong> (operator channel). The hook's stdout (LLM channel) becomes one byte-stable deny MSG with the canonical <code>.worktrees/&lt;slug&gt;</code> cut command. The LLM sees NO variable worktree list.</li><li><code>hooks/tdd-guard.sh</code> — keep deny as fallback; ADD a happy-path <code>additionalContext</code> emit that names the RED-evidence contract and the <code>/dev-kit:guard-mode off</code> bypass. Same channel-split.</li><li><code>hooks/context-window-guard.sh</code> — fix the <code>select()</code> bug identified in PR #836 review. Rewrite the broken <code>.[-100:] | select(.message.usage)</code> as <code>[.[-100:] | map(select(.message.usage))] | add // {}</code> so the array-vs-stream error is gone. Drop the <code>timeout:</code> field.</li><li><code>hooks/hooks.json</code> — remove the <code>timeout:</code> key from every hook entry that has one (4 entries today).</li><li><code>tools/regenerate_active_hooks.py</code> — extend the existing lint to <strong>hard-reject the `timeout:` key on any event</strong>.</li><li><code>.github/workflows/test.yml</code> — add a step that runs the lint and the no-timeout test, so CI catches manual edits to <code>hooks.json</code>.</li><li><code>tests/test_hook_additional_context.py</code> — assert byte-stability across N=10 runs.</li><li><code>tests/test_no_hook_timeouts.py</code> — walk <code>hooks.json</code>, assert no <code>timeout:</code> key on any hook entry. Wire into CI.</li><li><code>tests/test_context_window_guard.py</code> — behavioral test; runs the hook against a fixture JSONL with mixed-shape messages and asserts the slim-mode report is produced (the broken form currently silently swallows the error and returns <code>0</code>). This replaces PR #836's substring-only test.</li></ul>
+<p><strong>PR 2 (`refactor/tdd-scope-classify-move`)</strong>: ~120 lines, fully reversible.</p>
+<ul><li><code>hooks/tdd-scope-judge.sh</code> — DELETE entirely. No replacement hook.</li><li><code>lib/tdd_classify.py</code> — NEW. Pure function <code>classify(file_path) -&gt; Literal["exempt", "required"]</code> reading <code>lib/tdd_scope_policy.py</code> as a library, NOT a subprocess.</li><li><code>skills/build-tdd/SKILL.md</code> — Step 1 now runs <code>lib.tdd_classify</code> first; failure aborts the build step with a clear message.</li><li><code>hooks/tdd-guard.sh</code> — read <code>.dev-kit/.tdd-scope.json</code> only; remove the <code>python3 -m lib.tdd_scope_policy</code> subprocess call.</li><li><code>hooks/session-start-guard-mode-reset.sh</code> — extend to also verify <code>.dev-kit/.tdd-scope.json</code> exists and is non-empty; if absent, log a stderr warning naming <code>/dev-kit:build-tdd</code> as the remediation. Doesn't block; gives the LLM an early nudge on first Edit.</li><li><code>tests/test_tdd_classify_move.py</code> — three sub-tests.</li></ul>
+<p><strong>PR 3 (`feat/cwd-skill`)</strong>: ~80 lines, fully reversible.</p>
+<ul><li><code>skills/cwd/SKILL.md</code> — operator-invoked skill that suggests a <code>&lt;type&gt;/&lt;slug&gt;</code> per <code>rules/git-workflow.md</code> and runs <code>git worktree add -b &lt;type&gt;/&lt;slug&gt; .worktrees/&lt;slug&gt; origin/main</code> with operator confirmation. Replaces the wrong-surface <code>session-start-worktree-cut.sh</code> hook from PR #836 commit <code>4114eb49</code> (whose own existence is one more proof that auto-cutting a worktree at session start was the wrong surface).</li><li><code>tests/test_cwd_skill.py</code> — proves the suggested slug obeys kebab-case, length, and forbidden-word rules (<code>tests/test_git_workflow.py::FORBIDDEN_RE</code>).</li></ul>
+<p>Session toggle already exists (<code>.dev-kit/guard-mode.session.json</code>). No new session-state machinery. The three PRs together close every previously- identified weakness in this design — the pros/closed-questions lists at the end make this auditable.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">hooks/worktree-guard.sh</span><p>Keep <code>_worktree_list_rich()</code>. Route its output to stderr (operator channel). The hook's stdout (LLM channel) emits one byte-stable deny MSG with the canonical <code>.worktrees/&lt;slug&gt;</code> cut command.</p></li><li><span class="file-path">hooks/tdd-guard.sh</span><p>Keep deny as fallback. ADD happy-path <code>additionalContext</code> emit naming the RED-evidence contract and the <code>/dev-kit:guard-mode off</code> bypass. Remove the per-Edit <code>python3 -m lib.tdd_scope_policy</code> subprocess call (PR 2 readds this).</p></li><li><span class="file-path">hooks/context-window-guard.sh</span><p>Fix the <code>select()</code> bug. Replace <code>.[-100:] | select(.message.usage)</code> with <code>[.[-100:] | map(select(.message.usage))] | add // {}</code>. Drop <code>timeout:</code> from hooks.json entry.</p></li><li><span class="file-path">hooks/hooks.json</span><p>Remove the <code>timeout:</code> key from every hook entry that has one.</p></li><li><span class="file-path">hooks/tdd-scope-judge.sh</span><p>DELETE. No replacement hook.</p></li><li><span class="file-path">lib/tdd_classify.py</span><p>New module invoked from <code>skills/build-tdd/SKILL.md</code> Step 1. Writes <code>.dev-kit/.tdd-scope.json</code>.</p></li><li><span class="file-path">skills/build-tdd/SKILL.md</span><p>Step 1 invokes <code>lib.tdd_classify --write</code>. Failure aborts with clear message.</p></li><li><span class="file-path">skills/cwd/SKILL.md</span><p>NEW skill. Suggests <code>&lt;type&gt;/&lt;slug&gt;</code> and runs <code>git worktree add ...</code> with operator confirmation.</p></li><li><span class="file-path">hooks/session-start-guard-mode-reset.sh</span><p>Extend to verify <code>.dev-kit/.tdd-scope.json</code> exists; warn on stderr if absent.</p></li><li><span class="file-path">.github/workflows/test.yml</span><p>Add step that runs <code>python3 -m tools.regenerate_active_hooks</code> and the no-timeout test on every PR.</p></li><li><span class="file-path">tools/regenerate_active_hooks.py</span><p>Extend lint to hard-reject the <code>timeout:</code> key on any event.</p></li><li><span class="file-path">tests/test_hook_additional_context.py</span><p>New test asserting <code>additionalContext</code> is byte-stable across N runs.</p></li><li><span class="file-path">tests/test_no_hook_timeouts.py</span><p>New test asserting no <code>timeout:</code> key exists in <code>hooks.json</code>.</p></li><li><span class="file-path">tests/test_context_window_guard.py</span><p>New behavioral test; replaces the substring-only test from PR</p></li><li><span class="file-path">tests/test_tdd_classify_move.py</span><p>New test asserting the hook reads <code>.tdd-scope.json</code>, does NOT call python at hook time, and the deny fallback fires iff <code>tdd_required == true</code> AND RED evidence is missing.</p></li><li><span class="file-path">tests/test_cwd_skill.py</span><p>New test asserting the skill's slug satisfies kebab-case + length + forbidden-word rules.</p></li><li><span class="file-path">hooks/index.md</span><p>Update Hook matrix: tdd-guard gains <code>additionalContext</code>; worktree-guard gains channel-split; no hook may carry <code>timeout:</code>; context-window-guard gains the slim-mode rewrite.</p></li><li><span class="file-path">docs/proposals/review/guard-notify-mode-redesign/00-index.yaml</span><p>This proposal source.</p></li><li><span class="file-path">docs/proposals/review/guard-notify-mode-redesign/00-index.html</span><p>Derived, self-contained HTML render of this proposal; regenerated by the proposal renderer.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Channel-split hook contract: LLM sees byte-stable prefix (prompt-cache hit per <code>rules/session-hygiene.md</code> Iron Law 3); operator sees the full worktree list on stderr (visibility preserved).</li><li>LLM sees the RED-evidence contract reminder on EVERY Edit, not just on the deny path; better mental model formation.</li><li>tdd-scope classification moves to the right place (build-step entry + SessionStart nudge); hook becomes a pure reader, no per-Edit Python cold-start.</li><li><code>context-window-guard</code> broken <code>select()</code> rewrite closes the silent-discard bug PR #836 introduced.</li><li><code>timeout:</code> ban + lint extension closes the silent-discard problem of PR #836's UserPromptSubmit hooks.</li><li>/dev-kit:cwd skill closes the 'git bash only' friction that worktree-auto-cut was trying to solve in the wrong place.</li><li>All three PRs are reversible: revert each merge commit independently to restore prior behavior.</li><li>PR 1 carries <code>Closes #836</code> so the closure is explicit; operator can decline via <code>git revert</code>.</li><li>Session-scoped bypass via <code>/dev-kit:guard-mode off</code> already works; no new state machinery.</li><li>PR 1 wires no-timeout + lint into CI; manual edits to <code>hooks.json</code> cannot sneak a <code>timeout:</code> past the test suite on a PR.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-10 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
