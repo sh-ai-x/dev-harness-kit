@@ -181,6 +181,15 @@
             "fail_closed": false
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-start-hygiene.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "PostToolUse": [
