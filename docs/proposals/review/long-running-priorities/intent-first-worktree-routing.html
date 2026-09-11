@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intent-first worktree routing — client-neutral request classification</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Intent-first worktree routing — client-neutral request classification</h1>
+<p class="meta">2026-09-11 · <span class="tag tag-info">ready-for-review</span></p>
+<div class="tags"><span class="tag tag-info">intent</span><span class="tag tag-info">worktree</span><span class="tag tag-info">request-classification</span><span class="tag tag-info">claude-code</span><span class="tag tag-info">codex</span><span class="tag tag-info">hooks</span><span class="tag tag-info">orchestrator</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Conclusion — share policy, not event assumptions</a></li><li><a href="#sec-1">Intent lifecycle and ownership</a></li><li><a href="#sec-2">Risk-based ordering</a></li><li><a href="#sec-3">Shared hook decision table</a></li><li><a href="#sec-4">Risk, trade-offs, and rollback</a></li><li><a href="#sec-5">Acceptance gates and metrics</a></li><li><a href="#sec-6">Source and related work</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Conclusion — share policy, not event assumptions</h2>
+<p>The shared Claude Code/Codex worktree root is not itself the problem. Shared Git state, <code>lib.git_worktree.cut_worktree</code>, and deterministic edit/commit guards reduce drift. The harmful coupling is the assumption that one UserPromptSubmit shell hook can be the authoritative request classifier for both clients.</p>
+<p>The current design has three failure modes:</p>
+<ol><li>Claude may create a feature worktree before the originator has corrected or accepted the intent.</li><li>Codex does not receive the same UserPromptSubmit auto-cut behavior and can reach a write attempt with no equivalent handoff.</li><li>A failed auto-cut emits advice, but the main-checkout guard later denies the edit; the user experiences two disconnected failures.</li></ol>
+<p>Recommendation: <strong>keep shared enforcement, split request capture and handoff by client, and introduce one shared pure classifier plus one version-controlled intent artifact.</strong></p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Intent lifecycle and ownership</h2>
+<table><thead><tr><th>Stage</th><th>Owner</th><th>Artifact/decision</th><th>Side effects</th></tr></thead><tbody><tr><td>Capture</td><td>Claude/Codex adapter</td><td>raw request + client metadata</td><td>none</td></tr><tr><td>Classify</td><td>shared <code>lib/request_intent.py</code></td><td>mode, confidence, reason codes</td><td>none</td></tr><tr><td>Clarify</td><td>originator + orchestrator</td><td><code>.dev-kit/round-0/intent.md</code></td><td>analysis worktree only</td></tr><tr><td>Accept/reject</td><td>originator/product owner</td><td>accepted or rejected revision</td><td>no feature worktree on reject</td></tr><tr><td>Route</td><td>canonical orchestrator</td><td>worktree branch/path + handoff</td><td>one <code>cut_worktree</code> call</td></tr><tr><td>Enforce</td><td>shared hooks</td><td>file path and branch policy</td><td>deny unsafe edits/commits</td></tr><tr><td>Execute</td><td>Claude session or Codex subagent</td><td>feature worktree outputs</td><td>code changes only in feature worktree</td></tr></tbody></table>
+<p>The <code>intent.md</code> template should include:</p>
+<pre><code class="language-markdown"># Intent: &lt;short title&gt;
+Author: &lt;originator&gt;  Client: &lt;claude-code|codex&gt;  Status: draft
+Request ID: &lt;stable id&gt;
+
+## Problem
+## Proposed outcome
+## Affected users and systems
+## Constraints
+## Out of scope
+## Open questions
+## Classification
+mode: read-only | proposal | implementation | maintenance
+worktree_required: true | false | uncertain
+## Decision
+accepted | rejected | needs-clarification</code></pre>
+<hr class="section-divider">
+
+<h2 id="sec-2">Risk-based ordering</h2>
+<p><strong>P0 — isolate the hard stop.</strong></p>
+<ul><li>Fix Issue <a href="https://github.com/sh-ai-x/dev-harness-kit/issues/842">#842</a> first: worktree-guard must classify a target worktree from <code>file_path</code>, not the parent session cwd. Do not mix this fix with the request classifier redesign.</li><li>Add a regression for the observed auto-cut failure envelope: failed creation must produce one actionable handoff and must not leave the session pretending that a feature worktree exists.</li></ul>
+<p><strong>P1 — pure intent contract.</strong></p>
+<ul><li>Accept this proposal as a new issue/PR, but do not start with a broad hook rewrite. Implement <code>lib/request_intent.py</code> and a golden corpus.</li><li>Require deterministic output and parity tests for Claude/Codex inputs. <code>mode=uncertain</code> is valid and never silently becomes implementation.</li></ul>
+<p><strong>P1 — intent capture adapter.</strong></p>
+<ul><li>Change Claude's <code>worktree-auto-cut</code> from “classify and cut” to “classify and capture/advice”. Keep the canonical cut in the orchestrator after intent acceptance.</li><li>Add the Codex adapter at the invocation point that actually owns the original request. Do not add a fake UserPromptSubmit hook solely to make manifests look symmetric.</li></ul>
+<p><strong>P2 — artifact and metrics.</strong></p>
+<ul><li>Persist accepted <code>intent.md</code> in the existing <code>orch/*</code> handoff path.</li><li>Measure time-to-intent, intent correction rate, rejected-intent rate, false-cut rate, missed-cut rate, auto-cut failure rate, and Claude/Codex parity.</li></ul>
+<p><strong>P3 — cleanup.</strong></p>
+<ul><li>Remove duplicated prompt regex and legacy side effects only after the new classifier and adapters have a passing corpus.</li><li>Update hook matrix/docs and deprecate the old path with one release of visible diagnostics.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-3">Shared hook decision table</h2>
+<table><thead><tr><th>Surface</th><th>Keep shared?</th><th>Decision</th></tr></thead><tbody><tr><td><code>worktree-guard</code> edit admission</td><td>Yes</td><td>Shared deterministic enforcement; consume target path and branch metadata.</td></tr><tr><td><code>git-guard</code> commit/push protection</td><td>Yes</td><td>Shared command policy; client identity is metadata, not classification.</td></tr><tr><td><code>lib.git_worktree.cut_worktree</code></td><td>Yes</td><td>One side-effect primitive and one precondition contract.</td></tr><tr><td>Prompt-to-worktree regex</td><td>No</td><td>Move to shared pure classifier; no shell copies in client hooks.</td></tr><tr><td>Claude <code>UserPromptSubmit</code> adapter</td><td>Client-specific</td><td>Capture/advise only; no unreviewed implementation side effect.</td></tr><tr><td>Codex request adapter</td><td>Client-specific</td><td>Invoke at Codex's real orchestration boundary, not by imitation.</td></tr><tr><td>Linear/log bootstrap</td><td>No longer in classifier</td><td>Run after accepted worktree creation, independently and visibly.</td></tr></tbody></table>
+<p>The project should optimize for semantic parity, not manifest symmetry. Claude and Codex may have different hook events as long as they produce the same intent schema and enter the same canonical routing function.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Risk, trade-offs, and rollback</h2>
+<p><strong>Minimal fix vs integrated refactor:</strong> The minimal safe fix is to extract a pure classifier and stop treating the raw prompt hook as the owner of worktree side effects. A full intent platform, cross-client event bus, or new orchestration registry is explicitly deferred.</p>
+<p><strong>Shared worktree vs shared hook:</strong> Keep one <code>.worktrees/</code> namespace and one Git policy. Do not require the same hook event or the same client lifecycle. This accepts some adapter duplication to avoid semantic drift hidden behind a false common abstraction.</p>
+<p><strong>Intent review vs speed:</strong> An extra review step costs seconds/minutes on implementation work, but a wrong worktree classification costs a blocked session, polluted branches, or edits made through unsafe bypasses. The fast path is preserved for clear read-only requests; only implementation or uncertainty enters intent capture.</p>
+<p><strong>Versioned intent vs privacy:</strong> Version control makes correction and governance auditable, as recommended by Claude Academy, but raw prompts may contain secrets or customer data. Redact sensitive content and store a prompt hash; do not copy the complete provider payload blindly.</p>
+<p><strong>Rollback:</strong> disable the new adapters and leave shared enforcement in place; the old auto-cut path may be re-enabled only behind an explicit compatibility switch. Never roll back by disabling <code>worktree-guard</code> for the whole session.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Acceptance gates and metrics</h2>
+<ul><li>The same request fixture produces the same classification for Claude and Codex.</li><li>Read-only and proposal requests create no implementation worktree.</li><li>Clear implementation requests produce an intent record before the feature worktree is cut.</li><li>Ambiguous requests produce <code>uncertain</code> plus a next question; they do not silently cut a feature branch.</li><li>Rejected intent produces no implementation worktree and leaves an auditable rejection record.</li><li>Accepted intent produces exactly one canonical worktree cut and one client-specific handoff.</li><li>A failed cut leaves no false “ready” state and gives the canonical retry command.</li><li>The shared worktree guard still denies main edits and allows valid feature worktree edits for both clients.</li></ul>
+<p>Measure:</p>
+<table><thead><tr><th>Metric</th><th>Meaning</th></tr></thead><tbody><tr><td><code>time_to_intent</code></td><td>First request to reviewed/accepted intent.</td></tr><tr><td><code>intent_correction_rate</code></td><td>Requests changed by the originator before acceptance.</td></tr><tr><td><code>false_cut_rate</code></td><td>Worktrees cut for rejected/read-only work.</td></tr><tr><td><code>missed_cut_rate</code></td><td>Accepted implementation intent reaching a blocked main edit.</td></tr><tr><td><code>client_parity</code></td><td>Same fixture → same mode/worktree decision across clients.</td></tr><tr><td><code>cut_failure_rate</code></td><td>Canonical helper failures per accepted intent.</td></tr><tr><td><code>intent_survival_rate</code></td><td>Accepted intent records reaching design/build.</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-6">Source and related work</h2>
+<p>The design is informed by <a href="https://academy.claude.com/courses/ai-native-sdlc-playbook/capture-intent">Claude Academy's Capture as intent.md lesson</a>, which describes a human-readable, version-controlled proto-spec corrected by the originator before it proceeds, and measures time-to-committed intent plus survival into design.</p>
+<p>Related project work:</p>
+<ul><li><a href="https://github.com/sh-ai-x/dev-harness-kit/issues/842">Issue #842</a> — worktree-guard parent-cwd false deny.</li><li><a href="https://github.com/sh-ai-x/dev-harness-kit/issues/843">Issue #843</a> — dedicated <code>/dev-kit:proposal-orch-issue-pr</code> command.</li><li><a href="https://github.com/sh-ai-x/dev-harness-kit/pull/844">PR #844</a> — bottleneck-first open-work priority proposal.</li><li><code>lib/intent_integrity.py</code> — later PRD/phase integrity gate, not request capture.</li><li><code>hooks/worktree-guard.sh</code> — existing shared enforcement boundary.</li></ul>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>The current worktree request classifier is embedded in a Claude-oriented UserPromptSubmit shell hook. <code>hooks/worktree-auto-cut.sh:35-84</code> reads the raw prompt, applies English/Korean regexes, and decides whether a feature worktree should be cut. When the prompt is classified as a task, the same hook then performs fetch, worktree creation, log bootstrap, optional Linear sync, and emits a mixed Claude/Codex handoff envelope (<code>hooks/worktree-auto-cut.sh:167-305</code>). A failure falls back to an advisory message, which can leave the user with no usable worktree while the hard edit guard still forbids main-checkout edits.</p>
+<p>The two clients do not have the same event surface. Claude's manifest wires <code>worktree-auto-cut.sh</code> to UserPromptSubmit (<code>hooks/hooks.json:77-110</code>), while <code>.codex/hooks.json:4-22</code> wires only Write/Edit/MultiEdit and Bash enforcement hooks. Thus the same request can be auto-cut by Claude, but not classified or handed off by Codex. The shared worktree guard is valuable as a deterministic enforcement boundary, but it is currently being asked to compensate for a request-routing decision that happened differently, or not at all, in each client.</p>
+<p>Claude Academy's AI-native SDLC guidance recommends capturing a human readable, version-controlled <code>intent.md</code>, having the originator correct it before commit, and recording the accept/reject decision before design or build proceeds. The project has no equivalent pre-work intent artifact; <code>lib/intent_integrity.py</code> starts later at PRD/phase consistency and does not classify the original request.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li>Claude Academy, Capture as intent.md: https://academy.claude.com/courses/ai-native-sdlc-playbook/capture-intent</li><li><code>hooks/worktree-auto-cut.sh:35-84</code> — raw prompt regex classifier</li><li><code>hooks/worktree-auto-cut.sh:167-305</code> — fetch, cut, bootstrap, and mixed-client handoff</li><li><code>hooks/hooks.json:77-110</code> — Claude UserPromptSubmit registration</li><li><code>.codex/hooks.json:4-22</code> — Codex has enforcement hooks but no request-capture hook</li><li><code>hooks/worktree-guard.sh:55-93</code> — existing <code>orch/*</code> analysis-worktree boundary</li><li>Issue #842: https://github.com/sh-ai-x/dev-harness-kit/issues/842</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Request routing becomes a two-stage, client-neutral contract:</p>
+<pre><code class="language-text">raw request
+  -&gt; pure request classifier (no git/network/side effects)
+  -&gt; read-only/proposal: stay in current context
+  -&gt; implementation/uncertain: capture intent.md in an orch/* handoff
+  -&gt; originator correction + acceptance
+  -&gt; canonical worktree cut for implementation
+  -&gt; client-specific handoff (Claude session or Codex subagent cwd)</code></pre>
+<p>The project shares the policy and artifact contract, not the assumption that Claude Code and Codex expose identical hooks. <code>worktree-guard</code>, <code>git-guard</code>, and the canonical <code>lib.git_worktree.cut_worktree</code> remain shared enforcement/side-effect primitives. Request capture and handoff are thin client adapters. A raw prompt is never enough to trigger implementation worktree side effects when the classifier is uncertain.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">lib/request_intent.py</span><p>Add a pure classifier and schema for <code>request_id</code>, <code>client</code>, <code>mode</code>, <code>worktree_required</code>, <code>confidence</code>, <code>reason_codes</code>, and <code>prompt_hash</code>. It must not fetch, create worktrees, call Linear, or mutate files. The same JSON input must yield the same decision for Claude and Codex.</p></li><li><span class="file-path">hooks/worktree-auto-cut.sh</span><p>Reduce the current hook to a Claude adapter: obtain the request payload, call the shared classifier, and emit a capture/handoff envelope. Move worktree creation behind accepted intent; remove duplicated shell regex and client-specific side effects from the classification step.</p></li><li><span class="file-path">.codex/hooks.json</span><p>Do not pretend Codex has Claude's UserPromptSubmit event. Register only a client adapter where the Codex runtime can supply the original request; otherwise invoke the same classifier from the orchestrator before spawning a subagent.</p></li><li><span class="file-path">hooks/hooks.json</span><p>Keep Claude's hook wiring explicit and narrow. The hook may capture or advise, but it must not become a second implementation of the shared classifier.</p></li><li><span class="file-path">hooks/worktree-guard.sh</span><p>Keep this as the shared edit-admission boundary. It continues to deny main-checkout code edits and must consume <code>tool_input.file_path</code> for worktree detection; request classification is not added to this guard.</p></li><li><span class="file-path">hooks/lib/worktree-detect.sh</span><p>Expose only path-aware detection needed by enforcement. Do not add prompt parsing or client branching to this low-level helper.</p></li><li><span class="file-path">.dev-kit/round-0/intent.md</span><p>Use an <code>orch/*</code> worktree as the version-controlled, human-readable proto-spec home. The artifact records what is wanted, why, affected systems, constraints, out of scope, open questions, classification, and acceptance/rejection. Raw secrets are excluded or redacted.</p></li><li><span class="file-path">tests/test_request_intent.py</span><p>Add a golden corpus of English, Korean, Claude, Codex, read-only, proposal, implementation, ambiguous, and false-positive prompts. Test classifier determinism and Claude/Codex parity independently of hooks.</p></li><li><span class="file-path">tests/test_worktree_auto_cut.py</span><p>Replace regex-only expectations with boundary tests: no side effect for read-only/proposal requests, capture for implementation/uncertain requests, accepted-intent-only cut, and actionable failure handoff.</p></li><li><span class="file-path">docs/workflows/intent-first-worktree-routing.md</span><p>Document the lifecycle, client adapter contract, intent review point, and the rule that shared hooks enforce boundaries while adapters carry client-specific event semantics.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Preserves a single policy decision across Claude Code and Codex without pretending their hook events are identical.</li><li>Prevents raw prompt regexes from performing fetch, worktree creation, log bootstrap, and Linear side effects before intent is reviewed.</li><li>Uses the existing <code>orch/*</code> and <code>.dev-kit/round-*</code> analysis boundary instead of inventing a second coordination tree.</li><li>Creates a human-correctable, version-controlled intent artifact aligned with Claude Academy's recommended proto-spec flow.</li><li>Makes false cuts, missed cuts, classifier disagreement, and intent correction measurable.</li><li>Keeps the shared worktree guard small and deterministic; it remains an enforcement hook rather than an intent interpreter.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Some implementation requests gain an intent-capture step and may require an explicit acceptance before the feature worktree is cut.</li><li>There will be a short period with two adapter paths and migration complexity while the Claude hook and Codex orchestrator both call the shared classifier.</li><li>Creating an <code>orch/*</code> handoff worktree adds filesystem and branch overhead for ambiguous tasks, even when the originator later rejects them.</li><li>The classifier becomes a shared policy API; a schema change must be tested against both clients rather than fixed in one shell hook.</li><li>Removing automatic side effects from UserPromptSubmit may make the first interaction feel slower even though it reduces false worktree creation.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>A classifier cannot fully recover intent from a vague prompt; uncertainty must remain a first-class result rather than being forced into implementation.</li><li>Codex runtimes that do not expose a request-submit hook still need an explicit orchestrator/launcher integration; a shared JSON schema cannot create a missing event.</li><li><code>intent.md</code> records the accepted request, not every subsequent conversation turn; later scope changes require a new revision or a new request id.</li><li>Version-controlled intent can expose sensitive prompt content; redaction and prompt-hash fields reduce but do not eliminate that risk.</li><li>This proposal does not solve the independent #842 file-path/cwd bug; that remains a prerequisite for safe subagent edits.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-11 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
