@@ -1,0 +1,326 @@
+title: "Intent-first worktree routing — client-neutral request classification"
+status: ready-for-review
+date: 2026-09-11
+tags: [intent, worktree, request-classification, claude-code, codex, hooks, orchestrator]
+
+before:
+  summary: |
+    The current worktree request classifier is embedded in a Claude-oriented
+    UserPromptSubmit shell hook. `hooks/worktree-auto-cut.sh:35-84` reads the
+    raw prompt, applies English/Korean regexes, and decides whether a feature
+    worktree should be cut. When the prompt is classified as a task, the same
+    hook then performs fetch, worktree creation, log bootstrap, optional Linear
+    sync, and emits a mixed Claude/Codex handoff envelope
+    (`hooks/worktree-auto-cut.sh:167-305`). A failure falls back to an advisory
+    message, which can leave the user with no usable worktree while the hard
+    edit guard still forbids main-checkout edits.
+
+    The two clients do not have the same event surface. Claude's manifest wires
+    `worktree-auto-cut.sh` to UserPromptSubmit
+    (`hooks/hooks.json:77-110`), while `.codex/hooks.json:4-22` wires only
+    Write/Edit/MultiEdit and Bash enforcement hooks. Thus the same request can
+    be auto-cut by Claude, but not classified or handed off by Codex. The
+    shared worktree guard is valuable as a deterministic enforcement boundary,
+    but it is currently being asked to compensate for a request-routing
+    decision that happened differently, or not at all, in each client.
+
+    Claude Academy's AI-native SDLC guidance recommends capturing a human
+    readable, version-controlled `intent.md`, having the originator correct it
+    before commit, and recording the accept/reject decision before design or
+    build proceeds. The project has no equivalent pre-work intent artifact;
+    `lib/intent_integrity.py` starts later at PRD/phase consistency and does not
+    classify the original request.
+  evidence:
+    - "Claude Academy, Capture as intent.md: https://academy.claude.com/courses/ai-native-sdlc-playbook/capture-intent"
+    - "`hooks/worktree-auto-cut.sh:35-84` — raw prompt regex classifier"
+    - "`hooks/worktree-auto-cut.sh:167-305` — fetch, cut, bootstrap, and mixed-client handoff"
+    - "`hooks/hooks.json:77-110` — Claude UserPromptSubmit registration"
+    - "`.codex/hooks.json:4-22` — Codex has enforcement hooks but no request-capture hook"
+    - "`hooks/worktree-guard.sh:55-93` — existing `orch/*` analysis-worktree boundary"
+    - "Issue #842: https://github.com/sh-ai-x/dev-harness-kit/issues/842"
+
+after:
+  summary: |
+    Request routing becomes a two-stage, client-neutral contract:
+
+    ```text
+    raw request
+      -> pure request classifier (no git/network/side effects)
+      -> read-only/proposal: stay in current context
+      -> implementation/uncertain: capture intent.md in an orch/* handoff
+      -> originator correction + acceptance
+      -> canonical worktree cut for implementation
+      -> client-specific handoff (Claude session or Codex subagent cwd)
+    ```
+
+    The project shares the policy and artifact contract, not the assumption
+    that Claude Code and Codex expose identical hooks. `worktree-guard`,
+    `git-guard`, and the canonical `lib.git_worktree.cut_worktree` remain shared
+    enforcement/side-effect primitives. Request capture and handoff are thin
+    client adapters. A raw prompt is never enough to trigger implementation
+    worktree side effects when the classifier is uncertain.
+  files:
+    - path: "lib/request_intent.py"
+      change: |
+        Add a pure classifier and schema for `request_id`, `client`, `mode`,
+        `worktree_required`, `confidence`, `reason_codes`, and `prompt_hash`.
+        It must not fetch, create worktrees, call Linear, or mutate files. The
+        same JSON input must yield the same decision for Claude and Codex.
+    - path: "hooks/worktree-auto-cut.sh"
+      change: |
+        Reduce the current hook to a Claude adapter: obtain the request payload,
+        call the shared classifier, and emit a capture/handoff envelope. Move
+        worktree creation behind accepted intent; remove duplicated shell regex
+        and client-specific side effects from the classification step.
+    - path: ".codex/hooks.json"
+      change: |
+        Do not pretend Codex has Claude's UserPromptSubmit event. Register only
+        a client adapter where the Codex runtime can supply the original
+        request; otherwise invoke the same classifier from the orchestrator
+        before spawning a subagent.
+    - path: "hooks/hooks.json"
+      change: |
+        Keep Claude's hook wiring explicit and narrow. The hook may capture or
+        advise, but it must not become a second implementation of the shared
+        classifier.
+    - path: "hooks/worktree-guard.sh"
+      change: |
+        Keep this as the shared edit-admission boundary. It continues to deny
+        main-checkout code edits and must consume `tool_input.file_path` for
+        worktree detection; request classification is not added to this guard.
+    - path: "hooks/lib/worktree-detect.sh"
+      change: |
+        Expose only path-aware detection needed by enforcement. Do not add
+        prompt parsing or client branching to this low-level helper.
+    - path: ".dev-kit/round-0/intent.md"
+      change: |
+        Use an `orch/*` worktree as the version-controlled, human-readable
+        proto-spec home. The artifact records what is wanted, why, affected
+        systems, constraints, out of scope, open questions, classification,
+        and acceptance/rejection. Raw secrets are excluded or redacted.
+    - path: "tests/test_request_intent.py"
+      change: |
+        Add a golden corpus of English, Korean, Claude, Codex, read-only,
+        proposal, implementation, ambiguous, and false-positive prompts. Test
+        classifier determinism and Claude/Codex parity independently of hooks.
+    - path: "tests/test_worktree_auto_cut.py"
+      change: |
+        Replace regex-only expectations with boundary tests: no side effect for
+        read-only/proposal requests, capture for implementation/uncertain
+        requests, accepted-intent-only cut, and actionable failure handoff.
+    - path: "docs/workflows/intent-first-worktree-routing.md"
+      change: |
+        Document the lifecycle, client adapter contract, intent review point,
+        and the rule that shared hooks enforce boundaries while adapters carry
+        client-specific event semantics.
+
+pros:
+  - "Preserves a single policy decision across Claude Code and Codex without pretending their hook events are identical."
+  - "Prevents raw prompt regexes from performing fetch, worktree creation, log bootstrap, and Linear side effects before intent is reviewed."
+  - "Uses the existing `orch/*` and `.dev-kit/round-*` analysis boundary instead of inventing a second coordination tree."
+  - "Creates a human-correctable, version-controlled intent artifact aligned with Claude Academy's recommended proto-spec flow."
+  - "Makes false cuts, missed cuts, classifier disagreement, and intent correction measurable."
+  - "Keeps the shared worktree guard small and deterministic; it remains an enforcement hook rather than an intent interpreter."
+
+cons:
+  - "Some implementation requests gain an intent-capture step and may require an explicit acceptance before the feature worktree is cut."
+  - "There will be a short period with two adapter paths and migration complexity while the Claude hook and Codex orchestrator both call the shared classifier."
+  - "Creating an `orch/*` handoff worktree adds filesystem and branch overhead for ambiguous tasks, even when the originator later rejects them."
+  - "The classifier becomes a shared policy API; a schema change must be tested against both clients rather than fixed in one shell hook."
+  - "Removing automatic side effects from UserPromptSubmit may make the first interaction feel slower even though it reduces false worktree creation."
+
+limitations:
+  - "A classifier cannot fully recover intent from a vague prompt; uncertainty must remain a first-class result rather than being forced into implementation."
+  - "Codex runtimes that do not expose a request-submit hook still need an explicit orchestrator/launcher integration; a shared JSON schema cannot create a missing event."
+  - "`intent.md` records the accepted request, not every subsequent conversation turn; later scope changes require a new revision or a new request id."
+  - "Version-controlled intent can expose sensitive prompt content; redaction and prompt-hash fields reduce but do not eliminate that risk."
+  - "This proposal does not solve the independent #842 file-path/cwd bug; that remains a prerequisite for safe subagent edits."
+
+sections:
+  - title: "Conclusion — share policy, not event assumptions"
+    body: |
+      The shared Claude Code/Codex worktree root is not itself the problem.
+      Shared Git state, `lib.git_worktree.cut_worktree`, and deterministic
+      edit/commit guards reduce drift. The harmful coupling is the assumption
+      that one UserPromptSubmit shell hook can be the authoritative request
+      classifier for both clients.
+
+      The current design has three failure modes:
+
+      1. Claude may create a feature worktree before the originator has
+         corrected or accepted the intent.
+      2. Codex does not receive the same UserPromptSubmit auto-cut behavior and
+         can reach a write attempt with no equivalent handoff.
+      3. A failed auto-cut emits advice, but the main-checkout guard later
+         denies the edit; the user experiences two disconnected failures.
+
+      Recommendation: **keep shared enforcement, split request capture and
+      handoff by client, and introduce one shared pure classifier plus one
+      version-controlled intent artifact.**
+
+  - title: "Intent lifecycle and ownership"
+    body: |
+      | Stage | Owner | Artifact/decision | Side effects |
+      |---|---|---|---|
+      | Capture | Claude/Codex adapter | raw request + client metadata | none |
+      | Classify | shared `lib/request_intent.py` | mode, confidence, reason codes | none |
+      | Clarify | originator + orchestrator | `.dev-kit/round-0/intent.md` | analysis worktree only |
+      | Accept/reject | originator/product owner | accepted or rejected revision | no feature worktree on reject |
+      | Route | canonical orchestrator | worktree branch/path + handoff | one `cut_worktree` call |
+      | Enforce | shared hooks | file path and branch policy | deny unsafe edits/commits |
+      | Execute | Claude session or Codex subagent | feature worktree outputs | code changes only in feature worktree |
+
+      The `intent.md` template should include:
+
+      ```markdown
+      # Intent: <short title>
+      Author: <originator>  Client: <claude-code|codex>  Status: draft
+      Request ID: <stable id>
+
+      ## Problem
+      ## Proposed outcome
+      ## Affected users and systems
+      ## Constraints
+      ## Out of scope
+      ## Open questions
+      ## Classification
+      mode: read-only | proposal | implementation | maintenance
+      worktree_required: true | false | uncertain
+      ## Decision
+      accepted | rejected | needs-clarification
+      ```
+
+  - title: "Risk-based ordering"
+    body: |
+      **P0 — isolate the hard stop.**
+
+      - Fix Issue [#842](https://github.com/sh-ai-x/dev-harness-kit/issues/842)
+        first: worktree-guard must classify a target worktree from
+        `file_path`, not the parent session cwd. Do not mix this fix with the
+        request classifier redesign.
+      - Add a regression for the observed auto-cut failure envelope: failed
+        creation must produce one actionable handoff and must not leave the
+        session pretending that a feature worktree exists.
+
+      **P1 — pure intent contract.**
+
+      - Accept this proposal as a new issue/PR, but do not start with a broad
+        hook rewrite. Implement `lib/request_intent.py` and a golden corpus.
+      - Require deterministic output and parity tests for Claude/Codex inputs.
+        `mode=uncertain` is valid and never silently becomes implementation.
+
+      **P1 — intent capture adapter.**
+
+      - Change Claude's `worktree-auto-cut` from “classify and cut” to
+        “classify and capture/advice”. Keep the canonical cut in the
+        orchestrator after intent acceptance.
+      - Add the Codex adapter at the invocation point that actually owns the
+        original request. Do not add a fake UserPromptSubmit hook solely to
+        make manifests look symmetric.
+
+      **P2 — artifact and metrics.**
+
+      - Persist accepted `intent.md` in the existing `orch/*` handoff path.
+      - Measure time-to-intent, intent correction rate, rejected-intent rate,
+        false-cut rate, missed-cut rate, auto-cut failure rate, and
+        Claude/Codex parity.
+
+      **P3 — cleanup.**
+
+      - Remove duplicated prompt regex and legacy side effects only after the
+        new classifier and adapters have a passing corpus.
+      - Update hook matrix/docs and deprecate the old path with one release of
+        visible diagnostics.
+
+  - title: "Shared hook decision table"
+    body: |
+      | Surface | Keep shared? | Decision |
+      |---|:---:|---|
+      | `worktree-guard` edit admission | Yes | Shared deterministic enforcement; consume target path and branch metadata. |
+      | `git-guard` commit/push protection | Yes | Shared command policy; client identity is metadata, not classification. |
+      | `lib.git_worktree.cut_worktree` | Yes | One side-effect primitive and one precondition contract. |
+      | Prompt-to-worktree regex | No | Move to shared pure classifier; no shell copies in client hooks. |
+      | Claude `UserPromptSubmit` adapter | Client-specific | Capture/advise only; no unreviewed implementation side effect. |
+      | Codex request adapter | Client-specific | Invoke at Codex's real orchestration boundary, not by imitation. |
+      | Linear/log bootstrap | No longer in classifier | Run after accepted worktree creation, independently and visibly. |
+
+      The project should optimize for semantic parity, not manifest symmetry.
+      Claude and Codex may have different hook events as long as they produce
+      the same intent schema and enter the same canonical routing function.
+
+  - title: "Risk, trade-offs, and rollback"
+    body: |
+      **Minimal fix vs integrated refactor:** The minimal safe fix is to extract
+      a pure classifier and stop treating the raw prompt hook as the owner of
+      worktree side effects. A full intent platform, cross-client event bus,
+      or new orchestration registry is explicitly deferred.
+
+      **Shared worktree vs shared hook:** Keep one `.worktrees/` namespace and
+      one Git policy. Do not require the same hook event or the same client
+      lifecycle. This accepts some adapter duplication to avoid semantic drift
+      hidden behind a false common abstraction.
+
+      **Intent review vs speed:** An extra review step costs seconds/minutes on
+      implementation work, but a wrong worktree classification costs a blocked
+      session, polluted branches, or edits made through unsafe bypasses. The
+      fast path is preserved for clear read-only requests; only implementation
+      or uncertainty enters intent capture.
+
+      **Versioned intent vs privacy:** Version control makes correction and
+      governance auditable, as recommended by Claude Academy, but raw prompts
+      may contain secrets or customer data. Redact sensitive content and store
+      a prompt hash; do not copy the complete provider payload blindly.
+
+      **Rollback:** disable the new adapters and leave shared enforcement in
+      place; the old auto-cut path may be re-enabled only behind an explicit
+      compatibility switch. Never roll back by disabling `worktree-guard` for
+      the whole session.
+
+  - title: "Acceptance gates and metrics"
+    body: |
+      - The same request fixture produces the same classification for Claude
+        and Codex.
+      - Read-only and proposal requests create no implementation worktree.
+      - Clear implementation requests produce an intent record before the
+        feature worktree is cut.
+      - Ambiguous requests produce `uncertain` plus a next question; they do
+        not silently cut a feature branch.
+      - Rejected intent produces no implementation worktree and leaves an
+        auditable rejection record.
+      - Accepted intent produces exactly one canonical worktree cut and one
+        client-specific handoff.
+      - A failed cut leaves no false “ready” state and gives the canonical
+        retry command.
+      - The shared worktree guard still denies main edits and allows valid
+        feature worktree edits for both clients.
+
+      Measure:
+
+      | Metric | Meaning |
+      |---|---|
+      | `time_to_intent` | First request to reviewed/accepted intent. |
+      | `intent_correction_rate` | Requests changed by the originator before acceptance. |
+      | `false_cut_rate` | Worktrees cut for rejected/read-only work. |
+      | `missed_cut_rate` | Accepted implementation intent reaching a blocked main edit. |
+      | `client_parity` | Same fixture → same mode/worktree decision across clients. |
+      | `cut_failure_rate` | Canonical helper failures per accepted intent. |
+      | `intent_survival_rate` | Accepted intent records reaching design/build. |
+
+  - title: "Source and related work"
+    body: |
+      The design is informed by [Claude Academy's Capture as intent.md lesson](https://academy.claude.com/courses/ai-native-sdlc-playbook/capture-intent),
+      which describes a human-readable, version-controlled proto-spec corrected
+      by the originator before it proceeds, and measures time-to-committed intent
+      plus survival into design.
+
+      Related project work:
+
+      - [Issue #842](https://github.com/sh-ai-x/dev-harness-kit/issues/842) —
+        worktree-guard parent-cwd false deny.
+      - [Issue #843](https://github.com/sh-ai-x/dev-harness-kit/issues/843) —
+        dedicated `/dev-kit:proposal-orch-issue-pr` command.
+      - [PR #844](https://github.com/sh-ai-x/dev-harness-kit/pull/844) —
+        bottleneck-first open-work priority proposal.
+      - `lib/intent_integrity.py` — later PRD/phase integrity gate, not request
+        capture.
+      - `hooks/worktree-guard.sh` — existing shared enforcement boundary.
