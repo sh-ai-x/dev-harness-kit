@@ -1,0 +1,420 @@
+title: "Open work priority — bottleneck-first orchestrator refactoring"
+status: ready-for-review
+date: 2026-09-11
+tags: [long-running, ralph, orchestrator, bottleneck, refactoring, risk, triage]
+
+before:
+  summary: |
+    The previous triage treated the open PR list as a merge queue. That is the
+    wrong abstraction for an orchestrator: an orchestrator is blocked by a few
+    state-boundary failures, while many open PRs are optional improvements or
+    risky bundles. A PR can be valuable without being mergeable, and an issue
+    can be accepted without accepting its proposed implementation.
+
+    The actual execution path already has a state machine and durable fields.
+    `RalphState` persists the stage, attended lock, next action, blockers, and
+    per-stage state (`skills/ralph/lib/ralph_state.py:100-123`). The attended
+    chain persists each sub-stage and lands in DONE, RECOVERY_REQUIRED, or
+    USER_MERGE_REQUIRED (`skills/ralph/lib/ralph_chain.py:347-366`). The main
+    bottleneck is therefore not a lack of another coordinator; it is the gap
+    between those state transitions and the files, worktrees, hooks, and
+    evidence that an interrupted session must safely use.
+
+    Four concrete boundary problems dominate the backlog:
+
+    1. **Hard stop:** Issue #842 reports that `worktree-guard` reads ambient
+       cwd for its main/worktree discriminator while a subagent's target is in
+       a valid worktree. This denies normal Edit/Write and encourages unsafe
+       Bash-write or guard-disable workarounds.
+    2. **Continuity/audit bottleneck:** Issue #841 reports that phase artifacts
+       live in gitignored runtime directories. A completed run can therefore
+       be technically DONE but impossible for the next session or reviewer to
+       reconstruct. The build contract also says the runner does not copy its
+       long-running template bundle (`skills/build/SKILL.md:161-183`).
+    3. **Side-effect risk:** PR #838 combines janitor, retention, cooldown, and
+       advisory behavior. Its current checks are not green, and the described
+       retention import/cwd failures make cleanup both non-reliable and
+       potentially destructive.
+    4. **Truth/throughput gap:** the executor records `checks_run=[]` and
+       `independent=false` for its verify event (`lib/execute.py:917-934`),
+       while PR #836 and Issue #837 target hook/tool latency. Optimizing before
+       the orchestrator can prove what happened risks making an incorrect run
+       faster rather than making it safer.
+  evidence:
+    - "Issue #842: https://github.com/sh-ai-x/dev-harness-kit/issues/842"
+    - "Issue #841: https://github.com/sh-ai-x/dev-harness-kit/issues/841"
+    - "PR #838: https://github.com/sh-ai-x/dev-harness-kit/pull/838"
+    - "PR #836: https://github.com/sh-ai-x/dev-harness-kit/pull/836"
+    - "PR #797 and Issue #795: staged blob validation incident"
+    - "`skills/ralph/lib/ralph_state.py:100-123` — existing orchestrator state fields"
+    - "`skills/ralph/lib/ralph_chain.py:347-366` — attended run terminal states"
+    - "`skills/build/SKILL.md:170-183` — template copy is documented but not runner-wired"
+    - "`lib/execute.py:917-934` — executor verify evidence is explicitly self-reported"
+
+after:
+  summary: |
+    The backlog is reordered around the orchestrator's critical path rather
+    than PR age or feature size. The first wave fixes the hard edit gate and
+    creates a small, explicit artifact-promotion boundary. The second wave
+    makes unattended side effects safe. Only then do we split and rework the
+    large hygiene/latency/retry PRs.
+
+    The default disposition is now **accept the problem, not necessarily the
+    PR**. A current PR is accepted only when it has one bounded responsibility,
+    is based on current `origin/main`, has green required checks, and has a
+    rollback that does not require disabling the orchestrator's protections.
+    Otherwise the issue remains accepted, the PR is superseded or closed with
+    a cross-link, and a smaller replacement PR is created.
+
+    The target architecture is intentionally layered:
+
+    - **State layer:** `RalphState` owns transitions, attended locking, next
+      action, and blockers.
+    - **Execution layer:** `lib/execute.py` owns step lifecycle and subprocess
+      evidence; it does not decide hook policy or cleanup policy.
+    - **Boundary adapters:** a small promotion command, guard path resolver,
+      and side-effect gates translate state into files or external actions.
+    - **Protection layer:** worktree/TDD/pre-commit/destructive-confirm hooks
+      remain fail-closed and independently testable.
+    - **Measurement layer:** effectiveness reports consume provenance; they do
+      not manufacture independent verification from an agent exit code.
+  files:
+    - path: "hooks/worktree-guard.sh"
+      change: |
+        Add the smallest path-aware discriminator needed for Issue #842. Derive
+        the repository/worktree from `tool_input.file_path` when it resolves to
+        a registered worktree; retain the current ambient-cwd fallback for
+        outside paths. Do not redesign all hook routing in this PR.
+    - path: "hooks/lib/worktree-detect.sh"
+      change: |
+        If the helper extraction is unavoidable, add one narrow
+        `worktree_detect_at <path>` function and unit cases for main,
+        worktree, missing, symlink, and outside paths. Keep the existing caller
+        contract unchanged.
+    - path: "lib/ralph_promote.py"
+      change: |
+        Add an idempotent, explicit promotion operation that reads a completed
+        runtime phase and writes a small tracked evidence bundle. The first
+        PR is a command/adapter, not a rewrite of the executor state machine.
+    - path: "bin/ralph-promote-phases.sh"
+      change: |
+        Provide a stable operator/orchestrator entry point for promotion with
+        dry-run, session/plan identity, and fail-closed missing-artifact output.
+    - path: "docs/build-evidence/README.md"
+      change: |
+        Define the canonical tracked destination and minimum bundle: plan
+        identity, phase index, last action/next action, step outputs, changed
+        files, verification provenance, and blockers.
+    - path: "hooks/destructive-confirm.sh"
+      change: |
+        Make the existing session `push_confirm` decision cover both `push -u`
+        and `push --force-with-lease`; keep confirmation-on as the default and
+        limit the change to the two command branches plus tests.
+    - path: ".githooks/pre-commit"
+      change: |
+        Validate staged blobs and reject staged conflict markers in one focused
+        replacement for the behavior described by Issue #795. No unrelated
+        git-guard pattern changes belong in this PR.
+    - path: "lib/worktree_janitor.py"
+      change: |
+        Split PR #838's safety correction from its feature bundle: fix only
+        retention importability, fail closed on unknown retention, and make
+        the candidate test prove retained worktrees are excluded.
+    - path: "bin/worktree-janitor.sh"
+      change: |
+        In the janitor safety PR, anchor module execution at the repository
+        root. Keep bulk cleanup and log-retention policy in later PRs.
+    - path: "hooks/session-start-hygiene.sh"
+      change: |
+        If retained from PR #838, keep it as a read-only advisory and land it
+        separately from destructive cleanup; no janitor behavior is implied by
+        the advisory.
+    - path: "hooks/UserPromptSubmit*"
+      change: |
+        Rework PR #836 as a narrow latency change only after P0 boundaries are
+        green. Remove or relocate one slow advisory group at a time and retain
+        generated hook-matrix lint; do not mix it with context-window redesign.
+    - path: "tools/token_efficiency_analyzer.py"
+      change: |
+        Handle Issue #820 as an archive-discovery patch with an explicit
+        include/exclude flag before adding dashboard redesign.
+
+pros:
+  - "Uses the orchestrator's actual state boundaries instead of adding another broad coordination layer."
+  - "Separates risk from bottleneck: #842 is an immediate stop-the-line fix, while #838 is treated as a high-risk side effect that must be split before use."
+  - "Allows the team to accept #841, #830, and #795 while rejecting or superseding their current PR shape when a smaller replacement is safer."
+  - "Makes the simplest viable solution explicit: a promotion command can establish durable evidence before automatic executor wiring is attempted."
+  - "Reduces blast radius, review ambiguity, and rollback cost by enforcing one issue, one boundary, and one focused PR."
+  - "Preserves the existing Ralph attended-lock state machine and keeps hooks, execution, cleanup, and metrics independently testable."
+
+cons:
+  - "Replacing existing PRs creates short-term coordination work: issue/PR cross-links, supersession notes, and possible duplicate review."
+  - "The first #841 solution may require an explicit promotion call; automatic promotion on DONE is a follow-up unless the orchestrator integration is proven small and safe."
+  - "Splitting #838 delays the convenience of one hygiene bundle and may leave some cleanup features unavailable while the safety patch is reviewed."
+  - "A narrow #836 patch may leave some prompt advisories or context-window costs in place until a later measurement-driven change."
+  - "Strict evidence and fail-closed retention checks can make unattended runs stop more often at first; the trade is visible recovery instead of silent corruption or deletion."
+
+limitations:
+  - "The priority scores are heuristic because the repository does not yet have a stable corpus for stop rate, recovery time, artifact-loss rate, or per-hook latency."
+  - "Path-aware worktree detection covers registered repository worktrees; external workspaces, unusual symlink layouts, and tool payloads without `file_path` remain separate contracts."
+  - "A promotion command can preserve the canonical evidence bundle, but cannot recover artifacts that were already deleted or logs that were never emitted."
+  - "This is a boundary refactor plan, not a full rewrite of `lib/execute.py`, `RalphState`, or the effectiveness schema. Those larger changes require measurements from the first wave."
+  - "The proposal cannot decide ownership, reviewer availability, or whether a failing remote check is infrastructure noise; those remain explicit merge gates."
+
+sections:
+  - title: "Decision rule: accept issues, not PRs by default"
+    body: |
+      This proposal deliberately refuses to equate “the issue is valid” with
+      “the current PR should merge”. For each open item, apply this sequence:
+
+      1. Accept or reject the observed problem independently of its proposed
+         implementation.
+      2. Identify the orchestrator boundary: state, edit gate, artifact, side
+         effect, verification, recovery, measurement, or documentation.
+      3. Keep the current PR only if it changes one boundary, has a narrow file
+         set, is rebased on `origin/main`, and has green required checks.
+      4. Otherwise mark the PR superseded/closed with a link to the accepted
+         issue and create a replacement PR from `origin/main`.
+      5. Do not close the issue until the replacement is merged and its
+         boundary-level acceptance test passes.
+
+      This makes #838, #836, and #797 candidates for replacement rather than
+      presumed merge candidates. #835 may merge independently because it is
+      documentation-only, and #840 may be recreated as a small isolated fix
+      after its conflict is resolved.
+
+  - title: "Bottleneck map — what actually blocks the orchestrator"
+    body: |
+      | Bottleneck | Symptom | Open work | Blocking class | Ordering consequence |
+      |---|---|---|---|---|
+      | **Edit admission** | A valid subagent worktree edit is denied | #842 | Hard stop, high recovery cost | First. Nothing downstream can be trusted if agents cannot write through the normal tool path. |
+      | **Evidence continuity** | DONE state is not discoverable after session/worktree cleanup | #841; build template wiring | Hard resume/audit stop | Second. Establish a minimal tracked promotion contract before cleanup or retry automation. |
+      | **Unattended side effects** | Force push confirmation or commit integrity blocks/poisons checkpoints | #830; #795/#797 | Stop or corruption risk | Third. Make push and commit boundaries deterministic. |
+      | **Destructive cleanup** | Janitor can fail to recognize retained work or run from the wrong cwd | #838 | High blast radius, not current critical path | Split and gate. Do not let cleanup become a dependency of the core run. |
+      | **Verification truth** | Exit code is recorded without independent checks | executor; effectiveness | False completion/measurement | Add provenance to the evidence contract; do not optimize false scores. |
+      | **Iteration latency** | Hook/Bash/restart overhead accumulates | #836; #837 | Throughput, not correctness | Measure after admission and evidence paths are reliable. |
+      | **Recovery automation** | Retry may hide stale heads or repeat a bad action | #831 | Recovery quality | Add bounded retries only after state/evidence identity exists. |
+      | **Historical learning** | Archived sessions are omitted from dashboard | #820 | Learning/measurement | Low critical-path priority; fix after event/provenance contract. |
+
+      The ordering is therefore not “largest PR first” or “newest issue first”;
+      it is hard stop → resume/audit → side-effect integrity → safe cleanup →
+      measured optimization → learning/documentation.
+
+  - title: "Recommended ordering and disposition"
+    body: |
+      **O0 — stop-the-line, one small PR.**
+
+      - Accept Issue [#842](https://github.com/sh-ai-x/dev-harness-kit/issues/842).
+      - Do not wait for a broad hook refactor. Add a path-aware call at the
+        `worktree-guard` boundary using the existing `FILE_PATH` extraction and
+        the existing `orch/*` path pattern. Extract a helper only if tests show
+        duplication is unavoidable.
+      - Acceptance: parent cwd is main + target is registered worktree → normal
+        Edit/Write allowed; target is main → denied; outside/missing target has
+        an explicit safe result; the normal post-tool protection chain remains.
+
+      **O1 — durable evidence, minimal replacement PR.**
+
+      - Accept Issue [#841](https://github.com/sh-ai-x/dev-harness-kit/issues/841).
+      - Do not start by modifying the executor's step lifecycle. Create one
+        idempotent `ralph-promote-phases` command that copies a validated
+        minimum bundle to `docs/build-evidence/<plan-id>/` and writes a
+        SUMMARY with state, last action, next action, checks, and blockers.
+      - First use may be explicit/operator-triggered. If the command is stable,
+        wire it to the DONE transition in a second PR. This keeps the first
+        change small while preserving a path to unattended promotion.
+
+      **O2 — side-effect checkpoint, two focused PRs.**
+
+      - Accept Issue [#830](https://github.com/sh-ai-x/dev-harness-kit/issues/830)
+        and create a two-branch test for the existing `push_confirm` state;
+        do not redesign guard-mode.
+      - Accept Issue [#795](https://github.com/sh-ai-x/dev-harness-kit/issues/795),
+        but supersede PR [#797](https://github.com/sh-ai-x/dev-harness-kit/pull/797)
+        if its security/severity failures persist. Recreate the staged-blob
+        validation from current main with one integration reproducer.
+
+      **O3 — split high-risk or wide PRs.**
+
+      - Accept the retention problem in PR [#838](https://github.com/sh-ai-x/dev-harness-kit/pull/838),
+        but do not merge the hygiene bundle as-is. Create a safety-only PR for
+        retention importability, fail-closed behavior, and repository-root
+        invocation. Keep mutation dry-run by default. Follow with log
+        retention, cooldown, and advisory changes only after the safety PR.
+      - Accept the latency intent in PR [#836](https://github.com/sh-ai-x/dev-harness-kit/pull/836),
+        but prefer a new narrow PR that removes or relocates one slow hook group
+        and proves the generated hook matrix. Defer unrelated context-window
+        and broad hook rewrites.
+      - Recreate PR [#840](https://github.com/sh-ai-x/dev-harness-kit/pull/840)
+        as a fresh one-file/one-test CI fix if rebase does not cleanly resolve
+        its `CONFLICTING`/`DIRTY` state.
+
+      **O4 — optimize and recover after the boundaries are stable.**
+
+      - Issue [#837](https://github.com/sh-ai-x/dev-harness-kit/issues/837):
+        add latency measurements first; do not add hot reload, Bash fast paths,
+        and bulk patching in one change.
+      - PR [#831](https://github.com/sh-ai-x/dev-harness-kit/pull/831):
+        accept only bounded, identity-pinned retries with stale-head and
+        required-check revalidation.
+
+      **O5 — learning and workflow hygiene.**
+
+      - Issue [#820](https://github.com/sh-ai-x/dev-harness-kit/issues/820):
+        add archive discovery and a live/archive toggle; defer dashboard
+        redesign.
+      - PR [#832](https://github.com/sh-ai-x/dev-harness-kit/pull/832) / Issue
+        [#833](https://github.com/sh-ai-x/dev-harness-kit/issues/833): retain
+        as a proposal until local gate policy stabilizes.
+      - PR [#835](https://github.com/sh-ai-x/dev-harness-kit/pull/835): merge
+        when documentation parity is reviewed; it is not a runtime gate.
+
+  - title: "Refactoring shape — preserve ownership boundaries"
+    body: |
+      The refactor should make the orchestrator thinner, not make every hook
+      know about every phase. The intended dependency direction is:
+
+      ```text
+      RalphState transition
+          -> boundary adapter (promote / verify / push)
+              -> filesystem or external side effect
+                  -> provenance event + next_action/blocker
+      ```
+
+      Keep these responsibilities separate:
+
+      | Responsibility | Owner | Must not absorb |
+      |---|---|---|
+      | Stage transition and attended lock | `RalphState` / `ralph_chain` | Shell path heuristics, cleanup policy |
+      | Step execution and status | `lib/execute.py` | GitHub review policy, janitor deletion |
+      | File admission | `worktree-guard` / `tdd-guard` | Ralph phase progression |
+      | Durable evidence | promotion adapter + tracked docs | Worktree deletion decisions |
+      | Cleanup | janitor | Completion truth or promotion ownership |
+      | Effectiveness | event collector/reducer | Invented independent verification |
+
+      Avoid a “big orchestrator refactor” until O0/O1 provide real traces. The
+      first refactoring is a boundary extraction and an evidence contract, not
+      a new dispatcher, plugin registry, or shared hook framework.
+
+  - title: "Risk-based recommendation and trade-offs"
+    body: |
+      Use three scores for triage, each on a 1–5 scale:
+
+      - **Bottleneck (B):** how directly the item stops progress or resume.
+      - **Risk (R):** impact × likelihood × irreversibility if wrong.
+      - **Change containment (C):** how easy it is to isolate and roll back.
+
+      Recommended dispositions:
+
+      | Work | B | R | C | Recommendation |
+      |---|---:|---:|---:|---|
+      | #842 | 5 | 4 | 4 | New minimal PR immediately. |
+      | #841 | 5 | 3 | 4 | New promotion-command PR; executor wiring later. |
+      | #830 | 4 | 3 | 5 | New focused PR with two command-form tests. |
+      | #795/#797 | 3 | 5 | 3 | Accept issue; recreate PR from current main if gates remain red. |
+      | #838 | 2 | 5 | 2 | Do not merge bundle; split safety fix from cleanup features. |
+      | #836 | 3 | 3 | 2 | Supersede wide PR with one-hook-group latency PR. |
+      | #840 | 1 | 2 | 5 | Recreate/merge as isolated CI fix when convenient. |
+      | #831 | 2 | 3 | 3 | Defer until evidence identity exists. |
+      | #837 | 2 | 2 | 2 | Instrument first; optimize measured bottleneck. |
+      | #820 | 1 | 2 | 4 | Small follow-up after metrics contract. |
+      | #832/#833 | 1 | 2 | 3 | Defer; proposal is not runtime reliability. |
+      | #835 | 1 | 1 | 5 | Documentation-only merge when reviewed. |
+
+      This deliberately ranks #838 below #842/#841 despite its high risk: its
+      current default is dry-run, so it is not the immediate execution
+      bottleneck, but its risk forbids accepting the current bundled PR. The
+      correct response is containment and decomposition, not a forced merge.
+
+  - title: "Cons, limitations, and accepted trade-offs"
+    body: |
+      **Trade-off A — minimal fix vs integrated refactor**
+
+      A path-aware guard fix and a promotion command are less elegant than a
+      unified orchestration abstraction, but they are observable and reversible.
+      The proposal accepts temporary adapters and duplicate boundary code until
+      traces show which abstraction is actually shared.
+
+      **Trade-off B — explicit promotion vs automatic DONE promotion**
+
+      Manual promotion leaves a short-lived operator step and is not the final
+      unattended experience. It is chosen first because it avoids coupling
+      `lib/execute.py`, cleanup, and artifact layout in one risky PR. Automatic
+      promotion is accepted as O1.1 only after the command is idempotent and
+      its failure behavior is visible in `next_action`/`blockers`.
+
+      **Trade-off C — split PRs vs delivery speed**
+
+      Closing/superseding #838, #836, or #797 can feel slower than merging a
+      large bundle, but it reduces review ambiguity and makes rollback local.
+      The proposal prefers two independently mergeable small PRs over one fast
+      PR that couples cleanup, latency, and protection behavior.
+
+      **Trade-off D — fail-closed vs unattended continuity**
+
+      Ambiguous retention, missing evidence, or unverified staged content may
+      stop a run. That is an intentional cost: a visible RECOVERY_REQUIRED
+      state is preferable to deleting retained work, publishing conflict
+      markers, or claiming independent verification that did not happen.
+
+      **Trade-off E — measured optimization vs perceived speed**
+
+      #837 and the narrowed #836 may not immediately remove every second of
+      tool overhead. Measurement is required first because an optimization that
+      bypasses hook stages or increases false resumes can lower total harness
+      effectiveness even if wall-clock time improves.
+
+  - title: "Acceptance gates and exit criteria"
+    body: |
+      A replacement PR is ready for review only if it satisfies all applicable
+      gates:
+
+      - One issue, one boundary, one rollback path; no unrelated cleanup or
+        documentation bundle.
+      - Based on current `origin/main`; current PRs may be closed or marked
+        superseded rather than repaired indefinitely.
+      - Reproducer test exists for the incident or bottleneck being addressed.
+      - Hook changes preserve fail-closed behavior and generated hook-matrix
+        parity.
+      - External side effects have dry-run/default-safe behavior and explicit
+        provenance.
+      - A completion claim includes command, exit code, check identity, and
+        artifact path; an agent exit code is not independent verification.
+
+      O0 is complete when the #842 reproducer passes without disabling the
+      guard. O1 is complete when a fresh session can promote and read a phase
+      bundle after the runtime directory is unavailable. O2 is complete when
+      force-push and staged-conflict reproductions are deterministic. O3 is
+      complete when no cleanup candidate can be retained accidentally and the
+      reduced hook/CI PRs have green required checks.
+
+      Only after O0–O3 should the project judge overall harness effectiveness
+      with prevention, first-pass, recovery, measurement integrity, and
+      learning components. Until independent evidence exists, report
+      insufficient evidence rather than a synthetic score.
+
+  - title: "Current backlog snapshot"
+    body: |
+      Snapshot date: **2026-09-11 (Asia/Seoul)**. The live repository contains
+      7 open PRs and 7 open issues.
+
+      **Open PRs:** [#840](https://github.com/sh-ai-x/dev-harness-kit/pull/840),
+      [#838](https://github.com/sh-ai-x/dev-harness-kit/pull/838),
+      [#836](https://github.com/sh-ai-x/dev-harness-kit/pull/836),
+      [#835](https://github.com/sh-ai-x/dev-harness-kit/pull/835),
+      [#832](https://github.com/sh-ai-x/dev-harness-kit/pull/832),
+      [#831](https://github.com/sh-ai-x/dev-harness-kit/pull/831), and
+      [#797](https://github.com/sh-ai-x/dev-harness-kit/pull/797).
+
+      **Open issues:** [#842](https://github.com/sh-ai-x/dev-harness-kit/issues/842),
+      [#841](https://github.com/sh-ai-x/dev-harness-kit/issues/841),
+      [#837](https://github.com/sh-ai-x/dev-harness-kit/issues/837),
+      [#833](https://github.com/sh-ai-x/dev-harness-kit/issues/833),
+      [#830](https://github.com/sh-ai-x/dev-harness-kit/issues/830),
+      [#820](https://github.com/sh-ai-x/dev-harness-kit/issues/820), and
+      [#795](https://github.com/sh-ai-x/dev-harness-kit/issues/795).
+
+      This is a revised review proposal, not an instruction to merge the listed
+      PRs. The intended next action is to accept the problem statements,
+      supersede unsafe/wide PR shapes where necessary, and implement O0/O1 as
+      small replacement PRs from current main.
