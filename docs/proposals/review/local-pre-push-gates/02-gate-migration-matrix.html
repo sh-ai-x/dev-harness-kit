@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 — Gate migration matrix: Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge)</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<nav class="back-link"><a href="00-index.html">← 00-index</a></nav>
+<h1>02 — Gate migration matrix: Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge)</h1>
+<p class="meta">2026-09-09 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">ci</span><span class="tag tag-info">gates</span><span class="tag tag-info">tier-a</span><span class="tag tag-info">tier-b</span><span class="tag tag-info">tier-c</span><span class="tag tag-info">migration-matrix</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision rule (3-axis)</a></li><li><a href="#sec-1">Tier A — local pre-push (split: core vs opt-in)</a></li><li><a href="#sec-2">Tier B — remote-only GH Actions (5 gates)</a></li><li><a href="#sec-3">Tier C — post-merge (2 gates)</a></li><li><a href="#sec-4">Migration deltas</a></li><li><a href="#sec-5">Why this is NOT a CI runtime optimizer</a></li><li><a href="#sec-6">What this is NOT</a></li><li><a href="#sec-7">Cross-references</a></li></ol></div>
+<h2 id="sec-0">Decision rule (3-axis)</h2>
+<p>For each gate, ask three questions in order:</p>
+<ol><li><strong>Does it cost provider tokens?</strong> (i.e. does it call an LLM judge — <code>/dev-kit:review</code>, <code>/dev-kit:security</code>, <code>/dev-kit:maintenance</code>?) If yes → <strong>Tier B (must stay remote)</strong>. Severity review comments belong in GH Actions because that's where the provider tokens are intentionally spent and where the PR comments land.</li></ol>
+<ol><li><strong>Does it consume significant local CPU/memory?</strong> (<code>pytest tests/</code> on a large suite can run 30-120s + several GB RAM; <code>cache-decay-audit</code> runs a subset of pytest too.) If yes → <strong>Tier A optional</strong> (opt-in via config flag, NOT on by default). The user's local machine has bounded resources; the pre-push hook must not become a battery/CPU drain on every push.</li></ol>
+<ol><li><strong>Does it fail in a way the developer can fix before pushing?</strong> (i.e. is the failure mode visible in the diff, commit message, or staged file content — not external state?) If yes → <strong>Tier A (local pre-push)</strong>. The point is to <strong>prevent LLM judges from firing on a known-broken push</strong>. Tokens saved per caught failure: $1-3.</li></ol>
+<ol><li><strong>Is it triggered by a merge event?</strong> (e.g. <code>version-bump.yml</code> fires on <code>pull_request: closed</code> after main merge.) If yes → <strong>Tier C (post-merge only)</strong>. No pre-push mirror needed.</li></ol>
+<p>A gate is <strong>Tier A core</strong> iff: cheap locally (axis 2 = no) AND fixable pre-push (axis 3 = yes). A gate is <strong>Tier A opt-in</strong> iff: expensive locally (axis 2 = yes) AND fixable pre-push (axis 3 = yes). A gate is <strong>Tier B</strong> iff: costs provider tokens (axis 1 = yes). A gate is <strong>Tier C</strong> iff: post-merge trigger (axis 4 = yes).</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Tier A — local pre-push (split: core vs opt-in)</h2>
+<h3>Tier A core — <strong>RECOMMENDED DEFAULT</strong> (always on; cheap locally)</h3>
+<p><strong>Recommended shipping scope</strong>: <code>issue-sync</code> only. This is the only stage that actually saves provider tokens; everything else in this proposal is opt-in.</p>
+<table><thead><tr><th>Gate</th><th>Local command</th><th>Wall-clock</th><th>CPU/mem</th><th>Token-saving</th></tr></thead><tbody><tr><td><strong>`issue-sync`</strong></td><td><code>tools/issue_sync.py pre-push --remote origin --base origin/main --strict</code></td><td>~9s + 1 <code>gh api</code> per ref</td><td>&lt;10MB RSS</td><td><strong>$1-3 per caught stale-ref push</strong></td></tr></tbody></table>
+<p><strong>Tier A core wall-clock</strong>: ~9s on a warm tree. CPU/memory footprint: &lt;10MB RSS (just the parser). Zero pytest, zero ruff, zero validate — until user opts in below.</p>
+<p><strong>Why issue-sync is the only recommended default</strong>: it is the only Tier A gate that catches a failure mode invisible to GH Actions' deterministic gates AND saves provider tokens by blocking the LLM judges. Other Tier A gates are token-neutral (they catch failures that GH Actions would catch anyway) or only marginally useful (faster feedback, but the failure doesn't waste tokens).</p>
+<h3>Tier A additional (default-off; cheap but not token-saving)</h3>
+<p>These stages are also off by default. They consume negligible resources but don't save provider tokens. Listed for completeness — may ship as opt-in in a future iteration if user feedback shows demand.</p>
+<table><thead><tr><th>Gate</th><th>Local command</th><th>Wall-clock</th><th>Why not default</th></tr></thead><tbody><tr><td><code>branch-policy</code></td><td><code>git rev-parse --abbrev-ref HEAD</code></td><td>&lt;1s</td><td><strong>Already covered by `hooks/git-guard.sh`</strong> (PreToolUse <code>Bash</code>). Re-implementing here would be a duplicate</td></tr><tr><td><code>cost-flag</code></td><td><code>git diff --name-only origin/main...HEAD | grep</code></td><td>&lt;1s</td><td>Doesn't save tokens; just adds a PR label. Remote gate handles this</td></tr></tbody></table>
+<h3>Tier A omitted (not migrated)</h3>
+<p>These gates are <strong>NOT migrated</strong> even as opt-in:</p>
+<table><thead><tr><th>Gate</th><th>Why omitted</th></tr></thead><tbody><tr><td><code>linear-pr-sync --check-only</code></td><td>Network call + Python; Linear API state is rarely fixable pre-push (best-effort remote sync is fine)</td></tr><tr><td><code>prompt-injection static filter</code></td><td>Pattern scan over the full diff can be CPU-expensive on large PRs; the workflow's regex set is stricter than the local one anyway</td></tr><tr><td><code>merge-queue-ready-check</code></td><td>GH API state aggregator (read-only)</td></tr><tr><td><code>cache-decay-audit</code> (full G4)</td><td>G4 alone is the heaviest pytest subset (~60s); the user explicitly said local resources matter</td></tr></tbody></table>
+<p><strong>The `gh api` call in issue-sync is optional</strong>:</p>
+<ul><li>With <code>--offline</code>: parser emits the ref list and warns (does not fail). Developer runs the full check on push if they want the fail-fast signal.</li><li>Without <code>--offline</code> (default): runs the same <code>gh api</code> check as the workflow. The developer needs <code>gh auth status</code> green.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-2">Tier B — remote-only GH Actions (5 gates)</h2>
+<table><thead><tr><th>Gate</th><th>Why remote-only</th><th>Local fallback (manual)</th></tr></thead><tbody><tr><td><code>/dev-kit:review</code> (3-dim LLM judge)</td><td>Provider API key, ~1m44s, $0.10-0.50/push</td><td><code>bin/review-local.sh</code></td></tr><tr><td><code>/dev-kit:security</code> (10-dim OWASP fan-out)</td><td>Provider API key, ~2m22s, $0.50-2.00/push</td><td><code>bin/review-local.sh</code></td></tr><tr><td><code>/dev-kit:maintenance</code></td><td>Provider API key, ~3m45s, $0.30-1.00/push</td><td><code>/dev-kit:maintenance</code> skill</td></tr><tr><td><code>severity gate</code></td><td>Aggregates Tier-B outputs</td><td>n/a (composite only)</td></tr><tr><td><code>prompt-injection static filter</code></td><td>Can run locally, but runner has stricter rules + LLM-grade regex</td><td><code>tools/prompt_injection_scan.py</code></td></tr><tr><td><code>merge-queue-ready-check</code></td><td>GH API state aggregator (PR checks rollup)</td><td><code>gh pr checks --json</code></td></tr><tr><td><code>Fork PR review</code></td><td>GitHub-side approval workflow</td><td>n/a</td></tr></tbody></table>
+<p><strong>Net cost of Tier B per push</strong>: ~8m + $1-3.50. Moving these to local pre-push would <strong>multiply cost by the number of pushes per PR</strong> (typically 3-10) without adding signal.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Tier C — post-merge (2 gates)</h2>
+<table><thead><tr><th>Gate</th><th>Trigger</th><th>Why not pre-push</th></tr></thead><tbody><tr><td><code>version-bump</code></td><td><code>pull_request: closed</code> after main merge</td><td>Operates on merged state</td></tr><tr><td><code>auto-fix-pr</code></td><td><code>workflow_dispatch</code> only (manual repair adapter)</td><td>Operator-initiated</td></tr></tbody></table>
+<p>These stay remote. No local mirror needed.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Migration deltas</h2>
+<table><thead><tr><th>Metric</th><th>Before</th><th>After Phase 1 (Tier A core only)</th><th>After Phase 2 (Tier A core + opt-in)</th></tr></thead><tbody><tr><td>Provider tokens spent on a stale-ref push</td><td>$1-3 (LLM judges fire)</td><td><strong>$0</strong> (issue-sync catches pre-LLM)</td><td>$0 (same)</td></tr><tr><td>Provider tokens spent on a failing-test push</td><td>$1-3</td><td>$1-3 (Tier A opt-in off by default)</td><td><strong>$0</strong> (if user opts in)</td></tr><tr><td>Provider tokens spent on a successful PR</td><td>$3-9 (3 push iterations × 3 judges)</td><td>$3-9 unchanged</td><td>$3-9 unchanged</td></tr><tr><td>Local CPU/memory cost per push</td><td>0</td><td>~10s + negligible RAM</td><td>~30-120s + 200-500MB RAM (if opt-in enabled)</td></tr><tr><td>Pushes that reach GH Actions with a known-broken state</td><td>baseline (PR #829: 1)</td><td><strong>0</strong> for issue-sync / branch-policy / cost-flag</td><td><strong>0</strong> for all Tier A gates (if opted in)</td></tr><tr><td>Severity review / LLM fan-out location</td><td>GH Actions</td><td><strong>GH Actions</strong> (unchanged — must stay)</td><td>GH Actions (unchanged)</td></tr><tr><td>GH Actions minutes per PR</td><td>8-12 min</td><td>8-12 min unchanged</td><td>8-12 min unchanged</td></tr></tbody></table>
+<p><strong>Headline win</strong>: Phase 1 alone saves $1-3 of provider tokens per stale-ref push (the PR #829 failure mode) at &lt;10s wall-clock + negligible local resource cost. <strong>No opt-in config needed.</strong> Phase 2's opt-in stages (test/validate/lint) are for users who explicitly want to save more tokens at the cost of local CPU.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Why this is NOT a CI runtime optimizer</h2>
+<p>The proposal <strong>does not reduce GH Actions minutes</strong>. It only reduces the <strong>rate of red pushes</strong>. A developer who fixes a failing gate locally still pushes the green version to GH Actions, which then runs the same Tier-A gates (plus Tier B).</p>
+<p>The only GH Actions savings are:</p>
+<ol><li>Pushes blocked at pre-push never reach <code>pull_request</code> events.</li><li>Fewer <code>rerun</code> calls on already-red workflows.</li></ol>
+<p>Both are second-order effects. The primary metric is <strong>developer time-to-fix</strong>, not GH Actions spend.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">What this is NOT</h2>
+<ul><li><strong>Not a wholesale CI migration.</strong> No remote gate is removed.</li><li><strong>Not a substitute for LLM judges / severity review.</strong> Tier B stays remote. PR comments from <code>/dev-kit:review</code> / <code>/dev-kit:security</code> / <code>/dev-kit:maintenance</code> must land in GH Actions because that's where the comments are posted.</li><li><strong>Not a CI runtime cost reduction.</strong> GH Actions minutes per PR are unchanged. The win is <strong>provider token spend on caught Tier-A failures</strong>, not GH Actions minutes.</li><li><strong>Not a mandate to migrate `test` / `validate` / `lint`.</strong> Those gates cost zero provider tokens and can stay in GH Actions. They land in <code>hooks/pre-push.sh</code> because they're already part of the orchestration; the user has explicitly said they're not the bottleneck.</li><li><strong>Not a magic bullet for fork-PRs.</strong> <code>fork-pr-review.yml</code> is a different problem (GitHub security model — fork PRs can't access secrets) and stays as-is.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-7">Cross-references</h2>
+<ul><li><a href="01-problem-and-context.yaml">`01-problem-and-context.yaml`</a> — gate inventory + cost profile</li><li><a href="03-implementation.yaml">`03-implementation.yaml`</a> — hook design + parser flag</li><li><a href="04-rollout.yaml">`04-rollout.yaml`</a> — phased delivery</li><li><code>hooks/git-guard.sh</code> — existing closest analog (already covers branch-policy)</li><li><code>bin/review-local.sh</code> — existing local fallback for Tier B judges</li></ul>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-09 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

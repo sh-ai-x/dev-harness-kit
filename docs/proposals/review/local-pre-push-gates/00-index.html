@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local pre-push gate migration — fix PR</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Local pre-push gate migration — fix PR</h1>
+<p class="meta">2026-09-09 · <span class="tag tag-warn">draft</span></p>
+<div class="tags"><span class="tag tag-info">ci</span><span class="tag tag-info">gates</span><span class="tag tag-info">hooks</span><span class="tag tag-info">pre-push</span><span class="tag tag-info">issue-sync</span><span class="tag tag-info">workflow</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">One-paragraph summary</a></li><li><a href="#sec-1">Sub-topic map</a></li><li><a href="#sec-2">Why now (triggering evidence)</a></li><li><a href="#sec-3">What this proposal is NOT</a></li><li><a href="#sec-4">Proposal lifecycle</a></li><li><a href="#sec-5">Net-net</a></li></ol></div>
+<h2 id="sec-0">One-paragraph summary</h2>
+<p>PR #829 was merged with <code>GitHub issue sync check</code> failing because the PR body referenced three closed issues (<code>#726</code>, <code>#397</code>, <code>#625</code>) alongside the one it closed (<code>#823</code>). The gate is deterministic (Python parser + <code>gh api</code>) and ran on GH Actions only — so the developer had no signal until after push. <strong>Every push that triggered GH Actions burned $1-3 of provider tokens on LLM judges before the developer knew the push was broken.</strong></p>
+<p>This proposal installs a <strong>minimal local pre-push hook</strong> with <strong>`issue-sync` as the recommended default</strong> — the only gate that actually saves provider tokens. It catches the failure mode for <strong>~9s wall-clock + &lt;10MB RSS</strong>: zero pytest, zero ruff, zero validate. Severity review (LLM judges that produce PR comments) <strong>stays in GH Actions</strong> — that's where provider tokens are intentionally spent and where comments land. Other Tier A gates (<code>test</code>/<code>validate</code>/<code>lint</code>/<code>cache-decay-audit</code>) ship as <strong>opt-in</strong> under <code>.dev-kit/local-gates.yaml</code> for users who want them; branch-policy and cost-flag are not in the hook at all (already covered by <code>git-guard.sh</code> / remote gate respectively).</p>
+<p><strong>Three-axis decision rule</strong> (token cost × local resource cost × fixability) replaces the simple Tier A/B/C split.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Sub-topic map</h2>
+<table><thead><tr><th>File</th><th>Topic</th></tr></thead><tbody><tr><td><a href="01-problem-and-context.yaml">01-problem-and-context.yaml</a></td><td>PR #829 root cause + full GH Actions gate inventory (11 workflows, 6 LLM-judge gates)</td></tr><tr><td><a href="02-gate-migration-matrix.yaml">02-gate-migration-matrix.yaml</a></td><td>Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge) decision per gate</td></tr><tr><td><a href="03-implementation.yaml">03-implementation.yaml</a></td><td><code>hooks/pre-push.sh</code> design, <code>tools/issue_sync.py</code> <code>--lenient</code> flag, <code>tools/issue_sync.py</code> API-call bypass for offline mode</td></tr><tr><td><a href="04-rollout.yaml">04-rollout.yaml</a></td><td>3-phase rollout with per-phase acceptance criteria + cost deltas</td></tr><tr><td><a href="05-meta-eval.yaml">05-meta-eval.yaml</a></td><td>Risk register, open questions, cross-references, sources</td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-2">Why now (triggering evidence)</h2>
+<p>Three converging signals — all rooted in the same insight:</p>
+<p><strong>Insight</strong>: GitHub Actions is the <strong>only</strong> place provider API tokens are spent. Every <code>pull_request</code> event on <code>dev-harness-kit</code> triggers <code>/dev-kit:review</code> (3-dim) + <code>/dev-kit:security</code> (10-dim OWASP fan-out) + <code>/dev-kit:maintenance</code> — three LLM-judge calls per push. At ~$0.50-2.00 per push, a developer who iterates 5 times on a PR burns $2.50-10.00 on the LLM judges alone, before the PR is even reviewable. The point of running deterministic gates locally is to <strong>make sure provider tokens are only spent on pushes that have a chance of merging</strong>.</p>
+<p>Signals:</p>
+<ol><li><strong>PR #829 merged with a red `issue-sync` gate</strong> (run #102301168018). The deterministic gate failed; the LLM judges still ran; the merge queue still merged it via admin squash. Net result: provider tokens spent on a PR with a stale-ref bug that should have been caught pre-push.</li></ol>
+<ol><li><strong>The user has explicitly asked</strong> for a local pre-push mirror of deterministic gates. The user's framing: "github action에서 도는 것은 문제는 token을 아끼기 위함임을 알아야해 시간이 문제가 아니라" — what runs in GH Actions is about <strong>token savings, not time</strong>.</li></ol>
+<ol><li><strong>The gate surface has grown</strong>: 11 workflows (was 8 in 2026-08), 3 of them LLM-judge gates (<code>/dev-kit:review</code>, <code>/dev-kit:security</code>, <code>/dev-kit:maintenance</code>). The cost of a wasted push attempt is now ~$1-3 in provider tokens alone, plus 4-7 minutes of wall-clock — both non-trivial.</li></ol>
+<hr class="section-divider">
+
+<h2 id="sec-3">What this proposal is NOT</h2>
+<ul><li><strong>Not</strong> a removal of any remote GH Actions gate. The remote stays as the authoritative source of truth (PR branch protection cannot be enforced locally).</li><li><strong>Not</strong> a replacement for LLM judges. <strong>Severity review</strong> (the LLM fan-out that produces PR comments) MUST stay in GitHub Actions — that's where provider tokens are spent intentionally, where the comments are posted, and where the verdict is aggregated. We are <strong>not</strong> moving <code>/dev-kit:review</code>, <code>/dev-kit:security</code>, or <code>/dev-kit:maintenance</code> to local hooks.</li><li><strong>Not</strong> a wall-clock optimizer. Time is a secondary concern. The primary concern is <strong>provider token spend</strong>: failed pushes that reach GH Actions trigger LLM judges, wasting $1-3 per failed push.</li><li><strong>Not</strong> a mandate that <code>test</code> / <code>validate</code> / <code>lint</code> move locally. Those gates cost zero provider tokens and the user has explicitly said they can stay in GH Actions. The proposal migrates them too (because they're already part of the <code>hooks/pre-push.sh</code> orchestration) but <strong>the token-saving value comes from the issue-sync migration specifically</strong>.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-4">Proposal lifecycle</h2>
+<pre><code>┌──────────────────────────────────────────────────────────────────┐
+│  draft (now) → ready-for-review → accepted → implemented        │
+└──────────────────────────────────────────────────────────────────┘
+                 │
+                 └→ rejected (kept for audit; see playbook-application/02-reanalysis.yaml for an example of a re-scored proposal)</code></pre>
+<p>Current status: <code>draft</code>. Bucket: <code>review/</code>. Auto-routed by <code>status: draft</code> per <code>skills/proposal/SKILL.md:STATUS_TO_BUCKET</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Net-net</h2>
+<table><thead><tr><th>Dimension</th><th>Before</th><th>After Phase 1 (core)</th><th>After Phase 2 (opt-in)</th></tr></thead><tbody><tr><td>Provider tokens on a stale-ref push</td><td>$1-3 (LLM judges fire)</td><td><strong>$0</strong> (issue-sync catches pre-LLM)</td><td>$0 (same)</td></tr><tr><td>Provider tokens on a failing-test push</td><td>$1-3</td><td>$1-3 (opt-in off by default)</td><td><strong>$0</strong> (if user opts in)</td></tr><tr><td>Local wall-clock per push</td><td>0s</td><td><strong>&lt;10s</strong> (issue-sync)</td><td>30-120s (test/validate/lint)</td></tr><tr><td>Local CPU/memory per push</td><td>0</td><td><strong>negligible</strong></td><td>200-500MB RAM (opt-in)</td></tr><tr><td>Local hooks added</td><td>0</td><td>1 (<code>hooks/pre-push.sh</code>)</td><td>same hook, opt-in config</td></tr><tr><td>Severity review (LLM fan-out + comments)</td><td>GitHub Actions</td><td><strong>GitHub Actions</strong> (unchanged — MUST stay remote)</td><td>unchanged</td></tr><tr><td>Lines of code changed</td><td>n/a</td><td>~250 (1 hook + 1 parser flag + 4 tests)</td><td>+30 (opt-in config)</td></tr></tbody></table>
+<p><strong>Three constraints balanced</strong>:</p>
+<ol><li><strong>Provider tokens</strong> (primary win) — Phase 1 alone saves $1-3 per stale-ref push.</li><li><strong>Local CPU/memory</strong> (user-flagged concern) — Phase 1 is negligible; Phase 2 is opt-in precisely to preserve resources.</li><li><strong>Wall-clock</strong> (explicitly NOT the goal) — secondary; only Phase 2 trades wall-clock for more token savings.</li></ol>
+<p><strong>Apply? YES (Phase 0 → Phase 1 → Phase 2 opt-in).</strong></p>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-09 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

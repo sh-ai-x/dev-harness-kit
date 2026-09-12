@@ -1,0 +1,180 @@
+title: "02 — Gate migration matrix: Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge)"
+status: draft
+date: 2026-09-09
+tags: [ci, gates, tier-a, tier-b, tier-c, migration-matrix]
+
+sections:
+  - title: Decision rule (3-axis)
+    body: |
+      For each gate, ask three questions in order:
+
+      1. **Does it cost provider tokens?** (i.e. does it call an
+         LLM judge — `/dev-kit:review`, `/dev-kit:security`,
+         `/dev-kit:maintenance`?)
+         If yes → **Tier B (must stay remote)**. Severity review
+         comments belong in GH Actions because that's where the
+         provider tokens are intentionally spent and where the PR
+         comments land.
+
+      2. **Does it consume significant local CPU/memory?**
+         (`pytest tests/` on a large suite can run 30-120s + several
+         GB RAM; `cache-decay-audit` runs a subset of pytest too.)
+         If yes → **Tier A optional** (opt-in via config flag, NOT
+         on by default). The user's local machine has bounded
+         resources; the pre-push hook must not become a battery/CPU
+         drain on every push.
+
+      3. **Does it fail in a way the developer can fix before
+         pushing?** (i.e. is the failure mode visible in the diff,
+         commit message, or staged file content — not external state?)
+         If yes → **Tier A (local pre-push)**. The point is to
+         **prevent LLM judges from firing on a known-broken push**.
+         Tokens saved per caught failure: $1-3.
+
+      4. **Is it triggered by a merge event?** (e.g. `version-bump.yml`
+         fires on `pull_request: closed` after main merge.)
+         If yes → **Tier C (post-merge only)**. No pre-push mirror
+         needed.
+
+      A gate is **Tier A core** iff: cheap locally (axis 2 = no)
+      AND fixable pre-push (axis 3 = yes).
+      A gate is **Tier A opt-in** iff: expensive locally (axis 2 = yes)
+      AND fixable pre-push (axis 3 = yes).
+      A gate is **Tier B** iff: costs provider tokens (axis 1 = yes).
+      A gate is **Tier C** iff: post-merge trigger (axis 4 = yes).
+
+  - title: "Tier A — local pre-push (split: core vs opt-in)"
+    body: |
+      ### Tier A core — **RECOMMENDED DEFAULT** (always on; cheap locally)
+
+      **Recommended shipping scope**: `issue-sync` only. This is the
+      only stage that actually saves provider tokens; everything else
+      in this proposal is opt-in.
+
+      | Gate | Local command | Wall-clock | CPU/mem | Token-saving |
+      |---|---|---|---|---|
+      | **`issue-sync`** | `tools/issue_sync.py pre-push --remote origin --base origin/main --strict` | ~9s + 1 `gh api` per ref | <10MB RSS | **$1-3 per caught stale-ref push** |
+
+      **Tier A core wall-clock**: ~9s on a warm tree. CPU/memory
+      footprint: <10MB RSS (just the parser). Zero pytest, zero ruff,
+      zero validate — until user opts in below.
+
+      **Why issue-sync is the only recommended default**: it is the
+      only Tier A gate that catches a failure mode invisible to GH
+      Actions' deterministic gates AND saves provider tokens by blocking
+      the LLM judges. Other Tier A gates are token-neutral (they catch
+      failures that GH Actions would catch anyway) or only marginally
+      useful (faster feedback, but the failure doesn't waste tokens).
+
+      ### Tier A additional (default-off; cheap but not token-saving)
+
+      These stages are also off by default. They consume negligible
+      resources but don't save provider tokens. Listed for completeness —
+      may ship as opt-in in a future iteration if user feedback shows demand.
+
+      | Gate | Local command | Wall-clock | Why not default |
+      |---|---|---|---|
+      | `branch-policy` | `git rev-parse --abbrev-ref HEAD` | <1s | **Already covered by `hooks/git-guard.sh`** (PreToolUse `Bash`). Re-implementing here would be a duplicate |
+      | `cost-flag` | `git diff --name-only origin/main...HEAD \| grep` | <1s | Doesn't save tokens; just adds a PR label. Remote gate handles this |
+
+      ### Tier A omitted (not migrated)
+
+      These gates are **NOT migrated** even as opt-in:
+
+      | Gate | Why omitted |
+      |---|---|
+      | `linear-pr-sync --check-only` | Network call + Python; Linear API state is rarely fixable pre-push (best-effort remote sync is fine) |
+      | `prompt-injection static filter` | Pattern scan over the full diff can be CPU-expensive on large PRs; the workflow's regex set is stricter than the local one anyway |
+      | `merge-queue-ready-check` | GH API state aggregator (read-only) |
+      | `cache-decay-audit` (full G4) | G4 alone is the heaviest pytest subset (~60s); the user explicitly said local resources matter |
+
+      **The `gh api` call in issue-sync is optional**:
+      - With `--offline`: parser emits the ref list and warns
+        (does not fail). Developer runs the full check on push
+        if they want the fail-fast signal.
+      - Without `--offline` (default): runs the same `gh api` check
+        as the workflow. The developer needs `gh auth status` green.
+
+  - title: Tier B — remote-only GH Actions (5 gates)
+    body: |
+      | Gate | Why remote-only | Local fallback (manual) |
+      |---|---|---|
+      | `/dev-kit:review` (3-dim LLM judge) | Provider API key, ~1m44s, $0.10-0.50/push | `bin/review-local.sh` |
+      | `/dev-kit:security` (10-dim OWASP fan-out) | Provider API key, ~2m22s, $0.50-2.00/push | `bin/review-local.sh` |
+      | `/dev-kit:maintenance` | Provider API key, ~3m45s, $0.30-1.00/push | `/dev-kit:maintenance` skill |
+      | `severity gate` | Aggregates Tier-B outputs | n/a (composite only) |
+      | `prompt-injection static filter` | Can run locally, but runner has stricter rules + LLM-grade regex | `tools/prompt_injection_scan.py` |
+      | `merge-queue-ready-check` | GH API state aggregator (PR checks rollup) | `gh pr checks --json` |
+      | `Fork PR review` | GitHub-side approval workflow | n/a |
+
+      **Net cost of Tier B per push**: ~8m + $1-3.50. Moving these
+      to local pre-push would **multiply cost by the number of pushes
+      per PR** (typically 3-10) without adding signal.
+
+  - title: Tier C — post-merge (2 gates)
+    body: |
+      | Gate | Trigger | Why not pre-push |
+      |---|---|---|
+      | `version-bump` | `pull_request: closed` after main merge | Operates on merged state |
+      | `auto-fix-pr` | `workflow_dispatch` only (manual repair adapter) | Operator-initiated |
+
+      These stay remote. No local mirror needed.
+
+  - title: Migration deltas
+    body: |
+      | Metric | Before | After Phase 1 (Tier A core only) | After Phase 2 (Tier A core + opt-in) |
+      |---|---|---|---|
+      | Provider tokens spent on a stale-ref push | $1-3 (LLM judges fire) | **$0** (issue-sync catches pre-LLM) | $0 (same) |
+      | Provider tokens spent on a failing-test push | $1-3 | $1-3 (Tier A opt-in off by default) | **$0** (if user opts in) |
+      | Provider tokens spent on a successful PR | $3-9 (3 push iterations × 3 judges) | $3-9 unchanged | $3-9 unchanged |
+      | Local CPU/memory cost per push | 0 | ~10s + negligible RAM | ~30-120s + 200-500MB RAM (if opt-in enabled) |
+      | Pushes that reach GH Actions with a known-broken state | baseline (PR #829: 1) | **0** for issue-sync / branch-policy / cost-flag | **0** for all Tier A gates (if opted in) |
+      | Severity review / LLM fan-out location | GH Actions | **GH Actions** (unchanged — must stay) | GH Actions (unchanged) |
+      | GH Actions minutes per PR | 8-12 min | 8-12 min unchanged | 8-12 min unchanged |
+
+      **Headline win**: Phase 1 alone saves $1-3 of provider tokens
+      per stale-ref push (the PR #829 failure mode) at <10s wall-clock
+      + negligible local resource cost. **No opt-in config needed.**
+      Phase 2's opt-in stages (test/validate/lint) are for users who
+      explicitly want to save more tokens at the cost of local CPU.
+
+  - title: Why this is NOT a CI runtime optimizer
+    body: |
+      The proposal **does not reduce GH Actions minutes**. It only
+      reduces the **rate of red pushes**. A developer who fixes a
+      failing gate locally still pushes the green version to GH
+      Actions, which then runs the same Tier-A gates (plus Tier B).
+
+      The only GH Actions savings are:
+      1. Pushes blocked at pre-push never reach `pull_request` events.
+      2. Fewer `rerun` calls on already-red workflows.
+
+      Both are second-order effects. The primary metric is
+      **developer time-to-fix**, not GH Actions spend.
+
+  - title: What this is NOT
+    body: |
+      - **Not a wholesale CI migration.** No remote gate is removed.
+      - **Not a substitute for LLM judges / severity review.** Tier B
+        stays remote. PR comments from `/dev-kit:review` / `/dev-kit:security`
+        / `/dev-kit:maintenance` must land in GH Actions because that's
+        where the comments are posted.
+      - **Not a CI runtime cost reduction.** GH Actions minutes per PR
+        are unchanged. The win is **provider token spend on caught
+        Tier-A failures**, not GH Actions minutes.
+      - **Not a mandate to migrate `test` / `validate` / `lint`.** Those
+        gates cost zero provider tokens and can stay in GH Actions.
+        They land in `hooks/pre-push.sh` because they're already part
+        of the orchestration; the user has explicitly said they're not
+        the bottleneck.
+      - **Not a magic bullet for fork-PRs.** `fork-pr-review.yml`
+        is a different problem (GitHub security model — fork PRs
+        can't access secrets) and stays as-is.
+
+  - title: Cross-references
+    body: |
+      - [`01-problem-and-context.yaml`](01-problem-and-context.yaml) — gate inventory + cost profile
+      - [`03-implementation.yaml`](03-implementation.yaml) — hook design + parser flag
+      - [`04-rollout.yaml`](04-rollout.yaml) — phased delivery
+      - `hooks/git-guard.sh` — existing closest analog (already covers branch-policy)
+      - `bin/review-local.sh` — existing local fallback for Tier B judges

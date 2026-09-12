@@ -1,0 +1,132 @@
+title: Local pre-push gate migration — fix PR #829's silent sync-gate failure
+status: draft
+date: 2026-09-09
+tags: [ci, gates, hooks, pre-push, issue-sync, workflow]
+umbrella: local-pre-push-gates
+
+sections:
+  - title: One-paragraph summary
+    body: |
+      PR #829 was merged with `GitHub issue sync check` failing because
+      the PR body referenced three closed issues (`#726`, `#397`, `#625`)
+      alongside the one it closed (`#823`). The gate is deterministic
+      (Python parser + `gh api`) and ran on GH Actions only — so the
+      developer had no signal until after push. **Every push that
+      triggered GH Actions burned $1-3 of provider tokens on LLM judges
+      before the developer knew the push was broken.**
+
+      This proposal installs a **minimal local pre-push hook** with
+      **`issue-sync` as the recommended default** — the only gate
+      that actually saves provider tokens. It catches the failure
+      mode for **~9s wall-clock + <10MB RSS**: zero pytest, zero ruff,
+      zero validate. Severity review (LLM judges that produce PR
+      comments) **stays in GH Actions** — that's where provider tokens
+      are intentionally spent and where comments land. Other Tier A
+      gates (`test`/`validate`/`lint`/`cache-decay-audit`) ship as
+      **opt-in** under `.dev-kit/local-gates.yaml` for users who want
+      them; branch-policy and cost-flag are not in the hook at all
+      (already covered by `git-guard.sh` / remote gate respectively).
+
+      **Three-axis decision rule** (token cost × local resource cost ×
+      fixability) replaces the simple Tier A/B/C split.
+
+  - title: Sub-topic map
+    body: |
+      | File | Topic |
+      |---|---|
+      | [01-problem-and-context.yaml](01-problem-and-context.yaml) | PR #829 root cause + full GH Actions gate inventory (11 workflows, 6 LLM-judge gates) |
+      | [02-gate-migration-matrix.yaml](02-gate-migration-matrix.yaml) | Tier A (local pre-push) vs Tier B (remote-only) vs Tier C (post-merge) decision per gate |
+      | [03-implementation.yaml](03-implementation.yaml) | `hooks/pre-push.sh` design, `tools/issue_sync.py` `--lenient` flag, `tools/issue_sync.py` API-call bypass for offline mode |
+      | [04-rollout.yaml](04-rollout.yaml) | 3-phase rollout with per-phase acceptance criteria + cost deltas |
+      | [05-meta-eval.yaml](05-meta-eval.yaml) | Risk register, open questions, cross-references, sources |
+
+  - title: Why now (triggering evidence)
+    body: |
+      Three converging signals — all rooted in the same insight:
+
+      **Insight**: GitHub Actions is the **only** place provider API
+      tokens are spent. Every `pull_request` event on `dev-harness-kit`
+      triggers `/dev-kit:review` (3-dim) + `/dev-kit:security` (10-dim
+      OWASP fan-out) + `/dev-kit:maintenance` — three LLM-judge calls
+      per push. At ~$0.50-2.00 per push, a developer who iterates 5
+      times on a PR burns $2.50-10.00 on the LLM judges alone, before
+      the PR is even reviewable. The point of running deterministic
+      gates locally is to **make sure provider tokens are only spent
+      on pushes that have a chance of merging**.
+
+      Signals:
+
+      1. **PR #829 merged with a red `issue-sync` gate** (run #102301168018).
+         The deterministic gate failed; the LLM judges still ran;
+         the merge queue still merged it via admin squash. Net result:
+         provider tokens spent on a PR with a stale-ref bug that should
+         have been caught pre-push.
+
+      2. **The user has explicitly asked** for a local pre-push mirror
+         of deterministic gates. The user's framing: "github action에서
+         도는 것은 문제는 token을 아끼기 위함임을 알아야해 시간이 문제가
+         아니라" — what runs in GH Actions is about **token savings,
+         not time**.
+
+      3. **The gate surface has grown**: 11 workflows (was 8 in 2026-08),
+         3 of them LLM-judge gates (`/dev-kit:review`, `/dev-kit:security`,
+         `/dev-kit:maintenance`). The cost of a wasted push attempt is
+         now ~$1-3 in provider tokens alone, plus 4-7 minutes of
+         wall-clock — both non-trivial.
+
+  - title: What this proposal is NOT
+    body: |
+      - **Not** a removal of any remote GH Actions gate. The remote
+        stays as the authoritative source of truth (PR branch
+        protection cannot be enforced locally).
+      - **Not** a replacement for LLM judges. **Severity review**
+        (the LLM fan-out that produces PR comments) MUST stay in
+        GitHub Actions — that's where provider tokens are spent
+        intentionally, where the comments are posted, and where the
+        verdict is aggregated. We are **not** moving `/dev-kit:review`,
+        `/dev-kit:security`, or `/dev-kit:maintenance` to local hooks.
+      - **Not** a wall-clock optimizer. Time is a secondary concern.
+        The primary concern is **provider token spend**: failed
+        pushes that reach GH Actions trigger LLM judges, wasting
+        $1-3 per failed push.
+      - **Not** a mandate that `test` / `validate` / `lint` move
+        locally. Those gates cost zero provider tokens and the user
+        has explicitly said they can stay in GH Actions. The proposal
+        migrates them too (because they're already part of the
+        `hooks/pre-push.sh` orchestration) but **the token-saving
+        value comes from the issue-sync migration specifically**.
+
+  - title: Proposal lifecycle
+    body: |
+      ```
+      ┌──────────────────────────────────────────────────────────────────┐
+      │  draft (now) → ready-for-review → accepted → implemented        │
+      └──────────────────────────────────────────────────────────────────┘
+                       │
+                       └→ rejected (kept for audit; see playbook-application/02-reanalysis.yaml for an example of a re-scored proposal)
+      ```
+
+      Current status: `draft`. Bucket: `review/`. Auto-routed by
+      `status: draft` per `skills/proposal/SKILL.md:STATUS_TO_BUCKET`.
+
+  - title: Net-net
+    body: |
+      | Dimension | Before | After Phase 1 (core) | After Phase 2 (opt-in) |
+      |---|---|---|---|
+      | Provider tokens on a stale-ref push | $1-3 (LLM judges fire) | **$0** (issue-sync catches pre-LLM) | $0 (same) |
+      | Provider tokens on a failing-test push | $1-3 | $1-3 (opt-in off by default) | **$0** (if user opts in) |
+      | Local wall-clock per push | 0s | **<10s** (issue-sync) | 30-120s (test/validate/lint) |
+      | Local CPU/memory per push | 0 | **negligible** | 200-500MB RAM (opt-in) |
+      | Local hooks added | 0 | 1 (`hooks/pre-push.sh`) | same hook, opt-in config |
+      | Severity review (LLM fan-out + comments) | GitHub Actions | **GitHub Actions** (unchanged — MUST stay remote) | unchanged |
+      | Lines of code changed | n/a | ~250 (1 hook + 1 parser flag + 4 tests) | +30 (opt-in config) |
+
+      **Three constraints balanced**:
+      1. **Provider tokens** (primary win) — Phase 1 alone saves $1-3
+         per stale-ref push.
+      2. **Local CPU/memory** (user-flagged concern) — Phase 1 is
+         negligible; Phase 2 is opt-in precisely to preserve resources.
+      3. **Wall-clock** (explicitly NOT the goal) — secondary; only
+         Phase 2 trades wall-clock for more token savings.
+
+      **Apply? YES (Phase 0 → Phase 1 → Phase 2 opt-in).**

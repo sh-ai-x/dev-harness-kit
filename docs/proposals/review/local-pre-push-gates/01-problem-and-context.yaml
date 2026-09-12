@@ -1,0 +1,177 @@
+title: "01 — Problem & context: PR #829 sync-gate failure + GH Actions gate inventory"
+status: draft
+date: 2026-09-09
+tags: [ci, gates, issue-sync, pr-829, inventory]
+
+sections:
+  - title: PR #829 root cause (the bug that triggered this proposal)
+    body: |
+      **Run**: [`actions/runs/34298820072/job/102301168018`](https://github.com/sh-ai-x/dev-harness-kit/actions/runs/34298820072/job/102301168018) — `conclusion: failure`, 9s wall-clock.
+
+      **Gate**: `.github/workflows/issue-sync.yml:issue-sync` ("GitHub issue sync check").
+
+      **Parser**: `tools/issue_sync.py` v1.0.0. Captures every `#N` /
+      `owner/repo#N` reference in the PR title + body (HTML comments and
+      fenced code blocks stripped) with **any** leading keyword
+      (`Closes`, `Fixes`, `Resolves`, `Ref`, `See`, `Part of`, `Tracking`,
+      `Related to`, …) **or bare `#N` mention**.
+
+      **Closing contract** (`.github/workflows/issue-sync.yml:Check issue states`):
+      ```
+      if [ "${#CLOSED_REFS[@]}" -gt 0 ]; then
+          echo "::error title=issue-sync::PR references ${#CLOSED_REFS[@]} closed issue(s); sync cannot match."
+          exit 1
+      fi
+      ```
+      Unconditional. Any closed ref → hard fail.
+
+      **PR #829 body section "Related:"** (verbatim):
+      ```
+      - Issue #823 — the gap this closes
+      - Issue #726 — bootstrap-PR tolerance (preserved per-judge)
+      - Issue #397 — PARSE_FAILED hard-fail (preserved per-judge)
+      - Issue #625 — verdict_source split (preserved per-judge)
+      ```
+
+      **Parser output** (`/tmp/refs.json` from the failed run):
+      | ref | source | state | verdict |
+      |---|---|---|---|
+      | `#823` | title (`Closes`) | open | OK |
+      | `#823` | body | open | OK (dup) |
+      | `#726` | body | **closed** | **FAIL** |
+      | `#397` | body | **closed** | **FAIL** |
+      | `#625` | body | **closed** | **FAIL** |
+
+      **Final error**:
+      ```
+      ##[error]PR references 3 closed issue(s); sync cannot match.
+      ##[error]Closed refs: #726 #397 #625
+      ##[error]Fix: either re-open the issue(s), remove the reference from the PR body,
+                or open a new issue and replace the ref.
+      ```
+
+      **Why it merged anyway**: PR #829 was merged via squash with
+      admin override; `issue-sync` is not a `required` check on the
+      branch protection rule (only `CI / test`, `CI / validate`,
+      `CI / lint`, `Review`, `Security`, `Maintenance` are required).
+      The failure is **silent in the merge queue** and still shows
+      `fail` on `gh pr checks`.
+
+  - title: Why the gate caught this is correct (the contract is right)
+    body: |
+      The sync contract is real and load-bearing:
+
+      - "Closes #N against a closed issue" is a **stale ref** —
+        the work is no longer owed, the PR description lies.
+      - "Bare #N against a closed issue" is ambiguous at best —
+        the contributor linked to an issue that doesn't accept
+        contributions.
+      - The gate's job is to surface the contradiction at PR time,
+        not at merge time.
+
+      The **bug is not the gate**. The bug is that:
+      1. The local developer got no signal.
+      2. The gate does not distinguish between `Closes #N (closed)`
+         (genuinely stale) and `Related to #N (closed)` (intentional
+         audit-trail preservation).
+
+  - title: Full GH Actions gate inventory (11 workflows)
+    body: |
+      From `gh api repos/sh-ai-x/dev-harness-kit/actions/workflows`:
+
+      | # | Workflow | File | LoC | Trigger | Blocking? |
+      |---|---|---|---|---|---|
+      | 1 | CI | `ci.yml` | 288 | `pull_request`, `push:main`, `workflow_dispatch` | YES |
+      | 2 | PR Review | `review.yml` | 1066 | `pull_request`, `workflow_dispatch` | YES |
+      | 3 | PR Maintenance | `maintenance.yml` | 551 | `pull_request`, `workflow_dispatch` | YES |
+      | 4 | GitHub issue sync gate | `issue-sync.yml` | 171 | `pull_request:[opened,synchronize,reopened,edited]`, `workflow_dispatch` | YES |
+      | 5 | linear-pr-sync | `linear-pr-sync.yml` | 108 | `pull_request`, `workflow_dispatch` | NO (`continue-on-error`) |
+      | 6 | Fork PR Review | `fork-pr-review.yml` | 248 | `pull_request` (fork-only) | YES |
+      | 7 | cache-decay-audit | `cache-decay-audit.yml` | 178 | `pull_request`, `workflow_dispatch` | YES |
+      | 8 | cost-flag | `cost-flag.yml` | 195 | `pull_request` | YES (label) |
+      | 9 | merge-queue-ready-check | `merge-queue-ready-check.yml` | 113 | `pull_request` (queue) | YES |
+      | 10 | auto-fix-pr | `auto-fix-pr.yml` | 214 | `workflow_dispatch` only | NO |
+      | 11 | version-bump | `version-bump.yml` | 208 | `pull_request: closed` (post-merge) | NO |
+
+      **8 are pull_request triggers**. **6 are LLM-judge gates**
+      (`review.yml` runs `/dev-kit:review` + `/dev-kit:security`;
+      `maintenance.yml` runs `/dev-kit:maintenance`).
+
+  - title: Gate-by-gate contract (the SSOT for migration decisions)
+    body: |
+      | Gate | What | Blocking contract | Runtime | Network | Owner |
+      |---|---|---|---|---|---|
+      | `branch-policy` | Warns on direct push to main | Warning (advisory) | <1s | No | `ci.yml` |
+      | `test (python 3.12)` | `pytest tests/ -v` | Any failure → fail | ~2m | No | `ci.yml` |
+      | `validate` | Plugin/manifest schema | Schema invalid → fail | ~10s | No | `ci.yml` |
+      | `lint (ruff)` | Ruff over tracked files | Any violation → fail | ~7s | No | `ci.yml` |
+      | `scope (production code?)` | Detects prod-code touches | Sets gate output | <5s | No | `review.yml` |
+      | `prompt-injection static filter` | Pattern scan over diff | Suspect → fail | ~10s | No | `review.yml` |
+      | `/dev-kit:review (3-dim)` | LLM judge correctness + reuse/simplification | Verdict=Approve → pass | ~1m44s | YES | `review.yml` |
+      | `/dev-kit:security (10-dim)` | OWASP A01–A10 + LLM01 | Verdict=Approve → pass | ~2m22s | YES | `review.yml` |
+      | `severity gate (review + security)` | Aggregates R+S verdicts | Any high → fail | ~5s | No | `review.yml` |
+      | `/dev-kit:maintenance` | CC-1..8 / OE-1..8 / VM-1..4 + docs | Verdict=Pass → pass | ~3m45s | YES | `maintenance.yml` |
+      | `maintenance gate (verdict + docs)` | Doc-updated check | docs-not-required flag or verdict=Pass | ~7s | No | `maintenance.yml` |
+      | `cache-decay-audit (G4+G5)` | F1 cache_decay + skill frontmatter | Any failure → fail | ~2m12s | No | `cache-decay-audit.yml` |
+      | `cost-flag` | Labels PR if it touched LLM-cost config | Label only | <5s | No | `cost-flag.yml` |
+      | `merge-queue-ready-check` | Required-check aggregator | All required pass → ready | <5s | No | `merge-queue-ready-check.yml` |
+      | `Fork PR review` | Awaits maintainer approval | No approval → fail | indefinite | No | `fork-pr-review.yml` |
+      | **`GitHub issue sync check`** | Every `#N` ref → must be `open` | Any closed → fail | ~9s | YES (`gh api`) | `issue-sync.yml` |
+      | `linear-pr-sync` | Mirrors PR state to Linear | `continue-on-error` (best-effort) | ~7s | YES | `linear-pr-sync.yml` |
+
+  - title: Cost profile (why per-push LLM judges are non-starter)
+    body: |
+      Adding the **provider-token cost** of all blocking gates per push
+      (the headline metric; wall-clock shown for context):
+      - `test` + `validate` + `lint`: ~2m30s wall-clock, **$0 tokens**
+      - `cache-decay-audit` (G4+G5): ~2m12s, **$0 tokens**
+      - `prompt-injection static filter`: ~10s, **$0 tokens**
+      - `/dev-kit:review` (3-dim): ~1m44s, **~$0.10-0.50 per push**
+      - `/dev-kit:security` (10-dim): ~2m22s, **~$0.50-2.00 per push**
+      - `/dev-kit:maintenance`: ~3m45s, **~$0.30-1.00 per push**
+      - `issue-sync`: ~9s, **$0 tokens** (uses `gh api`)
+
+      Total **deterministic** cost per push: **$0** (no provider tokens)
+      Total **LLM-judge** cost per push: **~$1-3.50**
+
+      Running LLM judges per push is **2-3 orders of magnitude** more
+      expensive than the deterministic subset in provider tokens, and
+      **the only metric that matters for this proposal**. Wall-clock
+      is secondary. The migration matrix must reflect this.
+
+  - title: Local hook inventory (what already exists)
+    body: |
+      From `.dev-kit/.active-hooks.json`:
+
+      | Hook | When | fail_closed | Already covers |
+      |---|---|---|---|
+      | `git-guard.sh` | PreToolUse `Bash` | true | direct-main push (worktree-aware) |
+      | `tdd-guard.sh` | PreToolUse `Edit\|Write` | true | RED-evidence enforcement |
+      | `secret-scan.sh` | PostToolUse `Edit\|Write` | true | accidental key commit |
+      | `slop-detector.sh` | PostToolUse `Edit\|Write` | true | AI-slop patterns |
+      | `l4-todo-scan.sh` | PostToolUse `Edit\|Write` | true | forbidden deferred-work markers |
+      | `injection-content-guard.sh` | PostToolUse `Agent\|WebFetch` | false | prompt-injection on fetched text |
+      | `loop-detect.sh` | PostToolUse `Bash` | true | bash doom-loop |
+      | `sub-agent-handoff.sh` | PostToolUse `Agent` | true | missing evidence block |
+      | `linear-worktree-create.sh` | PostToolUse `Bash` | false | Linear mirror |
+      | `worktree-log-auto-install.sh` | PostToolUse `Bash` | false | session start log hooks |
+      | `stop-verify.sh` | Stop | true | build-stop verify |
+
+      **No pre-push hook exists today.** Claude Code's `Stop` hook
+      is the closest analog but fires only at session-end, not at
+      `git push`.
+
+      Git's native `pre-push` hook (`git/hooks/pre-push`) is
+      unconfigured across this repo. This proposal installs it.
+
+  - title: Cross-references
+    body: |
+      - PR #829: feat(ci): split review.yml into review + security templates (Closes #823)
+      - Issue #823: gate-select AI-judge pick has no `review-only` option
+      - `.github/workflows/issue-sync.yml` — gate that failed
+      - `tools/issue_sync.py` — parser (v1.0.0)
+      - `hooks/git-guard.sh` — existing closest analog
+      - `hooks/tdd-guard.sh` — pattern reference for hook ergonomics
+      - `skills/proposal/SKILL.md` — proposal lifecycle
+      - `docs/proposals/review/playbook-application/02-reanalysis.yaml` — example of a re-scored proposal
+      - `iron-laws/index.md` — Iron Law L2 ("Cartography, not re-reads"); L3 ("Volatile content stays in the prompt tail")
