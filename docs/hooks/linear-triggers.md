@@ -58,24 +58,11 @@ created"). Falls back to the most recent entry in
 `git worktree list --porcelain` if the parse fails (e.g. multi-line
 bash command, or an exotic flag the parser doesn't know).
 
-### `linear-task-change.sh` — UserPromptSubmit
-
-Detects plan / task changes mid-session and triggers one
-auto-sync round only when the scope (branch + latest commit
-subject) differs from the last-recorded handoff scope. Delegates
-to `tools/linear_sync.py task-change-sync` for the diff.
-
-This hook closes the gap where a session sits idle after a
-branch change or a fresh commit and the next Edit|Write is
-many minutes away — the user can now expect a Linear update
-immediately after stating the new intent, not after the next
-accidental save.
-
 ## Owner gate
 
-The auto-sync path (`auto_sync` / `task-change-sync` in
-`tools/linear_sync.py`) applies a **repo-owner gate** that the
-manual CLI path (`/dev-kit:linear` → `sync()`) does NOT. The
+The auto-sync path (`auto_sync` in `tools/linear_sync.py`)
+applies a **repo-owner gate** that the manual CLI path
+(`/dev-kit:linear` → `sync()`) does NOT. The
 gate's resolution order, first match wins:
 
 1. `LINEAR_REPO_OWNER_AUTO_SYNC=1|true` — explicit opt-in

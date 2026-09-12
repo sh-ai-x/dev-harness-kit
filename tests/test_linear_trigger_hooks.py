@@ -39,7 +39,9 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 SESSION_START_HOOK = ROOT / "hooks" / "linear-session-start.sh"
 WORKTREE_CREATE_HOOK = ROOT / "hooks" / "linear-worktree-create.sh"
-TASK_CHANGE_HOOK = ROOT / "hooks" / "linear-task-change.sh"
+# linear-task-change.sh was removed in fix/remove-userpromptsubmit-advisories;
+# coverage migrated to linear-autosync / linear-worktree-create /
+# linear-session-start (see hooks/index.md for the migration note).
 
 
 def _hermetic_env() -> dict[str, str]:
@@ -231,22 +233,6 @@ class TestLinearWorktreeCreateHook(unittest.TestCase):
             })
             result = _run_hook(WORKTREE_CREATE_HOOK, payload=payload, env=env)
             self.assertEqual(result.returncode, 0)
-
-
-class TestLinearTaskChangeHook(unittest.TestCase):
-    def test_empty_payload_exits_zero(self):
-        result = _run_hook(TASK_CHANGE_HOOK, payload="")
-        self.assertEqual(result.returncode, 0)
-
-    def test_main_checkout_cwd_does_not_fire(self):
-        # The task-change hook is worktree-only.
-        result = _run_hook(TASK_CHANGE_HOOK, payload=json.dumps({"cwd": str(ROOT)}))
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, "")
-
-    def test_no_stderr_on_empty_payload(self):
-        result = _run_hook(TASK_CHANGE_HOOK, payload="")
-        self.assertEqual(result.stderr, "")
 
 
 class TestWorktreeAddParser(unittest.TestCase):

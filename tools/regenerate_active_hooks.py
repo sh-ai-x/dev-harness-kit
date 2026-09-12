@@ -64,6 +64,44 @@ from atomic import atomic_write_json, read_json_or_default  # noqa: E402
 
 SCHEMA_VERSION = "1.0.0"
 
+# UserPromptSubmit is a synchronous gate in front of every prompt — any
+# hook that runs Python, hits the network, or walks a full file stalls
+# the user. `tools/regenerate_active_hooks.py` enforces this with a
+# regen-time lint (issue tracked in `fix/remove-userpromptsubmit-advisories`).
+#
+# Forbidden tokens are matched as bare substrings in the command string
+# AFTER stripping the canonical `python3 -m lib.<module>` pattern (the
+# in-plugin library invocation shape — used by the TDD scope judge
+# hook, which has its own 45s subprocess timeout baked in and a
+# fail-safe `tdd_required: true` default).
+#
+# Outside the canonical `python3 -m lib.<x>` shape, the lint rejects:
+#   - `python` (any other invocation — `python -c`, heredoc `python3 -`,
+#     bare `python script.py`) — those can stall on a long script.
+#   - `curl` (any HTTP roundtrip).
+#   - `git fetch` (network-bound).
+#   - `git worktree` (touches the worktree config; the PreToolUse guard
+#     is the right place).
+#   - `jq -rs` (full-file slurp + reduce; the prior context-window-guard
+#     shape).
+#
+# Tokens are matched in the post-strip command so the canonical patterns
+# don't false-positive. `python3 -m lib.<x>` is the in-plugin library
+# invocation shape (tdd-scope-judge); `command -v python3` is the
+# interpreter-availability check that precedes the canonical call.
+_USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS = (
+    "python3 -m lib.",
+    "command -v python3",
+)
+_USERPROMPT_SUBMIT_FORBIDDEN_TOKENS = (
+    "python",        # any python invocation OUTSIDE the canonical patterns
+    "curl",          # any HTTP roundtrip
+    "git fetch",     # network-bound
+    "git worktree",  # touches the worktree config; the PreToolUse guard is the right place
+    "jq -rs",        # full-file slurp + reduce; the prior context-window-guard shape
+)
+_USERPROMPT_SUBMIT_MAX_TIMEOUT = 5  # seconds; anything more is a design smell
+
 # Path-prefix tokens we strip from a hook command string. The harness
 # substitutes the env var at runtime; we only care about the script path.
 _ENV_PREFIX_RE = re.compile(r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}/")
@@ -129,7 +167,10 @@ def _derive_name(path: str) -> str:
     return base
 
 
-def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]]:
+def _walk_hooks_json(
+    hooks_json_path: Path,
+    repo_root: Path | None = None,
+) -> Dict[str, List[Dict[str, object]]]:
     """Read hooks/hooks.json and emit the event -> entries mapping.
 
     Returns a dict keyed by event name; each value is a list of hook
@@ -141,6 +182,13 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
     inference). Missing entries raise SystemExit(1) — the explicit
     field is the SSOT and silent defaults would re-introduce the
     drift the field replaced.
+
+    `repo_root` is used by the UserPromptSubmit lint to read each
+    hook's script body and reject forbidden tokens there too (the
+    command-string check alone leaves a gap: a script can call
+    `python` from a wrapper without the word appearing in the
+    command). Pass `None` to skip the body check (e.g. from tests
+    that don't ship real hook files).
     """
     raw = json.loads(hooks_json_path.read_text(encoding="utf-8"))
     hooks_section = raw.get("hooks", {})
@@ -174,6 +222,109 @@ def _walk_hooks_json(hooks_json_path: Path) -> Dict[str, List[Dict[str, object]]
                         file=sys.stderr,
                     )
                     sys.exit(1)
+                # UserPromptSubmit is a synchronous gate in front of
+                # every prompt. Anything that runs Python, hits the
+                # network, walks a full file, or carries a generous
+                # timeout stalls the user. The regen tool hard-rejects
+                # such entries so a slow hook can never re-enter the
+                # wiring — the only "allowed" UserPromptSubmit hook is
+                # one that does an in-process regex / tail sample on
+                # stdin within 5 seconds.
+                if event == "UserPromptSubmit":
+                    # Strip the canonical patterns before scanning —
+                    # those are the in-plugin library invocation
+                    # (`python3 -m lib.<x>`) and the interpreter check
+                    # (`command -v python3`). Both are documented
+                    # exceptions; everything else containing `python`
+                    # is forbidden.
+                    cmd_scanned = cmd
+                    for pat in _USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS:
+                        cmd_scanned = cmd_scanned.replace(pat, "")
+                    for token in _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS:
+                        if token in cmd_scanned:
+                            print(
+                                f"regenerate_active_hooks: UserPromptSubmit "
+                                f"hook {rel} contains forbidden token "
+                                f"{token!r}. UserPromptSubmit is a "
+                                f"synchronous gate; anything that runs "
+                                f"Python, hits the network, or walks a "
+                                f"full file stalls the user. The "
+                                f"documented exceptions are "
+                                f"{_USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS} "
+                                f"(in-plugin library invocation / "
+                                f"interpreter-availability check, both with "
+                                f"subprocess timeouts + fail-safe defaults). "
+                                f"Move the work to a PreToolUse / "
+                                f"PostToolUse / SessionStart hook, an "
+                                f"explicit skill, or a tail-sample regex.",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                    # Defense-in-depth: also read the script body and
+                    # reject forbidden tokens there. A wrapper script
+                    # can call `python` / `curl` / `git fetch` without
+                    # the word appearing in the command string. The
+                    # body check closes that gap; failure to read the
+                    # script (missing file) is treated as a hard
+                    # fail — a broken hook must not silently pass.
+                    if repo_root is not None and rel.endswith(".sh"):
+                        script_path = repo_root / rel
+                        if not script_path.is_file():
+                            print(
+                                f"regenerate_active_hooks: UserPromptSubmit "
+                                f"hook references missing script: {rel}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                        try:
+                            script_body = script_path.read_text(encoding="utf-8")
+                        except OSError as exc:
+                            print(
+                                f"regenerate_active_hooks: UserPromptSubmit "
+                                f"hook {rel} unreadable: {exc}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                        # Strip comment lines so the lint doesn't false-
+                        # positive on tokens that appear in docstrings
+                        # describing the OLD shape. The lint is meant
+                        # to gate NEW calls, not historical commentary.
+                        body_non_comment = "\n".join(
+                            line for line in script_body.splitlines()
+                            if not line.lstrip().startswith("#")
+                        )
+                        # Strip the canonical patterns before scanning — the in-plugin
+                        # library invocation (`python3 -m lib.<x>`,
+                        # e.g. tdd-scope-judge) and the interpreter
+                        # check (`command -v python3`) are documented
+                        # exceptions; everything else containing
+                        # `python` is forbidden.
+                        body_scanned = body_non_comment
+                        for pat in _USERPROMPT_SUBMIT_CANONICAL_PYTHON_PATTERNS:
+                            body_scanned = body_scanned.replace(pat, "")
+                        for token in _USERPROMPT_SUBMIT_FORBIDDEN_TOKENS:
+                            if token in body_scanned:
+                                print(
+                                    f"regenerate_active_hooks: UserPromptSubmit "
+                                    f"hook {rel} script body contains forbidden "
+                                    f"token {token!r}. The command-string lint "
+                                    f"alone is not sufficient — the body must "
+                                    f"also stay cheap.",
+                                    file=sys.stderr,
+                                )
+                                sys.exit(1)
+                    timeout = hook.get("timeout", 0)
+                    if isinstance(timeout, (int, float)) and timeout > _USERPROMPT_SUBMIT_MAX_TIMEOUT:
+                        print(
+                            f"regenerate_active_hooks: UserPromptSubmit "
+                            f"hook {rel} has timeout={timeout}s, exceeds "
+                            f"the {_USERPROMPT_SUBMIT_MAX_TIMEOUT}s cap. "
+                            f"A UserPromptSubmit hook that needs a "
+                            f"timeout is doing too much work — redesign "
+                            f"or move it off UserPromptSubmit.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
                 entries.append({
                     "name": _derive_name(rel),
                     "path": rel,
@@ -228,7 +379,7 @@ def regenerate(root: Path) -> Path:
             file=sys.stderr,
         )
         sys.exit(1)
-    hooks_by_event = _walk_hooks_json(hooks_json)
+    hooks_by_event = _walk_hooks_json(hooks_json, repo_root=root)
     target = root / ".dev-kit" / ".active-hooks.json"
     existing = read_json_or_default(target, {})
     payload = _build_payload(hooks_by_event, existing)
