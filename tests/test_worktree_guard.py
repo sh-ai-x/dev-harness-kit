@@ -314,6 +314,35 @@ class TestWorktreeGuardAllows(unittest.TestCase):
         finally:
             wt_parent.cleanup()
 
+    def test_allows_target_worktree_when_hook_cwd_is_main_checkout(self):
+        """Target path wins when a sub-agent inherits the parent's main cwd."""
+        main_tmp, wt_parent, wt_path = _init_main_with_worktree()
+        try:
+            r = _run_hook(
+                "worktree-guard.sh",
+                _edit_payload(str(wt_path / "new.py")),
+                cwd=Path(main_tmp.name),
+            )
+            self.assertEqual(r.returncode, 0, f"expected allow, got rc={r.returncode}, stderr={r.stderr}")
+        finally:
+            wt_parent.cleanup()
+            main_tmp.cleanup()
+
+    def test_blocks_main_target_when_hook_cwd_is_worktree(self):
+        """A worktree session cannot redirect an edit into main."""
+        main_tmp, wt_parent, wt_path = _init_main_with_worktree()
+        try:
+            r = _run_hook(
+                "worktree-guard.sh",
+                _edit_payload(str(Path(main_tmp.name) / "new.py")),
+                cwd=wt_path,
+            )
+            self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
+            self.assertIn("main checkout", r.stdout + r.stderr)
+        finally:
+            wt_parent.cleanup()
+            main_tmp.cleanup()
+
     def test_allows_edit_outside_any_git_repo(self):
         """Non-git directory → hook does not apply → exit 0."""
         with tempfile.TemporaryDirectory() as tmp:
