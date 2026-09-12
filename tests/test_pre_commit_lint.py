@@ -38,9 +38,14 @@ def _run_hook(root: Path, *, env: dict[str, str] | None = None) -> subprocess.Co
 
 
 def _path_without_ruff(root: Path) -> dict[str, str]:
+    # Build a minimal PATH that mirrors what the hook actually needs:
+    # bash + git + grep for index inspection and conflict-marker scan,
+    # plus mktemp for the NUL-preserving scratch files the hook uses
+    # to capture `git ls-files -z` and `git grep -z` output (bash
+    # command substitution would strip those NUL bytes).
     bin_dir = root / "bin-without-ruff"
     bin_dir.mkdir()
-    for command in ("bash", "git", "grep"):
+    for command in ("bash", "git", "grep", "mktemp", "rm"):
         executable = shutil.which(command)
         if executable is None:
             raise RuntimeError(f"required test command not found: {command}")
@@ -80,6 +85,107 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("ruff check --fix", result.stderr)
             self.assertIn("git commit --no-verify", result.stderr)
 
+    def test_ruff_remediation_command_quotes_shell_metacharacters(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            special_name = "unsafe;echo-INJECTED.py"
+            (root / special_name).write_text("import os\n")
+            subprocess.run(["git", "-C", str(root), "add", "--", special_name], check=True)
+
+            env = _path_without_ruff(root)
+            (root / "bin-without-ruff" / "ruff").write_text("#!/bin/sh\nexit 42\n")
+            (root / "bin-without-ruff" / "ruff").chmod(0o755)
+            result = _run_hook(root, env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(r"unsafe\;echo-INJECTED.py", result.stderr)
+            self.assertNotIn(special_name, result.stderr)
+
+    def test_conflict_marker_output_quotes_control_bytes(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            special_name = "bad\x1b[2J.txt"
+            (root / special_name).write_text("<<<<<<< HEAD\n")
+            subprocess.run(["git", "-C", str(root), "add", "--", special_name], check=True)
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertNotIn("\x1b", result.stderr)
+            self.assertIn("bad", result.stderr)
+            self.assertIn("2J", result.stderr)
+
+    def test_lints_staged_blob_not_worktree(self):
+        if shutil.which("ruff") is None:
+            self.skipTest("ruff is not installed")
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "staged.py").write_text("import os\n")
+            subprocess.run(["git", "-C", str(root), "add", "staged.py"], check=True)
+            (root / "staged.py").write_text("VALUE = 1\n")
+
+            result = _run_hook(root)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("staged.py", result.stderr)
+            self.assertIn("F401", result.stderr)
+
+    def test_blocks_indented_conflict_markers_in_staged_blob(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text(
+                "def render():\n    <<<<<<< HEAD\n    =======\n    >>>>>>> branch\n"
+            )
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+            (root / "notes.txt").write_text("clean\n")
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertIn("notes.txt", result.stderr)
+
+    def test_blocks_diff3_merge_base_marker(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text("ours\n||||||| merge base\nbase\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+            (root / "notes.txt").write_text("clean\n")
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertIn("notes.txt", result.stderr)
+
+    def test_fails_closed_when_index_is_invalid(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            env = os.environ.copy()
+            invalid_index = root / "invalid-index"
+            invalid_index.write_bytes(b"not a git index")
+            env["GIT_INDEX_FILE"] = str(invalid_index)
+
+            result = _run_hook(root, env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to inspect staged content", result.stderr)
+            self.assertIn("git grep exited", result.stderr)
+
+    def test_blocks_conflict_markers_in_any_staged_blob(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text("<<<<<<< HEAD\nconflict\n=======\nother\n>>>>>>> branch\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+            (root / "notes.txt").write_text("clean\n")
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertIn("notes.txt", result.stderr)
+
     def test_no_staged_py_is_noop_even_without_ruff(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
@@ -101,6 +207,51 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("ruff is required", result.stderr)
             self.assertIn("brew install ruff", result.stderr)
             self.assertIn("apt install ruff", result.stderr)
+
+
+
+    def test_lints_staged_file_with_special_chars_in_name(self):
+        """Staged Python filenames containing quote / backslash / space bytes
+        must survive the round-trip into `git checkout-index` and produce a
+        normal Ruff finding, NOT the misleading "unable to read staged Python
+        blobs" error from a C-quoting mismatch (issue #795 follow-up).
+        """
+        if shutil.which("ruff") is None:
+            self.skipTest("ruff is not installed")
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            # Create files with characters that `git diff --name-only` would
+            # C-quote. Note: a backslash in a Python filename is legal on
+            # Linux but usually avoided; quote and space are the realistic
+            # reproductions.
+            for special_name in ("quote\"file.py", "with space.py"):
+                try:
+                    (root / special_name).write_text("import os\n")
+                except (OSError, ValueError):
+                    # Filesystem may reject some chars in this sandbox; skip
+                    # this iteration rather than failing the whole test.
+                    continue
+                subprocess.run(
+                    ["git", "-C", str(root), "add", "--", special_name],
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    ["git", "-C", str(root), "config", "core.quotepath", "false"],
+                    check=True,
+                )
+                env = os.environ.copy()
+                env["PATH"] = "/usr/bin:/bin"
+                result = _run_hook(root, env=env)
+                # Two valid outcomes:
+                #  (a) ruff finding fires -> mentions the filename
+                #  (b) hook passes -> ruff did not run on it for unrelated reasons
+                # Both are OK; what we MUST NOT see is the false-positive
+                # "unable to read staged Python blobs" error path.
+                if result.returncode != 0:
+                    self.assertNotIn("unable to read staged Python blobs",
+                                     result.stderr,
+                                     f"filename with special chars broke checkout-index: {result.stderr!r}")
 
 
 if __name__ == "__main__":
