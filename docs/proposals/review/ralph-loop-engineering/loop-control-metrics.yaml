@@ -59,6 +59,13 @@ after:
     babysit-pr no-progress/MAX_ITERS, attended_lock, review gates, human
     merge boundary, worktree guard, and fail-closed audit semantics remain
     authoritative. Metrics do not approve code and do not authorize merge.
+
+    The prompt/control boundary is declarative: the compact Core Directive
+    states intent and authority, `/do` resolves one route envelope, and Ralph
+    controls only cross-skill sequencing. Static hooks and the existing SSOT
+    remain the enforcement plane. Context Diet telemetry measures whether
+    routing and recovery use compact artifact references instead of replaying
+    prompts or transcripts.
   files:
     - path: skills/ralph/lib/ralph_state.py
       change: |
@@ -134,6 +141,14 @@ after:
       change: "New CLI integration tests for resume/events/metrics output and distinct exit-code semantics."
     - path: docs/adr/ADR-00XX-ralph-loop-control-plane.md
       change: "Record the canonical event source, state/event ordering contract, retry ownership, metric definitions, and rollout/rollback decision."
+    - path: docs/core/DEV-HARNESS-CORE.md
+      change: "Store the concise declarative Core Directive and references to static enforcement SSOTs; do not duplicate hook or Iron Law prose."
+    - path: skills/do/SKILL.md
+      change: "Add the unified /do router that emits a versioned route envelope and delegates to existing plan/build/review/Ralph skills without becoming a second policy engine."
+    - path: docs/skills/do.md
+      change: "Document /do routing, critical-spec hold behavior, mode/team orthogonality, and context-budget handoff rules."
+    - path: tests/test_context_budget.py
+      change: "Verify bounded handoffs, usage coverage, no full-transcript reinjection, and insufficient-evidence behavior."
 
 pros:
   - "Fixes the highest-risk correctness gap first: a killed or restarted Ralph run can identify the last durable attempt and resume the correct stage without replaying completed work."
@@ -285,6 +300,96 @@ sections:
       a new attempt id. The pair is the join key for state, events, artifacts,
       and metrics.
 
+  - title: Directive, /do router, and context-diet boundary
+    body: |
+      The compact declarative Core Directive is the policy boundary for the
+      harness. It names intent, scope, and authority; it does not reproduce
+      the state machine or hook algorithms. The canonical references are
+      `iron-laws/index.md`, `hooks/index.md`, `rules/git-workflow.md`, and
+      the project Core Directive document. Ralph references those sources
+      and records their decisions; it never overrides or reimplements them.
+
+      `/do` is the single user-facing router. It resolves intent once and
+      passes a versioned envelope to the selected workflow:
+
+      ```text
+      request_id, intent_ref, directive_ref, directive_version,
+      route_id, route_version, owner, scope, worktree, mode,
+      policy_version, team_toggle
+      ```
+
+      The route is immutable for a `run_id`. Missing critical specifications
+      produce `HOLD` / `NEEDS_HUMAN`; the router must not infer a route from
+      incomplete intent. `route_id=ralph-attended` is an execution target,
+      not a second global intent classifier. Ralph owns only cross-skill
+      sequencing, lease/deadline/attempt budgets, recovery, terminal
+      classification, and run-level evidence joins. Child skills own their
+      internal loops and safety valves. Existing `/dev-kit:ralph` remains a
+      compatibility entrypoint while the envelope is the canonical input.
+
+      Every safety-relevant decision records `guard_id`, `policy_source`,
+      `decision`, `fail_closed`, `policy_version`, and `evidence_ref`. An
+      unknown guard binding or missing decision is `INSUFFICIENT_EVIDENCE`.
+      Metrics can report a guard result but cannot authorize a tool call,
+      approve missing audit evidence, change mode, or merge a PR.
+
+      The route envelope and context telemetry are additive event fields:
+
+      ```text
+      provider, model, turn_index, input_tokens, cache_read_tokens,
+      cache_write_tokens, output_tokens, usage_status, context_mode,
+      context_fingerprint, context_ref_count, replay_tokens,
+      compaction_observed
+      ```
+
+      `context_mode` is one of `artifact_ref`, `summary_ref`, or
+      `minimal_inline`. Full prompts and transcripts are never persisted in
+      Ralph events or re-injected into child/resumed attempts. A fingerprint
+      is opaque hash metadata only. Missing provider usage is
+      `INSUFFICIENT_EVIDENCE`, not zero. The existing context-window guard
+      remains an advisory cumulative-session warning; it is not silently
+      converted into a Ralph approval or failure.
+
+      Context Diet caps for the first rollout are:
+
+      | Payload | Cap / rule |
+      |---|---|
+      | stdout or stderr excerpt | 4 KiB each, redacted |
+      | child summary | 2 KiB |
+      | event payload | 16 KiB |
+      | artifact references | 32 per handoff |
+      | derived `ralph_progress.md` | 64 KiB |
+      | prompt/transcript persistence | forbidden |
+
+      A child handoff contains only the intent reference, checkpoint, latest
+      failure signature, required artifact references, and compact summary.
+      Reuse existing `input_tokens`, `output_tokens`, and `prompt_hash`
+      fields rather than creating a competing token system.
+
+      Context and routing metrics use the same typed metric record as the
+      Ralph reducer (`ratio`, `distribution`, or `counter`):
+
+      | Metric | Formula | Initial threshold |
+      |---|---|---|
+      | `usage_coverage` | valid usage records / expected usage records | ≥99% before controlled mode |
+      | `cache_hit_ratio` | cache-read tokens / (input + cache-read tokens) | target ≥85%; warn below 50% above 50K total |
+      | `artifact_handoff_rate` | artifact/summary-ref handoffs / all handoffs | ≥95% before controlled mode |
+      | `full_context_reinjection_rate` | full transcript handoffs / all child or resume handoffs | 0% |
+      | `resume_replay_ratio` | already-seen tokens / resumed context tokens | alert >10% after baseline |
+      | `context_hard_rate` | runs crossing 300K cumulative context / usage-covered runs | 0% unexplained |
+      | `context_payload_cap_violation_rate` | oversized payloads / events | 0% |
+      | `guard_decision_coverage` | complete guard events / guard decisions | ≥99%; missing is insufficient evidence |
+      | `terminal_evidence_rate` | terminals with authoritative evidence / terminals | ≥99%; missing evidence is not green |
+
+      Use `closed_runs` for terminal denominators and report `open_run_rate`
+      separately. Baseline-derived alerts require at least 30 eligible
+      complete runs and 14 days: rate regression is baseline +2 percentage
+      points, cache-hit regression is baseline −5 points, and p95
+      latency/context regression is baseline ×1.20. Fixed safety thresholds
+      (duplicate dispatch, guard bypass, full reinjection, and unsafe cleanup)
+      never wait for a baseline. No metric changes routing, retry policy, or
+      mode until a separate accepted proposal authorizes that policy change.
+
   - title: Whole-skill loop registry and ownership
     body: |
       Ralph must measure the loops that it invokes without taking ownership
@@ -292,8 +397,8 @@ sections:
       contract:
 
       ```text
-      loop_id, owner, parent_run_id, scope, iteration, cap,
-      progress_fingerprint, terminal, evidence_refs, mode
+      loop_id, route_id, owner, parent_run_id, scope, iteration, cap,
+      progress_fingerprint, terminal, evidence_refs, mode, policy_version
       ```
 
       The initial registry is:
@@ -420,10 +525,13 @@ sections:
       4. Check the run deadline, per-stage attempt budget, and inherited child
          safety state. If a limit fires, emit the limit event and land in
          RECOVERY_REQUIRED with a resumable next action.
-      5. Emit `stage.attempt.started`, dispatch exactly once for the attempt
-         id, capture real stdout/stderr/exit/duration, and emit a terminal
-         attempt event. A retry is allowed only if the classifier says the
-         child outcome is resumable and the operation is idempotent.
+      5. Emit `stage.attempt.started`, then record `dispatch.intent` and
+         `dispatch.accepted` before dispatching. Finish with
+         `dispatch.finished` or `dispatch.unknown`, capture real
+         stdout/stderr/exit/duration, and emit a terminal attempt event. Each
+         adapter supplies an idempotency key, side-effect class, receipt ref,
+         and resume policy. `dispatch.unknown` enters recovery and is never
+         retried without an idempotency proof or durable receipt.
       6. Compute a progress fingerprint from stage, child head/check state,
          artifact hashes, failure signature, and verification result. Same
          fingerprint without evidence change increments no-progress; a
@@ -589,6 +697,12 @@ sections:
             merge tests remain green.
       - [ ] Legacy mode remains available until the baseline and rollback
             review are complete.
+      - [ ] `/do` route identity and directive version are preserved for the
+            entire Ralph run.
+      - [ ] Static guard decisions are observed from the SSOT, never
+            reimplemented or overridden by Ralph.
+      - [ ] No full prompt/transcript is persisted in Ralph events or
+            handoffs; bounded context metrics report missing usage honestly.
 
   - title: References and relationship to existing Ralph proposal
     body: |
