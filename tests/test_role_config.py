@@ -194,6 +194,20 @@ class TestTeamGate(RoleConfigTestCase):
         with self.assertRaises(RoleConfigError):
             resolve_role(root)
 
+    def test_undev_mode_with_team_on_raises(self):
+        """Team roles stay inactive when the plugin mode is undev."""
+        root = self._with_roles_block("undev", "on")
+        with self.assertRaises(RoleConfigError):
+            resolve_role(root)
+
+    def test_project_boolean_false_wins_over_local_team_on(self):
+        root = self._with_roles_block("full", False)
+        (root / ".claude" / "settings.local.json").write_text(
+            json.dumps({"env": {"DEV_KIT_TEAM": "on"}})
+        )
+        with self.assertRaises(RoleConfigError):
+            resolve_role(root)
+
     def test_invalid_team_value_fails_closed(self):
         """A typo in DEV_KIT_TEAM while roles exist fails closed."""
         root = self._with_roles_block("full", "maybe")

@@ -143,7 +143,11 @@ dev_kit_mode_resolve() {
 }
 
 dev_kit_mode_active() {
-  if [ -z "${DEV_KIT_MODE:-}" ]; then
+  # A caller may source this library with a stale or legacy value already
+  # present in the environment. Re-resolve invalid values so
+  # `DEV_KIT_MODE=team` can never satisfy a direct mode gate.
+  if [ -z "${DEV_KIT_MODE:-}" ] || ! _is_valid_mode "$DEV_KIT_MODE"; then
+    unset DEV_KIT_MODE
     dev_kit_mode_resolve
   fi
   printf '%s' "${DEV_KIT_MODE:-undev}"

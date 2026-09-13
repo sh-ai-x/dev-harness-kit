@@ -95,6 +95,8 @@ _DEV_KIT_SKILL_PREFIXES = _discover_dev_kit_skill_prefixes()
 _WILDCARD = "*"
 
 _VALID_TEAM_VALUES = frozenset({"on", "off", "1", "0", "true", "false"})
+_VALID_MODES = frozenset({"full", "lite", "undev"})
+_MISSING = object()
 
 
 def _settings_path(root: Path) -> Path:
@@ -120,19 +122,34 @@ def _normalize_team(value: str) -> str:
     return "on" if value in {"on", "1", "true"} else "off"
 
 
-def _settings_team(body: dict) -> str | None:
-    """Read DEV_KIT_TEAM from the documented settings locations."""
+def _setting_value(body: dict, key: str) -> object:
+    """Read one setting with env-block precedence, preserving false/0."""
     env = body.get("env")
-    candidates = [env.get("DEV_KIT_TEAM") if isinstance(env, dict) else None,
-                  body.get("DEV_KIT_TEAM")]
-    for value in candidates:
-        if isinstance(value, bool):
-            value = "true" if value else "false"
-        elif isinstance(value, int) and value in (0, 1):
-            value = str(value)
-        if isinstance(value, str) and value in _VALID_TEAM_VALUES:
-            return _normalize_team(value)
-    return None
+    if isinstance(env, dict) and key in env:
+        return env[key]
+    if key in body:
+        return body[key]
+    return _MISSING
+
+
+def _team_setting(body: dict) -> tuple[bool, str | None]:
+    """Return (present, normalized value), preserving explicit invalidity."""
+    value = _setting_value(body, "DEV_KIT_TEAM")
+    if value is _MISSING:
+        return False, None
+    if isinstance(value, bool):
+        value = "true" if value else "false"
+    elif isinstance(value, int) and value in (0, 1):
+        value = str(value)
+    if isinstance(value, str) and value in _VALID_TEAM_VALUES:
+        return True, _normalize_team(value)
+    return True, None
+
+
+def _settings_team(body: dict) -> str | None:
+    """Read a valid DEV_KIT_TEAM value from one settings object."""
+    _present, team = _team_setting(body)
+    return team
 
 
 def _active_team(root: Path) -> str:
@@ -147,8 +164,8 @@ def _active_team(root: Path) -> str:
     if shell_team in _VALID_TEAM_VALUES:
         return _normalize_team(shell_team)
 
-    project_team = _settings_team(_read_settings(root))
-    if project_team is not None:
+    project_present, project_team = _team_setting(_read_settings(root))
+    if project_present and project_team is not None:
         return project_team
 
     local_path = Path(root) / ".claude" / "settings.local.json"
@@ -158,10 +175,49 @@ def _active_team(root: Path) -> str:
         except (OSError, ValueError):
             local_body = {}
         if isinstance(local_body, dict):
-            local_team = _settings_team(local_body)
-            if local_team is not None:
+            local_present, local_team = _team_setting(local_body)
+            if local_present and local_team is not None:
                 return local_team
     return "off"
+
+
+def _settings_mode(body: dict) -> str | None:
+    """Read a valid DEV_KIT_MODE value from one settings object."""
+    value = _setting_value(body, "DEV_KIT_MODE")
+    if isinstance(value, str) and value in _VALID_MODES:
+        return value
+    return None
+
+
+def _active_mode(root: Path) -> str:
+    """Resolve the mode needed to keep roles inactive in `undev`."""
+    shell_mode = os.environ.get("DEV_KIT_MODE", "")
+    if shell_mode in _VALID_MODES:
+        return shell_mode
+
+    project_mode = _settings_mode(_read_settings(root))
+    if project_mode is not None:
+        return project_mode
+
+    local_path = Path(root) / ".claude" / "settings.local.json"
+    if local_path.is_file():
+        try:
+            local_body = json.loads(local_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            local_body = {}
+        if isinstance(local_body, dict):
+            local_mode = _settings_mode(local_body)
+            if local_mode is not None:
+                return local_mode
+
+    settings = _read_settings(root)
+    enabled = settings.get("enabledPlugins")
+    if isinstance(enabled, dict) and any(
+        isinstance(name, str) and name.startswith("dev-kit@")
+        for name in enabled
+    ):
+        return "full"
+    return "undev"
 
 
 def _enforce_team_gate(root: Path) -> None:
@@ -176,11 +232,12 @@ def _enforce_team_gate(root: Path) -> None:
     if "roles" not in body:
         return  # no roles block -> nothing to gate
     team = _active_team(root)
-    if team == "on":
+    mode = _active_mode(root)
+    if team == "on" and mode in {"full", "lite"}:
         return  # happy path
     raise RoleConfigError(
         f"`roles` block present in {_settings_path(root)} but "
-        f"DEV_KIT_TEAM={team!r}. Enable team collaboration with "
+        f"DEV_KIT_MODE={mode!r}, DEV_KIT_TEAM={team!r}. Enable team collaboration with "
         f"`/dev-kit:team on` or remove the `roles` block."
     )
 

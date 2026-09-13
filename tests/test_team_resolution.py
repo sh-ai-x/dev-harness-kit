@@ -48,8 +48,8 @@ def _resolve(cwd: Path, env_override: dict | None = None) -> str:
     return result.stdout.strip()
 
 
-def _make_proj(tmp: Path, *, project_team: str | None,
-               local_team: str | None) -> Path:
+def _make_proj(tmp: Path, *, project_team: object | None,
+               local_team: object | None) -> Path:
     """Build a synthetic project root with .git and .claude/.
 
     Note: team-toggle resolution is independent of enabledPlugins; the
@@ -136,6 +136,11 @@ class TestTeamResolution(unittest.TestCase):
 
     def test_project_off_wins_over_local_on(self):
         proj = _make_proj(Path(self.tmp), project_team="off", local_team="on")
+        self.assertEqual(_resolve(proj), "off")
+
+    def test_project_boolean_false_wins_over_local_on(self):
+        """An explicit JSON false is a project-level off, not an unset key."""
+        proj = _make_proj(Path(self.tmp), project_team=False, local_team="on")
         self.assertEqual(_resolve(proj), "off")
 
     # ----- Layer 4: silent default = off -----

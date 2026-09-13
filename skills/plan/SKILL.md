@@ -262,10 +262,11 @@ For a worked example, see `lib/execute.py:examples/plan_step_template.md`.
 
 ### Team-enabled mode — dependency-aware step docs
 
-When `DEV_KIT_TEAM=on` (resolved from the shell or settings scopes),
-Gate 4/5 emits extra structure that the existing dispatcher / integrity
-layers already consume. `DEV_KIT_MODE` remains one of `full`, `lite`, or
-`undev` and is resolved independently:
+When `DEV_KIT_TEAM=on` (resolved from the shell or settings scopes) and the
+active `DEV_KIT_MODE` is `full` or `lite`, Gate 4/5 emits extra structure
+that the existing dispatcher / integrity layers already consume. In
+`undev`, the plugin is inactive and this team path is not invoked. The two
+settings remain independently resolved:
 
 1. **Per-step dependency prompt.** After the operator has chosen the
    step titles (the same multi-step picker that runs in `full` / `lite` /
