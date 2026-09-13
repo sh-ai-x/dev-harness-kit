@@ -168,6 +168,31 @@ class TestInstallWithGatesJson(unittest.TestCase):
             )
             self.assertTrue((target / ".github" / "workflows" / "security.yml").is_file())
 
+    def test_explicit_empty_exclude_is_reported_when_gates_present(self) -> None:
+        """An explicit empty exclude is distinct from an omitted argument."""
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            import io
+            from contextlib import redirect_stderr
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                r = _install(
+                    target,
+                    exclude=frozenset(),
+                    gates_json={
+                        "schema_version": "1.0.0",
+                        "gates": {},
+                    },
+                )
+
+            self.assertEqual(r.errors, [])
+            self.assertIn("::notice::gates.json present; ignoring --exclude []", buf.getvalue())
+            data = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
+            self.assertEqual(
+                set(data["runners"]),
+                {"ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml", "maintenance.yml"},
+            )
+
 
 class TestMarkerShapeWithGates(unittest.TestCase):
     def test_gates_source_field_present(self) -> None:
