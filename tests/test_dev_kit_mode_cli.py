@@ -3,7 +3,7 @@
 
 The Python CLI must agree with the bash resolver (hooks/lib/mode-resolve.sh)
 on every case. The bash side is tested in test_mode_resolution.py; this
-file pins the Python side to the same 15 outcomes so any drift in
+file pins the Python side to the same outcomes so any drift in
 bin/dev_kit_mode.py (or its delegates) is caught by CI.
 
 Test matrix mirrors test_mode_resolution.py:
@@ -176,45 +176,38 @@ class TestDevKitModeCLI(unittest.TestCase):
         non_git.mkdir()
         self.assertEqual(_run_cli(non_git), "undev")
 
-    # ----- `team` value (4th mode, multi-role + dependency-aware plan) -----
-    # The CLI must round-trip team across all 4 resolution layers the same
-    # way it round-trips full/lite/undev. The Python fallback in
-    # `bin/dev_kit_mode.py:_resolve_mode` is updated to whitelist `team`
-    # alongside the existing 3 values.
+    # ----- `team` is not a DEV_KIT_MODE value -----
 
-    def test_shell_env_team_overrides_project_full(self):
+    def test_shell_env_team_is_ignored(self):
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_run_cli(proj, env_override={"DEV_KIT_MODE": "team"}), "team")
+        self.assertEqual(_run_cli(proj, env_override={"DEV_KIT_MODE": "team"}), "full")
 
-    def test_project_team_when_plugin_enabled(self):
+    def test_project_team_is_ignored_and_local_mode_wins(self):
         proj = _make_proj(Path(self.tmp), project_mode="team",
-                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_run_cli(proj), "team")
+                          local_mode="lite", enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_run_cli(proj), "lite")
 
-    def test_local_team_used_when_project_unset(self):
+    def test_local_team_is_ignored_and_default_wins(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode="team",
                           enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_run_cli(proj), "team")
+        self.assertEqual(_run_cli(proj), "full")
 
-    def test_project_team_wins_over_local_lite(self):
+    def test_project_team_is_ignored_even_over_local_mode(self):
         proj = _make_proj(Path(self.tmp), project_mode="team",
                           local_mode="lite",
                           enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_run_cli(proj), "team")
+        self.assertEqual(_run_cli(proj), "lite")
 
-    def test_cli_write_team_writes_settings(self):
-        """`bin/dev_kit_mode.py write --mode team` must succeed (not be
-        rejected by the argparse `choices=` list) and write the value
-        into settings.json. This is the path `/dev-kit:mode team` takes."""
+    def test_cli_write_rejects_team_mode(self):
+        """The mode CLI must force team collaboration through its own
+        toggle instead of writing a fourth mode value."""
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
         result = _run_cli_write(proj, mode="team")
-        self.assertEqual(result.returncode, 0)
-        import json as _json
-        body = _json.loads((proj / ".claude" / "settings.json").read_text())
-        self.assertEqual(body["env"]["DEV_KIT_MODE"], "team")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid choice", result.stderr)
 
 
 if __name__ == "__main__":

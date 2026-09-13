@@ -330,8 +330,9 @@ def register_step(
     into `phases/<phase>/index.json` immediately, so the
     `lib/dispatch_classifier.py:_has_dependency_edge` consumer can classify
     the phase as `sequential` from the moment the step is registered (not
-    only after the runner reads `step<N>.md`). The plan skill in `team`
-    mode populates this field from the per-step dependency prompt the
+    only after the runner reads `step<N>.md`). The plan skill with team
+    collaboration enabled populates this field from the per-step
+    dependency prompt the
     operator answered during Gate 4/5. Defaults to `None` (= no
     declared deps = leaf). Re-registering a step with a different
     `depends_on` is a no-op (the early-return guard preserves whatever

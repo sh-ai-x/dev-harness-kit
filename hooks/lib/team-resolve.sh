@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # team-resolve.sh — shared DEV_KIT_TEAM resolution for hooks + skills.
 #
-# Single source of truth for "is the current session in team mode?".
+# Single source of truth for "is team collaboration enabled?".
 # Sourced (not executed) by every consumer that wants to short-circuit
-# when team-mode is OFF, or to flip its default behavior when team-mode
-# is ON. Independent of DEV_KIT_MODE (the three `mode` values
+# when team collaboration is OFF, or to flip its default behavior when
+# it is ON. Independent of DEV_KIT_MODE (the three `mode` values
 # `full|lite|undev` are orthogonal to this toggle).
 #
 # Resolution order (highest wins), matching docs/scopes/modes.md:
 #   1. $DEV_KIT_TEAM shell env var    — per-session override
 #   2. <proj>/.claude/settings.json env.DEV_KIT_TEAM — committed team choice
 #   3. <proj>/.claude/settings.local.json env.DEV_KIT_TEAM — personal override
-#   4. Default = "off" — silent; team mode is opt-in
+#   4. Default = "off" — silent; team collaboration is opt-in
 #
 # Public API:
 #   dev_kit_team_resolve            — sets $DEV_KIT_TEAM to one of
@@ -24,12 +24,12 @@
 #                                     this function uses identical
 #                                     call-and-forget semantics.
 #
-# Hooks/skills that want to act on team-mode (e.g., track .dev-kit/ in
+# Hooks/skills that want to act on team collaboration (e.g., track .dev-kit/ in
 # git) add at the top:
 #     source "${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/hooks/lib/team-resolve.sh"
 #     [ "$(dev_kit_team_active)" = "on" ] && ...track...
 #
-# Hooks that run ONLY in team-mode add:
+# Hooks that run ONLY with team collaboration enabled add:
 #     source .../team-resolve.sh
 #     dev_kit_team_require on
 # exit 0
