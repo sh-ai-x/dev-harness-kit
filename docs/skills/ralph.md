@@ -90,6 +90,34 @@ BABYSIT success always continues to SHIP. Only SHIP may emit
 `RECOVERY_REQUIRED` so the ship gate cannot be skipped. The persisted state
 also records ordered `completed_sub_stages` evidence for the run.
 
+## Evidence, failure logs, and metrics
+
+Ralph lifecycle events use the canonical `trace_log` v1 journal at
+`.dev-kit/trace/events.jsonl`, shared with hook and child-skill producers.
+Every dispatch has bounded/redacted start, acceptance, and finish evidence
+with `run_id`, `attempt_id`, parent event id, exit code, duration, failure
+class, and artifact references. Failed attempts also append a bounded
+operator sidecar at `.dev-kit/ralph/<session>.failures.jsonl`; this sidecar
+does not prove completion. `ralph_progress.md` is a derived view from the
+journal and persisted state.
+
+```bash
+skills/ralph/scripts/ralph_drive.sh resume --session default
+skills/ralph/scripts/ralph_drive.sh events --session default
+skills/ralph/scripts/ralph_drive.sh metrics --format json --session default
+skills/ralph/scripts/ralph_drive.sh status-report --session default
+```
+
+The metrics reducer reports stage completion/success, run convergence,
+recovery success, and observability coverage. Each metric includes
+`numerator`, `denominator`, `coverage`, `status`, and evidence event ids.
+The report also includes Context Diet metrics for usage coverage, cache hits,
+artifact handoffs, replay, full-context reinjection, and payload-cap
+violations.
+Missing or degraded evidence is `INSUFFICIENT_EVIDENCE` and is never turned
+into a false green. `resume` reconciles an open attempt as interrupted and
+does not replay a completed stage.
+
 ## State machine
 
 Pure Python dataclass — `skills/ralph/lib/ralph_state.py`. No subprocess,
@@ -118,8 +146,8 @@ is only the current cursor.
 
 ## Bash glue
 
-`skills/ralph/scripts/ralph_drive.sh` exposes a 5-subcommand CLI that
-calls into the state machine:
+`skills/ralph/scripts/ralph_drive.sh` exposes the state-machine and
+observability CLI:
 
 ```
 ralph_drive.sh init <idea>            # create state at RESEARCH_GATE
@@ -127,6 +155,11 @@ ralph_drive.sh status                 # print state JSON
 ralph_drive.sh can-ask                # exit 0/1 based on attended_lock
 ralph_drive.sh advance <stage>        # transition (state-machine validated)
 ralph_drive.sh rewind <gate> --reason # Edit-then-approve handler
+ralph_drive.sh run-attended --dispatch noop # dry-run through SHIP boundary
+ralph_drive.sh resume                 # resume a recoverable attended run
+ralph_drive.sh events                 # print this session's trace events
+ralph_drive.sh metrics --format text  # print evidence-linked metrics
+ralph_drive.sh status-report          # print state plus metrics
 ```
 
 ## Iteration loop
@@ -164,6 +197,6 @@ All four write `RECOVERY_REQUIRED` to the state and exit; re-invoking
 ## Reference
 
 The proposal that this skill implements lives at
-[`docs/proposals/review/ralph-autonomy/main.yaml`](../../proposals/review/ralph-autonomy/main.yaml).
+[`docs/proposals/review/ralph-loop-engineering/loop-control-metrics.yaml`](../../proposals/review/ralph-loop-engineering/loop-control-metrics.yaml).
 Read it for the full design rationale, ambiguity defaults, scope
 boundaries, and verification plan.

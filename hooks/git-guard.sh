@@ -139,7 +139,7 @@ CMD="$(strip_git_globals "$CMD")"
 # m1: dropped the dead `branch -d` arm — only `-D` has a denial check below.
 write_pattern='(git[[:space:]]+commit|git[[:space:]]+push|git[[:space:]]+checkout|git[[:space:]]+switch|git[[:space:]]+branch[[:space:]]+-D)'
 if ! printf '%s' "$CMD" | grep -qE "$write_pattern"; then
-  exit 0
+  allow "GIT GUARD" "allowed: no protected git write operation detected"
 fi
 
 # 1. Block git commit on main.
@@ -228,4 +228,4 @@ if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+push'; then
   _verify_slot
 fi
 
-exit 0
+allow "GIT GUARD" "allowed: protected git operation passed all policy checks"

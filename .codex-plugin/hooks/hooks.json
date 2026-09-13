@@ -198,6 +198,11 @@
             "type": "command",
             "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/l4-todo-scan.sh",
             "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/trace-write.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -217,6 +222,11 @@
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/linear-worktree-create.sh",
+            "fail_closed": false
+          },
+          {
+            "type": "command",
+            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/trace-verify.sh",
             "fail_closed": false
           }
         ]

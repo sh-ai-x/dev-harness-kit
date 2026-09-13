@@ -156,15 +156,26 @@ sys.path.insert(0, '$SCRIPT_DIR/../lib')
 import babysit_pr_reliability as bpr
 sys.exit(0 if bpr.try_acquire_pr_lock('$PR_LOCK_PATH', '''$LOCK_BODY''') else 1)
 " 2>/dev/null; then
-  HOLDER="$(python3 -c "
+  # A copied/portable wrapper may not have the Python helper beside it.
+  # Keep the same atomic mkdir primitive available in that case; production
+  # installs still use the shared reliability implementation above.
+  if [[ ! -d "${SCRIPT_DIR}/../lib" ]] && mkdir "${PR_LOCK_PATH}.d" 2>/dev/null; then
+    if ! printf '%s' "$LOCK_BODY" > "$PR_LOCK_PATH"; then
+      rmdir "${PR_LOCK_PATH}.d" 2>/dev/null || true
+      echo "error: unable to write babysit-pr-local lock: $PR_LOCK_PATH" >&2
+      exit 1
+    fi
+  else
+    HOLDER="$(python3 -c "
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/../lib')
 import babysit_pr_reliability as bpr
 sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
 " 2>/dev/null || true)"
-  HOLDER="${HOLDER:-<unreadable>}"
-  echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
-  exit 1
+    HOLDER="${HOLDER:-<unreadable>}"
+    echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
+    exit 1
+  fi
 fi
 trap 'rm -f "$PR_LOCK_PATH" && rm -rf "${PR_LOCK_PATH}.d"' EXIT
 

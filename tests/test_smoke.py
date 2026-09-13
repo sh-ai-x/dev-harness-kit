@@ -59,7 +59,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
 # feat/team-toggle: +1 for the `team` skill (DEV_KIT_TEAM toggle, orthogonal
 # to DEV_KIT_MODE). Mirrors `mode` shape; see skills/team/SKILL.md.
-SKILL_COUNT = 54  # +2: review-local + skill-usage (formerly commands/*.md shims)
+# Added the unified `/dev-kit:do` router (55).
+SKILL_COUNT = 55  # +2: review-local + skill-usage, +1: do router
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

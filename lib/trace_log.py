@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -200,8 +201,69 @@ def new_event_id() -> str:
     return uuid.uuid4().hex
 
 
+def resolve_trace_root(start: Path | str = Path(".")) -> Path:
+    """Resolve the shared root used by structured trace events.
+
+    ``DEV_KIT_TRACE_ROOT`` is an explicit operator/test override. Without
+    it, a git worktree resolves its repository's common git directory so
+    all worktrees append to the same ``.dev-kit/trace`` stream. Non-git
+    consumer projects retain the old per-directory fallback.
+
+    The resolver is deliberately best-effort: telemetry callers must not
+    turn a missing git executable or an unusual checkout layout into a
+    workflow failure. Relative explicit roots are interpreted relative to
+    ``start`` rather than the process cwd, which keeps hook payload cwd and
+    the Python emitter aligned.
+    """
+    start_path = Path(start).expanduser()
+    if not start_path.is_absolute():
+        start_path = Path.cwd() / start_path
+    try:
+        start_path = start_path.resolve()
+    except OSError:
+        start_path = start_path.absolute()
+    if start_path.is_file():
+        start_path = start_path.parent
+
+    configured = os.environ.get("DEV_KIT_TRACE_ROOT", "").strip()
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if not configured_path.is_absolute():
+            configured_path = start_path / configured_path
+        try:
+            return configured_path.resolve()
+        except OSError:
+            return configured_path.absolute()
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(start_path), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        common_dir_text = result.stdout.strip()
+        if result.returncode == 0 and common_dir_text:
+            common_dir = Path(common_dir_text)
+            if not common_dir.is_absolute():
+                common_dir = start_path / common_dir
+            try:
+                common_dir = common_dir.resolve()
+            except OSError:
+                common_dir = common_dir.absolute()
+            # A normal repository reports ``<checkout>/.git``. Only use
+            # that shape as a shared checkout root; a bare/unusual git
+            # layout falls back to the caller's directory.
+            if common_dir.name == ".git":
+                return common_dir.parent
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return start_path
+
+
 def _event_path(root: Path) -> Path:
-    return Path(root) / ".dev-kit" / "trace" / "events.jsonl"
+    return resolve_trace_root(Path(root)) / ".dev-kit" / "trace" / "events.jsonl"
 
 
 def validate_event(event: Mapping[str, Any]) -> Dict[str, Any]:
@@ -316,6 +378,10 @@ def append_event(root: Path, event: Mapping[str, Any]) -> Tuple[Path, str]:
                 record["event_id"] = new_event_id()
             handle.write(json.dumps(record, sort_keys=True) + "\n")
             handle.flush()
+            # Ralph checkpoints are published only after the event is durable.
+            # Keep the existing append-only API while making the ordering
+            # contract survive a process crash or host buffer loss.
+            os.fsync(handle.fileno())
         finally:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

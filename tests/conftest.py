@@ -27,6 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 # Env-var whitelist for the telemetry subprocess. Anything not on this list
 # — secrets (ANTHROPIC_API_KEY, GH_TOKEN, OPENAI_API_KEY, AWS_*, …),
 # ephemeral CI tokens, or arbitrary caller vars — is dropped before the
@@ -51,6 +53,23 @@ def _safe_env_for_telemetry() -> dict:
     }
     env.setdefault("DEV_KIT_AGENT", "pytest")
     return env
+
+
+@pytest.fixture(autouse=True)
+def _isolate_trace_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Keep every test's event stream out of the checkout and worktrees."""
+    # This legacy black-box module creates its own TemporaryDirectory and
+    # passes that payload cwd to trace-session-end.sh. Let the hook's explicit
+    # payload root win there; it is still outside the checkout and therefore
+    # remains isolated from developer telemetry.
+    if "test_trace_session_end_hook" in str(request.node.nodeid):
+        monkeypatch.delenv("DEV_KIT_TRACE_ROOT", raising=False)
+        return
+    monkeypatch.setenv("DEV_KIT_TRACE_ROOT", str(tmp_path))
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ANN001

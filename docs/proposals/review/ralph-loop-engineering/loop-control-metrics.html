@@ -471,7 +471,7 @@ progress_fingerprint, terminal, evidence_refs, mode, policy_version</code></pre>
 <h2 id="sec-11">References and relationship to existing Ralph proposal</h2>
 <p>This is a follow-up to the intent-first/autonomy proposal implemented around commit <code>5f3592759fea8d7a0973cc3d930d86d2c22f85a1</code> and PR #844. That proposal establishes the gates, attended lock, and basic safety valves. It explicitly leaves silent doom loops, recovery re-entry, and streaming/measurement gaps open. This proposal narrows the next change to the control/evidence/measurement architecture; it does not reopen the gate-count or Linear-scope decisions.</p>
 <p>Internal SSOT:</p>
-<ul><li><code>iron-laws/index.md</code> — verification, evidence, safety, and state rules</li><li><code>rules/git-workflow.md</code> — worktree, handoff, commit, and PR contract</li><li><code>skills/ralph/lib/ralph_state.py</code> — current Ralph state machine</li><li><code>skills/ralph/lib/ralph_chain.py</code> — current attended dispatcher</li><li><code>skills/babysit-pr/SKILL.md</code> and <code>lib/babysit_pr_loop.py</code> — child repair loop</li><li><code>lib/execute.py</code> — real child output and executor evidence events</li><li><code>lib/trace_log.py</code> — structured trajectory event contract</li><li><code>lib/effectiveness_collection.py</code> — bounded journal/projection durability pattern</li><li><code>lib/harness_effectiveness.py</code> — evidence-based metric conventions</li><li><code>docs/skills/ralph.md</code> and <code>docs/proposals/review/ralph-autonomy/main.yaml</code> — current public contract</li><li><code>tests/test_ralph_chain.py</code>, <code>tests/test_babysit_pr_loop.py</code> — current regression boundaries</li></ul>
+<ul><li><code>iron-laws/index.md</code> — verification, evidence, safety, and state rules</li><li><code>rules/git-workflow.md</code> — worktree, handoff, commit, and PR contract</li><li><code>skills/ralph/lib/ralph_state.py</code> — current Ralph state machine</li><li><code>skills/ralph/lib/ralph_chain.py</code> — current attended dispatcher</li><li><code>skills/babysit-pr/SKILL.md</code> and <code>lib/babysit_pr_loop.py</code> — child repair loop</li><li><code>lib/execute.py</code> — real child output and executor evidence events</li><li><code>lib/trace_log.py</code> — structured trajectory event contract</li><li><code>lib/effectiveness_collection.py</code> — bounded journal/projection durability pattern</li><li><code>lib/harness_effectiveness.py</code> — evidence-based metric conventions</li><li><code>docs/skills/ralph.md</code> and this proposal — current public contract</li><li><code>tests/test_ralph_chain.py</code>, <code>tests/test_babysit_pr_loop.py</code> — current regression boundaries</li></ul>
 <hr class="section-divider">
 
 
@@ -485,6 +485,6 @@ progress_fingerprint, terminal, evidence_refs, mode, policy_version</code></pre>
 
 <hr class="section-divider">
 
-<footer>Generated 2026-09-13 · render via <code>/dev-kit:proposal</code></footer>
+<footer>Generated 2026-09-14 · render via <code>/dev-kit:proposal</code></footer>
 </body>
 </html>

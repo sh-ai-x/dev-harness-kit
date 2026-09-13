@@ -184,6 +184,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
+| [`/dev-kit:do`](docs/skills/do.md) | Single entrypoint: resolves one existing workflow, emits a versioned route envelope, and passes a bounded context handoff. |
 | [`/dev-kit:bootstrap`](docs/skills/bootstrap.md) | First entry on a fresh repo — writes `CLAUDE.md`, `AGENTS.md`, and the hook config. |
 | [`/dev-kit:bootstrap` (with ci-setup prompt) | `bootstrap` **and** `ci-setup` in one shot — the usual new-project starting point. |
 | [`/dev-kit:ci-setup`](docs/skills/ci-setup.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |

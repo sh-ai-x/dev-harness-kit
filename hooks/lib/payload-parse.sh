@@ -83,6 +83,125 @@ extract_content() {
   ' 2>/dev/null || true)"
 }
 
+# trace_plugin_root — locate the installed plugin's Python package.
+#
+# Hooks run with the consumer project's cwd, not necessarily the checkout
+# that contains this script. Prefer the runtime-provided plugin root and
+# fall back to the directory containing this shared hook. The fallback keeps
+# direct black-box tests and source checkouts working without changing the
+# caller's process cwd.
+trace_plugin_root() {
+    if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+        printf '%s' "$CLAUDE_PLUGIN_ROOT"
+        return 0
+    fi
+    if [ -n "${PLUGIN_ROOT:-}" ]; then
+        printf '%s' "$PLUGIN_ROOT"
+        return 0
+    fi
+    (cd "${BASH_SOURCE[0]%/*}/../.." 2>/dev/null && pwd) || printf '%s' "."
+}
+
+# trace_root_for_log ROOT — shell-side mirror of trace_log.resolve_trace_root.
+# It is used only to place emitter diagnostics; the Python resolver remains
+# the authority for the actual JSONL destination.
+trace_root_for_log() {
+    local root="${1:-$PWD}"
+    if [ -n "${DEV_KIT_TRACE_ROOT:-}" ]; then
+        case "$DEV_KIT_TRACE_ROOT" in
+            /*) printf '%s' "$DEV_KIT_TRACE_ROOT" ;;
+            *) printf '%s/%s' "$root" "$DEV_KIT_TRACE_ROOT" ;;
+        esac
+        return 0
+    fi
+    local common_dir
+    common_dir="$(git -C "$root" rev-parse --git-common-dir 2>/dev/null || true)"
+    case "$common_dir" in
+        /*/.git) printf '%s' "${common_dir%/.git}" ;;
+        .git) printf '%s' "$root" ;;
+        */.git) printf '%s' "$root/${common_dir%/.git}" ;;
+        *) printf '%s' "$root" ;;
+    esac
+}
+
+# trace_emit_event ROOT TYPE RUN_ID WORKFLOW STAGE SUBJECT OUTCOME SOURCE
+# EVIDENCE_JSON [PARENT_ID] — best-effort shared event writer.
+#
+# The emitter is intentionally non-blocking for policy hooks: its stderr is
+# retained for diagnosis, but an import/permission/JSONL failure never
+# changes the guard's safety decision. Evidence is supplied by callers and
+# must remain compact; this helper does not persist raw tool payloads.
+trace_emit_event() {
+    local root="$1"
+    local event_type="$2"
+    local run_id="$3"
+    local workflow_id="$4"
+    local stage="$5"
+    local subject="$6"
+    local outcome="$7"
+    local source="$8"
+    local evidence_json="$9"
+    local parent_id="${10:-}"
+    local plugin_root error_root error_log
+    plugin_root="$(trace_plugin_root)"
+    error_root="$(trace_root_for_log "$root")"
+    error_log="$error_root/.dev-kit/trace/emitter-errors.log"
+    mkdir -p "$error_root/.dev-kit/trace" 2>/dev/null || true
+
+    local -a command_args=(
+        -m lib.trace_log append-event
+        --root "$root" --type "$event_type" --run-id "$run_id"
+        --workflow-id "$workflow_id" --stage "$stage"
+        --subject-id "$subject" --outcome "$outcome" --source "$source"
+        --evidence-json "$evidence_json"
+    )
+    [ -n "$parent_id" ] && command_args+=(--parent "$parent_id")
+    PYTHONPATH="$plugin_root${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 "${command_args[@]}" \
+        >/dev/null 2>>"$error_log" || true
+}
+
+# trace_latest_event ROOT RUN_ID WORKFLOW_ID SUBJECT EVENT_TYPES — print the
+# latest matching event as ``event_id<TAB>subject_id<TAB>event_type<TAB>ts``.
+# This is a bounded lookup over the reducer's already-validated event view;
+# failures are diagnostics only and never affect a caller's policy result.
+trace_latest_event() {
+    local root="$1"
+    local run_id="$2"
+    local workflow_id="$3"
+    local subject="$4"
+    local event_types="$5"
+    local plugin_root error_root error_log
+    plugin_root="$(trace_plugin_root)"
+    error_root="$(trace_root_for_log "$root")"
+    error_log="$error_root/.dev-kit/trace/emitter-errors.log"
+    mkdir -p "$error_root/.dev-kit/trace" 2>/dev/null || true
+    TRACE_LOOKUP_ROOT="$root" TRACE_LOOKUP_RUN_ID="$run_id" \
+        TRACE_LOOKUP_WORKFLOW_ID="$workflow_id" TRACE_LOOKUP_SUBJECT="$subject" \
+        TRACE_LOOKUP_TYPES="$event_types" \
+        PYTHONPATH="$plugin_root${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 - <<'PY' 2>>"$error_log" || true
+import os
+import sys
+from pathlib import Path
+
+from lib.trace_log import read_events
+
+types = set(os.environ.get("TRACE_LOOKUP_TYPES", "").split(","))
+events = [
+    event for event in read_events(Path(os.environ["TRACE_LOOKUP_ROOT"]))
+    if event.get("run_id") == os.environ.get("TRACE_LOOKUP_RUN_ID")
+    and event.get("workflow_id") == os.environ.get("TRACE_LOOKUP_WORKFLOW_ID")
+    and event.get("subject_id") == os.environ.get("TRACE_LOOKUP_SUBJECT")
+    and event.get("event_type") in types
+]
+if events:
+    event = max(events, key=lambda item: item.get("ts", ""))
+    sys.stdout.write("\t".join(str(event.get(key, "")) for key in
+                                ("event_id", "subject_id", "event_type", "ts")))
+PY
+}
+
 
 # deny HOOK_PREFIX REASON — emit PreToolUse deny JSON envelope to stderr and
 # exit 2. Single source of truth for the 6 hook sites that previously each
@@ -133,11 +252,18 @@ emit_guard_event() {
     local event_type="guard.blocked"
     [ "$outcome" = "allowed" ] && event_type="guard.allowed"
     [ "$outcome" = "ask" ] && event_type="guard.ask"
-    python3 -m lib.trace_log append-event \
-        --root "$root" --type "$event_type" --run-id "$run_id" \
-        --workflow-id "$workflow_id" --stage guard --subject-id "$subject" \
-        --outcome "$outcome" --source "hook:${hook_prefix}" --evidence-json "$evidence" \
-        >/dev/null 2>&1 || true
+    trace_emit_event "$root" "$event_type" "$run_id" "$workflow_id" guard \
+        "$subject" "$outcome" "hook:${hook_prefix}" "$evidence"
+}
+
+# allow HOOK_PREFIX REASON — record an allowed guard decision and return 0.
+# This is telemetry only; callers must use it only on paths that previously
+# exited 0 so the policy outcome remains unchanged.
+allow() {
+    local hook_prefix="$1"
+    local reason="$2"
+    emit_guard_event "$hook_prefix" "$reason" allowed
+    exit 0
 }
 
 deny() {

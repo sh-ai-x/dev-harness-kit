@@ -7,12 +7,16 @@
 # job, gated by the state machine's can_ask_question() invariant.
 #
 # Usage:
-#   ./ralph_drive.sh init <idea> [--session NAME]
+#   ./ralph_drive.sh init <idea> [--deadline ISO-8601] [--session NAME]
 #   ./ralph_drive.sh status [--session NAME]
 #   ./ralph_drive.sh can-ask [--session NAME]
 #   ./ralph_drive.sh advance <target> [--action TEXT] [--session NAME]
 #   ./ralph_drive.sh rewind <target> --reason TEXT [--session NAME]
 #   ./ralph_drive.sh run-attended [--dispatch real|noop] [--session NAME]
+#   ./ralph_drive.sh resume [--dispatch real|noop] [--session NAME]
+#   ./ralph_drive.sh events [--session NAME]
+#   ./ralph_drive.sh metrics [--format json|text] [--session NAME]
+#   ./ralph_drive.sh status-report [--session NAME]
 #
 # Exit codes:
 #   0 — OK
@@ -36,7 +40,7 @@ usage() {
 ralph_drive.sh — bash glue for /dev-kit:ralph state machine
 
 Subcommands:
-  init <idea>                       Create a new state for <idea>
+  init <idea> [--deadline ISO-8601] Create a new state for <idea>
   status                            Print current state JSON
   can-ask                           Exit 0 if AskUserQuestion allowed, 1 if locked
   advance <target> [--action T]     Transition current -> target (validated)
@@ -44,6 +48,10 @@ Subcommands:
   run-attended [--dispatch real|noop]
                                     Drive ATTENDED_RUN to terminal. Exit 0=DONE,
                                     USER_MERGE_REQUIRED; non-zero=RECOVERY_REQUIRED.
+  resume                            Resume ATTENDED_RUN from RECOVERY_REQUIRED.
+  events                            Print the canonical trace event journal.
+  metrics [--format json|text]      Print Ralph metrics with evidence coverage.
+  status-report                     Print state plus Ralph metrics.
 
 Env vars:
   PROJECT_ROOT   Project root (default: git toplevel)
@@ -71,7 +79,37 @@ require_python() {
 # ----------------------------------------------------------------------------
 
 cmd_init() {
-    local idea="$1"
+    local idea=""
+    local deadline=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --deadline)
+                if [ $# -lt 2 ]; then
+                    echo "error: --deadline requires an ISO-8601 value" >&2
+                    exit 1
+                fi
+                deadline="$2"
+                shift 2
+                ;;
+            --session)
+                if [ $# -lt 2 ]; then
+                    echo "error: --session requires a name" >&2
+                    exit 1
+                fi
+                SESSION="$2"
+                shift 2
+                ;;
+            *)
+                if [ -z "$idea" ]; then
+                    idea="$1"
+                    shift
+                else
+                    echo "error: unexpected init argument: $1" >&2
+                    exit 1
+                fi
+                ;;
+        esac
+    done
     if [ -z "$idea" ]; then
         echo "error: init requires an <idea> argument" >&2
         exit 1
@@ -80,7 +118,7 @@ cmd_init() {
     python3 -m skills.ralph.lib.ralph_state \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
-        init "$idea"
+        init "$idea" --deadline "$deadline"
 }
 
 cmd_status() {
@@ -200,12 +238,57 @@ cmd_run_attended() {
     require_python
     # Delegate to the chain executor. Exit codes:
     #   0 = DONE / USER_MERGE_REQUIRED (success — babysit landed)
-    #   2 = RECOVERY_REQUIRED (recovery surface, operator reviews)
-    #   non-zero (1, 3) = CLI usage / environment error
+    #   5 = RECOVERY_REQUIRED (recovery surface, operator reviews)
+    #   2 = CLI usage/state error; 3 = metrics/environment evidence error
     python3 -m skills.ralph.lib.ralph_chain \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
         run-attended --dispatch "$dispatch"
+}
+
+cmd_resume() {
+    # Resume is deliberately the same bounded controller entrypoint. The
+    # persisted state, not shell history, decides the next safe stage.
+    cmd_run_attended "$@"
+}
+
+cmd_events() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --session) SESSION="$2"; shift 2 ;;
+            *) echo "error: unknown flag: $1" >&2; exit 1 ;;
+        esac
+    done
+    require_python
+    python3 -m skills.ralph.lib.ralph_chain \
+        --project-root "$PROJECT_ROOT" --session "$SESSION" events
+}
+
+cmd_metrics() {
+    local format="json"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --format) format="$2"; shift 2 ;;
+            --session) SESSION="$2"; shift 2 ;;
+            *) echo "error: unknown flag: $1" >&2; exit 1 ;;
+        esac
+    done
+    case "$format" in json|text) ;; *) echo "error: --format must be json or text" >&2; exit 1 ;; esac
+    require_python
+    python3 -m skills.ralph.lib.ralph_chain \
+        --project-root "$PROJECT_ROOT" --session "$SESSION" metrics --format "$format"
+}
+
+cmd_status_report() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --session) SESSION="$2"; shift 2 ;;
+            *) echo "error: unknown flag: $1" >&2; exit 1 ;;
+        esac
+    done
+    require_python
+    python3 -m skills.ralph.lib.ralph_chain \
+        --project-root "$PROJECT_ROOT" --session "$SESSION" status-report
 }
 
 # ----------------------------------------------------------------------------
@@ -227,6 +310,10 @@ case "$sub" in
     advance)      cmd_advance "$@" ;;
     rewind)       cmd_rewind "$@" ;;
     run-attended) cmd_run_attended "$@" ;;
+    resume)       cmd_resume "$@" ;;
+    events)       cmd_events "$@" ;;
+    metrics)      cmd_metrics "$@" ;;
+    status-report) cmd_status_report "$@" ;;
     -h|--help|help) usage; exit 0 ;;
     *)
         echo "error: unknown subcommand: $sub" >&2

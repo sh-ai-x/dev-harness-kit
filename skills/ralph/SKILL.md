@@ -167,6 +167,35 @@ that bypasses subprocess and returns a successful SHIP-owned
 USER_MERGE_REQUIRED landing; useful for state-machine smoke tests without spawning
 babysit-pr. `tests/test_ralph_chain.py::test_cli_dry_run_*` pins this.
 
+### Durable evidence and recovery commands
+
+The lifecycle journal is the repository-wide `trace_log` v1 stream at
+`.dev-kit/trace/events.jsonl`. Each Ralph dispatch writes bounded,
+redacted `stage.attempt.started` / `dispatch.accepted` /
+`stage.attempt.finished` events with a run id, attempt id, parent event, exit
+code, duration, failure class, and artifact references. A failure sidecar at
+`.dev-kit/ralph/<session>.failures.jsonl` is only a human diagnostic view;
+metrics never treat it as completion evidence. The derived
+`.dev-kit/ralph/<session>.progress.md` is also not a source of truth.
+
+```bash
+skills/ralph/scripts/ralph_drive.sh resume --session default
+skills/ralph/scripts/ralph_drive.sh events --session default
+skills/ralph/scripts/ralph_drive.sh metrics --format json --session default
+skills/ralph/scripts/ralph_drive.sh metrics --format text --session default
+skills/ralph/scripts/ralph_drive.sh status-report --session default
+```
+
+`resume` only resumes `RECOVERY_REQUIRED` with the attended lock intact and
+never infers success from an open attempt. `events` exposes the canonical
+validated records. `metrics` returns numerator, denominator, coverage,
+status, and evidence event ids; absent or degraded evidence is reported as
+`INSUFFICIENT_EVIDENCE`, never as a zero or approval. Exit code `3` means the
+metrics report is not observability-complete.
+The report also nests Context Diet metrics for usage coverage, cache hits,
+artifact handoffs, replay, full-context reinjection, and payload-cap
+violations.
+
 ## State machine — `skills/ralph/lib/ralph_state.py`
 
 Pure Python dataclass. No subprocess at import time. Persists to
@@ -204,12 +233,12 @@ under `accepted/`, not as a Ralph amendment.
 
 ## Bash glue — `skills/ralph/scripts/ralph_drive.sh`
 
-Linear bash script that chains the underlying Skill invocations.
-Reads/writes `.dev-kit/ralph/<session>.json` between hops. Re-uses
-the long-running templates (`templates/init.sh`, `feature_list.json`,
-`progress.log.md`, `session_handoff.md`, `ralph_progress.md`) at the
-build step via the same `cp -u` pattern `skills/build/SKILL.md`
-already documents.
+The bash script chains the underlying Skill invocations and exposes the
+state, resume, evidence, and metrics commands. It reads/writes
+`.dev-kit/ralph/<session>.json` between hops and reuses the long-running
+templates (`templates/init.sh`, `feature_list.json`, `progress.log.md`,
+`session_handoff.md`, `ralph_progress.md`) at the build step via the same
+`cp -u` pattern `skills/build/SKILL.md` already documents.
 
 ## Long-running templates wiring
 

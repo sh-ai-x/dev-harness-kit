@@ -46,11 +46,13 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`gate-select`](../../skills/gate-select/SKILL.md) | `state` | Unified 3-dimension picker for project / session / AI-judge gates (`show` / `pick` / `install-project` / `install-session`). Reads existing sources (`.dev-kit/ci-config.json`, `.dev-kit/harness-mode.session.json`) — no new state file. (Consumer docs land in a follow-up PR.) |
 | [`linear`](linear.md) | `state` | Optional Linear task tracker — reconciling the current repo task with a canonical project + issue (auto-sync on every edit when configured). |
 | [`mode`](../../skills/mode/SKILL.md) | `state` | Pick / show / write the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). 0-arg default opens the picker; `--show` prints current; `--scope=local` writes to `settings.local.json` instead of the committed project file. |
+| [`team`](../../skills/team/SKILL.md) | `state` | Independent `DEV_KIT_TEAM` collaboration toggle (`on` / `off`) for roles and dependency-aware planning; it is never a `DEV_KIT_MODE` value. |
 
 ### Plan → Build
 
 | Skill | Alpha | Summary |
 |---|---|---|
+| [`do`](do.md) | `state` | Unified intent router: one versioned route envelope, critical-spec `HOLD`, and bounded handoff to an existing owner. |
 | [`plan`](plan.md) | `state` | Idea → `PRD.md` + `phases/<name>/` through a 5-gate loop. |
 | [`build`](build.md) | `state` | Per-step sub-agent delegation with an integrated TDD + auto-fix loop. |
 | [`build-debug`](build-debug.md) | `enforcement` | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Also auto-invoked by the model mid-build-step for the in-build self-fix loop — standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
@@ -146,6 +148,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`codex-cache-update`](codex-cache-update.md) | `shortcuts` | `analysis` | human |
 | [`config`](config.md) | `config` | `state` | human |
 | [`cost-gate`](cost-gate.md) | `audit` | `enforcement` | human |
+| [`do`](do.md) | `plan` | `state` | human |
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | human |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | human |
 | [`evidence-plan`](evidence-plan.md) | `design` | `state` | human |
@@ -176,6 +179,7 @@ step inside their parent skill's flow; you never type them directly.
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | human |
 | [`status`](status.md) | `status` | `state` | human |
 | [`sync-version`](sync-version.md) | `config` | `state` | human |
+| [`team`](../../skills/team/SKILL.md) | `config` | `state` | human |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | human |
 | [`valuate`](valuate.md) | `design` | `enforcement` | model |
 

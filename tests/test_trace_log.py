@@ -10,11 +10,13 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from lib.trace_log import SCHEMA_VERSION, TraceLog, TraceStep, now_utc
+from lib.trace_log import SCHEMA_VERSION, TraceLog, TraceStep, now_utc, resolve_trace_root
 
 
 def test_now_utc_is_iso8601() -> None:
@@ -267,3 +269,38 @@ def test_append_event_dedupe_on_write_collision(tmp_path: Path) -> None:
     # Second must differ — the dedupe guard regenerated it.
     assert stored[1]["event_id"] != "collision-uuid"
     assert stored[0]["event_id"] != stored[1]["event_id"]
+
+
+def test_resolve_trace_root_honors_explicit_env(tmp_path: Path, monkeypatch) -> None:
+    shared = tmp_path / "shared"
+    monkeypatch.setenv("DEV_KIT_TRACE_ROOT", str(shared))
+    assert resolve_trace_root(tmp_path / "worktree") == shared.resolve()
+
+
+def test_resolve_trace_root_uses_git_common_dir_for_worktree(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True, text=True)
+    identity = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "trace-test",
+        "GIT_AUTHOR_EMAIL": "trace-test@example.test",
+        "GIT_COMMITTER_NAME": "trace-test",
+        "GIT_COMMITTER_EMAIL": "trace-test@example.test",
+    }
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "--allow-empty", "-m", "initial"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=identity,
+    )
+    worktree = tmp_path / "worktree"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", str(worktree), "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    monkeypatch.delenv("DEV_KIT_TRACE_ROOT", raising=False)
+    assert resolve_trace_root(worktree) == repo.resolve()

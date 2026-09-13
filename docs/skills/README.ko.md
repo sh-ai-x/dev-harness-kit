@@ -43,11 +43,14 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`ci-setup`](ci-setup.ko.md) | `enforcement` | dev-kit의 재사용 가능한 CI 워크플로 템플릿을 대상 프로젝트에 설치. |
 | [`config`](config.md) | `state` | 스킬 / 훅 / 방법론 선택기. |
 | [`linear`](linear.md) | `state` | 선택적 Linear 태스크 트래커 — 현재 저장소 태스크를 정식 프로젝트 + 이슈와 조정(설정 시 모든 편집마다 자동 동기화). |
+| [`mode`](../../skills/mode/SKILL.md) | `state` | `DEV_KIT_MODE`를 `full` / `lite` / `undev` 중에서 조회·설정한다. `team`은 mode가 아니다. |
+| [`team`](../../skills/team/SKILL.md) | `state` | `DEV_KIT_TEAM` 독립 협업 토글(`on` / `off`) — 역할·의존성 계획을 제어하며 mode와 직교한다. |
 
 ### Plan → Build
 
 | 스킬 | Alpha | 요약 |
 |---|---|---|
+| [`do`](do.md) | `state` | 하나의 의도를 기존 소유 스킬로 라우팅하고, versioned envelope와 bounded Context Diet handoff를 생성한다. 사양 누락·충돌·`undev`는 `HOLD`한다. |
 | [`plan`](plan.ko.md) | `state` | 아이디어 → 5-게이트 루프를 거쳐 `PRD.md` + `phases/<name>/`. |
 | [`build`](build.ko.md) | `state` | TDD + 자동 수정 루프가 통합된 스텝별 서브에이전트 위임. |
 | [`build-debug`](build-debug.md) | `enforcement` | 4단계 근본원인 디버깅(재현 → 격리 → 근본원인 → 수정). 빌드 단계 중간에 모델이 자동 호출하기도 한다 — 단독 호출 시에는 근본원인을 인라인으로 고치는 대신 `/dev-kit:plan`으로 넘긴다. |
@@ -138,6 +141,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`codex-cache-update`](codex-cache-update.md) | `shortcuts` | `analysis` | 사용자 |
 | [`config`](config.md) | `config` | `state` | 사용자 |
 | [`cost-gate`](cost-gate.md) | `audit` | `enforcement` | 사용자 |
+| [`do`](do.md) | `plan` | `state` | 사용자 |
 | [`docs-maintenance`](docs-maintenance.md) | `audit` | `analysis` | 사용자 |
 | [`evaluate`](evaluate.md) | `eval` | `enforcement` | 사용자 |
 | [`evidence-plan`](evidence-plan.md) | `design` | `state` | 사용자 |
@@ -163,6 +167,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`sot-harness-writer`](sot-harness-writer.md) | `design` | `state` | 사용자 |
 | [`status`](status.md) | `status` | `state` | 사용자 |
 | [`sync-version`](sync-version.md) | `config` | `state` | 사용자 |
+| [`team`](../../skills/team/SKILL.md) | `config` | `state` | 사용자 |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | 사용자 |
 | [`valuate`](valuate.md) | `design` | `enforcement` | 모델 |
 

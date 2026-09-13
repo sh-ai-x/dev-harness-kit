@@ -725,5 +725,5 @@ sections:
       - `lib/trace_log.py` — structured trajectory event contract
       - `lib/effectiveness_collection.py` — bounded journal/projection durability pattern
       - `lib/harness_effectiveness.py` — evidence-based metric conventions
-      - `docs/skills/ralph.md` and `docs/proposals/review/ralph-autonomy/main.yaml` — current public contract
+      - `docs/skills/ralph.md` and this proposal — current public contract
       - `tests/test_ralph_chain.py`, `tests/test_babysit_pr_loop.py` — current regression boundaries

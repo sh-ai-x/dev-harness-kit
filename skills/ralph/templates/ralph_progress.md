@@ -1,10 +1,9 @@
 # /dev-kit:ralph — Per-run progress log
 
-This template is the per-run complement to `templates/progress.log.md`.
-Each `/dev-kit:ralph <idea>` invocation appends one section per gate
-transition plus one section per Skill invocation. It is the
-operator-readable headline; the canonical state is
-`.dev-kit/ralph/<session>.json`.
+This template is the per-run derived complement to `templates/progress.log.md`.
+The runtime regenerates it from the canonical state snapshot and validated
+`trace_log` event journal. It is an operator-readable headline; neither this
+file nor the failure sidecar is completion evidence.
 
 ## Header (filled at init)
 
@@ -35,6 +34,9 @@ attended_lock: <true|false>
 ### [SKILL] <skill-name> <args>
 - invocation_id: <monotonic>
 - parent_stage: <the gate or ATTENDED_RUN that triggered this call>
+- event_id: <canonical trace event id for this invocation>
+- attempt_id: <durable Ralph attempt id>
+- failure_class: <empty or normalized failure taxonomy>
 - started_at: <ISO-8601>
 - ended_at: <ISO-8601>
 - exit_code: <0 = success; non-zero captured for forensics>
@@ -48,6 +50,8 @@ attended_lock: <true|false>
 last_action: <one-line description of the most recent Skill call>
 next_action: <one-line description of what the orchestrator will do next>
 blockers: <empty list, or list of unresolved blockers>
+metric_status: <OK|FAILED|DEGRADED|INSUFFICIENT_EVIDENCE>
+metric_coverage: <0..1, derived from the event journal>
 ```
 
 ## Terminal verdict

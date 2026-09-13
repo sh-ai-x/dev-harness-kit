@@ -27,10 +27,14 @@ esac
 # Enforce paths
 case "$FILE" in
   *)
+    ROOT="${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+    # A recorded judge decision is authoritative for this session, including
+    # paths that the deterministic policy would otherwise classify as core.
+    # Check it before the fast path so an explicit tdd_required=false cannot
+    # be hidden by the policy's conservative ``required`` result.
+    if [ -f "${ROOT}/.dev-kit/.tdd-scope.json" ] && jq -e '.tdd_required == false' "${ROOT}/.dev-kit/.tdd-scope.json" >/dev/null 2>&1; then exit 0; fi
     DECISION=$(python3 -m lib.tdd_scope_policy "$FILE" 2>/dev/null || echo judge)
     [ "$DECISION" = "exempt" ] && exit 0
-    if [ "$DECISION" = "judge" ] && [ -f "${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.dev-kit/.tdd-scope.json" ] && jq -e '.tdd_required == false' "${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.dev-kit/.tdd-scope.json" >/dev/null 2>&1; then exit 0; fi
-    ROOT="${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
     STATE="${ROOT}/.dev-kit/.tdd-cycle.json"
     if [ "$DECISION" = "required" ] || [ "$DECISION" = "judge" ]; then
       if [ ! -f "$STATE" ] || ! jq -e '.phase == "red" and (.exit_code | numbers) != 0' "$STATE" >/dev/null 2>&1; then

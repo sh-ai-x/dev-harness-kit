@@ -114,7 +114,7 @@ for pattern in "${RECOVERABLE_PATTERNS[@]}"; do
       deny "BASH GUARD (strict)" "pattern '$pattern' blocked."
     fi
     echo "[bash-guard] Pattern '$pattern' in command: ${CMD:0:60}... (advisory). strict mode required to block." >&2
-    exit 0
+    allow "BASH GUARD" "advisory pattern '$pattern' allowed"
   fi
 done
-exit 0
+allow "BASH GUARD" "allowed: no blocking bash policy matched"
