@@ -12,8 +12,8 @@ State lives at ``.dev-kit/guard-mode.session.json``, reset to all-"on" by
 `tdd_guard` and `worktree_guard` are hard PreToolUse blocks enforcing Iron
 Law L1 (no prod code without a verification artifact) and the
 `rules/git-workflow.md` worktree-isolation rule; `push_confirm` is the
-ask-tier bypass for the non-force git push ask, opt-in only by the
-babysit-pr loop lifetime, force-with-lease is unaffected. This module exists
+ask-tier bypass for first-push and force-with-lease asks, opt-in only by the
+babysit-pr loop lifetime. This module exists
 so a session can deliberately and visibly suspend any of them for itself,
 never silently and never beyond the current session.
 """
@@ -35,7 +35,7 @@ GUARDS = ("tdd_guard", "worktree_guard", "push_confirm")
 GUARD_DESCRIPTIONS = {
     "tdd_guard": "hooks/tdd-guard.sh — blocks prod code edits without RED evidence (Iron Law L1)",
     "worktree_guard": "hooks/worktree-guard.sh — blocks Edit/Write/MultiEdit in the main checkout (rules/git-workflow.md worktree isolation)",
-    "push_confirm": "hooks/destructive-confirm.sh — ask-tier gate that pauses non-force git push -u / git push --set-upstream ; toggled off by /dev-kit:babysit-pr[-local] for the loop lifetime, force-with-lease is unaffected",
+    "push_confirm": "hooks/destructive-confirm.sh — ask-tier gate for first-push and force-with-lease; toggled off by /dev-kit:babysit-pr[-local] for the loop lifetime",
 }
 
 
