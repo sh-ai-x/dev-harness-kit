@@ -892,14 +892,15 @@ jobs:
           # pytest -q canonical summary line — any of these forms:
           #   all-green (no skips):    `<N> passed in <Ns>s`
           #   all-green (with skips):  `<N> passed, <N> skipped in <Ns>s`
+          #   subtests:               `<N> passed, <N> skipped, <N> subtests passed in <Ns>s`
           #   partial-red:             `<N> failed, <N> passed, <N> skipped in <Ns>s`
           #   total-red:               `<N> failed in <Ns>s`
-          # The `skipped` (or `xfailed` / `xpassed`) segment is OPTIONAL —
-          # pytest omits it when the count is 0, and we should not force
-          # authors to fabricate a skip count or add a deliberate
-          # `@unittest.skip` test just to satisfy the gate. The regex
-          # accepts the natural pytest -q output for every state.
-          PATTERN='[0-9]+ (passed|failed)(, [0-9]+ (skipped|xfailed|xpassed))? in [0-9.]+s'
+          # The `skipped` (or `xfailed` / `xpassed`) and `subtests passed`
+          # segments are OPTIONAL — pytest omits them when their count is 0.
+          # Do not force authors to fabricate a skip count or omit a natural
+          # pytest summary just to satisfy the gate. Allowing each normal
+          # pytest result segment also covers failed+passed output.
+          PATTERN='[0-9]+ (passed|failed)(, [0-9]+ (passed|failed|skipped|xfailed|xpassed|subtests passed))* in [0-9.]+s'
           if printf '%s' "$PR_BODY" | grep -qE "$PATTERN"; then
             echo "L3-evidence OK: pytest tail line found in PR body"
             exit 0
