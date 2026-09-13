@@ -18,11 +18,16 @@ from lib.context_budget import (
 def test_handoff_prefers_artifact_refs_and_caps_payloads() -> None:
     payload = build_handoff(
         intent_ref="request-1",
-        artifact_refs=[f"artifact-{i}" for i in range(MAX_ARTIFACT_REFS + 4)],
+        artifact_refs=[
+            "artifact-long-" + "x" * MAX_ARTIFACT_REF_CHARS,
+            *[f"artifact-{i}" for i in range(MAX_ARTIFACT_REFS + 3)],
+        ],
         summary="x" * (MAX_SUMMARY_CHARS + 100),
     )
     assert payload["context_mode"] == "artifact_ref"
     assert len(payload["artifact_refs"]) == MAX_ARTIFACT_REFS
+    assert len(payload["artifact_refs"][0]) == MAX_ARTIFACT_REF_CHARS
+    assert all(len(ref) <= MAX_ARTIFACT_REF_CHARS for ref in payload["artifact_refs"])
     assert len(payload["summary"]) == MAX_SUMMARY_CHARS
     validate_handoff(payload)
 
@@ -106,13 +111,3 @@ def test_context_metrics_empty_input_is_insufficient() -> None:
     metrics = context_metrics([])
     assert metrics["usage_coverage"]["value"] is None
     assert metrics["full_context_reinjection_rate"]["status"] == "INSUFFICIENT_EVIDENCE"
-
-
-def test_handoff_bounds_artifact_references_and_serialized_size() -> None:
-    handoff = build_handoff(
-        intent_ref="intent",
-        artifact_refs=["artifact/" + "x" * 5000],
-        summary="compact",
-    )
-    assert len(handoff["artifact_refs"][0]) <= 512
-    validate_handoff(handoff)

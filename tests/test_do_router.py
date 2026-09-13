@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from lib.context_budget import validate_handoff
 from lib.do_router import build_envelope, resolve_route
 
@@ -102,15 +100,13 @@ def test_cli_emits_json_and_nonzero_hold_exit(tmp_path: Path) -> None:
     assert payload["status"] == "DELEGATED"
 
 
-@pytest.mark.parametrize("route", ["not-a-route", ""])
-def test_invalid_explicit_route_holds(route: str, tmp_path: Path) -> None:
+def test_invalid_explicit_route_holds() -> None:
     envelope = build_envelope(
         "implement a fix",
         target="lib/a.py",
         acceptance="tests pass",
         root=ROOT,
-        route_id=route or None,
+        route_id="not-a-route",
         resolver=_resolved,
     )
-    if route:
-        assert envelope["status"] == "HOLD"
+    assert envelope["status"] == "HOLD"

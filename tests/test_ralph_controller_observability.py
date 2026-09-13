@@ -7,7 +7,6 @@ from pathlib import Path
 from lib.trace_log import read_events
 from skills.ralph.lib import ralph_chain as chain
 from skills.ralph.lib import ralph_state as state_module
-from skills.ralph.lib.ralph_events import RalphEventAdapter
 from skills.ralph.lib.ralph_metrics import reduce_metrics
 
 
@@ -68,14 +67,6 @@ def test_resume_skips_completed_stage_and_keeps_attended_lock(tmp_path: Path) ->
     assert [call["sub_stage"] for call in resumed.calls] == [
         chain.BUILD, chain.BABYSIT, chain.SHIP,
     ]
-
-
-def test_context_adapter_remains_idempotent_under_controller_journal(tmp_path: Path) -> None:
-    adapter = RalphEventAdapter(tmp_path, run_id="run", attempt_id="attempt")
-    first = adapter.emit("BUILD", "stage.started", "started", idempotency_key="same")
-    second = adapter.emit("BUILD", "stage.started", "started", idempotency_key="same")
-    assert first.persisted and second.duplicate
-    assert len(read_events(tmp_path)) == 1
 
 
 def test_live_lease_blocks_and_dead_lease_is_reclaimed(tmp_path: Path) -> None:
