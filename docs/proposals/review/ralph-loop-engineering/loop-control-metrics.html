@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>/dev-kit:ralph — loop control plane, failure evidence, and measurable improvement</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>/dev-kit:ralph — loop control plane, failure evidence, and measurable improvement</h1>
+<p class="meta">2026-09-13 · <span class="tag tag-info">ready-for-review</span></p>
+<div class="tags"><span class="tag tag-info">ralph</span><span class="tag tag-info">loop-engineering</span><span class="tag tag-info">observability</span><span class="tag tag-info">metrics</span><span class="tag tag-info">durable-state</span><span class="tag tag-info">recovery</span><span class="tag tag-info">safety</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and priority</a></li><li><a href="#sec-1">Whole-system audit</a></li><li><a href="#sec-2">Proposed control-plane architecture</a></li><li><a href="#sec-3">Whole-skill loop registry and ownership</a></li><li><a href="#sec-4">State, event, and failure contracts</a></li><li><a href="#sec-5">Loop-control policy</a></li><li><a href="#sec-6">Metric contract and initial targets</a></li><li><a href="#sec-7">Failure handling and recovery matrix</a></li><li><a href="#sec-8">Rollout, verification, and rollback</a></li><li><a href="#sec-9">Issue plan and acceptance checklist</a></li><li><a href="#sec-10">References and relationship to existing Ralph proposal</a></li><li><a href="#amb-section">Ambiguities (open questions)</a></li><li><a href="#scope-section">Scope</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Decision and priority</h2>
+<p><strong>Decision: improve and control the loop, but stage the change.</strong> The highest-priority task is not a new retry heuristic. It is to make the existing state transition and the actual child attempt one durable, causally linked unit. Without that, every later metric is vulnerable to replay, missing output, or a false terminal state.</p>
+<p>Priority order:</p>
+<table><thead><tr><th>Priority</th><th>Issue</th><th>Why now</th><th>Exit condition</th></tr></thead><tbody><tr><td>P0</td><td>RLE-00 stage/terminal contract</td><td>The real babysit adapter can stop at USER_MERGE_REQUIRED before SHIP, while docs/tests describe a three-stage chain.</td><td>One explicit terminal owner is documented and stage metrics cannot hide a skipped SHIP.</td></tr><tr><td>P0</td><td>RLE-01 durable checkpoint/resume</td><td>A restart can replay BUILD and the documented recovery path is not executable from RECOVERY_REQUIRED.</td><td>Crash at every boundary resumes the next safe stage and never claims an unfinished attempt succeeded.</td></tr><tr><td>P0</td><td>RLE-02 failure event journal</td><td><code>last_action</code> and raw stdout are not enough for forensics or aggregation.</td><td>Every dispatch has a start/finish or interrupted event, with bounded evidence and a write-failure finding.</td></tr><tr><td>P1</td><td>RLE-03 bounded Ralph controller</td><td>The same-stage guard is dead in the production single-pass path.</td><td>Controller chooses next work from checkpoint, enforces lease/deadline/budget, and classifies no-progress explicitly.</td></tr><tr><td>P1</td><td>RLE-04 metric projection/report</td><td>There is no Ralph-specific success, recovery, convergence, or evidence-coverage view.</td><td><code>ralph_drive.sh metrics</code> returns reproducible JSON and a human report from events only.</td></tr><tr><td>P2</td><td>RLE-05 closed-loop improvement</td><td>A metric without a safe experiment loop only creates dashboards.</td><td>Shadow policy comparison and a separate accepted proposal show an improvement without safety regression.</td></tr></tbody></table>
+<p>The first implementation PR should land RLE-01 and RLE-02 together, after RLE-00's terminal ownership is made explicit. A checkpoint without an attempt journal can resume from a misleading state, while a journal without checkpoint ordering cannot control execution. RLE-00 must not be “fixed” by blindly forcing SHIP: whether BABYSIT or SHIP owns the human-merge boundary is a contract decision that the implementation and docs must agree on.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Whole-system audit</h2>
+<p>The loop ownership boundary is currently implicit:</p>
+<table><thead><tr><th>Layer</th><th>Current owner</th><th>Existing guard/evidence</th><th>Gap Ralph must close</th></tr></thead><tbody><tr><td>Gate/lock</td><td><code>ralph_state.py</code> + attended hook</td><td><code>attended_lock</code>, <code>last_blocked_ask</code></td><td>Emit lock decisions as events and include them in safety metrics.</td></tr><tr><td>Orchestration</td><td><code>ralph_chain.py</code></td><td>Fixed sub-stage order and atomic state snapshots</td><td>Resume from exact completed attempt; record duration, exit, and retry reason.</td></tr><tr><td>BUILD</td><td><code>lib/execute.py</code> / build skill</td><td>Per-step worktree, MUST-37, output JSON, trace/effectiveness events</td><td>Link the parent build attempt to those existing step artifacts.</td></tr><tr><td>BABYSIT</td><td><code>babysit_pr_loop.py</code> / babysit skill</td><td>Durable PR state, three no-information strategies, MAX_ITERS</td><td>Expose normalized child outcome and preserve its own retry ownership.</td></tr><tr><td>SHIP</td><td>ship skill</td><td>Review/tag/main boundary</td><td>Require authoritative evidence before user-merge terminal.</td></tr><tr><td>Storage</td><td>state JSON, trace log, effectiveness collection, Markdown template</td><td>Several individually useful stores</td><td>One run id, one event identity, clear source-of-truth rules.</td></tr><tr><td>Reporting</td><td>progress template and generic effectiveness reports</td><td>Human summaries and five-component scorer</td><td>Ralph-specific projection with coverage and failure taxonomy.</td></tr></tbody></table>
+<p>The operational cases from the recent PR work are part of this audit. Worktree guard fixes (#847) require a safe target/branch identity; phase evidence (#848) requires promotion of real artifacts rather than prose claims; push-confirm bypass (#849) shows that a passing workflow can still have an audit provider with <code>MISSING</code> evidence. A prior recovery cleanup mistake also demonstrated that a broad or unresolved temporary path can delete the newly created worktree. The new event taxonomy must make these distinct: <code>worktree_policy</code>, <code>evidence_promotion</code>, <code>audit_evidence_missing</code>, and <code>cleanup_target_rejected</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Proposed control-plane architecture</h2>
+<pre><code class="language-text">user gates + attended_lock
+           │
+           ▼
+Ralph Controller ── lease / deadline / attempt budget ──┐
+    │                                                   │
+    ├─ checkpoint snapshot (.dev-kit/ralph/&lt;session&gt;.json)
+    ├─ lifecycle event adapter ── trace/events.jsonl     │
+    └─ derived progress + metrics                       │
+                                                        ▼
+    BUILD (execute output + events)
+        → BABYSIT (babysit-state + check/review evidence)
+        → SHIP (review/tag/merge boundary)
+                                                        │
+             reducer: metrics + recovery decision ◄────┘</code></pre>
+<p>The controller is the only component allowed to advance Ralph's sub-stage. Child skills retain authority over their internal loops:</p>
+<ul><li>BUILD reports step-level output and the existing self-fix guard; Ralph does not infer a green build from a zero exit code without the child artifact reference.</li><li>BABYSIT reports its durable state, failure signature, no-information count, wake time, and terminal/recovery reason; Ralph does not reset its context or silently turn <code>MISSING</code> review evidence into approval.</li><li>SHIP remains the final policy boundary. <code>USER_MERGE_REQUIRED</code> is an expected terminal outcome, not a failure and not a merge command.</li></ul>
+<p>A run has one stable <code>run_id</code>; every stage execution has a unique <code>attempt_id</code>; retries and recovery re-entry keep the run id but receive a new attempt id. The pair is the join key for state, events, artifacts, and metrics.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Whole-skill loop registry and ownership</h2>
+<p>Ralph must measure the loops that it invokes without taking ownership of their internal algorithms. A registry entry is the smallest shared contract:</p>
+<pre><code class="language-text">loop_id, owner, parent_run_id, scope, iteration, cap,
+progress_fingerprint, terminal, evidence_refs, mode</code></pre>
+<p>The initial registry is:</p>
+<table><thead><tr><th>Loop</th><th>Owner</th><th>Control policy</th><th>Ralph integration/metric</th></tr></thead><tbody><tr><td><code>research-escalation</code></td><td>research/research_engine</td><td>Phase 0 cache → Phase 1 direct → Phase 2 fan-out → Phase 3 human; <code>max_phase</code> cap</td><td>Record phase, source count, citation verification, <code>NEEDS_HUMAN</code>, and latency.</td></tr><tr><td><code>plan-gates</code></td><td>plan/interview</td><td>5 gates, user interrupt, HOLD and loop-log resume</td><td>Record gate transition, ambiguity answers, HOLD/resume count, and artifact refs.</td></tr><tr><td><code>build-step</code></td><td>build/execute</td><td>Dependency-aware dispatch, isolated worktree, real output, MUST-37 3-cycle self-fix</td><td>Join Ralph attempt to step output/events; report step attempts and blocked/error/completed outcomes.</td></tr><tr><td><code>build-debug</code></td><td>build-debug</td><td>Reproduce → isolate → root cause → fix/plan; one phase at a time</td><td>Record phase completion and quoted root-cause/regression evidence; never bundle phases.</td></tr><tr><td><code>build-refactor</code></td><td>build-refactor</td><td>Dead → duplicate → naming → coverage; one pass at a time</td><td>Record pass and regression result; no artificial retry metric.</td></tr><tr><td><code>tdd-cycle</code></td><td>build-tdd + tdd-guard</td><td>RED → GREEN → REFACTOR, failing test required before production code</td><td>Record red confirmation, green result, refactor verification, and guard decision.</td></tr><tr><td><code>build-verify</code></td><td>build-verify</td><td>verify pass advances; fail returns to execute</td><td>Record verification evidence and back-edge count.</td></tr><tr><td><code>babysit-gh</code></td><td>babysit-pr/babysit_pr_loop</td><td>Poll/repair until approval, 3 no-information guard, MAX_ITERS=1000</td><td>Import child iteration, signature, wake, repair attempt, and recovery state; Ralph does not reset it.</td></tr><tr><td><code>babysit-local</code></td><td>babysit-pr-local</td><td>Local pytest/judge loop, same no-progress/cap family</td><td>Use <code>mode=local</code>; never combine its iterations with <code>babysit-gh</code> counts.</td></tr><tr><td><code>ci-triage-resolution</code></td><td>ci-triage</td><td>Signature dedup; known-pattern auto-fix; idempotent processed state</td><td>Record case lifecycle and resolution evidence when explicitly invoked, not as a hidden retry.</td></tr><tr><td><code>review-fanout</code> / <code>security-fanout</code></td><td>review/security</td><td>Parallel dimensions then verifier; missing/rejected findings stay visible</td><td>Report expected/returned/confirmed/rejected/missing dimensions and verifier latency.</td></tr><tr><td><code>ralph-attended</code></td><td>Ralph</td><td>Gate lock + BUILD/BABYSIT/SHIP controller, lease, deadline, stage budget</td><td>Owns only cross-skill sequencing, resume, terminal classification, and run-level metrics.</td></tr></tbody></table>
+<p>Nested loop events carry <code>parent_run_id</code> and <code>parent_attempt_id</code>. A child loop's iteration is not a Ralph stage attempt, and a Ralph retry must not reset the child's own state. This prevents double-counting and avoids stacking <code>MAX_ITERS</code> on top of another hidden cap. Standalone invocations can continue using their current logs; Phase 1 only promises complete registry coverage for loops reached from an active Ralph run.</p>
+<p>The controller must show a loop graph in the report: parent Ralph run → stage attempt → child loop → child attempt → artifact/check/review evidence. A missing child edge is an observability finding, not a successful no-op.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">State, event, and failure contracts</h2>
+<h3>Checkpoint contract</h3>
+<p>Additive fields in the Ralph state snapshot:</p>
+<pre><code class="language-json">{
+  &quot;schema_version&quot;: 2,
+  &quot;run_id&quot;: &quot;ralph-&lt;opaque-id&gt;&quot;,
+  &quot;checkpoint_seq&quot;: 17,
+  &quot;current_stage&quot;: &quot;ATTENDED_RUN&quot;,
+  &quot;sub_stage&quot;: &quot;BABYSIT&quot;,
+  &quot;last_completed_sub_stage&quot;: &quot;BUILD&quot;,
+  &quot;active_attempt&quot;: {
+    &quot;attempt_id&quot;: &quot;attempt-17&quot;,
+    &quot;stage&quot;: &quot;BABYSIT&quot;,
+    &quot;started_event_id&quot;: &quot;evt-start-17&quot;,
+    &quot;lease_owner&quot;: &quot;&lt;worker-id&gt;&quot;,
+    &quot;deadline&quot;: &quot;&lt;ISO-8601&gt;&quot;
+  },
+  &quot;terminal_reason&quot;: &quot;&quot;,
+  &quot;recovery_reason&quot;: &quot;&quot;,
+  &quot;next_action&quot;: &quot;resume BABYSIT attempt-18&quot;
+}</code></pre>
+<p>State transitions are ordered as: durable <code>attempt.started</code> event → child dispatch → durable <code>attempt.finished</code> or <code>attempt.interrupted</code> event → atomic checkpoint snapshot. On restart, an active attempt with no finish event is never treated as success. The reconciler marks it interrupted, checks child state/artifacts, and either resumes from the last verified boundary or lands in RECOVERY_REQUIRED.</p>
+<p>The load path validates schema, enum, counters, path containment, and lease ownership. A corrupt snapshot is not silently replaced by a new run; replay from valid events is attempted, and failure becomes an explicit <code>checkpoint_corrupt</code> recovery finding.</p>
+<h3>Event contract</h3>
+<p>Keep the existing <code>trace_log</code> v1 required fields and add Ralph-specific fields additively:</p>
+<table><thead><tr><th>Field</th><th>Contract</th></tr></thead><tbody><tr><td><code>run_id</code>, <code>attempt_id</code>, <code>event_id</code></td><td>Non-empty stable ids; duplicate writes are idempotent.</td></tr><tr><td><code>stage</code>, <code>sub_stage</code>, <code>event_type</code>, <code>outcome</code></td><td>Controlled values; child-specific details go in <code>evidence_ref</code>.</td></tr><tr><td><code>parent_id</code>, <code>checkpoint_seq</code></td><td>Causal link and monotonic run order.</td></tr><tr><td><code>started_at</code>, <code>ended_at</code>, <code>duration_ms</code></td><td>UTC timestamps and measured wall duration; absent means unknown, not zero.</td></tr><tr><td><code>exit_code</code>, <code>failure_class</code></td><td>Real child exit and normalized class; no exit-code guessing from prose.</td></tr><tr><td><code>stdout_ref</code>, <code>stderr_ref</code>, <code>artifact_refs</code></td><td>Safe relative references to bounded artifacts; snippets are capped and redacted.</td></tr><tr><td><code>policy</code></td><td>Guard/lease/retry decision with rule id and reason.</td></tr><tr><td><code>git_sha</code>, <code>branch</code>, <code>pr_number</code></td><td>Context only; never proof that a push or merge happened.</td></tr></tbody></table>
+<p>Minimum event types are <code>run.started</code>, <code>stage.attempt.started</code>, <code>stage.attempt.finished</code>, <code>stage.attempt.interrupted</code>, <code>guard.blocked</code>, <code>guard.allowed</code>, <code>retry.scheduled</code>, <code>recovery.required</code>, <code>observability.degraded</code>, <code>terminal.reached</code>, and <code>run.closed</code>.</p>
+<p>Failure classes include <code>child_exit</code>, <code>child_timeout</code>, <code>child_exception</code>, <code>no_progress</code>, <code>watchdog_limit</code>, <code>stale_lease</code>, <code>checkpoint_corrupt</code>, <code>event_write_failed</code>, <code>audit_evidence_missing</code>, <code>worktree_policy</code>, <code>cleanup_target_rejected</code>, <code>human_merge_boundary</code>, and <code>unknown</code>. A failure class is a label for analysis; the raw bounded evidence and artifact refs remain the source for diagnosis.</p>
+<h3>Log safety</h3>
+<p>Event writes are append-only, locked, flushed/fsynced for checkpoint events, and deduplicated by event id. Payloads must not contain secrets, tokens, full prompts, or unlimited child output. Paths are resolved and checked under the run artifact root before writing; an unresolved cleanup target is rejected and logged. A write failure never becomes a green metric. If the failure itself cannot be logged, the process exits with a distinct observability/environment code and leaves the last valid checkpoint intact.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Loop-control policy</h2>
+<p>The controller uses this decision order on every wake or invocation:</p>
+<ol><li>Load and validate the snapshot; acquire the session lease. A live lease blocks a second worker. A stale lease emits <code>stale_lease</code> and requires bounded recovery instead of concurrent dispatch.</li><li>Replay the event tail from <code>checkpoint_seq</code>. Close any attempt that has a finish event; mark an open attempt interrupted. Never infer completion from a timestamp, process exit, or Markdown line.</li><li>Choose the next work from the last verified child evidence. BUILD resumes from execute's step output/index; BABYSIT resumes from <code>.dev-kit/babysit-state.json</code>; SHIP is eligible only after the authoritative review/tag preconditions are present.</li><li>Check the run deadline, per-stage attempt budget, and inherited child safety state. If a limit fires, emit the limit event and land in RECOVERY_REQUIRED with a resumable next action.</li><li>Emit <code>stage.attempt.started</code>, dispatch exactly once for the attempt id, capture real stdout/stderr/exit/duration, and emit a terminal attempt event. A retry is allowed only if the classifier says the child outcome is resumable and the operation is idempotent.</li><li>Compute a progress fingerprint from stage, child head/check state, artifact hashes, failure signature, and verification result. Same fingerprint without evidence change increments no-progress; a changed failure with stronger verification is progress. Two Ralph re-entries without progress are a recovery signal, while child policies remain authoritative for their own three-cycle/three-poll limits.</li><li>Write the checkpoint after the event, release the lease, and return a terminal or wake result. Backoff is bounded and stored as <code>next_wake_at</code>; no busy loop is allowed.</li></ol>
+<p>This makes the loop a state machine with explicit ownership rather than a <code>for sub in SUB_STAGE_ORDER</code> traversal. It also makes “resume” a deterministic operation: it means resume the next unverified attempt, not repeat every child skill.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Metric contract and initial targets</h2>
+<p>Metrics are pure reductions over valid events and referenced child evidence. Every value includes numerator, denominator, coverage, dimensions, and evidence event ids. A missing denominator is <code>null</code> with <code>INSUFFICIENT_EVIDENCE</code>, never 0% and never 100%.</p>
+<table><thead><tr><th>Metric</th><th>Formula</th><th>Initial policy / use</th></tr></thead><tbody><tr><td><code>terminal_rate</code></td><td>(<code>DONE</code> + <code>USER_MERGE_REQUIRED</code>) / runs started</td><td>Reliability; baseline first, expected human merge included.</td></tr><tr><td><code>recovery_rate</code></td><td><code>RECOVERY_REQUIRED</code> / runs started</td><td>Diagnose regressions; split by failure class and stage.</td></tr><tr><td><code>resume_success_rate</code></td><td>resumed runs reaching the next verified boundary / resume attempts</td><td>Synthetic gate: ≥95% before controlled mode; otherwise rollback.</td></tr><tr><td><code>evidence_completeness</code></td><td>attempts with start + terminal + exit/duration/evidence refs / attempts</td><td>Safety gate: ≥99% for controlled mode; below this is degraded.</td></tr><tr><td><code>orphan_attempt_rate</code></td><td>open attempts reconciled as interrupted / attempts</td><td>Detect crashes and lost finishes; alert on trend, never auto-close as success.</td></tr><tr><td><code>no_progress_rate</code></td><td>no-progress fingerprints / stage attempts</td><td>Convergence signal, split from legitimate retries.</td></tr><tr><td><code>attempts_per_run</code></td><td>total stage attempts / runs</td><td>Efficiency and loop expansion; report median/p95.</td></tr><tr><td><code>time_to_terminal</code></td><td>terminal timestamp − run start</td><td>Reliability/latency; report median/p95 by stage and outcome.</td></tr><tr><td><code>stage_duration_ms</code></td><td>finish − start for each attempt</td><td>Find bottleneck; absent duration lowers coverage.</td></tr><tr><td><code>retry_rate</code></td><td>retries scheduled / attempts</td><td>Detect thrashing; pair with terminal and quality outcomes.</td></tr><tr><td><code>child_evidence_link_rate</code></td><td>Ralph attempts linked to child artifacts / child attempts</td><td>Verify executor/babysit integration.</td></tr><tr><td><code>audit_evidence_missing_rate</code></td><td>audit attempts with missing verdict / audit attempts</td><td>Must not be counted as approval; identifies provider/readiness failures.</td></tr><tr><td><code>guard_block_rate</code></td><td>blocked guard decisions / guard decisions</td><td>Safety behavior; dimension by guard id and ground truth where available.</td></tr><tr><td><code>observability_degraded_rate</code></td><td>runs with event/checkpoint write degradation / runs</td><td>A release gate, not a quality score.</td></tr><tr><td><code>cleanup_policy_violation_rate</code></td><td>rejected unsafe cleanup targets / cleanup attempts</td><td>Must remain zero in regression and synthetic safety tests.</td></tr></tbody></table>
+<p>Required dimensions are <code>skill</code>, <code>stage</code>, <code>sub_stage</code>, <code>outcome</code>, <code>failure_class</code>, <code>mode</code> (legacy/shadow/controlled), <code>provider</code>, <code>model</code>, <code>git_sha</code>, and <code>repo</code>. Provider/model are empty when not recorded; the reducer must not silently attribute identity.</p>
+<p>Initial rollout gates are deliberately small and evidence-oriented:</p>
+<ul><li>Do not enable controlled mode unless synthetic crash/restart tests achieve <code>resume_success_rate &gt;= 0.95</code> and <code>evidence_completeness &gt;= 0.99</code>.</li><li>Treat any cleanup policy violation, attended-lock bypass, auto-merge, or audit-MISSING-to-approval conversion as a release blocker even if terminal rate improves.</li><li>Collect a baseline of at least 30 runs or 14 days before setting product thresholds for terminal rate, p95 latency, retries, or cost.</li><li>Do not add token/cost optimization to the primary score until event coverage is stable; otherwise the system may reward under-logging.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-7">Failure handling and recovery matrix</h2>
+<table><thead><tr><th>Failure</th><th>Event/finding</th><th>Controller action</th><th>Metric treatment</th></tr></thead><tbody><tr><td>Crash before child dispatch</td><td><code>stage.attempt.started</code> without dispatch marker</td><td>Reconcile as not-dispatched; retry with a new attempt id.</td><td>Orphan/interrupted, not failure-free.</td></tr><tr><td>Crash after dispatch, before finish</td><td>Open attempt</td><td>Inspect child artifacts; resume only from verified boundary, otherwise recovery.</td><td><code>orphan_attempt_rate</code> and <code>resume_success_rate</code>.</td></tr><tr><td>Child non-zero/timeout/exception</td><td><code>stage.attempt.finished</code> + class</td><td>Apply child-owned policy; bounded Ralph retry only when resumable.</td><td>Failure distribution and duration.</td></tr><tr><td>BUILD MUST-37 trip</td><td><code>watchdog_limit</code></td><td>Preserve step output and stop at recovery.</td><td>Build guard trip; never Ralph success.</td></tr><tr><td>BABYSIT no-progress/MAX_ITERS</td><td><code>no_progress</code> or <code>watchdog_limit</code></td><td>Preserve babysit state and wake/recovery action.</td><td>Convergence and recovery, not a generic code failure.</td></tr><tr><td>CI/LLM audit verdict MISSING</td><td><code>audit_evidence_missing</code></td><td>Keep review unresolved; do not ship/approve from missing data.</td><td>Insufficient evidence.</td></tr><tr><td>State snapshot corrupt</td><td><code>checkpoint_corrupt</code></td><td>Replay valid events; if replay fails, recovery with original artifacts.</td><td>Snapshot integrity and recovery.</td></tr><tr><td>Event write/lock/fsync failure</td><td><code>observability.degraded</code></td><td>Keep last valid checkpoint; fail closed for safety-critical transition.</td><td>Degraded evidence; no success claim.</td></tr><tr><td>Stale/concurrent worker</td><td><code>stale_lease</code> / <code>guard.blocked</code></td><td>One worker recovers or operator decides; never dual dispatch.</td><td>Lease conflict and guard safety.</td></tr><tr><td>Unsafe cleanup path</td><td><code>cleanup_target_rejected</code></td><td>Refuse deletion; retain worktree and ask for recovery at the allowed boundary.</td><td>Must be zero in safety gate.</td></tr><tr><td>Green PR awaiting merge</td><td><code>terminal.reached</code> outcome <code>USER_MERGE_REQUIRED</code></td><td>Stop and hand off to human <code>gh pr merge</code>.</td><td>Expected terminal, separate from DONE.</td></tr></tbody></table>
+<p>The recovery output must contain: run id, last verified checkpoint, active/interrupted attempt, failure class, first useful artifact path, bounded log excerpt, next safe command, and whether a human decision is required. It must not instruct the next worker to “just retry” without an idempotency and evidence check.</p>
+<hr class="section-divider">
+
+<h2 id="sec-8">Rollout, verification, and rollback</h2>
+<h3>Phase 0 — observe only</h3>
+<p>Add the event adapter and pure reducer. Wrap existing Ralph dispatches without changing stage order or retries. Compare projected metrics with current state/child outcomes. Acceptance: no workflow exit-code change, no prompt/merge-policy change, and 100% of synthetic events have stable parent links.</p>
+<h3>Phase 1 — durable checkpoint</h3>
+<p>Add schema validation, checkpoint sequence, active-attempt recovery, lease, and <code>resume</code>. Keep the legacy traversal as a feature-flagged fallback. Acceptance: kill the process before and after each of BUILD/BABYSIT/SHIP dispatch; recovery never duplicates a verified terminal side effect and never reports an open attempt as success.</p>
+<h3>Phase 2 — controlled loop</h3>
+<p>Enable progress fingerprints, stored backoff, stage/deadline budgets, and explicit retry classification for resumable child results. Existing child guard limits remain unchanged. Acceptance: no busy loop, bounded attempts, stale worker cannot dispatch, and rollback to legacy mode is one environment/config change.</p>
+<h3>Phase 3 — operational report</h3>
+<p>Add <code>ralph_drive.sh events</code> and <code>metrics</code>, derived progress rendering, and the metric coverage/release gates. Acceptance: reports are reproducible from a copied event journal and show insufficient evidence for truncated/missing records.</p>
+<h3>Phase 4 — improvement experiments</h3>
+<p>Use shadow policy comparisons to test one change at a time (for example, backoff or diagnosis strategy). Any metric-driven policy change gets a separate proposal, explicit safety thresholds, and a rollback. No self-modifying or LLM-only control policy is included here.</p>
+<p>Verification commands for the implementation PR should include the focused Ralph/event/metric suites, existing executor and babysit suites, <code>git diff --check</code>, hook/worktree policy checks, and one end-to-end noop run with a captured event journal. The PR must quote actual exit codes, test counts, and metric coverage rather than a prose “all green”.</p>
+<hr class="section-divider">
+
+<h2 id="sec-9">Issue plan and acceptance checklist</h2>
+<p>Proposed GitHub issues after this proposal is accepted:</p>
+<ol><li><strong>RLE-00 — Align stage and terminal ownership (P0).</strong> Reproduce with a successful real dispatch and assert whether SHIP runs before <code>USER_MERGE_REQUIRED</code>; update the public contract, state transition, and metrics so a skipped stage is explicit and intentional.</li><li><strong>RLE-01 — Make Ralph checkpoint resume real (P0).</strong> Reproduce by persisting <code>sub_stage=BABYSIT</code>, restarting, and asserting BUILD is not dispatched. Add crash-boundary and schema-corruption tests.</li><li><strong>RLE-02 — Add Ralph lifecycle/failure evidence (P0).</strong> Reproduce by forcing timeout/exception/audit-MISSING and inspecting event ids, refs, redaction, and interrupted-attempt recovery.</li><li><strong>RLE-03 — Activate bounded controller semantics (P1).</strong> Reproduce a changed and unchanged failure fingerprint; assert progress advances, no-progress backs off, and limits land in recovery.</li><li><strong>RLE-04 — Add Ralph metric projection and CLI (P1).</strong> Reproduce from a fixture journal; assert formulas, dimensions, coverage, and expected USER_MERGE_REQUIRED handling.</li><li><strong>RLE-05 — Run shadow improvement experiment (P2).</strong> Reproduce a legacy-vs-controlled comparison; accept only if reliability and safety metrics do not regress. This issue must not mutate production control policy by itself.</li></ol>
+<p>Definition of done for the first two issues:</p>
+<ul><li>[ ] A single <code>run_id</code> joins state, attempt events, child artifacts, progress, and metrics.</li><li>[ ] A process kill at every stage boundary produces an explicit interrupted/recovery record and a deterministic next action.</li><li>[ ] No event or metric treats missing audit/review evidence as green.</li><li>[ ] Logs are bounded, redacted, append-only, idempotent, and safe under invalid/symlinked/broad cleanup paths.</li><li>[ ] Existing attended_lock, worktree isolation, review, and human merge tests remain green.</li><li>[ ] Legacy mode remains available until the baseline and rollback review are complete.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-10">References and relationship to existing Ralph proposal</h2>
+<p>This is a follow-up to the intent-first/autonomy proposal implemented around commit <code>5f3592759fea8d7a0973cc3d930d86d2c22f85a1</code> and PR #844. That proposal establishes the gates, attended lock, and basic safety valves. It explicitly leaves silent doom loops, recovery re-entry, and streaming/measurement gaps open. This proposal narrows the next change to the control/evidence/measurement architecture; it does not reopen the gate-count or Linear-scope decisions.</p>
+<p>Internal SSOT:</p>
+<ul><li><code>iron-laws/index.md</code> — verification, evidence, safety, and state rules</li><li><code>rules/git-workflow.md</code> — worktree, handoff, commit, and PR contract</li><li><code>skills/ralph/lib/ralph_state.py</code> — current Ralph state machine</li><li><code>skills/ralph/lib/ralph_chain.py</code> — current attended dispatcher</li><li><code>skills/babysit-pr/SKILL.md</code> and <code>lib/babysit_pr_loop.py</code> — child repair loop</li><li><code>lib/execute.py</code> — real child output and executor evidence events</li><li><code>lib/trace_log.py</code> — structured trajectory event contract</li><li><code>lib/effectiveness_collection.py</code> — bounded journal/projection durability pattern</li><li><code>lib/harness_effectiveness.py</code> — evidence-based metric conventions</li><li><code>docs/skills/ralph.md</code> and <code>docs/proposals/review/ralph-autonomy/main.yaml</code> — current public contract</li><li><code>tests/test_ralph_chain.py</code>, <code>tests/test_babysit_pr_loop.py</code> — current regression boundaries</li></ul>
+<hr class="section-divider">
+
+
+<hr class="section-divider">
+
+<section id="amb-section" class="amb-section"><h3>Ambiguities (open questions)</h3><ol class="amb-list"><li id="amb-A1" class="amb-item"><div class="amb-header"><code class="amb-id">A1</code><span class="amb-badge amb-badge-blocking">blocking</span></div><div class="amb-question">Which existing event store is canonical for Ralph lifecycle events: trace_log, effectiveness_collection, or a new journal?</div><div class="amb-default"><strong>Default:</strong> trace_log v1 is the canonical trajectory event source because executor events already use its parent-link contract; Ralph metrics are a separate pure projection. Reuse effectiveness_collection's fsync/hash-chain patterns where trace_log is hardened, without creating a third store.</div></li><li id="amb-A2" class="amb-item"><div class="amb-header"><code class="amb-id">A2</code><span class="amb-badge amb-badge-blocking">blocking</span></div><div class="amb-question">What happens when a safety-critical event cannot be persisted?</div><div class="amb-default"><strong>Default:</strong> Fail closed for checkpoint-critical transitions: persist RECOVERY_REQUIRED with an observability-degraded reason if possible and do not claim success. Best-effort output snippets may be omitted only when the event still records the omission.</div></li><li id="amb-A3" class="amb-item"><div class="amb-header"><code class="amb-id">A3</code><span class="amb-badge amb-badge-default">default</span></div><div class="amb-question">Should Ralph add retries on top of build and babysit-pr retries?</div><div class="amb-default"><strong>Default:</strong> Do not duplicate child retry policy. Ralph owns stage-attempt budgets, deadline, backoff, and resume; build owns MUST-37 and babysit-pr owns no-progress/MAX_ITERS. Ralph retries only when the child outcome is explicitly resumable and idempotent.</div></li><li id="amb-A4" class="amb-item"><div class="amb-header"><code class="amb-id">A4</code><span class="amb-badge amb-badge-default">default</span></div><div class="amb-question">How should CI or LLM audit MISSING affect a run metric?</div><div class="amb-default"><strong>Default:</strong> Classify it as audit_evidence_missing / insufficient evidence, never as approval and never as an ordinary code failure. The run may remain resumable, but terminal quality metrics exclude it until an authoritative verdict exists.</div></li><li id="amb-A5" class="amb-item"><div class="amb-header"><code class="amb-id">A5</code><span class="amb-badge amb-badge-default">default</span></div><div class="amb-question">When should metric thresholds become automatic control inputs?</div><div class="amb-default"><strong>Default:</strong> Never in the first rollout. Collect a two-week or 30-run baseline, review distributions, then propose thresholds in a separate accepted change with shadow comparison and rollback.</div></li></ol></section><section id="scope-section" class="scope-section"><h3>Scope</h3><div class="scope-grid"><div class="scope-card scope-in-card"><h4>In scope</h4><ul class="scope-list"><li>A single canonical Ralph run identity and versioned checkpoint/attempt model under <code>.dev-kit/ralph/</code>.</li><li>Resume-aware BUILD → BABYSIT → SHIP orchestration after process crash, child timeout, RECOVERY_REQUIRED, or stale lease.</li><li>Append-only structured lifecycle, guard, recovery, and terminal events with bounded redacted logs and artifact references.</li><li>Derived <code>ralph_progress.md</code> output and a local JSON/Markdown metrics CLI.</li><li>Pure metric projection with reliability, convergence, efficiency, safety, observability, and evidence-completeness dimensions.</li><li>Synthetic crash/restart, duplicate-event, timeout, stale-lock, audit-MISSING, cleanup-safety, and regression tests.</li><li>Shadow-mode rollout and explicit rollback to the legacy single-pass controller.</li></ul></div><div class="scope-card scope-out-card"><h4>Out of scope</h4><ul class="scope-list"><li>Auto-merge, force-push, review bypass, or changing the human merge boundary.</li><li>Replacing build's per-step executor, MUST-37 self-fix, babysit-pr's repair strategy, or ship's authoritative review/tag checks.</li><li>A hosted observability service, external database, background daemon, or multi-repository coordinator.</li><li>LLM-generated metric interpretation being allowed to mutate policy without deterministic guard evaluation.</li><li>Retroactively claiming success for runs that have no durable terminal evidence.</li><li>Editing unrelated PR implementation work or changing hook manifests unless a later accepted issue explicitly proves it is required.</li></ul></div></div></section><section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>Ralph has a useful attended-lock state machine and delegates the actual work to build, babysit-pr, and ship. The control loop is not yet a durable execution loop, however. The persisted top-level state, child skill state, stdout, failure logs, and effectiveness reports are separate surfaces. A restart can therefore replay work from the beginning, lose the causal relationship between an attempt and its failure, or report a terminal-looking state without enough evidence to measure it.</p>
+<p>The project already contains the ingredients for a safe design: build writes real step output and evidence events, trace_log has a validated append-only event contract, effectiveness_collection has bounded append+fsync storage, and babysit-pr has a resumable state machine. This proposal connects those pieces instead of introducing another competing loop or another unstructured progress file.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li>skills/ralph/lib/ralph_chain.py:385-415 iterates BUILD → BABYSIT → SHIP from the beginning and saves only the current sub_stage before dispatch; it does not select the next work from a recovered checkpoint.</li><li>skills/ralph/lib/ralph_chain.py:454-460 stores only child stdout in build_state, babysit_state, and ship_state; exit code, stderr, duration, attempt identity, and evidence references are not durable Ralph fields.</li><li>skills/ralph/lib/ralph_chain.py:557-573 rejects every loaded state whose current_stage is not ATTENDED_RUN, so the documented re-invocation path cannot itself resume RECOVERY_REQUIRED.</li><li>skills/ralph/scripts/ralph_drive.sh:73-236 exposes init/status/can-ask/advance/rewind/run-attended, but has no resume, event, failure-log, or metric command.</li><li>skills/ralph/templates/ralph_progress.md:1-7 describes a per-run log, but no runtime writer creates or appends that file.</li><li>tests/test_ralph_chain.py:214-241 reaches same-stage-repeat only by monkey-patching SUB_STAGE_ORDER; the production runner is explicitly a single pass.</li><li>tests/test_ralph_chain.py:249-267 accepts any BUILD/BABYSIT/SHIP sub_stage after reload, so it does not prove crash/restart resume semantics.</li><li>skills/ralph/lib/ralph_chain.py:234-250 maps a successful BABYSIT dispatch directly to USER_MERGE_REQUIRED, while the public contract describes BUILD → BABYSIT → SHIP; the SHIP stage is therefore skipped on the real happy path.</li><li>lib/execute.py:807-838 already writes real exit_code/stdout/stderr/duration_seconds output, and lib/execute.py:926-949 emits causal verification events; Ralph currently captures neither contract as a structured attempt.</li><li>lib/trace_log.py:278-326 provides event validation, locking, dedupe, and parent links; lib/effectiveness_collection.py:609-678 provides append+fsync and hash-chain durability, but neither is wired to Ralph stage lifecycle.</li><li>lib/babysit_pr_loop.py:177-220 has a useful three-outcome no-information policy, yet Ralph does not consume its iteration, failure signature, wake, or recovery evidence as metrics.</li><li>The wider skill set has independent loop owners: research Phase 0-3 escalation (<code>skills/research/SKILL.md:33-53</code>), plan's 5-gate and loop-log (<code>skills/plan/SKILL.md:305-324,431-445</code>), build step/self-fix (<code>skills/build/SKILL.md:106-115</code>), build-debug 4 phases (<code>skills/build-debug/SKILL.md:55-84</code>), build-refactor 4 passes (<code>skills/build-refactor/SKILL.md:48-55</code>), TDD Red-Green-Refactor (<code>skills/build-tdd/SKILL.md:24-32</code>), build-verify fail-back (<code>skills/build-verify/SKILL.md:61-63</code>), local babysit (<code>skills/babysit-pr-local/SKILL.md:144-166,255-266</code>), and CI-triage process (<code>skills/ci-triage/SKILL.md:50-57,108-113</code>).</li><li>Review and security are parallel fan-out plus verifier workflows (<code>skills/review/SKILL.md:16-25</code>, <code>skills/security/SKILL.md:33-38</code>); their expected/returned/confirmed dimension counts are also loop evidence when invoked under Ralph.</li><li>Operational evidence from PRs #847, #848, and #849: worktree isolation, phase-evidence promotion, push-confirm bypass, CI audit MISSING, and recovery cleanup all need separate policy/failure classes rather than one generic failed run.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Ralph becomes a bounded, resumable controller with three explicit planes:</p>
+<ol><li>Control plane — a versioned checkpoint plus lease/attempt record chooses the next sub-stage from committed evidence, not from a fixed list. A process crash, stale worker, child timeout, or RECOVERY_REQUIRED state is represented as an interrupted attempt and can be resumed safely.</li><li>Evidence plane — every stage emits validated start, finish, retry, guard, recovery, and terminal events with an attempt id and artifact references. The operator-readable ralph_progress.md is derived from this journal; it is never the source of truth.</li><li>Measurement plane — a pure projection computes Ralph-specific reliability, convergence, efficiency, safety, and evidence-completeness metrics. Missing or degraded telemetry is reported as insufficient evidence and never converted into success.</li></ol>
+<p>The first rollout runs in shadow/metrics-only mode, then enables durable resume, then enables controller retries. Existing build MUST-37, babysit-pr no-progress/MAX_ITERS, attended_lock, review gates, human merge boundary, worktree guard, and fail-closed audit semantics remain authoritative. Metrics do not approve code and do not authorize merge.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">skills/ralph/lib/ralph_state.py</span><p>Add a versioned checkpoint schema with last completed sub-stage, active attempt, checkpoint sequence, terminal reason, deadline, and recovery metadata. Validate state on load, distinguish resumable recovery from terminal user-merge, and use atomic snapshot writes only after the corresponding event is durable.</p></li><li><span class="file-path">skills/ralph/lib/ralph_chain.py</span><p>Replace the fixed single-pass traversal with a resume-aware controller that acquires a per-session lease, emits stage lifecycle events, measures dispatch duration, classifies child outcomes, honors bounded retry/backoff and no-progress fingerprints, and reconciles an open attempt after a crash. Preserve the attended-lock Ask refusal and the human merge boundary.</p></li><li><span class="file-path">skills/ralph/lib/ralph_events.py</span><p>New adapter around the existing trace_log event contract. Normalize Ralph run/stage/attempt events, redact bounded stdout/stderr snippets, retain artifact references, emit idempotent event ids, and surface observability degradation without fabricating outcomes.</p></li><li><span class="file-path">skills/ralph/lib/ralph_metrics.py</span><p>New pure reducer over Ralph events and child-state evidence. Produce versioned metric records with numerator, denominator, coverage, evidence event ids, dimensions, and an explicit insufficient-evidence status. Reuse the existing harness effectiveness conventions rather than changing its five-component score.</p></li><li><span class="file-path">skills/ralph/scripts/ralph_drive.sh</span><p>Add resume, events, and metrics/status-report commands. Keep CLI exit codes distinct for success, expected human-merge, recovery, usage, and environment/observability failures.</p></li><li><span class="file-path">skills/ralph/templates/ralph_progress.md</span><p>Turn the current starter template into a documented derived view: each section points to an event id, attempt id, evidence artifact, failure class, next action, and metric coverage state.</p></li><li><span class="file-path">lib/trace_log.py</span><p>Harden the existing event append boundary for Ralph's durability contract (including flush/fsync and safe bounded payload handling) while preserving the v1 event schema and existing executor callers.</p></li><li><span class="file-path">lib/babysit_pr_loop.py</span><p>Expose a read-only normalized snapshot of iteration, repair attempt, failure signature, no-information count, wake time, and recovery reason so Ralph can measure and resume babysit without reimplementing its policy.</p></li><li><span class="file-path">docs/skills/ralph.md</span><p>Replace claims that re-invocation automatically resumes with the implemented checkpoint/recovery contract, event taxonomy, metric commands, and operator recovery procedure.</p></li><li><span class="file-path">skills/ralph/SKILL.md</span><p>Make loop ownership explicit: Ralph controls orchestration and budgets; build and babysit-pr own their internal safety valves; ship owns the review/tag/merge boundary. Document when a missing audit is a recovery evidence gap rather than an approval.</p></li><li><span class="file-path">tests/test_ralph_chain.py</span><p>Add crash-at-each-boundary, restart-from-BABYSIT/SHIP, duplicate dispatch, retry/backoff, deadline, stale-lease, no-progress, and terminal-evidence tests. Replace the current weak sub_stage reload assertion with exact checkpoint assertions.</p></li><li><span class="file-path">tests/test_ralph_events.py</span><p>New tests for event schema, parent links, redaction, idempotency, bounded failure logs, and degraded-observability findings.</p></li><li><span class="file-path">tests/test_ralph_metrics.py</span><p>New pure-reducer tests for metric formulas, dimensions, missing-event coverage, expected USER_MERGE_REQUIRED terminals, and insufficient-evidence behavior.</p></li><li><span class="file-path">tests/test_ralph_drive.sh</span><p>New CLI integration tests for resume/events/metrics output and distinct exit-code semantics.</p></li><li><span class="file-path">docs/adr/ADR-00XX-ralph-loop-control-plane.md</span><p>Record the canonical event source, state/event ordering contract, retry ownership, metric definitions, and rollout/rollback decision.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Fixes the highest-risk correctness gap first: a killed or restarted Ralph run can identify the last durable attempt and resume the correct stage without replaying completed work.</li><li>Makes every failure inspectable: exit code, stderr reference, duration, failure class, child state, and event ids are queryable instead of hidden in one truncated last_action string.</li><li>Uses current project primitives (<code>trace_log</code>, <code>harness_effectiveness</code>, <code>effectiveness_collection</code>, executor output, and babysit state) so the metric contract has real evidence and does not create a third unrelated telemetry system.</li><li>Separates expected human merge from recovery, audit MISSING from approval, and observability degradation from workflow success. This prevents the CI/audit ambiguity seen during PR #849 from becoming a false green.</li><li>Makes loop improvement measurable before enabling autonomous policy changes: baseline first, then shadow metrics, then bounded controller changes with rollback.</li><li>Preserves existing safety boundaries: no auto-merge, no force-push, no Ask after attended_lock, no bypass of per-step worktrees, and no silent retry beyond a budget.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>The repository will temporarily have both legacy state snapshots and the new event projection. Mitigation: define one-way compatibility readers, make the event journal canonical for new runs, and remove only redundant legacy fields after a migration period.</li><li>A durable event write adds a small amount of I/O at every stage boundary. Mitigation: emit compact metadata plus artifact references, cap payloads, batch only non-safety metrics, and retain fsync for checkpoint-critical events.</li><li>Metric names and thresholds can create perverse optimization. Mitigation: publish numerator, denominator, coverage, and evidence ids; never score missing data as zero or success; keep learning/auto-policy changes disabled until a baseline exists.</li><li>Resuming a child process is not always safe after an external side effect. Mitigation: reconcile open attempts as interrupted, require idempotency keys for dispatch, and resume at the last verified boundary; never infer a successful push or merge from process death.</li><li>Cross-skill integration expands the test surface. Mitigation: land the event adapter and pure reducer separately from controller activation, and retain a legacy mode behind a feature flag during rollout.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>No metric can prove the semantic quality of an LLM change from exit code alone. Independent checks and review evidence remain required; self-reported child success is labeled as such.</li><li>The controller cannot safely replay an arbitrary external command that was interrupted after side effects. It can classify and surface the ambiguity, not undo the side effect.</li><li>The first version measures Ralph runs within one repository and one session namespace. Distributed multi-repository coordination, hosted dashboards, and cross-machine leases are out of scope.</li><li>The proposal does not change the meaning of build's three-cycle guard, babysit-pr's no-progress/MAX_ITERS policy, or the human merge requirement. It measures and coordinates those policies; it does not replace them.</li><li>Historical runs lack the new event fields. Historical metrics are partial and must be shown with insufficient coverage rather than backfilled from prose or stdout.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-13 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
