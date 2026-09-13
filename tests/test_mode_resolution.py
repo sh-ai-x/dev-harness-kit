@@ -46,6 +46,25 @@ def _resolve(cwd: Path, env_override: dict | None = None) -> str:
     return result.stdout.strip()
 
 
+def _active(cwd: Path, env_override: dict | None = None) -> str:
+    """Read the active value without explicitly invoking the resolver."""
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(cwd)
+    env.pop("DEV_KIT_MODE", None)
+    if env_override:
+        env.update(env_override)
+    script = f'''
+      source "{MODE_LIB}"
+      printf '%s' "$(dev_kit_mode_active)"
+    '''
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True, text=True, timeout=10,
+        cwd=str(cwd), env=env,
+    )
+    return result.stdout.strip()
+
+
 def _make_proj(tmp: Path, *, project_mode: str | None, local_mode: str | None,
                enabled_plugins: dict | None) -> Path:
     """Build a synthetic project root with .git and .claude/."""
@@ -189,6 +208,12 @@ class TestModeResolution(unittest.TestCase):
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
         self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "team"}), "full")
+
+    def test_active_legacy_team_is_re_resolved(self):
+        """A direct gate caller cannot activate the removed team mode."""
+        proj = _make_proj(Path(self.tmp), project_mode="full",
+                          local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_active(proj, {"DEV_KIT_MODE": "team"}), "full")
 
     def test_project_team_is_ignored_and_local_mode_wins(self):
         proj = _make_proj(Path(self.tmp), project_mode="team",

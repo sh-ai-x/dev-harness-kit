@@ -101,7 +101,7 @@ tracked in git. Both can be set independently and combine freely.
 |---|---|---|
 | `full` | full dev-kit (30+ skills/hooks), `.dev-kit/` gitignored | full dev-kit, team roles/dependencies enabled, `.dev-kit/` tracked |
 | `lite` | lite 7/7 subset, `.dev-kit/` gitignored | lite 7/7 subset, team roles/dependencies enabled, `.dev-kit/` tracked |
-| `undev` | plugin off (team toggle is a no-op since plugin disabled) | plugin off (same — team behavior is inactive) |
+| `undev` | plugin off; team behavior inactive | plugin off; role/dependency behavior inactive (tracking remains a bootstrap concern) |
 
 ### Resolution order (highest wins)
 

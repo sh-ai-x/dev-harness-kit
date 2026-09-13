@@ -65,7 +65,13 @@ _is_valid_team() {
 _read_settings_env() {
   local path="$1" key="$2"
   [ -f "$path" ] || return 0
-  jq -r --arg k "$key" '(.env[$k] // .[$k] // empty)' "$path" 2>/dev/null \
+  jq -r --arg k "$key" '
+    if ((.env | type) == "object" and (.env | has($k))) then .env[$k]
+    elif (type == "object" and has($k)) then .[$k]
+    else empty
+    end
+    | select(. != null)
+  ' "$path" 2>/dev/null \
     | grep -m1 . || true
 }
 

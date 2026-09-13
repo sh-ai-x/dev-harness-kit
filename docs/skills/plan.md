@@ -12,9 +12,10 @@ Read the resolved `DEV_KIT_TEAM` once at the top of Gate 4/5:
 - `.claude/settings.json` `env.DEV_KIT_TEAM` — Layer 2 (committed project choice)
 - `.claude/settings.local.json` `env.DEV_KIT_TEAM` — Layer 3 (personal override)
 
-If the resolved value is `on`, Gate 4/5 takes the dependency-aware path.
-Any other value preserves the non-team emit shape exactly. The selected
-`DEV_KIT_MODE` remains independent.
+If the resolved value is `on` and the active mode is `full` or `lite`, Gate
+4/5 takes the dependency-aware path. Any other combination preserves the
+non-team emit shape exactly. In `undev`, the plugin is inactive even when
+the independent team toggle resolves to `on`.
 
 ## Gate 4/5 — decompose (team path)
 
