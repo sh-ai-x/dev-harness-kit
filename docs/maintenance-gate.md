@@ -64,6 +64,16 @@ rules on every PR:
 
 ### Implementation
 
+#### Event-driven judge verdicts
+
+The `review`, `security`, and `maintenance` judge jobs fail closed when a
+`pull_request` or `pull_request_target` run cannot extract a machine-readable
+verdict. This prevents a provider/action error from producing a misleading
+green job with `status=success verdict=MISSING` in the audit stream. The
+explicit `workflow_dispatch` path retains its operator-override behavior;
+`lib/pr_verify.py` remains strict and never treats a missing verdict as an
+approval.
+
 - `lib/maintenance_gate.py::parse_file_entry` accepts both legacy
   bare paths (`"lib/foo.py"`, status defaults to `modified`) and
   the new file-status-aware form (`"lib/foo.py:added"`). Status is

@@ -510,6 +510,13 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "review_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Event-driven reviews must never finish green without a
+          # machine-readable judge verdict. Keep the explicit manual
+          # workflow_dispatch override, but fail closed for PR events.
+          if [ -z "$verdict" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "::error::review verdict missing; refusing to report a successful judge job"
+            exit 1
+          fi
           # PR_HEAD_SHA is captured at job-start by the `pr_meta` step
           # above (NOT fetched here) to close the TOCTOU that would
           # transfer an Approve to an unjudged commit pushed between
@@ -785,6 +792,13 @@ jobs:
           verdict="$(printf '%s' "$comment" | python3 -m lib.maintenance_gate --extract-verdict-from-stdin)"
           echo "security_verdict=${verdict:-<none>}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          # Event-driven security reviews must never finish green without a
+          # machine-readable judge verdict. Keep the explicit manual
+          # workflow_dispatch override, but fail closed for PR events.
+          if [ -z "$verdict" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "::error::security verdict missing; refusing to report a successful judge job"
+            exit 1
+          fi
           # PR_HEAD_SHA is captured at job-start by the `pr_meta`
           # step above (NOT fetched here) to close the TOCTOU. Audit
           # posting flows through the composite action so all three
