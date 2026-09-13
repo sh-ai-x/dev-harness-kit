@@ -899,7 +899,7 @@ def _resolve_gates_precedence(
     import sys as _sys
     gates_runners = _resolve_runners_from_gates(target)
     if gates_runners is not None:
-        if exclude:
+        if exclude is not None:
             print(
                 "::notice::gates.json present; ignoring --exclude "
                 f"{sorted(exclude)} (issue #834)",
@@ -950,7 +950,7 @@ def _build_marker(
     """
     if gates_runners is None:
         runners = ["ci.yml", "auto-fix-pr.yml", "review.yml", "security.yml", "maintenance.yml"]
-        if exclude:
+        if exclude is not None:
             runners = [r for r in runners if r not in exclude]
     else:
         # ci.yml + auto-fix-pr.yml are always-on infrastructure (branch
