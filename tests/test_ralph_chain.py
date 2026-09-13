@@ -62,22 +62,23 @@ def test_run_attended_refuses_when_lock_not_set(project_root: Path):
 
 
 # ============================================================================
-# 2. Happy path — full chain lands USER_MERGE_REQUIRED
+# 2. Happy path — full chain reaches SHIP before USER_MERGE_REQUIRED
 # ============================================================================
 
 
 def test_happy_path_lands_user_merge_required(project_root: Path):
-    """Real babysit-pr auto-flips to USER_MERGE_REQUIRED on green
-    (because babysit-pr never auto-merges per its Iron Laws). The
-    chain contract is that this terminal is the EXPECTED landing for
-    an unattended single-operator run."""
+    """The human merge boundary belongs to SHIP, never BABYSIT."""
     state = _entered_attended(session="happy")
     dispatch = rc.RecordingDispatch(
         results={
             rc.BUILD: rc.DispatchResult(exit_code=0, stdout="build green"),
             rc.BABYSIT: rc.DispatchResult(
                 exit_code=0,
-                stdout="REVIEW_REQUIRED -> human-gate\nPR=1234",
+                stdout="babysit green\nPR=1234",
+            ),
+            rc.SHIP: rc.DispatchResult(
+                exit_code=0,
+                stdout="tag pushed; human merge required",
                 terminal="USER_MERGE_REQUIRED",
             ),
         }
@@ -86,11 +87,10 @@ def test_happy_path_lands_user_merge_required(project_root: Path):
 
     assert final.current_stage == rs.USER_MERGE_REQUIRED
     assert final.attended_lock is True
-    # Sub_stage progression: BUILD → BABYSIT (then chain stops because
-    # BABYSIT signalled USER_MERGE_REQUIRED). SHIP is not reached —
-    # babysit-pr never auto-merges, so RealDispatch flips to USER_MERGE.
+    assert final.completed_sub_stages == [rc.BUILD, rc.BABYSIT, rc.SHIP]
+    # SHIP must run before the human merge boundary is emitted.
     assert [c["sub_stage"] for c in dispatch.calls] == [
-        rc.BUILD, rc.BABYSIT
+        rc.BUILD, rc.BABYSIT, rc.SHIP
     ]
 
 
@@ -104,10 +104,10 @@ def test_babysit_pr_receives_operator_only_human_and_rationale(project_root: Pat
     )
     state = _entered_attended()
     # Inject captured argv by monkey-patching subprocess.run.
-    captured = {}
+    captured = {"argvs": []}
 
     def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
-        captured["argv"] = argv
+        captured["argvs"].append(argv)
         class _R:  # noqa: D401, E701
             returncode = 0
             stdout = ""
@@ -118,17 +118,39 @@ def test_babysit_pr_receives_operator_only_human_and_rationale(project_root: Pat
     orig = _sp.run
     _sp.run = fake_run  # type: ignore[assignment]
     try:
-        result = dispatch.babysit(state)
+        babysit_result = dispatch.babysit(state)
+        result = dispatch.ship(state)
     finally:
         _sp.run = orig  # type: ignore[assignment]
 
-    assert "--operator-is-only-human" in captured["argv"]
-    rationale_idx = captured["argv"].index("--rationale") + 1
-    rationale = captured["argv"][rationale_idx]
+    babysit_argv = captured["argvs"][0]
+    assert "--operator-is-only-human" in babysit_argv
+    rationale_idx = babysit_argv.index("--rationale") + 1
+    rationale = babysit_argv[rationale_idx]
     assert "ralph-session=default" in rationale
     assert "operator=alice" in rationale
+    assert babysit_result.exit_code == 0
+    assert babysit_result.terminal is None
     assert result.exit_code == 0
     assert result.terminal == "USER_MERGE_REQUIRED"
+
+
+def test_babysit_cannot_end_at_user_merge_boundary(project_root: Path):
+    state = _entered_attended(session="early-merge")
+    dispatch = rc.RecordingDispatch(
+        results={
+            rc.BUILD: rc.DispatchResult(exit_code=0),
+            rc.BABYSIT: rc.DispatchResult(
+                exit_code=0, terminal="USER_MERGE_REQUIRED"
+            ),
+        }
+    )
+
+    final = rc.run_attended(state, dispatch, project_root=project_root)
+
+    assert final.current_stage == rs.RECOVERY_REQUIRED
+    assert "before SHIP" in final.last_action
+    assert [c["sub_stage"] for c in dispatch.calls] == [rc.BUILD, rc.BABYSIT]
 
 
 # ============================================================================
@@ -252,6 +274,9 @@ def test_state_persists_sub_stage_on_every_hop(project_root: Path):
         results={
             rc.BUILD: rc.DispatchResult(exit_code=0),
             rc.BABYSIT: rc.DispatchResult(
+                exit_code=0,
+            ),
+            rc.SHIP: rc.DispatchResult(
                 exit_code=0, terminal="USER_MERGE_REQUIRED"
             ),
         }
@@ -262,6 +287,7 @@ def test_state_persists_sub_stage_on_every_hop(project_root: Path):
     # reflect the final state, not the in-memory copy.
     loaded = rs.RalphState.load(project_root, session="persist")
     assert loaded.current_stage == rs.USER_MERGE_REQUIRED
+    assert loaded.completed_sub_stages == [rc.BUILD, rc.BABYSIT, rc.SHIP]
     assert loaded.sub_stage == rs.RalphState(
         current_stage=rs.USER_MERGE_REQUIRED
     ).sub_stage or loaded.sub_stage in {rc.BUILD, rc.BABYSIT, rc.SHIP}
@@ -277,7 +303,10 @@ def test_build_state_captures_dispatch_stdout(project_root: Path):
             ),
             rc.BABYSIT: rc.DispatchResult(
                 exit_code=0,
-                stdout="REVIEW_REQUIRED -> human-gate\nPR=1234",
+                stdout="babysit green\nPR=1234",
+            ),
+            rc.SHIP: rc.DispatchResult(
+                exit_code=0,
                 terminal="USER_MERGE_REQUIRED",
             ),
         }
@@ -285,7 +314,7 @@ def test_build_state_captures_dispatch_stdout(project_root: Path):
     final = rc.run_attended(state, dispatch, project_root=project_root)
 
     assert "47 passed" in final.build_state
-    assert "REVIEW_REQUIRED" in final.babysit_state
+    assert "babysit green" in final.babysit_state
     # PR number was captured into babysit_state by the chain.
     assert "PR=1234" in final.babysit_state
 
@@ -316,6 +345,21 @@ def test_user_merge_required_subclass_lands_terminal(project_root: Path):
 
     assert final.current_stage == rs.USER_MERGE_REQUIRED
     assert "UserMergeRequired" in (final.last_action or "")
+
+
+def test_user_merge_required_from_babysit_is_recovery(project_root: Path):
+    state = _entered_attended(session="early-merge-exception")
+    dispatch = rc.RecordingDispatch(
+        results={rc.BUILD: rc.DispatchResult(exit_code=0)},
+        raise_map={
+            rc.BABYSIT: rc.UserMergeRequired("babysit must not own merge")
+        },
+    )
+
+    final = rc.run_attended(state, dispatch, project_root=project_root)
+
+    assert final.current_stage == rs.RECOVERY_REQUIRED
+    assert "before SHIP" in final.last_action
 
 
 # ============================================================================
