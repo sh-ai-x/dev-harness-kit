@@ -127,19 +127,23 @@ audit comment requires per `skills/babysit-pr/SKILL.md:494-588`.
 
 | Dispatch outcome | Terminal landed | Operator action |
 |---|---|---|
-| `BUILD` exit 0 → `BABYSIT` exit 0 (`terminal="USER_MERGE_REQUIRED"`) | `USER_MERGE_REQUIRED` | `gh pr merge` |
-| `BUILD` exit 0 → `BABYSIT` exit 0 (clean ship) → `SHIP` exit 0 | `DONE` | review final state |
+| `BUILD` exit 0 → `BABYSIT` exit 0 → `SHIP` exit 0 (`terminal="USER_MERGE_REQUIRED"`) | `USER_MERGE_REQUIRED` | `gh pr merge` |
+| `BUILD` exit 0 → `BABYSIT` exit 0 → `SHIP` exit 0 (custom dispatch with no merge boundary) | `DONE` | review final state |
 | `BUILD` exit != 0 (build 3-cycle self-fix / state-machine reject / env error) | `RECOVERY_REQUIRED` | investigate + retry |
 | `BABYSIT` exit != 0 (MAX_ITERS / watchdog / 3-consecutive-no-progress) | `RECOVERY_REQUIRED` | investigate + retry |
 | Same sub_stage re-entered twice (same-stage-repeat=2 trip wire) | `RECOVERY_REQUIRED` | review loop log |
 | Sub-skill crashed (any other Exception) | `RECOVERY_REQUIRED` | review crash + retry |
-| `SHIP` pre-condition failed but build green + review approved | `USER_MERGE_REQUIRED` | `gh pr merge` |
+| `SHIP` raises or signals `USER_MERGE_REQUIRED` after build/review/tag evidence | `USER_MERGE_REQUIRED` | `gh pr merge` |
 | `AttendedLockError` raised mid-dispatch | (propagates) | forensic field already populated |
 
 `USER_MERGE_REQUIRED` is the **expected landing** on a healthy single-
 operator repo: build green, review approved, tag pushed, but the
 human operator runs `gh pr merge` themselves per babysit-pr's
 iron laws (`skills/babysit-pr/SKILL.md:476-483`).
+
+Only `SHIP` owns this terminal. If `BABYSIT` raises or returns
+`USER_MERGE_REQUIRED`, the chain rejects the invalid boundary and lands in
+`RECOVERY_REQUIRED` so a child contract error cannot skip the ship gate.
 
 ### Recovery & re-entry
 
@@ -155,12 +159,12 @@ JSON is the recovery source-of-truth, not the assistant's memory.
 ```bash
 python3 -m skills.ralph.lib.ralph_chain \
   --project-root . --session default \
-  run-attended --dispatch noop   # dry-run: BABYSIT exits 0 → USER_MERGE_REQUIRED
+  run-attended --dispatch noop   # dry-run: SHIP exits 0 → USER_MERGE_REQUIRED
 ```
 
 The `run-attended --dispatch noop` form uses a `RecordingDispatch`
-that bypasses subprocess and returns a successful USER_MERGE_REQUIRED
-landing; useful for state-machine smoke tests without spawning
+that bypasses subprocess and returns a successful SHIP-owned
+USER_MERGE_REQUIRED landing; useful for state-machine smoke tests without spawning
 babysit-pr. `tests/test_ralph_chain.py::test_cli_dry_run_*` pins this.
 
 ## State machine — `skills/ralph/lib/ralph_state.py`
