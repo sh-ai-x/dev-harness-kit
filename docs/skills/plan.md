@@ -1,23 +1,25 @@
-# Plan skill — `team` mode behaviour delta
+# Plan skill — team-toggle behaviour delta
 
 The `/dev-kit:plan` skill behaves the same in `full` / `lite` / `undev`
-and emits additional structure only in `team`. This page documents the
-delta.
+when team collaboration is off. With `DEV_KIT_TEAM=on`, it emits the
+additional team structure described below.
 
 ## Detection
 
-Read `DEV_KIT_MODE` once at the top of Gate 4/5:
+Read the resolved `DEV_KIT_TEAM` once at the top of Gate 4/5:
 
-- `os.environ.get("DEV_KIT_MODE")` — Layer 1 (per-session shell override)
-- `.claude/settings.json` `env.DEV_KIT_MODE` — Layer 2 (committed project choice)
+- `os.environ.get("DEV_KIT_TEAM")` — Layer 1 (per-session shell override)
+- `.claude/settings.json` `env.DEV_KIT_TEAM` — Layer 2 (committed project choice)
+- `.claude/settings.local.json` `env.DEV_KIT_TEAM` — Layer 3 (personal override)
 
-If the resolved value is `team`, Gate 4/5 takes the dependency-aware
-path. Any other value preserves the pre-team emit shape exactly.
+If the resolved value is `on`, Gate 4/5 takes the dependency-aware path.
+Any other value preserves the non-team emit shape exactly. The selected
+`DEV_KIT_MODE` remains independent.
 
 ## Gate 4/5 — decompose (team path)
 
 After the operator has chosen the step titles (the multi-step picker
-that runs in all four modes), run **one `AskUserQuestion` per step**
+that runs in all modes), run **one `AskUserQuestion` per step**
 with `multiSelect: true`:
 
 > "Which earlier steps must complete before step N starts?"
@@ -71,7 +73,7 @@ pending
 `lib/intent_integrity.py:_parse_step_file` already coerces the
 `dependencies:` values to `int` via `_to_int()`. The IC-3 gap check
 then enforces `step.md.dependencies ⊆ index.json.steps[*].step` at
-build time. Non-team modes do NOT write the `dependencies:` line, so
+build time. Team-off runs do NOT write the `dependencies:` line, so
 IC-3 stays silent for them (consistent with today).
 
 ## Gate 5/5 — emit (team path)
@@ -120,6 +122,5 @@ The DAG subsection in PRD §4 is informational, not a gate.
   emitted `dependencies:` block
 - `lib/dispatch_classifier.py:_has_dependency_edge` — reads
   `depends_on` / `consumes` from `phases/<phase>/index.json`
-- `docs/scopes/modes.md` — `team` mode rationale + role-config section
-- `lib/role_config.py` — the role half of `team` (independent of the
-  dependency half)
+- `docs/scopes/modes.md` — mode reference, team-toggle matrix, and role-config section
+- `lib/role_config.py` — the role half of team collaboration

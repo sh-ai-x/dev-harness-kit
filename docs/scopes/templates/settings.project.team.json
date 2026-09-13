@@ -3,7 +3,8 @@
     "dev-kit@dev-kit": true
   },
   "env": {
-    "DEV_KIT_MODE": "team"
+    "DEV_KIT_MODE": "full",
+    "DEV_KIT_TEAM": "on"
   },
   "roles": {
     "active": "",

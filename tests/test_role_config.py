@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Tests for lib/role_config.py — team-mode role resolver + gate.
+"""Tests for lib/role_config.py — team-toggle role resolver + gate.
 
 Covers:
   - missing `roles` block -> resolve_role returns None; allowed_skills returns empty set
-  - valid `team` + empty `roles.members` -> empty set
-  - valid `team` + user-declared roles -> returns the user's allowlist
+  - valid `DEV_KIT_TEAM=on` + empty `roles.members` -> empty set
+  - valid `DEV_KIT_TEAM=on` + user-declared roles -> returns the user's allowlist
   - `"*"` wildcard expands to the canonical dev-kit skill prefix list
-  - mode gate: `full` / `lite` / `undev` + `roles` block raises `RoleConfigError`
+  - team gate: `DEV_KIT_TEAM=off` + `roles` block raises `RoleConfigError`
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -45,6 +46,13 @@ class RoleConfigTestCase(unittest.TestCase):
 
     _open_tmpdirs: list[tempfile.TemporaryDirectory] = []
 
+    def setUp(self) -> None:
+        self._saved_team = os.environ.pop("DEV_KIT_TEAM", None)
+
+    def tearDown(self) -> None:
+        if self._saved_team is not None:
+            os.environ["DEV_KIT_TEAM"] = self._saved_team
+
     @classmethod
     def tearDownClass(cls) -> None:
         for tmp in cls._open_tmpdirs:
@@ -58,12 +66,12 @@ class TestResolveRoleMissing(RoleConfigTestCase):
         self.assertIsNone(resolve_role(root))
 
     def test_settings_without_roles_returns_none(self):
-        root = _project_with_settings({"env": {"DEV_KIT_MODE": "team"}})
+        root = _project_with_settings({"env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"}})
         self.assertIsNone(resolve_role(root))
 
     def test_empty_active_returns_none(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {"active": "", "members": {"alice": {"skills": ["dev-kit:plan"]}}},
         })
         self.assertIsNone(resolve_role(root))
@@ -76,14 +84,14 @@ class TestAllowedSkillsEmpty(RoleConfigTestCase):
 
     def test_unknown_role_returns_empty_set(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {"active": "alice", "members": {"alice": {"skills": ["dev-kit:plan"]}}},
         })
         self.assertEqual(allowed_skills(root, "bob"), set())
 
     def test_malformed_skills_returns_empty_set(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {"active": "alice", "members": {"alice": {"skills": "not-a-list"}}},
         })
         self.assertEqual(allowed_skills(root, "alice"), set())
@@ -92,7 +100,7 @@ class TestAllowedSkillsEmpty(RoleConfigTestCase):
 class TestResolveRoleHappyPath(RoleConfigTestCase):
     def test_returns_active_role(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {
                 "active": "reviewer",
                 "members": {"reviewer": {"skills": ["dev-kit:review"]}},
@@ -104,7 +112,7 @@ class TestResolveRoleHappyPath(RoleConfigTestCase):
 class TestAllowedSkillsHappyPath(RoleConfigTestCase):
     def test_returns_declared_skills(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {
                 "active": "implementer",
                 "members": {
@@ -119,7 +127,7 @@ class TestAllowedSkillsHappyPath(RoleConfigTestCase):
 
     def test_wildcard_expands_to_canonical_set(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {
                 "active": "owner",
                 "members": {"owner": {"skills": ["*"]}},
@@ -132,7 +140,7 @@ class TestAllowedSkillsHappyPath(RoleConfigTestCase):
 
     def test_wildcard_can_coexist_with_explicit_skills(self):
         root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "team"},
+            "env": {"DEV_KIT_MODE": "full", "DEV_KIT_TEAM": "on"},
             "roles": {
                 "active": "owner",
                 "members": {"owner": {"skills": ["*", "custom:external-tool"]}},
@@ -143,43 +151,52 @@ class TestAllowedSkillsHappyPath(RoleConfigTestCase):
         self.assertIn("custom:external-tool", skills)
 
 
-class TestModeGate(RoleConfigTestCase):
-    """`roles` block present + mode != team -> RoleConfigError."""
+class TestTeamGate(RoleConfigTestCase):
+    """`roles` block present + team toggle off -> RoleConfigError."""
 
-    def _with_roles_block(self, mode: str) -> Path:
+    def _with_roles_block(self, mode: str = "full", team: object | None = None) -> Path:
+        env = {"DEV_KIT_MODE": mode}
+        if team is not None:
+            env["DEV_KIT_TEAM"] = team
         return _project_with_settings({
-            "env": {"DEV_KIT_MODE": mode},
+            "env": env,
             "roles": {
                 "active": "reviewer",
                 "members": {"reviewer": {"skills": ["dev-kit:review"]}},
             },
         })
 
-    def test_full_mode_with_roles_raises(self):
-        root = self._with_roles_block("full")
+    def test_full_mode_with_team_on_allows_roles(self):
+        root = self._with_roles_block("full", "on")
+        self.assertEqual(resolve_role(root), "reviewer")
+        self.assertEqual(allowed_skills(root, "reviewer"), {"dev-kit:review"})
+
+    def test_lite_mode_with_team_on_allows_roles(self):
+        root = self._with_roles_block("lite", "1")
+        self.assertEqual(resolve_role(root), "reviewer")
+
+    def test_boolean_team_on_matches_shell_resolver(self):
+        root = self._with_roles_block("full", True)
+        self.assertEqual(resolve_role(root), "reviewer")
+
+    def test_mode_team_without_team_toggle_raises(self):
+        root = self._with_roles_block("team")
         with self.assertRaises(RoleConfigError):
             resolve_role(root)
-        with self.assertRaises(RoleConfigError):
-            allowed_skills(root, "reviewer")
 
-    def test_lite_mode_with_roles_raises(self):
-        root = self._with_roles_block("lite")
-        with self.assertRaises(RoleConfigError):
-            resolve_role(root)
-        with self.assertRaises(RoleConfigError):
-            allowed_skills(root, "reviewer")
-
-    def test_undev_mode_with_roles_raises(self):
-        root = self._with_roles_block("undev")
+    def test_team_off_with_roles_raises(self):
+        root = self._with_roles_block("full", "off")
         with self.assertRaises(RoleConfigError):
             resolve_role(root)
 
-    def test_invalid_mode_with_roles_raises(self):
-        """A typo in `DEV_KIT_MODE` while a `roles` block exists fails closed."""
-        root = _project_with_settings({
-            "env": {"DEV_KIT_MODE": "teamish"},  # typo (deliberate; not a valid mode value)
-            "roles": {"active": "reviewer", "members": {"reviewer": {"skills": ["dev-kit:review"]}}},
-        })
+    def test_undev_mode_with_team_off_raises(self):
+        root = self._with_roles_block("undev", "false")
+        with self.assertRaises(RoleConfigError):
+            resolve_role(root)
+
+    def test_invalid_team_value_fails_closed(self):
+        """A typo in DEV_KIT_TEAM while roles exist fails closed."""
+        root = self._with_roles_block("full", "maybe")
         with self.assertRaises(RoleConfigError):
             resolve_role(root)
 

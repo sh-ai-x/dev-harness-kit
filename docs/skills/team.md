@@ -2,9 +2,13 @@
 
 # `team`
 
-**Category:** `mode` · **Alpha:** `state` · **Invocation:** `/dev-kit:team [on|off]` (human-invoked)
+**Category:** `config` · **Alpha:** `state` · **Invocation:** `/dev-kit:team [on|off]` (human-invoked)
 
-`team` toggles whether `.dev-kit/` is tracked in git for the current project. The toggle is a separate env-var (`DEV_KIT_TEAM`) and is orthogonal to `DEV_KIT_MODE` — full+team, full+no-team, lite+team, and lite+no-team are all valid combinations. Default is OFF (silent).
+`team` is the independent team collaboration toggle (`DEV_KIT_TEAM`).
+It enables operator-declared roles and dependency-aware planning, and
+controls whether `.dev-kit/` is tracked in git. It is orthogonal to
+`DEV_KIT_MODE` — full/lite/undev can each run with team on or off.
+Default is OFF (silent).
 
 ## When to use it
 
@@ -22,7 +26,10 @@
 3. `<proj>/.claude/settings.local.json` `env.DEV_KIT_TEAM` (gitignored personal override)
 4. Not set → **OFF** (silent default — team toggle is opt-in)
 
-The single concrete effect when team=ON is: `hooks/lib/team-resolve.sh:dev_kit_team_resolve` returns `on`, and `/dev-kit:bootstrap` reads that result to strip `^\.dev-kit` from the target `.gitignore` (sub-stage 8.5).
+When team=ON, `hooks/lib/team-resolve.sh:dev_kit_team_resolve`
+returns `on`; role configuration and dependency-aware plan behavior are
+enabled, and `/dev-kit:bootstrap` reads that result to strip
+`^\.dev-kit` from the target `.gitignore` (sub-stage 8.5).
 
 ## Usage
 
@@ -47,8 +54,8 @@ DEV_KIT_TEAM=on claude         # one-session override (no file change)
 
 | Mode | team OFF (default) | team ON |
 |---|---|---|
-| `full` | full dev-kit (30+ skills/hooks), `.dev-kit/` gitignored | full dev-kit, `.dev-kit/` tracked |
-| `lite` | lite 7/7 subset, `.dev-kit/` gitignored | lite 7/7 subset, `.dev-kit/` tracked |
+| `full` | full dev-kit (30+ skills/hooks), team roles/dependencies off, `.dev-kit/` gitignored | full dev-kit, team roles/dependencies on, `.dev-kit/` tracked |
+| `lite` | lite 7/7 subset, team roles/dependencies off, `.dev-kit/` gitignored | lite 7/7 subset, team roles/dependencies on, `.dev-kit/` tracked |
 | `undev` | plugin off (team toggle is a no-op since plugin disabled) | plugin off (same) |
 
 ## What `team` does NOT do
