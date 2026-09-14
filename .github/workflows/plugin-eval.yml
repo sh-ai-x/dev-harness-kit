@@ -1,0 +1,143 @@
+name: Plugin Eval
+
+# Runs `claude plugin eval` against this plugin's eval suite on every PR
+# and on manual dispatch. Gates on overallScore >= 0.8 (per the docs:
+# exit 1 == below threshold, exit 2 == partial / cost-ceiling hit,
+# exit 130/143 == interrupted / terminated). See:
+#   https://code.claude.com/docs/en/plugin-evals
+#
+# Anthropic-only — `claude plugin eval` requires Anthropic models, so the
+# CI_REVIEW_PROVIDER variable that switches review.yml between minimax /
+# anthropic / deepseek is not consulted here. Required secret:
+# `ANTHROPIC_API_KEY` (exported as ANTHROPIC_API_KEY in the env).
+#
+# Pre-flight gates observed on local machines that this workflow handles
+# automatically because GitHub Actions runners don't have them:
+#   1. Linked-worktree count — the runner checkout is fetch-depth: 1,
+#      so no worktree refs link into the plugin repo.
+#   2. ~/.docker symlink sandbox refusal — Actions runners don't have
+#      Docker Desktop, so Bash-granting skills (ci-doctor / evaluate /
+#      refactor / build-tdd) run cleanly.
+#   3. --model inheritance — every invocation here is explicit
+#      (--model claude-sonnet-5 --judge-model claude-haiku-4-5), so
+#      the child session can't inherit a non-Anthropic default.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Pass threshold (0..1)"
+        required: false
+        default: "0.8"
+        type: string
+      max_cost_usd:
+        description: "Cost ceiling (USD)"
+        required: false
+        default: "20"
+        type: string
+      runs:
+        description: "Runs per case per arm (1..50)"
+        required: false
+        default: "3"
+        type: string
+
+jobs:
+  plugin-eval:
+    name: plugin-eval (claude plugin eval)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # fetch-depth: 1 avoids the "more linked worktrees than can be
+          # screened" pre-flight refusal when the source repo has many
+          # .worktrees/ entries. The runner only sees the single commit
+          # it needs to evaluate.
+          fetch-depth: 1
+
+      - name: Setup Node (for claude-code npm package)
+        uses: actions/setup-node@1d0c4699c2b62e4ada8e9249e9b8d8c56ea5edf1 # v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI (>= 2.1.269)
+        # claude plugin eval is gated on Claude Code >= 2.1.269. The npm
+        # tag `latest` is currently 2.1.270+; we belt-and-suspenders
+        # with `claude update` to catch any drift between the package
+        # publish and this run.
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+          claude update || true
+          claude --version
+
+      - name: Run plugin eval suite
+        id: eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p evals/results
+          claude plugin eval . \
+            --trust-plugin \
+            --json results.json \
+            --threshold "${{ github.event.inputs.threshold || '0.8' }}" \
+            --model claude-sonnet-5 \
+            --judge-model claude-haiku-4-5 \
+            --no-publish \
+            --runs "${{ github.event.inputs.runs || '3' }}" \
+            --max-cost-usd "${{ github.event.inputs.max_cost_usd || '20' }}"
+
+      - name: Set job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          try:
+            with open("results.json") as f:
+              d = json.load(f)
+          except FileNotFoundError:
+            print("### Plugin Eval: no results.json (run aborted before eval start)")
+            raise SystemExit(0)
+          agg = d.get("aggregates", {}) or {}
+          partial = d.get("partial", False)
+          reason = d.get("partialReason", "")
+          print("### Plugin Eval")
+          print()
+          print(f"- overallScore: **{agg.get('overallScore', 'n/a')}**")
+          print(f"- casesPassed: **{agg.get('casesPassed', 'n/a')} / {agg.get('casesTotal', 'n/a')}**")
+          print(f"- costUsd: ${d.get('costUsd', 0):.2f}")
+          print(f"- durationSeconds: {d.get('durationSeconds', 'n/a')}")
+          print(f"- claudeVersion: {d.get('claudeVersion', 'n/a')}")
+          if partial:
+            print(f"- partial: true ({reason})")
+          print()
+          print("| case | score | cost |")
+          print("|------|-------|------|")
+          for c in d.get("cases", []) or []:
+            a = c.get("aggregates", {}) or {}
+            print(f"| {c.get('name')} | {a.get('score', 'n/a')} | ${c.get('costUsd', 0):.2f} |")
+          PY
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee41c689e6254740ca # v4
+        with:
+          name: plugin-eval-results
+          path: |
+            results.json
+            evals/results/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Fail job if threshold not met
+        if: always() && steps.eval.conclusion == 'failure'
+        run: |
+          echo "::error::claude plugin eval exited with failure (threshold not met, or partial run, or eval error). See summary above and the plugin-eval-results artifact for the full report.html."
+          exit 1
