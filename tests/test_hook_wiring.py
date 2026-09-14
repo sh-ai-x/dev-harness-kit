@@ -11,6 +11,7 @@ Two-runtime iteration below covers both at no extra test cost.
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -123,15 +124,19 @@ class TestHookWiring(unittest.TestCase):
                         cmd = h.get("command", "")
                         if "l4-todo-scan" not in cmd:
                             continue
-                        # Extract the path after bash ${...}
-                        if "${CLAUDE_PLUGIN_ROOT}" in cmd:
-                            root_var = "CLAUDE_PLUGIN_ROOT"
-                        elif "${PLUGIN_ROOT}" in cmd:
-                            root_var = "PLUGIN_ROOT"
-                        else:
-                            self.fail(f"unexpected root var in command: {cmd}")
-                        # The path component is literal here (relative to plugin root).
-                        path_part = cmd.split("$" + "{" + root_var + "}", 1)[1].strip()
+                        # The command may pass the hook through a wrapper (for
+                        # example mode-gate.sh), so locate the actual hook path
+                        # instead of assuming it is the first plugin-root path.
+                        path_matches = re.findall(
+                            r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}"
+                            r"(/hooks/[^\s\"']*l4-todo-scan\.sh)",
+                            cmd,
+                        )
+                        self.assertTrue(
+                            path_matches,
+                            msg=f"l4-todo-scan path missing from command: {cmd}",
+                        )
+                        path_part = path_matches[-1]
                         self.assertTrue(
                             path_part.startswith("/hooks/"),
                             msg=f"unexpected path part: {path_part!r}",
