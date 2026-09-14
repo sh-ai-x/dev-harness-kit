@@ -6,10 +6,13 @@ name: Plugin Eval
 # exit 130/143 == interrupted / terminated). See:
 #   https://code.claude.com/docs/en/plugin-evals
 #
-# Anthropic-only — `claude plugin eval` requires Anthropic models, so the
-# CI_REVIEW_PROVIDER variable that switches review.yml between minimax /
-# anthropic / deepseek is not consulted here. Required secret:
-# `ANTHROPIC_API_KEY` (exported as ANTHROPIC_API_KEY in the env).
+# Provider: defaults to minimax via the Anthropic-compatible endpoint at
+# https://api.minimax.io/anthropic. Matches `review.yml` /
+# `auto-fix-pr.yml` / `maintenance.yml`'s default provider. Required
+# secret: `MINIMAX_API_KEY` (exported as ANTHROPIC_API_KEY in the env,
+# with ANTHROPIC_BASE_URL pointing at the MiniMax Anthropic-compatible
+# endpoint). Switch by setting `vars.CI_REVIEW_PROVIDER` and overriding
+# ANTHROPIC_BASE_URL + the auth secret accordingly.
 #
 # Pre-flight gates observed on local machines that this workflow handles
 # automatically because GitHub Actions runners don't have them:
@@ -79,7 +82,12 @@ jobs:
       - name: Run plugin eval suite
         id: eval
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          ANTHROPIC_BASE_URL: https://api.minimax.io/anthropic
+          ANTHROPIC_MODEL: MiniMax-M3[1m]
+          ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M3[1m]
+          ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M3[1m]
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: MiniMax-M3[1m]
         run: |
           set -euo pipefail
           mkdir -p evals/results
@@ -87,8 +95,8 @@ jobs:
             --trust-plugin \
             --json results.json \
             --threshold "${{ github.event.inputs.threshold || '0.8' }}" \
-            --model claude-sonnet-5 \
-            --judge-model claude-haiku-4-5 \
+            --model MiniMax-M3[1m] \
+            --judge-model MiniMax-M3[1m] \
             --no-publish \
             --runs "${{ github.event.inputs.runs || '3' }}" \
             --max-cost-usd "${{ github.event.inputs.max_cost_usd || '20' }}"
