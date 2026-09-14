@@ -4,7 +4,7 @@
 # Enforces .claude/rules/git-workflow.md "every task = new worktree" rule.
 #
 # Denies (exit 2):
-#   Edit / Write / MultiEdit when the session cwd is the MAIN repo checkout
+#   Edit / Write / MultiEdit when the target is in the MAIN repo checkout
 #   (the checkout that owns the .git directory at its root). Forces the
 #   user to cut a worktree off origin/main before making any edits.
 #
@@ -93,9 +93,11 @@ if [[ "$ORCH_BRANCH" == orch/* ]]; then
   esac
 fi
 
-# Detect whether we are in the main checkout or a worktree. The lib
-# function never returns 1 here because we just verified jq exists;
-# $WORKTREE_DETECT was already populated by the preamble.
+# Detect whether the target file is in the main checkout or a worktree.
+# The path-aware call is required because a sub-agent may inherit the
+# parent session's main-checkout cwd even while Edit targets a valid linked
+# worktree. It falls back to ambient-cwd detection for unrelated paths.
+worktree_detect "$FILE_PATH"
 case "$WORKTREE_DETECT" in
   worktree|outside|"") emit_guard_event "WORKTREE GUARD" "allowed" allowed; exit 0 ;;
   main) ;;
