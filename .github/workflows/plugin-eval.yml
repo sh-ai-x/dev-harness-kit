@@ -60,7 +60,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Node (for claude-code npm package)
-        uses: actions/setup-node@1d0c4699c2b62e4ada8e9249e9b8d8c56ea5edf1 # v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
 
@@ -127,7 +127,7 @@ jobs:
 
       - name: Upload eval artifacts
         if: always()
-        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee41c689e6254740ca # v4
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
         with:
           name: plugin-eval-results
           path: |
