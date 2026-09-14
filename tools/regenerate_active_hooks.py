@@ -92,6 +92,9 @@ def _utc_now_iso() -> str:
 
 
 _LEADING_BASH_RE = re.compile(r"^bash\s+")
+_MODE_GATE_RE = re.compile(
+    r"^hooks/mode-gate\.sh\s+(hooks/\S+)"
+)
 
 def _normalize_path(raw: str) -> str:
     """Strip a `DEV_KIT_AGENT=` prefix, `${CLAUDE_PLUGIN_ROOT}/` env
@@ -111,6 +114,9 @@ def _normalize_path(raw: str) -> str:
     s = _DEV_KIT_AGENT_PREFIX_RE.sub("", s)
     s = _ENV_PREFIX_RE.sub("", s)
     s = _LEADING_BASH_RE.sub("", s)
+    # Runtime manifests route every hook through mode-gate.sh. Keep the
+    # regenerated event matrix keyed by the real hook, not the dispatcher.
+    s = _MODE_GATE_RE.sub(r"\1", s)
     return s
 
 

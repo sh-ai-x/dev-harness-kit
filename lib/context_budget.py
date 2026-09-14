@@ -234,12 +234,28 @@ def context_metrics(records: Iterable[dict[str, Any]], *, expected: int | None =
 
 
 def _validate_no_transcript(payload: dict[str, Any]) -> None:
-    forbidden = sorted(key for key in payload if key.lower() in _FORBIDDEN_KEYS)
+    forbidden = sorted(_forbidden_paths(payload))
     if forbidden:
         raise ValueError(
             "full prompts/transcripts are not valid handoff fields: "
             + ", ".join(forbidden)
         )
+
+
+def _forbidden_paths(value: Any, prefix: str = "") -> list[str]:
+    """Return every forbidden prompt/transcript key at any JSON depth."""
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            name = str(key)
+            path = f"{prefix}.{name}" if prefix else name
+            if name.casefold() in _FORBIDDEN_KEYS:
+                found.append(path)
+            found.extend(_forbidden_paths(child, path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(_forbidden_paths(child, f"{prefix}[{index}]"))
+    return found
 
 
 def _nonnegative_int(value: int | None) -> int:

@@ -20,7 +20,7 @@
 #
 # Exit codes:
 #   0 — OK
-#   1 — invalid CLI usage
+#   1 — invalid CLI usage, or can-ask predicate is false (locked/terminal)
 #   2 — state machine rejected the operation (transition / rewind / can-ask blocked)
 #   3 — environment error (missing python3, no project root, etc.)
 
@@ -137,6 +137,8 @@ cmd_can_ask() {
         can-ask; then
         exit 0
     fi
+    rc=$?
+    [ "$rc" -eq 1 ] && exit 1
     exit 2
 }
 

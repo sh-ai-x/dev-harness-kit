@@ -76,7 +76,7 @@ try:  # Works both as a package import and in the legacy top-level test path.
 except ImportError:  # pragma: no cover - package import fallback
     from skills.ralph.lib.ralph_events import RalphEventAdapter
 from lib.context_budget import redact_excerpt  # noqa: E402, I001
-from lib.trace_log import resolve_trace_root  # noqa: E402, I001
+from lib.trace_log import resolve_trace_root, validate_event  # noqa: E402, I001
 
 
 # ----------------------------------------------------------------------------
@@ -375,6 +375,23 @@ def _record_completed_sub_stage(state: "rs.RalphState", sub_stage: str) -> None:
     if sub_stage not in state.completed_sub_stages:
         state.completed_sub_stages.append(sub_stage)
     state.last_completed_sub_stage = sub_stage
+    repeat_counts = state.recovery_metadata.get("stage_repeat_counts")
+    if isinstance(repeat_counts, dict):
+        repeat_counts.pop(sub_stage, None)
+        if not repeat_counts:
+            state.recovery_metadata.pop("stage_repeat_counts", None)
+
+
+def _record_stage_failure(state: "rs.RalphState", sub_stage: str) -> int:
+    """Persist consecutive failed entries for the same sub-stage."""
+    repeat_counts = state.recovery_metadata.setdefault("stage_repeat_counts", {})
+    if not isinstance(repeat_counts, dict):
+        repeat_counts = {}
+        state.recovery_metadata["stage_repeat_counts"] = repeat_counts
+    value = repeat_counts.get(sub_stage, 0)
+    value = value if isinstance(value, int) and not isinstance(value, bool) else 0
+    repeat_counts[sub_stage] = value + 1
+    return repeat_counts[sub_stage]
 
 
 def _bounded(text: str, limit: int = MAX_EVIDENCE_CHARS) -> str:
@@ -428,6 +445,40 @@ def _read_events(state: "rs.RalphState", project_root: Path) -> List[Dict[str, A
             if event.get("run_id") == state.run_id:
                 events.append(event)
     return events
+
+
+def _replay_valid_events_for_recovery(
+    state: "rs.RalphState", project_root: Path
+) -> tuple[int, str]:
+    """Read whatever valid journal evidence survives a corrupt checkpoint.
+
+    Recovery must inspect the append-only journal, but it must never infer a
+    successful stage from it when the checkpoint itself is untrusted. Invalid
+    journal lines are retained as a diagnostic and do not prevent the state
+    from converging to explicit ``checkpoint_corrupt`` recovery.
+    """
+    try:
+        path = _event_path(state, project_root)
+        if not path.exists():
+            return 0, ""
+        count = 0
+        first_error = ""
+        for line_no, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            if not line.strip():
+                continue
+            try:
+                event = validate_event(json.loads(line))
+            except (json.JSONDecodeError, RecursionError, TypeError, ValueError) as exc:
+                if not first_error:
+                    first_error = f"event log line {line_no}: {type(exc).__name__}: {exc}"
+                continue
+            if event.get("run_id") == state.run_id:
+                count += 1
+        return count, first_error
+    except (OSError, ChainError) as exc:
+        return 0, f"event replay unavailable: {type(exc).__name__}: {exc}"
 
 
 def _append_failure_log(
@@ -618,6 +669,97 @@ def _failure_class(result: DispatchResult) -> str:
         return "child_exit"
     return ""
 
+
+def _land_checkpoint_corrupt(
+    state: "rs.RalphState", project_root: Path
+) -> "rs.RalphState":
+    """Persist an explicit recovery terminal for a corrupt state snapshot."""
+    state.prepare_artifact_paths(project_root)
+    replayed_count, replay_error = _replay_valid_events_for_recovery(
+        state, project_root
+    )
+    metadata = state.recovery_metadata
+    metadata.update(
+        {
+            "failure_class": rs.CHECKPOINT_CORRUPT,
+            "resume_allowed": False,
+            "replay_attempted": True,
+            "replayed_event_count": replayed_count,
+        }
+    )
+    if replay_error:
+        metadata["replay_error"] = replay_error
+    else:
+        metadata.pop("replay_error", None)
+
+    state.current_stage = rs.RECOVERY_REQUIRED
+    state.terminal_reason = "recovery required"
+    state.recovery_reason = state.recovery_reason or (
+        f"{rs.CHECKPOINT_CORRUPT}: checkpoint cannot be trusted"
+    )
+    state.last_action = (
+        f"{state.recovery_reason} "
+        f"(valid_events_replayed={replayed_count})"
+    )
+    state.next_action = "operator reviews the preserved checkpoint; no new run"
+    state.active_attempt.clear()
+    state.completed_sub_stages.clear()
+    state.last_completed_sub_stage = ""
+    state.stage_evidence.clear()
+
+    attempt_id = f"{state.run_id}:checkpoint-recovery"
+    event_kwargs = {
+        "attempt_id": attempt_id,
+        "sub_stage": state.sub_stage or "CHECKPOINT_CORRUPT",
+        "failure_class": rs.CHECKPOINT_CORRUPT,
+        "stderr": state.recovery_metadata.get("checkpoint_load_error", ""),
+        "checkpoint_digest": state.recovery_metadata.get("checkpoint_digest", ""),
+        "replayed_event_count": replayed_count,
+        "replay_error": replay_error,
+    }
+    if not metadata.get("recovery_event_id"):
+        try:
+            recovery_event = _append_event(
+                state,
+                project_root,
+                "recovery.required",
+                outcome="recovery",
+                **event_kwargs,
+            )
+            metadata["recovery_event_id"] = recovery_event["event_id"]
+        except Exception as exc:  # keep state recovery fail-closed if journal is bad
+            metadata["event_persistence_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )[:512]
+    if not metadata.get("terminal_event_id"):
+        try:
+            terminal_event = _append_event(
+                state,
+                project_root,
+                "terminal.reached",
+                outcome=rs.RECOVERY_REQUIRED,
+                terminal=rs.RECOVERY_REQUIRED,
+                **event_kwargs,
+            )
+            metadata["terminal_event_id"] = terminal_event["event_id"]
+        except Exception as exc:  # keep state recovery fail-closed if journal is bad
+            metadata["event_persistence_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )[:512]
+
+    try:
+        _checkpoint(state, project_root)
+    except Exception as exc:
+        # The canonical state is still more important than the derived
+        # progress view. Retry the state-only write so a broken journal or
+        # progress renderer cannot turn recovery into a process crash.
+        metadata["checkpoint_persist_error"] = (
+            f"{type(exc).__name__}: {exc}"
+        )[:512]
+        state.save(project_root)
+    return state
+
+
 # ----------------------------------------------------------------------------
 # Durable unattended runner
 # ----------------------------------------------------------------------------
@@ -629,6 +771,12 @@ def _land_recovery(
     resume_allowed: bool = True,
 ) -> "rs.RalphState":
     state.prepare_artifact_paths(project_root)
+    repeat_count = 0
+    if (
+        state.sub_stage in SUB_STAGE_ORDER
+        and failure_class not in {"checkpoint_corrupt", "deadline_exceeded"}
+    ):
+        repeat_count = _record_stage_failure(state, state.sub_stage)
     state.last_action = reason
     state.recovery_reason = reason
     state.next_action = "operator reviews failure log + resumes"
@@ -638,17 +786,20 @@ def _land_recovery(
         "resume_allowed": resume_allowed,
         "last_verified_checkpoint": state.checkpoint_seq,
         "failure_log": state.failure_log_path,
+        "stage_repeat_count": repeat_count,
     })
     state.transition(rs.RECOVERY_REQUIRED, action=reason)
     _append_event(
         state, project_root, "recovery.required", attempt_id=attempt_id,
         sub_stage=state.sub_stage, outcome="recovery",
         failure_class=failure_class, stderr=reason,
+        stage_repeat_count=repeat_count,
     )
     _append_event(
         state, project_root, "terminal.reached", attempt_id=attempt_id,
         sub_stage=state.sub_stage, outcome=rs.RECOVERY_REQUIRED,
         failure_class=failure_class, terminal=rs.RECOVERY_REQUIRED,
+        stage_repeat_count=repeat_count,
     )
     _checkpoint(state, project_root)
     return state
@@ -864,6 +1015,8 @@ def _run_attended_impl(
     state: "rs.RalphState", dispatch: ChainDispatch, *, project_root: Path
 ) -> "rs.RalphState":
     """Drive the locked chain from the last durable verified boundary."""
+    if state.is_checkpoint_corrupt():
+        return _land_checkpoint_corrupt(state, project_root)
     if state.current_stage == rs.RECOVERY_REQUIRED:
         state.resume_attended()
         _append_event(
@@ -871,6 +1024,21 @@ def _run_attended_impl(
             outcome="resume", failure_class=str(state.recovery_metadata.get("failure_class", "")),
         )
         _checkpoint(state, project_root)
+        repeat_counts = state.recovery_metadata.get("stage_repeat_counts", {})
+        repeat_count = (
+            repeat_counts.get(state.sub_stage, 0)
+            if isinstance(repeat_counts, dict)
+            else 0
+        )
+        if repeat_count >= 2 and state.sub_stage in SUB_STAGE_ORDER:
+            return _land_recovery(
+                state,
+                project_root,
+                f"same-stage-repeat=2 tripped at {state.sub_stage}; RECOVERY_REQUIRED",
+                failure_class="no_progress",
+                attempt_id=str(state.recovery_metadata.get("attempt_id", "")),
+                resume_allowed=False,
+            )
     if state.current_stage != rs.ATTENDED_RUN or not state.attended_lock:
         raise ChainError(
             "run_attended requires ATTENDED_RUN with attended_lock=True; "
@@ -1068,6 +1236,8 @@ def _cli(argv: List[str]) -> int:
         from skills.ralph.lib.ralph_metrics import reduce_metrics
 
         state = rs.RalphState.load(args.project_root, args.session)
+        if state.is_checkpoint_corrupt():
+            state = _land_checkpoint_corrupt(state, args.project_root)
         events = [
             event for event in read_events(args.project_root)
             if event.get("run_id") == state.run_id
@@ -1100,7 +1270,7 @@ def _cli(argv: List[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    if not state.attended_lock:
+    if not state.attended_lock and not state.is_checkpoint_corrupt():
         print(
             "error: current_stage=ATTENDED_RUN but "
             "attended_lock=False (expected True). "

@@ -61,6 +61,11 @@ def test_handoff_rejects_transcript_fields() -> None:
             }
         )
 
+    payload = build_handoff(intent_ref="a")
+    payload["metadata"] = {"attempt": [{"transcript": "do not persist"}]}
+    with pytest.raises(ValueError, match=r"metadata\.attempt\[0\]\.transcript"):
+        validate_handoff(payload)
+
 
 def test_redaction_and_excerpt_are_bounded() -> None:
     value = "Bearer secret-token api_key=hidden sk-1234567890 " + "x" * MAX_EXCERPT_CHARS

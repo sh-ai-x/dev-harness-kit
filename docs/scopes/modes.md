@@ -8,6 +8,13 @@ Set `DEV_KIT_MODE` in `<proj>/.claude/settings.json` `env` block, or via `/dev-k
 | `lite`  | 4-hour MVP sprint                              | 7 lite subset   | 7 lite subset  | L1–L9 (subset of gates) |
 | `undev` | Non-dev / scratchpad / docs-only / random     | none            | none           | none (silent)   |
 
+The runtime manifests route every hook through `hooks/mode-gate.sh`. In
+`full` it dispatches all registered hooks; in `lite` it dispatches only
+`acp-tier-assert`, `tdd-guard`, `worktree-guard`, `destructive-confirm`,
+`bash-guard`, `git-guard`, and `stop-verify`; in `undev` it exits silently
+before the hook body. The same boundary is present in the Claude and Codex
+manifests, so an explicitly installed plugin cannot bypass the selected mode.
+
 ## Resolution order (highest wins)
 
 | Source | Effective value | Notes |
@@ -78,7 +85,10 @@ resolver. A project that carries `roles:` must resolve
 
 ## Mode + plugin-enable interaction
 
-`undev` means the plugin is **off**, not "the plugin is on but with lite behavior". If `enabledPlugins.dev-kit@dev-kit: true` and `DEV_KIT_MODE=undev`, the plugin is on (full hooks fire) but the mode label is misleading. To actually be undev:
+`undev` means dev-kit behavior is **off**. If the plugin is installed while
+`DEV_KIT_MODE=undev` is explicit, the host may load the manifest, but
+`mode-gate.sh` short-circuits every hook before its body runs. To keep the
+plugin entirely out of the host configuration as well:
 
 ```jsonc
 // .claude/settings.json
@@ -88,7 +98,9 @@ resolver. A project that carries `roles:` must resolve
 }
 ```
 
-The resolution-order table above already encodes this: the default-conditional-on-plugin-enabled row is the same "silent undev" rule the conditional default implements.
+The resolution-order table above still controls the default label. The
+manifest-level gate controls runtime behavior when an operator explicitly
+sets `undev` while the plugin remains installed.
 
 ## Team toggle (`DEV_KIT_TEAM`) — orthogonal to mode
 

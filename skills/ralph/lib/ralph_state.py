@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -48,6 +49,7 @@ ATTENDED_RUN = "ATTENDED_RUN"
 DONE = "DONE"
 RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
 USER_MERGE_REQUIRED = "USER_MERGE_REQUIRED"
+CHECKPOINT_CORRUPT = "checkpoint_corrupt"
 
 STATE_SCHEMA_VERSION = 2
 
@@ -164,6 +166,13 @@ class RalphState:
 
     def is_terminal(self) -> bool:
         return self.current_stage in TERMINAL_STATES
+
+    def is_checkpoint_corrupt(self) -> bool:
+        """Return whether this record is a load-time corruption recovery."""
+        return (
+            self.current_stage == RECOVERY_REQUIRED
+            and self.recovery_metadata.get("failure_class") == CHECKPOINT_CORRUPT
+        )
 
     def is_gate(self) -> bool:
         return self.current_stage in GATE_STATES
@@ -371,6 +380,22 @@ class RalphState:
         self.validate()
         path = self._state_path(project_root, self.session)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if self.recovery_metadata.pop("_checkpoint_corrupt_loaded", False):
+            if path.exists():
+                digest = str(
+                    self.recovery_metadata.get("checkpoint_digest", "unknown")
+                )[:16]
+                backup = path.with_name(f"{path.name}.corrupt.{digest}")
+                if not backup.exists():
+                    # Preserve the bytes that failed validation before the
+                    # explicit recovery checkpoint replaces the canonical
+                    # path.  A corrupt snapshot must remain inspectable.
+                    os.replace(path, backup)
+                try:
+                    backup_label = str(backup.relative_to(project_root))
+                except ValueError:
+                    backup_label = str(backup)
+                self.recovery_metadata["checkpoint_backup_path"] = backup_label
         payload = json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
         _atomic_write_text(path, payload)
         return path
@@ -384,7 +409,108 @@ class RalphState:
                 schema_version=STATE_SCHEMA_VERSION,
                 run_id=_run_id(session, ""),
             )
-        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        raw_bytes = b""
+        try:
+            raw_bytes = path.read_bytes()
+            raw = json.loads(raw_bytes.decode("utf-8"))
+            if not isinstance(raw, dict):
+                raise StateValidationError("checkpoint root must be a JSON object")
+            return cls.from_dict(raw)
+        except (
+            OSError,
+            UnicodeError,
+            json.JSONDecodeError,
+            RecursionError,
+            RalphStateError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return cls._from_corrupt_checkpoint(
+                project_root,
+                session,
+                path,
+                raw_bytes,
+                exc,
+            )
+
+    @classmethod
+    def _from_corrupt_checkpoint(
+        cls,
+        project_root: Path,
+        session: str,
+        path: Path,
+        raw_bytes: bytes,
+        error: BaseException,
+    ) -> "RalphState":
+        """Build a terminal recovery record without trusting the snapshot.
+
+        This deliberately does not initialize a normal ``RESEARCH_GATE``
+        state.  The original bytes are identified by digest and are archived
+        by ``save()`` before the recovery record is published.
+        """
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        raw_object: Dict[str, Any] = {}
+        decoded = ""
+        try:
+            decoded = raw_bytes.decode("utf-8")
+            candidate = json.loads(decoded)
+            if isinstance(candidate, dict):
+                raw_object = candidate
+        except (UnicodeError, json.JSONDecodeError, RecursionError, TypeError, ValueError):
+            pass
+
+        run_id = raw_object.get("run_id")
+        if not isinstance(run_id, str) or not run_id.strip():
+            # A syntax error can still leave a usable run_id before the
+            # damaged suffix. Preserve it for event joins when it is plainly
+            # present; otherwise use a corruption-specific, non-run id.
+            match = re.search(r'"run_id"\s*:\s*"([^"\\]{1,128})"', decoded)
+            run_id = match.group(1) if match else f"ralph-corrupt-{digest[:20]}"
+        else:
+            run_id = run_id.strip()[:128]
+
+        try:
+            checkpoint_label = str(path.relative_to(project_root))
+        except ValueError:
+            checkpoint_label = str(path)
+        reason = f"{type(error).__name__}: {error}"[:512]
+        sub_stage = raw_object.get("sub_stage")
+        if not isinstance(sub_stage, str) or not sub_stage.strip():
+            sub_stage = "CHECKPOINT_CORRUPT"
+        state = cls(
+            session=session,
+            started_at=(
+                raw_object.get("started_at")
+                if isinstance(raw_object.get("started_at"), str)
+                else _now_iso()
+            ),
+            idea=(
+                raw_object.get("idea")
+                if isinstance(raw_object.get("idea"), str)
+                else ""
+            ),
+            schema_version=STATE_SCHEMA_VERSION,
+            run_id=run_id,
+            current_stage=RECOVERY_REQUIRED,
+            sub_stage=sub_stage[:128],
+            terminal_reason="recovery required",
+            recovery_reason=f"{CHECKPOINT_CORRUPT}: {reason}",
+            recovery_metadata={
+                "failure_class": CHECKPOINT_CORRUPT,
+                "resume_allowed": False,
+                "checkpoint_path": checkpoint_label,
+                "checkpoint_digest": digest,
+                "checkpoint_load_error": reason,
+                "replay_attempted": False,
+                "_checkpoint_corrupt_loaded": True,
+            },
+            attended_lock=raw_object.get("attended_lock") is True,
+            last_action=f"{CHECKPOINT_CORRUPT}: {reason}",
+            next_action="operator reviews the preserved checkpoint; no new run",
+            blockers=[CHECKPOINT_CORRUPT],
+        )
+        state.prepare_artifact_paths(project_root)
+        return state
 
     def validate(self) -> None:
         """Validate checkpoint-critical fields before dispatch or publish."""
@@ -539,6 +665,12 @@ def _cli(argv: List[str]) -> int:
         print(json.dumps(state.to_dict(), indent=2, sort_keys=True))
         return 0
     if args.cmd == "init":
+        if state.is_checkpoint_corrupt():
+            print(
+                json.dumps(state.to_dict(), indent=2, sort_keys=True),
+                file=sys.stderr,
+            )
+            return 3
         ns = new_state(args.idea, session=args.session, deadline=args.deadline)
         ns.save(args.project_root)
         print(json.dumps(ns.to_dict(), indent=2, sort_keys=True))

@@ -48,6 +48,25 @@ def _resolve(cwd: Path, env_override: dict | None = None) -> str:
     return result.stdout.strip()
 
 
+def _active(cwd: Path, env_override: dict | None = None) -> str:
+    """Run dev_kit_team_active to cover stale inherited env values."""
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(cwd)
+    env.pop("DEV_KIT_TEAM", None)
+    if env_override:
+        env.update(env_override)
+    script = f'''
+      source "{TEAM_LIB}"
+      printf '%s' "$(dev_kit_team_active)"
+    '''
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True, text=True, timeout=10,
+        cwd=str(cwd), env=env,
+    )
+    return result.stdout.strip()
+
+
 def _make_proj(tmp: Path, *, project_team: object | None,
                local_team: object | None) -> Path:
     """Build a synthetic project root with .git and .claude/.
@@ -176,6 +195,11 @@ class TestTeamResolution(unittest.TestCase):
         proj = _make_proj(Path(self.tmp), project_team="maybe",
                           local_team="on")
         self.assertEqual(_resolve(proj), "on")
+
+    def test_active_canonicalizes_and_rejects_stale_shell_value(self):
+        proj = _make_proj(Path(self.tmp), project_team="on", local_team=None)
+        self.assertEqual(_active(proj, {"DEV_KIT_TEAM": "1"}), "on")
+        self.assertEqual(_active(proj, {"DEV_KIT_TEAM": "maybe"}), "on")
 
     # ----- Orthogonality: team toggle is independent of mode -----
 

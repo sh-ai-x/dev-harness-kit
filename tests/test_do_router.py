@@ -69,6 +69,21 @@ def test_ambiguous_intent_is_not_guessed() -> None:
     assert set(envelope["ambiguity"]) == {"review", "security", "build"}
 
 
+def test_route_keywords_do_not_match_inside_other_words() -> None:
+    route, details = resolve_route("review the staged change")
+    assert route == "review"
+    assert details == []
+
+    route, details = resolve_route("rebuild the parser")
+    assert route is None
+    assert details == ["no owner matched the intent"]
+
+
+def test_explicit_compound_route_beats_its_component_hints() -> None:
+    assert resolve_route("security review") == ("security", [])
+    assert resolve_route("build-debug the failing test") == ("build-debug", [])
+
+
 def test_explicit_route_can_be_used_when_intent_is_generic() -> None:
     route, details = resolve_route("do the requested work", route_id="build")
     assert route == "build"

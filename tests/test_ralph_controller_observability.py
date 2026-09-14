@@ -69,6 +69,21 @@ def test_resume_skips_completed_stage_and_keeps_attended_lock(tmp_path: Path) ->
     ]
 
 
+def test_repeated_failed_stage_is_bounded_across_resumes(tmp_path: Path) -> None:
+    state = _attended("repeat-persisted")
+    dispatch = chain.RecordingDispatch(
+        results={chain.BUILD: chain.DispatchResult(exit_code=1, stderr="still failing")}
+    )
+
+    chain.run_attended(state, dispatch, project_root=tmp_path)
+    chain.run_attended(state, dispatch, project_root=tmp_path)
+    final = chain.run_attended(state, dispatch, project_root=tmp_path)
+
+    assert final.current_stage == state_module.RECOVERY_REQUIRED
+    assert "same-stage-repeat=2" in final.last_action
+    assert [call["sub_stage"] for call in dispatch.calls] == [chain.BUILD, chain.BUILD]
+
+
 def test_live_lease_blocks_and_dead_lease_is_reclaimed(tmp_path: Path) -> None:
     state = _attended("lease")
     lease = tmp_path / ".dev-kit" / "ralph" / "lease.lease"

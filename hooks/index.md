@@ -4,6 +4,11 @@
 >
 > Hooks are loaded based on three scopes (user / project / local) and three modes (`full` / `lite` / `undev`). If a hook fires in an unexpected project, or your `enabledPlugins` doesn't seem to take effect, the answer is in `docs/scopes/troubleshooting.md`.
 
+Every manifest entry is dispatched through `hooks/mode-gate.sh`. The gate
+resolves the independent `DEV_KIT_MODE` value once per invocation: `full`
+allows all registered hooks, `lite` allows the seven documented safety and
+verification hooks, and `undev` exits before any hook body executes.
+
 
 
 > The active-hooks state lives in `.dev-kit/.active-hooks.json` (MUST-13).

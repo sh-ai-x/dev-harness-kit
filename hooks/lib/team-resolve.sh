@@ -156,7 +156,18 @@ dev_kit_team_resolve() {
 }
 
 dev_kit_team_active() {
-  if [ -z "${DEV_KIT_TEAM:-}" ]; then
+  # Keep the public active value canonical even when a caller inherited a
+  # legacy/boolean shell value or a typo. Invalid values must fall through to
+  # the normal precedence chain instead of becoming a new team state.
+  if [ -n "${DEV_KIT_TEAM:-}" ] && _is_valid_team "$DEV_KIT_TEAM"; then
+    DEV_KIT_TEAM="$(_normalize_team "$DEV_KIT_TEAM")"
+    export DEV_KIT_TEAM
+    if [ -z "${DEV_KIT_TEAM_SOURCE:-}" ]; then
+      DEV_KIT_TEAM_SOURCE="shell"
+      export DEV_KIT_TEAM_SOURCE
+    fi
+  else
+    unset DEV_KIT_TEAM
     dev_kit_team_resolve
   fi
   printf '%s' "${DEV_KIT_TEAM:-off}"

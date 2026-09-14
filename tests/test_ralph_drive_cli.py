@@ -61,3 +61,26 @@ def test_cli_drives_noop_and_reports_session_scoped_evidence(tmp_path: Path) -> 
     status = _run(tmp_path, "status-report")
     assert status.returncode == 0, status.stderr
     assert json.loads(status.stdout)["state"]["run_id"] == state["run_id"]
+
+
+def test_corrupt_checkpoint_becomes_explicit_recovery_without_dispatch(tmp_path: Path) -> None:
+    state_path = tmp_path / ".dev-kit" / "ralph" / "cli.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"schema_version": 2, "run_id": "ralph-original", '
+        '"current_stage": "ATTENDED_RUN", "attended_lock": true,',
+        encoding="utf-8",
+    )
+
+    result = _run(tmp_path, "run-attended", "--dispatch", "noop")
+
+    assert result.returncode == 5
+    recovered = json.loads(result.stdout)
+    assert recovered["current_stage"] == "RECOVERY_REQUIRED"
+    assert recovered["recovery_metadata"]["failure_class"] == "checkpoint_corrupt"
+    assert recovered["recovery_metadata"]["replay_attempted"] is True
+    assert recovered["recovery_metadata"]["recovery_event_id"]
+    assert recovered["completed_sub_stages"] == []
+    backups = list(state_path.parent.glob("cli.json.corrupt.*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8").endswith("attended_lock\": true,")

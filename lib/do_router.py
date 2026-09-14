@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -54,11 +55,14 @@ _ROUTE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ralph-attended", ("ralph", "end-to-end", "end to end", "자율 루프", "전체 루프")),
     ("babysit-pr", ("babysit", "pr monitor", "pr 모니터", "pr 감시", "pr 수리")),
     ("ship", ("release", "릴리스", "tag", "태그", "ship")),
-    ("security", ("security", "보안", "owasp")),
-    ("review", ("review", "리뷰", "검토", "diff review")),
+    ("security", ("security", "보안", "owasp", "security review")),
+    ("review", ("review", "리뷰", "검토", "code review", "diff review")),
     ("research", ("research", "조사", "근거 조사", "citations", "인용")),
     ("plan", ("plan", "계획", "prd")),
-    ("build-debug", ("debug", "디버그", "diagnose", "진단", "재현", "regression")),
+    (
+        "build-debug",
+        ("debug", "build-debug", "디버그", "diagnose", "진단", "재현", "regression"),
+    ),
     ("build", ("build", "구현", "implement", "fix", "수정", "변경", "개발")),
 )
 
@@ -108,9 +112,50 @@ def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}-{hashlib.sha256(joined.encode('utf-8')).hexdigest()[:24]}"
 
 
+def _hint_spans(intent: str, hint: str) -> tuple[tuple[int, int], ...]:
+    """Return whole-token matches, excluding substring-only occurrences."""
+    pattern = rf"(?<!\w){re.escape(hint.casefold())}(?!\w)"
+    return tuple(match.span() for match in re.finditer(pattern, intent.casefold()))
+
+
 def _matches(intent: str, route_id: str) -> bool:
-    lowered = intent.casefold()
-    return any(hint.casefold() in lowered for candidate, hints in _ROUTE_HINTS if candidate == route_id for hint in hints)
+    return any(
+        _hint_spans(intent, hint)
+        for candidate, hints in _ROUTE_HINTS
+        if candidate == route_id
+        for hint in hints
+    )
+
+
+def _route_candidates(intent: str) -> list[str]:
+    """Resolve lexical candidates while preferring explicit compound hints."""
+    matches: dict[str, tuple[tuple[int, int, str], ...]] = {}
+    for candidate, hints in _ROUTE_HINTS:
+        candidate_matches = tuple(
+            (start, end, hint)
+            for hint in hints
+            for start, end in _hint_spans(intent, hint)
+        )
+        if candidate_matches:
+            matches[candidate] = candidate_matches
+
+    compound_matches = tuple(
+        (owner, start, end)
+        for owner, candidate_matches in matches.items()
+        for start, end, hint in candidate_matches
+        if len(re.findall(r"\w+", hint, flags=re.UNICODE)) > 1
+    )
+    candidates = set(matches)
+    for candidate, candidate_matches in matches.items():
+        if all(
+            any(
+                owner != candidate and start <= match_start and match_end <= end
+                for owner, start, end in compound_matches
+            )
+            for match_start, match_end, _hint in candidate_matches
+        ):
+            candidates.discard(candidate)
+    return [candidate for candidate, _hints in _ROUTE_HINTS if candidate in candidates]
 
 
 def resolve_route(intent: str, *, route_id: str | None = None) -> tuple[str | None, list[str]]:
@@ -119,7 +164,7 @@ def resolve_route(intent: str, *, route_id: str | None = None) -> tuple[str | No
         if route_id not in ROUTE_OWNERS:
             return None, [f"unknown route_id: {route_id}"]
         return route_id, []
-    candidates = [candidate for candidate, _hints in _ROUTE_HINTS if _matches(intent, candidate)]
+    candidates = _route_candidates(intent)
     # A generic implementation request has one natural owner.  Only an
     # explicit signal can select the cross-skill Ralph owner.
     if len(candidates) == 1:
