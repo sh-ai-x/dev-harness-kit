@@ -102,6 +102,25 @@ class TestSyncDocumented(unittest.TestCase):
         )
 
 
+class TestOptionalIntegrationDocumented(unittest.TestCase):
+    """Linear stays available, but gate-select defaults it off."""
+
+    def setUp(self) -> None:
+        self.skill = SKILL.read_text(encoding="utf-8")
+
+    def test_linear_is_an_optional_integration_not_a_ci_gate(self) -> None:
+        self.assertIn("Optional integrations", self.skill)
+        self.assertIn("not part of gates.json", self.skill)
+        self.assertIn("enabled=false by default in gate-select", self.skill)
+
+    def test_linear_toggle_delegates_to_authoritative_cli(self) -> None:
+        self.assertIn("enable linear", self.skill)
+        self.assertIn("disable linear", self.skill)
+        self.assertIn("python3 tools/linear_sync.py on", self.skill)
+        self.assertIn("python3 tools/linear_sync.py off", self.skill)
+        self.assertIn(".dev-kit/linear-config.json", self.skill)
+
+
 class TestInitDocumented(unittest.TestCase):
     """`init` synthesizes gates.json from current marker.runners."""
 
