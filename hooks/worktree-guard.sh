@@ -141,6 +141,10 @@ _worktree_list_rich() {
 # pointer. The file is regenerated on every deny so the snapshot stays
 # fresh; failure to write (e.g. read-only FS) is silently ignored — the
 # deny still fires and the inline fallback line covers that case.
+#
+# The `.dev-kit/cache/` path is the canonical ephemeral-cache root used
+# elsewhere (see lib/eval_runner.py:747 for the same convention); using
+# it here means a fresh checkout does not need a new gitignore entry.
 WT_LIST="$(_worktree_list_rich)"
 WT_LIST_FILE=".dev-kit/cache/worktree-list.txt"
 if [ -n "$WT_LIST" ]; then
