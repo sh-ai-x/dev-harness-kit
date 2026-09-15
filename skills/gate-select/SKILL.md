@@ -32,6 +32,9 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 
 ## Sub-commands
 
+Special-case `linear` aliases take precedence over the generic `<gate>` rows
+below; they delegate to `tools/linear_sync.py` and never touch `gates.json`.
+
 | Sub-command | Effect |
 |---|---|
 | `show` (default) | Read gates.json + marker; print the 3 dimensions. No edits. |
@@ -41,7 +44,7 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 | `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`). |
 | `enable linear` | `python3 tools/linear_sync.py on` — explicitly opt in to Linear auto-sync. |
 | `disable linear` | `python3 tools/linear_sync.py off` — keep the optional Linear integration off. |
-| `set linear enabled <true\|false>` | Maps to the existing Linear `on`/`off` CLI; does not write `gates.json`. |
+| `set linear enabled <true\|false>` | Maps `true` to `python3 tools/linear_sync.py on` and `false` to `python3 tools/linear_sync.py off`; does not write `gates.json`. |
 | `sync` | Push enabled flags to `gh variable set GATES_<NAME>_ENABLED`. |
 | `init` | Synthesize `.dev-kit/gates.json` from the current `marker.runners` so a consumer that previously used `--exclude security.yml` upgrades in one step. |
 | `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install). |
