@@ -453,9 +453,9 @@ class TestHookIsWired(unittest.TestCase):
 
 class TestPushConfirmBypass(unittest.TestCase):
     """When `push_confirm` is off in `.dev-kit/guard-mode.session.json`,
-    the non-force first-push ask is suppressed; force-with-lease still
-    asks. Loop lifetime of /dev-kit:babysit-pr[-local] flips this on
-    entry and restores "on" in the EXIT trap."""
+    both push-confirm asks are suppressed. Loop lifetime of
+    /dev-kit:babysit-pr[-local] flips this off on entry and restores "on"
+    in the EXIT trap."""
 
     def setUp(self):
         if not (HOOKS / "destructive-confirm.sh").exists():
@@ -491,13 +491,18 @@ class TestPushConfirmBypass(unittest.TestCase):
 
     def test_first_push_silent_when_off(self):
         """The bypass contract: with `push_confirm=off`, a non-force
-        first-push is silent — no ask envelope."""
-        r = self._run_with_state("off", "git push -u origin feat/x")
-        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
-        self.assertNotIn(
-            '"ask"', r.stdout,
-            f"first-push should be silent when push_confirm=off: {r.stdout!r}",
-        )
+        first-push is silent — no ask envelope, in either flag form."""
+        for cmd in (
+            "git push -u origin feat/x",
+            "git push --set-upstream origin feat/x",
+        ):
+            with self.subTest(cmd=cmd):
+                r = self._run_with_state("off", cmd)
+                self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+                self.assertNotIn(
+                    '"ask"', r.stdout,
+                    f"first-push should be silent when push_confirm=off: {r.stdout!r}",
+                )
 
     def test_first_push_asks_when_on(self):
         """Explicit `push_confirm=on` is the same as the default: first-push
@@ -518,15 +523,41 @@ class TestPushConfirmBypass(unittest.TestCase):
             f"first-push should ask when state is absent: {r.stdout!r}",
         )
 
-    def test_force_with_lease_still_asks_when_off(self):
-        """Force-with-lease (history-rewriting) stays destructive-confirm-worthy
-        even when `push_confirm=off`. Only the non-force ask is bypassed."""
+    def test_force_with_lease_silent_when_off(self):
+        """The babysit loop's push-confirm bypass covers force-with-lease too.
+        The separate git-guard still owns catastrophic force-push policy."""
         r = self._run_with_state("off", "git push --force-with-lease origin feat/x")
+        self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+        self.assertNotIn(
+            '"ask"', r.stdout,
+            f"force-with-lease should be silent when push_confirm=off: {r.stdout!r}",
+        )
+
+    def test_force_with_lease_asks_when_on(self):
+        """Explicit `push_confirm=on` preserves the confirmation prompt."""
+        r = self._run_with_state("on", "git push --force-with-lease origin feat/x")
         self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
         self.assertIn(
             '"ask"', r.stdout,
-            f"force-with-lease must still ask: {r.stdout!r}",
+            f"force-with-lease should ask when push_confirm=on: {r.stdout!r}",
         )
+
+
+class TestPushConfirmEnvironmentBypass(unittest.TestCase):
+    def test_no_confirm_disables_both_push_asks(self):
+        """The explicit environment escape hatch suppresses both push asks."""
+        for cmd in (
+            "git push -u origin feat/x",
+            "git push --force-with-lease origin feat/x",
+        ):
+            with self.subTest(cmd=cmd):
+                r = _run(
+                    "destructive-confirm.sh",
+                    _bash_payload(cmd),
+                    env_extra={"DEV_KIT_NO_CONFIRM": "1"},
+                )
+                self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
+                self.assertNotIn('"ask"', r.stdout)
 
 
 if __name__ == "__main__":

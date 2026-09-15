@@ -8,7 +8,7 @@
 # single source of truth for the discriminator.
 #
 # Public API:
-#   worktree_detect                — sets $WORKTREE_DETECT to one of:
+#   worktree_detect [file_path]    — sets $WORKTREE_DETECT to one of:
 #                                    "worktree", "main", "outside", or
 #                                    leaves it empty on jq-less no-op.
 #   worktree_detect_jq_missing_warn — emit a stderr warning to stdout
@@ -17,9 +17,13 @@
 #                                    session-start-check) which can't
 #                                    hard-block on missing jq.
 
-# worktree_detect — set $WORKTREE_DETECT to "worktree" or "main"
-# based on the discriminator. Caller must `cd` into the right
-# working dir before sourcing (each hook has its own cwd policy).
+# worktree_detect [file_path] — set $WORKTREE_DETECT to "worktree" or
+# "main" based on the discriminator. With a file_path, classify the
+# repository containing that path when it belongs to the same repository
+# as the ambient cwd. This matters when a sub-agent's hook still inherits
+# the parent session's cwd while the tool targets a linked worktree.
+# If the path cannot be resolved into the ambient repository, retain the
+# ambient-cwd behavior. Callers without a path retain the original API.
 #
 # The discriminator is `git rev-parse --git-dir == --git-common-dir`:
 #   - In the MAIN checkout both return the same path
@@ -42,14 +46,37 @@ worktree_detect() {
     return 1
   fi
 
+  local detect_dir="$PWD"
+  local target_path="${1:-}"
+
+  if [ -n "$target_path" ]; then
+    local ambient_toplevel target_dir target_toplevel
+    local ambient_common_raw target_common_raw ambient_common target_common
+    ambient_toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || ambient_toplevel=""
+    target_dir="$(_existing_parent_dir "$target_path")" || target_dir=""
+
+    if [ -n "$ambient_toplevel" ] && [ -n "$target_dir" ]; then
+      target_toplevel="$(git -C "$target_dir" rev-parse --show-toplevel 2>/dev/null)" || target_toplevel=""
+      if [ -n "$target_toplevel" ]; then
+        ambient_common_raw="$(cd "$ambient_toplevel" && git rev-parse --git-common-dir 2>/dev/null)" || ambient_common_raw=""
+        target_common_raw="$(cd "$target_toplevel" && git rev-parse --git-common-dir 2>/dev/null)" || target_common_raw=""
+        ambient_common="$(cd "$ambient_toplevel" && abspath "$ambient_common_raw")"
+        target_common="$(cd "$target_toplevel" && abspath "$target_common_raw")"
+        if [ -n "$ambient_common" ] && [ "$ambient_common" = "$target_common" ]; then
+          detect_dir="$target_dir"
+        fi
+      fi
+    fi
+  fi
+
   local git_dir_raw git_common_raw toplevel
-  toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || { WORKTREE_DETECT="outside"; return 0; }
+  toplevel="$(git -C "$detect_dir" rev-parse --show-toplevel 2>/dev/null)" || { WORKTREE_DETECT="outside"; return 0; }
   git_dir_raw="$(cd "$toplevel" && git rev-parse --git-dir 2>/dev/null)" || { WORKTREE_DETECT="outside"; return 0; }
   git_common_raw="$(cd "$toplevel" && git rev-parse --git-common-dir 2>/dev/null)" || { WORKTREE_DETECT="outside"; return 0; }
 
   local git_dir git_common
-  git_dir="$(abspath "$git_dir_raw")"
-  git_common="$(abspath "$git_common_raw")"
+  git_dir="$(cd "$toplevel" && abspath "$git_dir_raw")"
+  git_common="$(cd "$toplevel" && abspath "$git_common_raw")"
   git_dir="${git_dir%/}"
   git_common="${git_common%/}"
 
@@ -59,6 +86,32 @@ worktree_detect() {
     WORKTREE_DETECT="worktree"
   fi
   return 0
+}
+
+# _existing_parent_dir — resolve a target file path to the nearest existing
+# directory so `git -C` can classify edits to files that do not exist yet.
+_existing_parent_dir() {
+  local target_path="$1"
+  local candidate
+  case "$target_path" in
+    /*) candidate="$target_path" ;;
+    *)  candidate="$PWD/$target_path" ;;
+  esac
+
+  if [ ! -d "$candidate" ]; then
+    candidate="${candidate%/*}"
+    [ -n "$candidate" ] || candidate="/"
+  fi
+
+  while [ ! -d "$candidate" ]; do
+    [ "$candidate" = "/" ] && return 1
+    local parent="${candidate%/*}"
+    [ -n "$parent" ] || parent="/"
+    [ "$parent" != "$candidate" ] || return 1
+    candidate="$parent"
+  done
+
+  abspath "$candidate"
 }
 
 # abspath — canonicalize a path to absolute. Uses realpath when
