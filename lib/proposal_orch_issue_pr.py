@@ -118,6 +118,15 @@ class OpenItem:
     checks_state: str = ""
     files_count: int = 0
 
+    def containment_score(self, boundary: str) -> int:
+        """Return the change-containment score for `boundary` (1-5).
+
+        Mirrors `DEFAULT_SCORES[b][2]`. Pass the boundary explicitly so
+        callers don't re-run `classify()` (the score rule already
+        classifies once and threads the result through).
+        """
+        return DEFAULT_SCORES.get(boundary, (3, 3, 3))[2]
+
     @property
     def is_pr(self) -> bool:
         return self.kind == "pr"
@@ -263,8 +272,15 @@ ISSUE_LIST_FIELDS = ",".join((
 ))
 
 
-def _normalize_pr_safe(raw: Dict[str, Any]) -> OpenItem:
-    """Build an OpenItem from a PR-list JSON record."""
+def _common_normalize(raw: Dict[str, Any], *, kind: str) -> OpenItem:
+    """Build an OpenItem from a `gh {kind} list` JSON record.
+
+    `kind` is `"pr"` or `"issue"`. PR-specific fields default to empty
+    strings / zero counts; issue-specific fields default to PR defaults
+    via the dataclass. Both record shapes share the eight fields below
+    (number / title / body / state / labels / createdAt / updatedAt /
+    author / url).
+    """
     author = raw.get("author") or {}
     if isinstance(author, dict):
         author_login = str(author.get("login", ""))
@@ -274,7 +290,7 @@ def _normalize_pr_safe(raw: Dict[str, Any]) -> OpenItem:
         str(label.get("name", "")) for label in (raw.get("labels") or [])
     )
     return OpenItem(
-        kind="pr",
+        kind=kind,
         number=int(raw["number"]),
         title=str(raw.get("title", "")),
         body=str(raw.get("body", "") or ""),
@@ -284,36 +300,20 @@ def _normalize_pr_safe(raw: Dict[str, Any]) -> OpenItem:
         updated_at=str(raw.get("updatedAt", "")),
         author=author_login,
         url=str(raw.get("url", "")),
-        is_draft=bool(raw.get("isDraft", False)),
-        base_ref_name=str(raw.get("baseRefName", "")),
-        head_ref_name=str(raw.get("headRefName", "")),
-        checks_state="",
-        files_count=0,
+        is_draft=bool(raw.get("isDraft", False)) if kind == "pr" else False,
+        base_ref_name=str(raw.get("baseRefName", "")) if kind == "pr" else "",
+        head_ref_name=str(raw.get("headRefName", "")) if kind == "pr" else "",
     )
+
+
+def _normalize_pr_safe(raw: Dict[str, Any]) -> OpenItem:
+    """Build an OpenItem from a PR-list JSON record."""
+    return _common_normalize(raw, kind="pr")
 
 
 def _normalize_issue(raw: Dict[str, Any]) -> OpenItem:
     """Build an OpenItem from an issue-list JSON record."""
-    author = raw.get("author") or {}
-    if isinstance(author, dict):
-        author_login = str(author.get("login", ""))
-    else:
-        author_login = str(author)
-    labels = tuple(
-        str(label.get("name", "")) for label in (raw.get("labels") or [])
-    )
-    return OpenItem(
-        kind="issue",
-        number=int(raw["number"]),
-        title=str(raw.get("title", "")),
-        body=str(raw.get("body", "") or ""),
-        state=str(raw.get("state", "OPEN")),
-        labels=labels,
-        created_at=str(raw.get("createdAt", "")),
-        updated_at=str(raw.get("updatedAt", "")),
-        author=author_login,
-        url=str(raw.get("url", "")),
-    )
+    return _common_normalize(raw, kind="issue")
 
 
 def _fetch_pr_checks_for(
@@ -443,7 +443,6 @@ def score(item: OpenItem, boundary: Optional[str] = None) -> Tuple[int, int, int
 def recommend_disposition(
     item: OpenItem,
     boundary: Optional[str] = None,
-    scores: Optional[Tuple[int, int, int]] = None,
 ) -> str:
     """Pick one disposition based on the item's signature.
 
@@ -457,11 +456,6 @@ def recommend_disposition(
     - throughput / measurement / documentation → defer
     """
     b = boundary or classify(item)
-    s = scores or score(item, b)
-    # `s` is computed for future use; the current rule does not need its
-    # numbers but the function signature stays stable for downstream
-    # callers that may want to surface the score in the proposal body.
-    _ = s
 
     title_lower = item.title.lower()
     body_lower = (item.body or "").lower()
@@ -477,7 +471,7 @@ def recommend_disposition(
             return "replace"
         if item.files_count > WIDE_PR_FILE_THRESHOLD:
             return "replace"
-        if item.containment_score() >= 4:
+        if item.containment_score(b) >= 4:
             return "keep"
         return "replace"
 
@@ -610,7 +604,7 @@ def _score_one(item: OpenItem) -> ScoredItem:
     """Compute one item's triage outputs in a single pass."""
     boundary = classify(item)
     s = score(item, boundary)
-    disposition = recommend_disposition(item, boundary, s)
+    disposition = recommend_disposition(item, boundary)
     bucket = bucket_for(boundary) if disposition != "reject" else ""
     return ScoredItem(
         item=item,
@@ -623,12 +617,14 @@ def _score_one(item: OpenItem) -> ScoredItem:
     )
 
 
-def compose_yaml(snapshot: BacklogSnapshot) -> str:
-    """Build the proposal YAML text from the snapshot.
+def compose_yaml(snapshot: BacklogSnapshot) -> Tuple[str, Dict[str, int]]:
+    """Build the proposal YAML text + per-disposition counts.
 
-    The output is byte-identical for a given snapshot (modulo the date
-    field, which is `snapshot.snapshot_date`). The grammar matches what
-    `lib/render_proposal_html.parse_proposal_yaml` accepts.
+    The output text is byte-identical for a given snapshot (modulo the
+    date field, which is `snapshot.snapshot_date`). The grammar matches
+    what `lib/render_proposal_html.parse_proposal_yaml` accepts. The
+    returned counts dict lets `main()` report the disposition
+    distribution without re-running `_score_one` over the snapshot.
     """
     scored: List[ScoredItem] = [_score_one(i) for i in snapshot.items]
 
@@ -680,7 +676,7 @@ def compose_yaml(snapshot: BacklogSnapshot) -> str:
         f"# Generated by: /dev-kit:proposal-orch-issue-pr\n"
         f"# Open PRs: {len(snapshot.prs())}, Open issues: {len(snapshot.issues())}\n"
     )
-    return header + text
+    return (header + text, disposition_counts)
 
 
 def _compose_before_summary(
@@ -1018,20 +1014,7 @@ def _safe_slug(value: str, *, label: str) -> str:
     return value
 
 
-# ----- Monkeys for testability ----------------------------------------------
-#
-# `OpenItem` is a frozen dataclass with no `containment_score()` method;
-# `recommend_disposition` reads containment through that method. We bind
-# the method dynamically at import time so the function can stay
-# declarative and the field stays a plain int. This avoids adding a
-# method that does no work (would be a YAGNI trip-hazard per the
-# project Iron Laws).
-def _containment_score(self: "OpenItem") -> int:
-    b = classify(self)
-    return DEFAULT_SCORES.get(b, (3, 3, 3))[2]
-
-
-OpenItem.containment_score = _containment_score  # type: ignore[attr-defined]
+# ----- CLI entry ------------------------------------------------------------
 
 
 # ----- CLI entry ------------------------------------------------------------
@@ -1083,7 +1066,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"error: snapshot failed: {e}", file=sys.stderr)
         return 3
 
-    yaml_text = compose_yaml(snapshot)
+    yaml_text, counts = compose_yaml(snapshot)
 
     if args.print_yaml:
         print(yaml_text)
@@ -1100,10 +1083,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (ValueError, OSError) as e:
         print(f"error: render failed: {e}", file=sys.stderr)
         return 4
-
-    counts = {d: 0 for d in DISPOSITIONS}
-    for sc in [_score_one(i) for i in snapshot.items]:
-        counts[sc.disposition] = counts.get(sc.disposition, 0) + 1
 
     print("## /dev-kit:proposal-orch-issue-pr")
     print()

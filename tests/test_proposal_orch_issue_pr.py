@@ -393,7 +393,7 @@ class ComposeYamlTests(unittest.TestCase):
             ),
         ]
         snap = self._snapshot(items)
-        text = poip.compose_yaml(snap)
+        text, _counts = poip.compose_yaml(snap)
         parsed = yaml.safe_load(text)
         # Top-level fields exist.
         self.assertEqual(parsed["title"], "Open work priority — orchestrator-first triage")
@@ -436,7 +436,7 @@ class ComposeYamlTests(unittest.TestCase):
             ),
         ]
         snap = self._snapshot(items)
-        text = poip.compose_yaml(snap)
+        text, _counts = poip.compose_yaml(snap)
         # Strip the header comments; the renderer doesn't parse them,
         # and yaml.safe_load leaves them in (so we keep them in compose
         # output for source readability — but parse_proposal_yaml
@@ -456,7 +456,7 @@ class ComposeYamlTests(unittest.TestCase):
             ),
         ]
         snap = self._snapshot(items)
-        text = poip.compose_yaml(snap)
+        text, _counts = poip.compose_yaml(snap)
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             html = poip.render_html(

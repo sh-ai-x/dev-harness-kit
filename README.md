@@ -204,6 +204,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone hands the root cause to `/dev-kit:plan`. |
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
+| [`/dev-kit:proposal-orch-issue-pr`](skills/proposal-orch-issue-pr/SKILL.md) | 0-arg orchestrator-first GitHub backlog triage. Gathers open PRs + issues, scores (Bottleneck / Risk / Change containment), orders by orchestrator critical path, and writes a proposal YAML + HTML via `/dev-kit:proposal`. |
 | [`/dev-kit:interview`](docs/skills/interview.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
 
 ### End-to-end autonomous

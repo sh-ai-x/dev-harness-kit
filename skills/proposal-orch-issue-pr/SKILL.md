@@ -109,16 +109,9 @@ HTML under `docs/proposals/<bucket>/long-running-priorities/`.
 
 ## Ordering rule (orchestrator critical path)
 
-Six buckets, in this fixed order:
-
-| Bucket | What belongs here | Why first |
-|---|---|---|
-| `hard-stop` | Edit admission, write gate, or state-machine failures that block any agent action | Nothing downstream is trustworthy if writes fail |
-| `resume-audit` | Artifact / evidence / log durability — a DONE run must survive cleanup | Establish canonical evidence contract before retry automation |
-| `side-effect-integrity` | Push, commit, force-push, destructive side effects | Fail-closed boundaries, then automation |
-| `safe-cleanup` | Janitor, retention, cooldown, log rotation | High blast radius; never a dependency of core run |
-| `measured-optimization` | Latency, throughput, hot reload | Optimize only after measurement exists |
-| `learning-documentation` | Dashboard, archive discovery, docs | Low critical-path priority |
+Six buckets, in this fixed order: `hard-stop → resume-audit →
+side-effect-integrity → safe-cleanup → measured-optimization →
+learning-documentation`.
 
 The ordering is enforced by `lib/proposal_orch_issue_pr.py::bucket_for`.
 It is NOT controlled by PR age, PR size, or issue labels.
@@ -127,24 +120,16 @@ It is NOT controlled by PR age, PR size, or issue labels.
 
 `lib/proposal_orch_issue_pr.py::classify` assigns one of nine
 orchestrator boundaries using a small rule table (label first,
-title patterns second, default `state`). The mapping is the same
-boundary vocabulary the existing open-work-priority YAML uses; a
-match on a label like `area: hook` or `type: ralph` maps to the
-closest boundary.
+title patterns second, default `state`). The rule tables live in
+`lib/proposal_orch_issue_pr.py` — the SKILL.md does not restate them.
 
 ## Disposition rule (deterministic)
 
-`lib/proposal_orch_issue_pr.py::recommend_disposition` returns one of:
-
-| Disposition | When |
-|---|---|
-| `keep` | Item maps to one boundary, current PR (if any) is on `origin/main` HEAD, all required checks green |
-| `replace` | Item maps to one boundary AND (`R >= 4` OR checks red OR PR is wide (>20 files) OR PR off current main) |
-| `defer` | Item maps to `throughput` / `measurement` / `learning-documentation` AND not a hard-stop |
-| `reject` | Item is a duplicate, off-topic, or already-superseded by another open item |
-
-The rule is conservative: when in doubt, `replace` beats `keep`, and
-`defer` beats `keep`. The reviewer is the only authority to override.
+`lib/proposal_orch_issue_pr.py::recommend_disposition` returns one of
+`keep` / `replace` / `defer` / `reject`. The full rule precedence lives
+there; the rule is conservative (when in doubt, `replace` beats `keep`,
+and `defer` beats `keep`). The reviewer is the only authority to
+override.
 
 ## How to use
 
