@@ -121,24 +121,34 @@ BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)"
 # The LCS substrate was dropped entirely in #463; the CLI no longer
 # ships. Direct `git worktree list --porcelain` is the only path.
 _worktree_list_rich() {
-  : "no-op placeholder kept for structural symmetry with the prior shape"
-  # Fallback: porcelain worktree list, branch stripped of refs/heads/.
+  # Porcelain worktree list with the branch stripped of refs/heads/.
   # Handle both `^branch refs/heads/X` and `^detached` so a CI
   # checkout in detached HEAD (the common case for `actions/checkout`
   # on a PR ref) still surfaces a worktree entry instead of an empty
-  # list.
+  # list. The prior LCS-based shape was removed in PR #462/#463; this
+  # direct-shell path is the only one that remains.
   git worktree list --porcelain 2>/dev/null | awk '
     /^worktree / { path = substr($0, 10); pending = 1; next }
     /^branch /   { sub(/^refs\/heads\//, "", $2); print "  " path "\t" $2; pending = 0 }
     /^detached/  { if (pending) { print "  " path "\t(detached)"; pending = 0 } }
   '
 }
+# Phase 2.2 (follow-up to #358): the worktree list is no longer inlined
+# in the deny reason — inlining made the hook output long enough that
+# the actionable instruction ("cut a worktree") got buried. Instead the
+# list is dumped to .dev-kit/cache/worktree-list.txt (gitignored via the
+# existing `.dev-kit/` rule) and the deny reason carries a one-line
+# pointer. The file is regenerated on every deny so the snapshot stays
+# fresh; failure to write (e.g. read-only FS) is silently ignored — the
+# deny still fires and the inline fallback line covers that case.
 WT_LIST="$(_worktree_list_rich)"
+WT_LIST_FILE=".dev-kit/cache/worktree-list.txt"
 if [ -n "$WT_LIST" ]; then
-  WT_BLOCK="Existing worktrees (cd into one, or open a Claude session there):
-$WT_LIST"
+  mkdir -p "$(dirname "$WT_LIST_FILE")" 2>/dev/null || true
+  printf '%s\n' "$WT_LIST" > "$WT_LIST_FILE" 2>/dev/null || true
+  WT_BLOCK="Existing worktrees (fresh on every deny) → cat ${WT_LIST_FILE}"
 else
-  WT_BLOCK="(no worktrees listed — run \`git worktree list\` to enumerate them)"
+  WT_BLOCK="No worktrees listed. Run \`git worktree list\` to enumerate them."
 fi
 
 MSG="editing in main checkout (branch='$BRANCH') is forbidden.
@@ -150,12 +160,12 @@ REQUIRED environment setup before retrying:
 Without these, abort this edit. Re-running without setting them will be denied.
 
 Routing (after config is set):
-  claude  + single   -> git worktree add -b <type>/<slug> .worktrees/<slug> origin/main
-                        cd .worktrees/<slug>
-                        open a Claude session there
-  claude  + parallel -> same worktree, then fan out sub-agents via the Agent tool
-  codex   + single   -> git worktree add ..., then spawn one sub-agent with cwd=<worktree>
-  codex   + parallel -> spawn N sub-agents each with cwd=<worktree> and explicit task prompt
+  1. git worktree add -b <type>/<slug> .worktrees/<slug> origin/main
+  2. Hand off the client:
+     claude  + single   -> open a Claude session in .worktrees/<slug>
+     claude  + parallel -> fan out sub-agents via the Agent tool from .worktrees/<slug>
+     codex   + single   -> spawn one sub-agent with cwd=.worktrees/<slug>
+     codex   + parallel -> spawn N sub-agents each with cwd=.worktrees/<slug> + explicit task prompt
 
 Hard rules (Iron Laws: see iron-laws/index.md, L1/L3/L4/L5):
   M push / commit / PR to main: forbidden
