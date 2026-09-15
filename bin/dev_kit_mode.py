@@ -21,6 +21,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODE_LIB = REPO_ROOT / "hooks" / "lib" / "mode-resolve.sh"
+VALID_MODES = ("full", "lite", "undev")
 
 
 def _resolve_mode(cwd: Path) -> tuple[str, str]:
@@ -39,7 +40,7 @@ def _resolve_mode(cwd: Path) -> tuple[str, str]:
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         # Fallback: Layer 1 (shell) + Layer 4 (default).
         shell_mode = os.environ.get("DEV_KIT_MODE", "")
-        if shell_mode in {"full", "lite", "undev", "team"}:
+        if shell_mode in VALID_MODES:
             return shell_mode, "shell"
         return _default_for_cwd(cwd), "default"
 
@@ -139,8 +140,8 @@ def cmd_write(args) -> int:
     if not args.mode:
         print("error: --mode is required for write", file=sys.stderr)
         return 2
-    if args.mode not in {"full", "lite", "undev", "team"}:
-        print(f"error: invalid mode {args.mode!r}; must be full|lite|undev|team",
+    if args.mode not in VALID_MODES:
+        print(f"error: invalid mode {args.mode!r}; must be full|lite|undev",
               file=sys.stderr)
         return 2
 
@@ -192,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     p_show.set_defaults(func=cmd_show)
 
     p_write = sub.add_parser("write", help="write DEV_KIT_MODE")
-    p_write.add_argument("--mode", choices=["full", "lite", "undev", "team"])
+    p_write.add_argument("--mode", choices=VALID_MODES)
     p_write.add_argument("--scope", choices=["project", "local"], default="project")
     p_write.set_defaults(func=cmd_write)
 

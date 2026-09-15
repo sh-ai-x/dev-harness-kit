@@ -14,8 +14,8 @@ into a setup checklist, a daily workflow, and a session-override cheat sheet.
 | Decision                         | Where it lives                                      |
 |---------------------------------|-----------------------------------------------------|
 | "Is dev-kit enabled at all?"    | `enabledPlugins` in user / project / local settings |
-| "Which mode?" (`full` / `lite` / `undev` / `team`) | `DEV_KIT_MODE` env var or `/dev-kit:mode`           |
-| "Track `.dev-kit/` in git?"     | `DEV_KIT_TEAM` env var or `/dev-kit:team`           |
+| "Which mode?" (`full` / `lite` / `undev`) | `DEV_KIT_MODE` env var or `/dev-kit:mode`           |
+| "Enable team collaboration / track `.dev-kit/`?" | `DEV_KIT_TEAM` env var or `/dev-kit:team`           |
 | "Pause the hard-block hooks for this session only?" | `/dev-kit:guard-mode off`                           |
 | "Silence all optional local hooks for this session only?" | `/dev-kit:harness-mode fast`                       |
 
@@ -38,8 +38,9 @@ spikes — and there is no per-project opt-out once it is on.
 ├──────────────────────────────────────────────────────────────────┤
 │  <proj>/.claude/settings.json     (committed, team-shared)        │
 │   ├─ enabledPlugins.dev-kit@dev-kit: true  ✅  — per-project opt-in│
-│   ├─ env.DEV_KIT_MODE = full|lite|undev|team  ✅                   │
-│   └─ roles.* (team mode only)                                    │
+│   ├─ env.DEV_KIT_MODE = full|lite|undev  ✅                       │
+│   ├─ env.DEV_KIT_TEAM = on|off  ✅                                │
+│   └─ roles.* (team toggle on only)                               │
 ├──────────────────────────────────────────────────────────────────┤
 │  <proj>/.claude/settings.local.json  (gitignored, personal)       │
 │   ├─ env.DEV_KIT_MODE override ✅                                 │
@@ -94,7 +95,8 @@ If you later decide the project needs dev-kit:
 
 ```bash
 /dev-kit:bootstrap        # writes minimal CLAUDE.md + AGENTS.md + active-hooks.json
-/dev-kit:mode lite        # or full / team
+/dev-kit:mode lite        # or full / undev
+/dev-kit:team on          # optional: roles, dependencies, shared state
 ```
 
 ### I am joining an existing dev-kit project
@@ -137,7 +139,7 @@ confuse your teammates.
 | `undev` is set but hooks still fire                                  | `enabledPlugins.dev-kit@dev-kit: true` overrides the mode       | Set `enabledPlugins` empty AND `DEV_KIT_MODE=undev`             |
 | Plugin updates are not picked up                                     | Plugin cache is stale                                           | `claude plugin marketplace upgrade dev-kit` (or restart — SessionStart auto-refreshes) |
 | New dev-kit skill does not show up after upgrade                     | Cache refreshed but plugin not force-installed                  | `claude plugin install dev-kit --force`                         |
-| `team` mode but no role gating feels active                          | `DEV_KIT_MODE=team` requires a `roles:` block in project scope  | Run `/dev-kit:mode team`; declare role names + skill subsets   |
+| Team roles are not active                                                   | `DEV_KIT_TEAM` is off or no `roles:` block is declared                 | Run `/dev-kit:team on`; declare role names + skill subsets in project scope |
 
 ---
 

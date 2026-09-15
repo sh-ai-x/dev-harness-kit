@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""role_config.py — operator-declared `roles` block for `DEV_KIT_MODE=team`.
+"""role_config.py — operator-declared `roles` block for `DEV_KIT_TEAM=on`.
 
-`team` is the fourth mode added in this PR. It activates two
-enhancements the existing `full` / `lite` / `undev` modes do not provide:
+The independent team toggle activates two enhancements the existing
+`full` / `lite` / `undev` modes do not provide:
 
   1. Per-session persona (active role) — declared under
      `<proj>/.claude/settings.json` `roles.active`.
@@ -11,14 +11,14 @@ enhancements the existing `full` / `lite` / `undev` modes do not provide:
 
 The plugin ships NO default roles (mirrors the dev-harness-kit-lite
 pattern; `docs/scopes/modes.md` documents this). The operator declares
-role names + skill subsets at `/dev-kit:mode team` time. This module is
-the canonical reader + gate.
+role names + skill subsets while team collaboration is enabled. This
+module is the canonical reader + gate.
 
 Public API
 ----------
 
 - `RoleConfigError` — raised when a `roles` block exists but
-  `DEV_KIT_MODE != team` (the gate is fail-closed).
+  `DEV_KIT_TEAM` does not resolve to `on` (the gate is fail-closed).
 - `resolve_role(root) -> str | None` — return `roles.active`, or None if
   no `roles` block / block has no active role.
 - `allowed_skills(root, role) -> set[str]` — return the skill allowlist for
@@ -29,39 +29,40 @@ Pure function (no subprocess, no I/O outside `<root>/.claude/settings.json`
 read). Testable in isolation; `tests/test_role_config.py` covers the
 happy paths + the mode gate + the wildcard expansion.
 
-Mode gate contract
+Team gate contract
 ------------------
 
-`bin/dev_kit_mode.py` only writes `roles` to settings.json when the
-operator picked `--mode team`. If a downstream consumer (a hook, a
-skill) reads `roles` while the active mode is `full` / `lite` / `undev`,
-something wrote `roles` outside the mode picker. `resolve_role` /
-`allowed_skills` raise `RoleConfigError` so the caller fails closed
-instead of silently trusting a stale `roles` block.
+The team-enabled settings template writes `roles` alongside
+`DEV_KIT_TEAM=on`, while `DEV_KIT_MODE` remains one of `full`, `lite`,
+or `undev`. If a downstream consumer (a hook or skill) reads `roles`
+while the team toggle is off, `resolve_role` / `allowed_skills` raise
+`RoleConfigError` so the caller fails closed instead of silently
+trusting a stale `roles` block. A legacy `DEV_KIT_MODE=team` value does
+not enable roles.
 
 No shipped defaults
 -------------------
 
 The plugin does NOT define a default role/persona. `roles.members` is
-empty when first written; the operator fills it via the
-`/dev-kit:mode team` picker loop (see `skills/mode/SKILL.md`).
+empty when first written; the operator fills it while using the
+`/dev-kit:team on` collaboration toggle (see `skills/team/SKILL.md`).
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 
 class RoleConfigError(Exception):
-    """Raised when the `roles` block exists but the mode gate forbids it.
+    """Raised when the `roles` block exists but the team gate forbids it.
 
     Caller-visible signal: the project has a `roles` block in
-    `.claude/settings.json` but `DEV_KIT_MODE` is not `team`. Either the
-    mode was switched away from `team` (and the roles block should be
-    removed) or something wrote `roles` outside the `/dev-kit:mode team`
-    picker (which is the only legal writer).
+    `.claude/settings.json` but `DEV_KIT_TEAM` is not `on`. Either the
+    team toggle was switched off (and the roles block should be removed)
+    or something wrote `roles` outside the team-enabled settings flow.
     """
 
 
@@ -93,7 +94,9 @@ _DEV_KIT_SKILL_PREFIXES = _discover_dev_kit_skill_prefixes()
 
 _WILDCARD = "*"
 
-_VALID_MODES = frozenset({"full", "lite", "undev", "team"})
+_VALID_TEAM_VALUES = frozenset({"on", "off", "1", "0", "true", "false"})
+_VALID_MODES = frozenset({"full", "lite", "undev"})
+_MISSING = object()
 
 
 def _settings_path(root: Path) -> Path:
@@ -114,45 +117,128 @@ def _read_settings(root: Path) -> dict:
     return body
 
 
-def _active_mode(root: Path) -> Optional[str]:
-    """Read `env.DEV_KIT_MODE` from `.claude/settings.json`.
+def _normalize_team(value: str) -> str:
+    """Map a valid team value to the canonical `on` / `off` form."""
+    return "on" if value in {"on", "1", "true"} else "off"
 
-    Layer 1 (shell env) + Layer 2 (settings.json) only. The mode CLI
-    is the authoritative resolver; this helper exists so the role gate
-    does not have to spawn a subprocess. A mismatch with the live
-    resolver is acceptable for the gate (we err on the strict side:
-    if we read `team` here but the CLI resolves `undev` because of a
-    shell-var override, the caller will simply get `roles` not honored
-    for that session — which is correct fail-closed behavior).
-    """
-    body = _read_settings(root)
+
+def _setting_value(body: dict, key: str) -> object:
+    """Read one setting with env-block precedence, preserving false/0."""
     env = body.get("env")
-    if not isinstance(env, dict):
-        return None
-    val = env.get("DEV_KIT_MODE")
-    if not isinstance(val, str):
-        return None
-    return val if val in _VALID_MODES else None
+    if isinstance(env, dict) and key in env:
+        return env[key]
+    if key in body:
+        return body[key]
+    return _MISSING
 
 
-def _enforce_mode_gate(root: Path) -> None:
-    """Raise `RoleConfigError` if a `roles` block exists but mode != team.
+def _team_setting(body: dict) -> tuple[bool, str | None]:
+    """Return (present, normalized value), preserving explicit invalidity."""
+    value = _setting_value(body, "DEV_KIT_TEAM")
+    if value is _MISSING:
+        return False, None
+    if isinstance(value, bool):
+        value = "true" if value else "false"
+    elif isinstance(value, int) and value in (0, 1):
+        value = str(value)
+    if isinstance(value, str) and value in _VALID_TEAM_VALUES:
+        return True, _normalize_team(value)
+    return True, None
 
-    The role block is honored only in `team` mode. Reading it from any
-    other mode is a contract violation — something wrote `roles`
-    without going through the picker. We fail closed (raise) so the
-    caller can refuse to apply the stale block.
+
+def _settings_team(body: dict) -> str | None:
+    """Read a valid DEV_KIT_TEAM value from one settings object."""
+    _present, team = _team_setting(body)
+    return team
+
+
+def _active_team(root: Path) -> str:
+    """Resolve DEV_KIT_TEAM using the same four layers as team-resolve.sh.
+
+    This local implementation keeps role resolution pure and avoids a
+    subprocess. Invalid values are ignored, matching the shell resolver's
+    fail-open-to-the-next-layer behavior; the gate itself remains
+    fail-closed unless the final value is `on`.
+    """
+    shell_team = os.environ.get("DEV_KIT_TEAM", "")
+    if shell_team in _VALID_TEAM_VALUES:
+        return _normalize_team(shell_team)
+
+    project_present, project_team = _team_setting(_read_settings(root))
+    if project_present and project_team is not None:
+        return project_team
+
+    local_path = Path(root) / ".claude" / "settings.local.json"
+    if local_path.is_file():
+        try:
+            local_body = json.loads(local_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            local_body = {}
+        if isinstance(local_body, dict):
+            local_present, local_team = _team_setting(local_body)
+            if local_present and local_team is not None:
+                return local_team
+    return "off"
+
+
+def _settings_mode(body: dict) -> str | None:
+    """Read a valid DEV_KIT_MODE value from one settings object."""
+    value = _setting_value(body, "DEV_KIT_MODE")
+    if isinstance(value, str) and value in _VALID_MODES:
+        return value
+    return None
+
+
+def _active_mode(root: Path) -> str:
+    """Resolve the mode needed to keep roles inactive in `undev`."""
+    shell_mode = os.environ.get("DEV_KIT_MODE", "")
+    if shell_mode in _VALID_MODES:
+        return shell_mode
+
+    project_mode = _settings_mode(_read_settings(root))
+    if project_mode is not None:
+        return project_mode
+
+    local_path = Path(root) / ".claude" / "settings.local.json"
+    if local_path.is_file():
+        try:
+            local_body = json.loads(local_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            local_body = {}
+        if isinstance(local_body, dict):
+            local_mode = _settings_mode(local_body)
+            if local_mode is not None:
+                return local_mode
+
+    settings = _read_settings(root)
+    enabled = settings.get("enabledPlugins")
+    if isinstance(enabled, dict) and any(
+        isinstance(name, str) and name.startswith("dev-kit@")
+        for name in enabled
+    ):
+        return "full"
+    return "undev"
+
+
+def _enforce_team_gate(root: Path) -> None:
+    """Raise `RoleConfigError` if a `roles` block exists but team is off.
+
+    The role block is honored only when the independent team toggle is
+    on. Reading it while team is off is a contract violation — something
+    wrote `roles` without going through the team-enabled settings flow.
+    We fail closed (raise) so callers refuse to apply a stale block.
     """
     body = _read_settings(root)
     if "roles" not in body:
         return  # no roles block -> nothing to gate
+    team = _active_team(root)
     mode = _active_mode(root)
-    if mode == "team":
+    if team == "on" and mode in {"full", "lite"}:
         return  # happy path
     raise RoleConfigError(
         f"`roles` block present in {_settings_path(root)} but "
-        f"DEV_KIT_MODE={mode!r}. Switch to DEV_KIT_MODE=team (via "
-        f"`/dev-kit:mode team`) or remove the `roles` block."
+        f"DEV_KIT_MODE={mode!r}, DEV_KIT_TEAM={team!r}. Enable team collaboration with "
+        f"`/dev-kit:team on` or remove the `roles` block."
     )
 
 
@@ -178,10 +264,10 @@ def resolve_role(root: Path) -> Optional[str]:
       - `roles` block is missing
       - `roles.active` is empty / missing
 
-    Raises `RoleConfigError` when the mode gate fires (see
-    `_enforce_mode_gate`).
+    Raises `RoleConfigError` when the team gate fires (see
+    `_enforce_team_gate`).
     """
-    _enforce_mode_gate(root)
+    _enforce_team_gate(root)
     body = _read_settings(root)
     roles = body.get("roles")
     if not isinstance(roles, dict):
@@ -204,9 +290,9 @@ def allowed_skills(root: Path, role: str) -> set[str]:
     `_DEV_KIT_SKILL_PREFIXES` (the canonical dev-kit slash-command
     set). Operators MAY mix wildcards with explicit entries.
 
-    Raises `RoleConfigError` when the mode gate fires.
+    Raises `RoleConfigError` when the team gate fires.
     """
-    _enforce_mode_gate(root)
+    _enforce_team_gate(root)
     body = _read_settings(root)
     roles = body.get("roles")
     if not isinstance(roles, dict):
