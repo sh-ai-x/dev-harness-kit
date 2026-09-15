@@ -355,10 +355,10 @@ sys.exit(0 if bpr.is_stale_lock('.dev-kit/babysit.lock') else 1)
 fi
 echo "$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD) source=babysit-pr-local" \
   > .dev-kit/babysit.lock
-# Flip the non-destructive push-confirm ask gate off AFTER the lock
+# Flip the push-confirm ask gate off AFTER the lock
 # write: the lock guards the flip so two concurrent babysit
-# invocations cannot both race-pause the gate. force-with-lease still
-# asks. SessionStart reseeds "on" for a fresh window; the EXIT trap
+# invocations cannot both race-pause the gate. SessionStart reseeds
+# "on" for a fresh window; the EXIT trap
 # restores it so a normal loop-end does not leak "off" into the
 # parent session.
 python3 -m lib.guard_mode_state set push_confirm off
@@ -485,7 +485,7 @@ between them; the byte-stable line-1 shape is owned by
 - `slop-detector=ON` — blocks vacuous commits.
 - `tdd-guard=OFF` — not applicable (PR babysitting, not authoring new tests).
 - `bash-guard=ON` — guards `git push --force` patterns.
-- `push_confirm=off (auto, loop lifetime)` — non-force first-push ask is suppressed; force-with-lease still asks. The lock-file trap restores "on" on EXIT.
+- `push_confirm=off (auto, loop lifetime)` — first-push and force-with-lease asks are suppressed. The lock-file trap restores "on" on EXIT.
 - `git-guard=ON` — hard-blocks `gh pr merge` (any invocation); merging into
   `main` is always a human action, run outside automation.
 - `worktree-guard=ON` — denies Edit/Write from the main checkout.

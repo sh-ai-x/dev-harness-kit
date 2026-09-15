@@ -657,10 +657,10 @@ sys.exit(0 if bpr.is_stale_lock('.dev-kit/babysit.lock') else 1)
   fi
 fi
 echo "$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD)" > .dev-kit/babysit.lock
-# Flip the non-destructive push-confirm ask gate off AFTER the lock
+# Flip the push-confirm ask gate off AFTER the lock
 # write: the lock guards the flip so two concurrent babysit
-# invocations cannot both race-pause the gate. force-with-lease still
-# asks. The SessionStart hook reseeds "on" for a fresh window; the
+# invocations cannot both race-pause the gate. The SessionStart hook
+# reseeds "on" for a fresh window; the
 # EXIT trap below restores it explicitly so a normal loop-end does
 # not leak "off" into the parent session.
 python3 -m lib.guard_mode_state set push_confirm off
@@ -755,7 +755,7 @@ section for the full algorithm + audit-comment parser details.
   functional change.
 - `tdd-guard=OFF` — not applicable (PR babysitting, not authoring new tests).
 - `bash-guard=ON` — guards `git push --force` patterns.
-- `push_confirm=off (auto, loop lifetime)` — non-force first-push ask is suppressed; force-with-lease still asks. The lock-file trap restores "on" on EXIT.
+- `push_confirm=off (auto, loop lifetime)` — first-push and force-with-lease asks are suppressed. The lock-file trap restores "on" on EXIT.
 - `git-guard=ON` — hard-blocks `gh pr merge` (any invocation); merging into
   `main` is always a human action, run outside automation.
 

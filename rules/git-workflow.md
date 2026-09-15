@@ -117,6 +117,13 @@ verification requirements to a spawned subagent.
 - **No force-push** to shared branches (use `git push --force-with-lease` only on your own unmerged branch, never after review has started).
 - **No merge commits in the PR** — rebase or squash before merge.
 
+The ask-tier confirmation for first pushes and `git push --force-with-lease` is
+controlled by the session-scoped `push_confirm` state in
+`.dev-kit/guard-mode.session.json`. `/dev-kit:babysit-pr` and
+`/dev-kit:babysit-pr-local` set it to `off` for their loop lifetime and restore
+`on` on exit; this only suppresses the confirmation prompt and does not relax
+the hard `git-guard` policy.
+
 ## Enforcement
 
 1. **`hooks/git-guard.sh`** (PreToolUse, Bash matcher) — blocks:
