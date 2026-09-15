@@ -188,8 +188,8 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:bootstrap` (with ci-setup prompt) | `bootstrap` **and** `ci-setup` in one shot — the usual new-project starting point. |
 | [`/dev-kit:ci-setup`](docs/skills/ci-setup.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
 | [`/dev-kit:ci-doctor`](docs/skills/ci-doctor.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
-| [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev` / `team`). The single switch that gates which hooks and skills run. |
-| [`/dev-kit:team`](skills/team/SKILL.md) | Toggle whether `.dev-kit/` is tracked in git (`DEV_KIT_TEAM` on / off). Orthogonal to `DEV_KIT_MODE` — the team-committed default for who-sees-what state files. |
+| [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). The single switch that gates which hooks and skills run. |
+| [`/dev-kit:team`](skills/team/SKILL.md) | Toggle team collaboration (`DEV_KIT_TEAM` on / off): operator roles, dependency-aware plans, and whether `.dev-kit/` is tracked. Orthogonal to `DEV_KIT_MODE`. |
 | [`/dev-kit:gate-select`](skills/gate-select/SKILL.md) | One picker for all three gate dimensions — project (CI workflows), session (local hooks), AI-judge. `show` reads current state; `pick` dispatches to the right installer. |
 | [`/dev-kit:harness-mode`](skills/harness-mode/SKILL.md) | Session-scoped local-hook mode — `fast` (optional hooks off), `full` (default), or `custom` per-hook picker. |
 | [`/dev-kit:guard-mode`](skills/guard-mode/SKILL.md) | Session-scoped on/off switch for the two hard-block hooks (`tdd-guard`, `worktree-guard`). |
@@ -204,6 +204,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:build`](docs/skills/build.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
 | [`/dev-kit:build-debug`](docs/skills/build-debug.md) | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Standalone hands the root cause to `/dev-kit:plan`. |
 | [`/dev-kit:proposal`](docs/skills/proposal.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
+| [`/dev-kit:proposal-orch-issue-pr`](skills/proposal-orch-issue-pr/SKILL.md) | 0-arg orchestrator-first GitHub backlog triage. Gathers open PRs + issues, scores (Bottleneck / Risk / Change containment), orders by orchestrator critical path, and writes a proposal YAML + HTML via `/dev-kit:proposal`. |
 | [`/dev-kit:interview`](docs/skills/interview.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
 
 ### End-to-end autonomous
@@ -284,12 +285,13 @@ repo's worktrees and hands you back the exact command to resume the right one.
 (This needs `/dev-kit:log` to have been on — that's what records the sessions.)
 See [Session monitor](#session-monitor) below for the flag reference.
 
-**You want to switch between `full` / `lite` / `undev` / `team` modes.** Run
+**You want to switch between `full` / `lite` / `undev` modes.** Run
 [`/dev-kit:mode`](skills/mode/SKILL.md). `full` is the multi-session/multi-agent
 default; `lite` is a 7-hook / 7-skill subset for a 4-hour MVP sprint;
-`undev` disables the plugin entirely; `team` adds user-defined roles +
-dependency-aware plan output. Use `--scope=local` to test a mode
-without committing the change. The full resolution order
+`undev` disables the plugin entirely. Use `/dev-kit:team on` separately
+when role/dependency-aware plan output and shared `.dev-kit/` state are
+needed. Use `--scope=local` to test a mode without committing the change.
+The full resolution order
 (shell env → `settings.json` → `settings.local.json`) lives in
 [`docs/scopes/modes.md`](docs/scopes/modes.md).
 

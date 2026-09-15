@@ -60,10 +60,10 @@
 - [ ] External plugin deps (all 5 repos fully absorbed, ADR-0001)
 - [ ] Interactive options (UX auto-determined)
 - [ ] ML/AI extensions (Loop Engineering only via Ralph, ADR-0002)
-- [ ] `--team` mode (Phase 1 = 10x default, 100x in Phase 5)
+- [ ] Team collaboration toggle (Phase 1 = 10x default, 100x in Phase 5)
 - [ ] Eval-Repair Specialized Fixers (Phase 3)
 - [ ] A2A typed schemas (Phase 3)
-- [ ] `lib/install.sh --team` (Phase 3)
+- [ ] `DEV_KIT_TEAM` install/tracking integration (Phase 3)
 - [ ] `docs/quality/COST-ANALYSIS.md` attached (already excerpted in §C, body separate)
 
 ## §F. User review (1×, HOTL)

@@ -89,7 +89,7 @@ if $WITH_STRICT; then
   fi
 fi
 
-# Team mode — keep .dev-kit/ tracked (strip any pre-existing ignore).
+# Team collaboration toggle — keep .dev-kit/ tracked (strip any pre-existing ignore).
 # Note: this script is invoked by manual `bash lib/install.sh` only; the
 # canonical /dev-kit:bootstrap skill reads $DEV_KIT_TEAM via
 # hooks/lib/team-resolve.sh and acts there. Callers that want the

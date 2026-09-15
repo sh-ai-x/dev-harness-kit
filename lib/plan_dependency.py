@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""plan_dependency.py — DAG validator for plan-skill Gate 4/5 (team mode).
+"""plan_dependency.py — DAG validator for plan-skill Gate 4/5 (team toggle).
 
-When `DEV_KIT_MODE=team`, the plan skill prompts the operator for
+When `DEV_KIT_TEAM=on`, the plan skill prompts the operator for
 upstream dependency edges between `phases/<phase>/step<N>.md` files
 and writes them into each step dict via `lib/execute.py:register_step(
 ..., depends_on=[...])`. Before writing, the plan skill calls

@@ -1,7 +1,7 @@
 ---
 name: team
-category: mode
-description: Read or write the team toggle (DEV_KIT_TEAM on|off). Default OFF, independent of DEV_KIT_MODE. When ON, .dev-kit/ stays tracked in git.
+category: config
+description: Read or write the team collaboration toggle (DEV_KIT_TEAM on|off). Default OFF, independent of DEV_KIT_MODE. When ON, team roles/dependency-aware planning is enabled and .dev-kit/ stays tracked in git.
 alpha: state
 user-invocable: true
 when_to_use: |
@@ -16,19 +16,23 @@ disable-model-invocation: false
 ---
 > [← Skills index](../../README.md)
 
-# /dev-kit:team — toggle team mode (.dev-kit/ tracking)
+# /dev-kit:team — toggle team collaboration
 
 ## What it does
 
-The team toggle is the single switch that decides whether `.dev-kit/`
-is tracked in the project's git. Two legal values:
+The team toggle is the single switch that enables team collaboration
+and decides whether `.dev-kit/` is tracked in the project's git. Two
+legal values:
 
 - **`on`** — `.dev-kit/` is kept in git (the team-committed default).
+  Operator-declared roles are honored and the plan skill can collect
+  dependency edges.
 - **`off`** — `.dev-kit/` is gitignored (the silent default).
+  Role configuration and dependency-aware plan prompts are disabled.
 
 This is **orthogonal to `DEV_KIT_MODE`** (full / lite / undev). The
-four valid combinations are full+team, full+no-team, lite+team,
-lite+no-team.
+three modes and this toggle combine independently: full/lite/undev
+can each run with team on or off.
 
 The resolution order lives in [`docs/scopes/modes.md`](../../docs/scopes/modes.md):
 
@@ -95,8 +99,8 @@ DEV_KIT_TEAM=on claude
 
 ## What this skill does NOT do
 
-- **Does not modify `enabledPlugins`.** Team mode is purely about
-  `.dev-kit/` git tracking; plugin enable/disable is a separate concern.
+- **Does not modify `enabledPlugins`.** Team collaboration is separate
+  from plugin enable/disable.
 - **Does not modify `DEV_KIT_MODE`.** The two env-vars are orthogonal;
   toggling team does not change the mode skill/hook subset.
 - **Does not commit.** When writing to `--scope=project`, the change is

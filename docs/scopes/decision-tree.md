@@ -16,12 +16,12 @@ Answer in order. Stop at the first "yes".
 
 - **4-hour sprint** → **lite**. Edit `<proj>/.claude/settings.json`. See [`project-scope.md`](project-scope.md) and copy [`templates/settings.project.lite.json`](templates/settings.project.lite.json).
 - **Multi-session / multi-agent / autonomous** → **full**. Edit `<proj>/.claude/settings.json`. See [`project-scope.md`](project-scope.md) and copy [`templates/settings.project.full.json`](templates/settings.project.full.json).
-- **Multi-role team / dependency-aware plan** → **team**. Edit `<proj>/.claude/settings.json`. See [`project-scope.md`](project-scope.md) and copy [`templates/settings.project.team.json`](templates/settings.project.team.json). Roles are user-defined (no shipped defaults); `/dev-kit:mode team` prompts for active role + member roles at activation time.
+- **Need team roles or dependency-aware planning?** Keep the mode from the previous answer, then run `/dev-kit:team on`. Use [`templates/settings.project.team.json`](templates/settings.project.team.json) as the team-enabled project template. Roles are user-defined (no shipped defaults).
 
-## Q4. Should `.dev-kit/` be tracked in git for this project? (independent of Q3)
+## Q4. Should team collaboration and `.dev-kit/` tracking be enabled? (independent of Q3)
 
-- **NO** (default) → do nothing. `.dev-kit/` stays gitignored; bootstrap will not strip it from `.gitignore`.
-- **YES** → run `/dev-kit:team on` (or set `DEV_KIT_TEAM=1`). Bootstrap sub-stage 8.5 will strip `^\.dev-kit` from `.gitignore` on the next run, and the team toggle persists in `env.DEV_KIT_TEAM`. Independent of the mode you picked in Q3 — full+team, full+no-team, lite+team, lite+no-team are all valid. See [`modes.md` § Team toggle](modes.md#team-toggle-dev_kit_team--orthogonal-to-mode).
+- **NO** (default) → do nothing. Team roles/dependencies stay disabled, `.dev-kit/` stays gitignored, and bootstrap will not strip it from `.gitignore`.
+- **YES** → run `/dev-kit:team on` (or set `DEV_KIT_TEAM=1`). This enables the independent team behavior and bootstrap sub-stage 8.5 will strip `^\.dev-kit` from `.gitignore` on the next run. Any `full`, `lite`, or `undev` mode remains valid with the toggle. See [`modes.md` § Team toggle](modes.md#team-toggle-dev_kit_team--orthogonal-to-mode).
 
 ---
 
