@@ -31,16 +31,24 @@ class TestReadWriteRoundTrip(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_missing_file_defaults_to_all_on(self):
+    def test_missing_file_defaults_to_all_on_except_opt_in(self):
+        # ``fork_pr_confirm`` is opt-in (default "off"); the other
+        # three are always-on ("on"). See ``OPT_IN_GUARDS``.
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
+        self.assertEqual(
+            state,
+            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+        )
 
-    def test_corrupt_file_defaults_to_all_on(self):
+    def test_corrupt_file_defaults_to_all_on_except_opt_in(self):
         path = gms._state_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json", encoding="utf-8")
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
+        self.assertEqual(
+            state,
+            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+        )
 
     def test_invalid_value_in_file_defaults_that_guard_to_on(self):
         path = gms._state_path(self.root)
@@ -52,29 +60,54 @@ class TestReadWriteRoundTrip(unittest.TestCase):
     def test_write_state_round_trips_one_guard(self):
         gms.write_state({"tdd_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "off", "worktree_guard": "on", "push_confirm": "on"})
+        self.assertEqual(
+            state,
+            {"tdd_guard": "off", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+        )
 
     def test_write_state_does_not_disturb_other_guard(self):
         gms.write_state({"tdd_guard": "off"}, root=self.root)
         gms.write_state({"worktree_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on"})
+        self.assertEqual(
+            state,
+            {"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on", "fork_pr_confirm": "off"},
+        )
 
     def test_write_state_drops_unknown_guard_key(self):
         gms.write_state({"git_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
+        self.assertEqual(
+            state,
+            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+        )
 
     def test_write_state_drops_non_on_off_value(self):
         gms.write_state({"tdd_guard": "maybe"}, root=self.root)
         state = gms.read_state(self.root)
         self.assertEqual(state["tdd_guard"], "on")
 
-    def test_reset_state_forces_all_on(self):
+    def test_reset_state_forces_all_on_except_opt_in(self):
         gms.write_state({"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on"}, root=self.root)
         gms.reset_state(self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
+        self.assertEqual(
+            state,
+            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+        )
+
+    def test_fork_pr_confirm_round_trips(self):
+        gms.write_state({"fork_pr_confirm": "on"}, root=self.root)
+        state = gms.read_state(self.root)
+        self.assertEqual(state["fork_pr_confirm"], "on")
+        self.assertEqual(gms.resolved_guard("fork_pr_confirm", self.root), "on")
+
+    def test_fork_pr_confirm_defaults_off(self):
+        # Opt-in guard → missing file + reset both yield "off".
+        self.assertEqual(gms.resolved_guard("fork_pr_confirm", self.root), "off")
+        gms.write_state({"fork_pr_confirm": "on"}, root=self.root)
+        gms.reset_state(self.root)
+        self.assertEqual(gms.resolved_guard("fork_pr_confirm", self.root), "off")
 
 
 class TestResolvedGuard(unittest.TestCase):
@@ -164,7 +197,10 @@ class TestCli(unittest.TestCase):
                 self.assertIn(guard, parsed)
                 self.assertIn("value", parsed[guard])
                 self.assertIn("description", parsed[guard])
-                self.assertEqual(parsed[guard]["value"], "on")
+                # Default value: always-on guards → "on"; opt-in
+                # guards (see ``OPT_IN_GUARDS``) → "off".
+                expected = "off" if guard in gms.OPT_IN_GUARDS else "on"
+                self.assertEqual(parsed[guard]["value"], expected)
 
 
 if __name__ == "__main__":
