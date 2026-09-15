@@ -36,6 +36,14 @@ A 3-phase orchestration via `lib/ci_setup.py`:
 /dev-kit:ci-setup [--force] [--setup-secrets] [--target DIR] [--skip-verify] [--provider NAME]
 ```
 
+The installer distinguishes an omitted filter from an explicitly empty one.
+`exclude=None` uses the legacy default path, while `exclude=frozenset()` is
+preserved as an intentional no-exclude selection. This matters to callers
+that pass gate-selection results through the Python API: an empty selection
+must not be treated as if the caller omitted the argument. When
+`.dev-kit/gates.json` is present, it remains the source of truth and a legacy
+`exclude` value is reported as a notice and ignored.
+
 | Flag | Effect |
 |---|---|
 | *(0-arg)* | Idempotent install/no-op against `$PWD`. |

@@ -84,10 +84,10 @@ esac
 [ "$TOOL" = "Bash" ] || exit 0
 
 # Session-scoped bypass during babysit-pr / babysit-pr-local. The
-# non-force first-push ask below is suppressed so the unattended loop
-# is not blocked; force-with-lease stays unchanged. Fail closed (on)
-# when python3 is unavailable or the read fails for any reason — an
-# unrecognized state must never silently bypass the ask gate.
+# first-push and force-with-lease asks below are suppressed so the
+# unattended loop is not blocked. Fail closed (on) when python3 is
+# unavailable or the read fails for any reason — an unrecognized state
+# must never silently bypass the ask gate.
 _PUSH_CONFIRM_STATE=on
 if command -v python3 >/dev/null 2>&1; then
   _PUSH_CONFIRM_STATE="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && python3 -m lib.guard_mode_state get push_confirm 2>/dev/null || echo on)"
@@ -110,8 +110,12 @@ if echo "$CMD" | grep -qE "git .*worktree remove" && ! echo "$CMD" | grep -q "wo
 fi
 
 if echo "$CMD" | grep -qE "git push .*--force-with-lease"; then
-  ask "DESTRUCTIVE CONFIRM" \
-    "force-with-lease rewrites remote history on this branch. Per rules/git-workflow.md this is allowed only on your own unmerged branch, never after review has started."
+  if [ "$_PUSH_CONFIRM_STATE" = "off" ]; then
+    : # bypassed during babysit-pr / babysit-pr-local loop lifetime
+  else
+    ask "DESTRUCTIVE CONFIRM" \
+      "force-with-lease rewrites remote history on this branch. Per rules/git-workflow.md this is allowed only on your own unmerged branch, never after review has started."
+  fi
 fi
 
 if echo "$CMD" | grep -qE "git push .*(-u|--set-upstream)"; then
