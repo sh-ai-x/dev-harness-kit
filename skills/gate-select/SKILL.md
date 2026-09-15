@@ -34,6 +34,8 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 | Sub-command | Effect |
 |---|---|
 | `show` (default) | Read gates.json + marker; print the 3 dimensions. No edits. |
+| `classify` | Run `python -m lib.actor_classifier` for the current HEAD; print the actor type + recommended gate. Read-only. |
+| `route [--json]` | Run `classify` + write `.dev-kit/.pr-route.json` (the breadcrumb `hooks/pr-create-route.sh` consumes on every `gh pr create`). |
 | `pick` | Legacy 6-question picker; threads writes to gates.json + ci-setup. Kept as compat for the original AI-judge picker UX. |
 | `enable <gate>` | `python -m lib.gates_state enable <gate>` — flips `gates.<gate>.enabled` to true. |
 | `disable <gate>` | `python -m lib.gates_state disable <gate>` — flips `gates.<gate>.enabled` to false. |
@@ -46,6 +48,8 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 ```bash
 /dev-kit:gate-select                       # = show
 /dev-kit:gate-select show                  # explicit read-only
+/dev-kit:gate-select classify              # one-shot: actor_type + recommended_gate
+/dev-kit:gate-select route --json          # same, plus writes .dev-kit/.pr-route.json
 /dev-kit:gate-select enable review         # turn review gate on
 /dev-kit:gate-select disable security      # turn security gate off
 /dev-kit:gate-select set review enabled true
@@ -59,6 +63,16 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 ## `show` output
 
 ```text
+ACTOR ROUTE (lib/actor_classifier, deterministic — never calls gh)
+  actor_type:        consumer_fork
+  repo_kind:         dev_harness_kit
+  recommended_gate:  fork_pr_review_environment
+  head_branch:       feat/actor-route-gate-select
+  base_branch:       main
+  remote:            eve/dev-harness-kit
+  reason:            fork PR without maintainer signal — route via
+                     fork-pr-review.yml Environment gate (manual approval required)
+
 PROJECT GATES (.dev-kit/gates.json + .dev-kit/ci-config.json marker)
   review.yml     enabled=true   var=GATES_REVIEW_ENABLED
   security.yml   enabled=false  var=GATES_SECURITY_ENABLED   # disabled via gates.json
@@ -82,6 +96,9 @@ AI-JUDGE GATES (skills shipped with the plugin; scheduled by .github/workflows/*
 ### How `show` reads each dimension
 
 ```bash
+# Actor route — deterministic; never calls gh.
+python3 -m lib.actor_classifier --root . --json
+
 # Project — gates.json is the SSOT; marker.gates_source is the audit breadcrumb.
 python3 -m lib.gates_state show --json --root .
 python3 -c "import json; print(json.load(open('.dev-kit/ci-config.json'))['runners'])"
@@ -165,6 +182,52 @@ python3 -m lib.gates_state init [--root PATH]   # reads marker.runners, writes g
 workflow in the EXPECTED set NOT in marker.runners becomes a gate with
 `enabled=False`. The operator can spot-check the output, then run
 `gate-select sync` to push the flags to GH.
+
+## `classify` / `route` — actor-aware PR routing
+
+The `actor_classifier` module lifts the maintainer-vs-consumer
+classification out of the four duplicated YAML `if:` predicates in
+`review.yml` / `maintenance.yml` / `fork-pr-review.yml`. It reads
+three local signals (no `gh` calls):
+
+| Signal | Source | Indicates |
+|---|---|---|
+| `git remote get-url origin` | local git | owner/repo pair |
+| `.claude-plugin/plugin.json:owner` | plugin manifest | "this repo IS the dev-harness-kit source" |
+| `.dev-kit/team.json:maintainers` | optional hand-maintained file | GH logins trusted as maintainers |
+
+Plus an optional `--gh-author-association` injection for callers that
+already verified the value via `gh api`. The five scenario outcomes map
+to one of three recommended gates:
+
+| Scenario | `actor_type` | `recommended_gate` |
+|---|---|---|
+| dev-harness-kit, maintainer | `maintainer_self` | `standard_gates` |
+| dev-harness-kit, no maintainer signal | `consumer_self` | `standard_gates` (server-side trusted-author filter still applies) |
+| dev-harness-kit fork, maintainer | `maintainer_fork` | `standard_gates` (server-side `pull_request_target` + `author_association` filter) |
+| Any fork, no maintainer signal | `consumer_fork` | `fork_pr_review_environment` |
+| No git origin | `unknown` | `manual_review` (fail-closed) |
+
+```bash
+# Read-only — print the classification for the current HEAD branch.
+python3 -m lib.actor_classifier --root .
+
+# Same payload, machine-readable JSON.
+python3 -m lib.actor_classifier --root . --json
+
+# Persist the breadcrumb `hooks/pr-create-route.sh` consumes on
+# every `gh pr create`. The hook runs the same command internally;
+# this sub-command is the operator's escape hatch to inspect or
+# pre-populate the route before opening a PR.
+python3 -m lib.actor_classifier --root . --write-breadcrumb --json
+```
+
+The `hooks/pr-create-route.sh` PreToolUse:Bash hook fires on every
+`gh pr create` invocation and runs this classifier inline. Default
+mode is silent (one-line stderr summary); opt-in ask mode is toggled
+via `fork_pr_confirm=on` in `.dev-kit/guard-mode.session.json` (same
+shape as the existing `push_confirm` field). See
+`skills/guard-mode/SKILL.md` for the picker surface.
 
 ## What is out of scope
 
