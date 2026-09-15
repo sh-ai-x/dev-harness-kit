@@ -11,8 +11,9 @@ on re-run: re-writing the same value is a no-op (preserves other keys in
 the settings file).
 
 Independent of DEV_KIT_MODE (full|lite|undev). The two env-vars
-coexist; `mode` selects the skill/hook subset, `team` toggles whether
-.dev-kit/ is tracked in git.
+coexist; `mode` selects the skill/hook subset, while `team` enables
+team roles/dependency-aware planning and toggles whether .dev-kit/ is
+tracked in git.
 """
 from __future__ import annotations
 

@@ -9,11 +9,8 @@ Pins the resolution order documented in docs/scopes/modes.md:
   4. Default = "full" ONLY when enabledPlugins.dev-kit@dev-kit: true;
      otherwise "undev" (silent — plugin not loaded)
 
-Fifteen cases (3 layer-1 shell-env wins + 3 layer-2 project wins + 3
-layer-3 local kicks in + 2 precedence (project > local) + 3 conditional
-default + 1 outside-git). Each runs in a temp git repo with synthetic
-`.claude/settings*.json` so we can assert precedence without depending
-on the host filesystem.
+Each case runs in a temp git repo with synthetic `.claude/settings*.json`
+so we can assert precedence without depending on the host filesystem.
 """
 from __future__ import annotations
 
@@ -41,6 +38,25 @@ def _resolve(cwd: Path, env_override: dict | None = None) -> str:
       dev_kit_mode_resolve
       printf '%s' "$DEV_KIT_MODE"
     """
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True, text=True, timeout=10,
+        cwd=str(cwd), env=env,
+    )
+    return result.stdout.strip()
+
+
+def _active(cwd: Path, env_override: dict | None = None) -> str:
+    """Read the active value without explicitly invoking the resolver."""
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(cwd)
+    env.pop("DEV_KIT_MODE", None)
+    if env_override:
+        env.update(env_override)
+    script = f'''
+      source "{MODE_LIB}"
+      printf '%s' "$(dev_kit_mode_active)"
+    '''
     result = subprocess.run(
         ["bash", "-c", script],
         capture_output=True, text=True, timeout=10,
@@ -186,32 +202,35 @@ class TestModeResolution(unittest.TestCase):
                           enabled_plugins={"dev-kit@dev-kit": True})
         self.assertEqual(_resolve(proj), "undev")
 
-    # ----- `team` value (4th mode, multi-role + dependency-aware plan) -----
-    # The team value must satisfy the same 4-layer precedence rule as
-    # full / lite / undev. These cases mirror the existing matrix one
-    # case per layer so the resolver, CLI, and docs stay in agreement.
+    # ----- `team` is not a DEV_KIT_MODE value -----
 
-    def test_shell_env_team_overrides_project_full(self):
+    def test_shell_env_team_is_ignored(self):
         proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "team"}), "team")
+        self.assertEqual(_resolve(proj, {"DEV_KIT_MODE": "team"}), "full")
 
-    def test_project_team_when_plugin_enabled(self):
-        proj = _make_proj(Path(self.tmp), project_mode="team",
+    def test_active_legacy_team_is_re_resolved(self):
+        """A direct gate caller cannot activate the removed team mode."""
+        proj = _make_proj(Path(self.tmp), project_mode="full",
                           local_mode=None, enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "team")
+        self.assertEqual(_active(proj, {"DEV_KIT_MODE": "team"}), "full")
 
-    def test_local_team_used_when_project_unset(self):
+    def test_project_team_is_ignored_and_local_mode_wins(self):
+        proj = _make_proj(Path(self.tmp), project_mode="team",
+                          local_mode="lite", enabled_plugins={"dev-kit@dev-kit": True})
+        self.assertEqual(_resolve(proj), "lite")
+
+    def test_local_team_is_ignored_and_default_wins(self):
         proj = _make_proj(Path(self.tmp), project_mode=None,
                           local_mode="team",
                           enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "team")
+        self.assertEqual(_resolve(proj), "full")
 
-    def test_project_team_wins_over_local_lite(self):
+    def test_project_team_is_ignored_even_over_local_mode(self):
         proj = _make_proj(Path(self.tmp), project_mode="team",
                           local_mode="lite",
                           enabled_plugins={"dev-kit@dev-kit": True})
-        self.assertEqual(_resolve(proj), "team")
+        self.assertEqual(_resolve(proj), "lite")
 
 
 if __name__ == "__main__":

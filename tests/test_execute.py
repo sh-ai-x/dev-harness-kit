@@ -328,7 +328,7 @@ class TestUnimplementedStubRegistration(unittest.TestCase):
         self.assertEqual(data["steps"][0]["name"], "future-step")
 
     def test_register_step_persists_depends_on(self):
-        """`team` mode producer-side contract (issue #18 follow-up):
+        """Team-toggle producer-side contract (issue #18 follow-up):
 
         `register_step(..., depends_on=[1, 2])` writes the `depends_on`
         field into the step dict at registration time, so the

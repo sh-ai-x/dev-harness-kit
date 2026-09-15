@@ -3,15 +3,20 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **fix(scope):** `team` is fully independent from `DEV_KIT_MODE`. The
+  mode selector now accepts only `full`, `lite`, and `undev`; existing
+  `DEV_KIT_MODE=team` settings must migrate to `DEV_KIT_MODE=full` (or
+  `lite`) plus `DEV_KIT_TEAM=on`. Team roles and dependency-aware plans
+  are gated by `DEV_KIT_TEAM=on`, alongside shared `.dev-kit/` tracking.
 - **feat(scope):** `team` refactored from a `--team` bootstrap flag to a
   first-class toggleable skill (`/dev-kit:team`) backed by a separate
   env-var `DEV_KIT_TEAM`. Default OFF, independent of `DEV_KIT_MODE`.
-  The four valid combinations are full+team, full+no-team, lite+team,
-  lite+no-team. Resolution mirrors `mode` (4 layers: shell env,
+  The three modes and team toggle combine independently. Resolution
+  mirrors `mode` (4 layers: shell env,
   `<proj>/.claude/settings.json` `env.DEV_KIT_TEAM`,
   `<proj>/.claude/settings.local.json` `env.DEV_KIT_TEAM`, silent
-  default = off). The single concrete effect when team=ON is that
-  `hooks/lib/team-resolve.sh:dev_kit_team_resolve` returns `on`, and
+  default = off). When team=ON, `hooks/lib/team-resolve.sh:dev_kit_team_resolve`
+  returns `on`; roles/dependency-aware planning is enabled and
   `/dev-kit:bootstrap` sub-stage 8.5 strips `^\.dev-kit` from the
   target `.gitignore`. New files: `skills/team/SKILL.md`,
   `bin/dev_kit_team.py`, `hooks/lib/team-resolve.sh`,
@@ -277,4 +282,3 @@ verdict (so silent skips aren't invisible to the PR author).
 - Iron Laws SSOT in `CLAUDE.md §1` (5 laws)
 - `.dev-kit/` state files (state.json, .active-hooks.json, hand-off/*.md)
 - Pre-impl gate (`docs/planning/PRE-IMPL-CHECK.md`) + 8-dimension cost analysis (`docs/quality/COST-ANALYSIS.md`)
-
