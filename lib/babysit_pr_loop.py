@@ -54,6 +54,23 @@ class LoopState:
     github_tracker_issue: int | None = None
     linear_issue: str = ""
     last_synced_transition: str = ""
+    # v1.1.0 — `dynamic_skipped` is the set of gate names the LLM-judge
+    # layer (`lib/gate_dynamic.py`) recommended skipping for the current
+    # head_sha. `frozenset` (not `set`) because `LoopState` is a frozen
+    # dataclass and the default must be hashable. Inserted at the END
+    # so existing positional constructor calls in tests still work.
+    # `validate()` rejects unknown gate names so a typo can't silently
+    # disable a gate. The default value (`frozenset()`) means older
+    # persisted state files load cleanly via `load_state` (which pops
+    # `schema_version` and feeds the rest to `LoopState(**raw)`).
+    dynamic_skipped: frozenset = frozenset()
+
+    def __post_init__(self) -> None:
+        # Run `validate()` on construction so typos in `dynamic_skipped`
+        # fail at the call site rather than at the next `to_dict()` /
+        # `observe()` call. `load_state` validates again after
+        # reconstruction — defense in depth.
+        self.validate()
 
     def validate(self) -> None:
         if self.parent_pr <= 0 or self.current_pr <= 0:
@@ -70,10 +87,27 @@ class LoopState:
             raise ValueError("state counters cannot be negative")
         if self.github_tracker_issue is not None and self.github_tracker_issue <= 0:
             raise ValueError("github_tracker_issue must be positive")
+        # Known gate names — bound to gates_state.VALID_GATE_KEYS at
+        # module-import time so this stays in lockstep with the schema
+        # SSOT. Imported here (not at top) to dodge the circular import
+        # risk during babysit_pr_loop module init.
+        from gates_state import VALID_GATE_KEYS
+        unknown = set(self.dynamic_skipped) - VALID_GATE_KEYS
+        if unknown:
+            raise ValueError(f"dynamic_skipped has unknown gate name(s): {sorted(unknown)}")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
-        return {"schema_version": SCHEMA_VERSION, **asdict(self)}
+        # v1.1.0 — `dynamic_skipped` is a frozenset (frozen-dataclass
+        # hashable-default requirement) which `json.dump` cannot
+        # serialize. Materialize to a sorted list so the persisted
+        # state is JSON-stable AND round-trips through `load_state`
+        # (which feeds the dict to `LoopState(**raw)` — sets/frozensets
+        # are reconstructed by the `frozenset` annotation).
+        d = asdict(self)
+        if isinstance(d.get("dynamic_skipped"), frozenset):
+            d["dynamic_skipped"] = sorted(d["dynamic_skipped"])
+        return {"schema_version": SCHEMA_VERSION, **d}
 
 
 def new_state(parent_pr: int, *, current_pr: int | None = None) -> LoopState:
@@ -94,6 +128,13 @@ def load_state(path: str | os.PathLike[str] = STATE_FILE) -> LoopState | None:
         raise ValueError("babysit state must be a JSON object")
     raw = dict(raw)
     raw.pop("schema_version", None)
+    # v1.1.0 — JSON round-trips `dynamic_skipped` as a list (via
+    # `to_dict()`'s sorted(list) materialization). Convert back to
+    # `frozenset` here so the in-memory state matches the dataclass
+    # annotation and equality checks against a freshly-constructed
+    # `LoopState` (with the `frozenset()` default) succeed.
+    if "dynamic_skipped" in raw and isinstance(raw["dynamic_skipped"], list):
+        raw["dynamic_skipped"] = frozenset(raw["dynamic_skipped"])
     state = LoopState(**raw)
     state.validate()
     return state
@@ -148,12 +189,22 @@ def observe(
     now_epoch: float,
     now_iso: str,
     failure_signature: str = "",
+    dynamic_skipped: frozenset | None = None,
 ) -> LoopState:
-    """Apply one fresh snapshot and advance the resumable phase."""
+    """Apply one fresh snapshot and advance the resumable phase.
+
+    `dynamic_skipped` (v1.1.0) is the set of gate names the LLM-judge
+    layer (`lib/gate_dynamic.py`) recommended skipping for this
+    iteration. Passing `None` (default) preserves the existing value;
+    passing a frozenset replaces it. The babysit-pr SKILL flow calls
+    `select_gates_dynamic()` between SNAPSHOT and CLASSIFY and threads
+    the result here.
+    """
     phase = classify_snapshot(
         review_verdict=review_verdict, checks=checks, now_epoch=now_epoch
     )
     epoch_bump = bool(state.head_sha and state.head_sha != head_sha)
+    new_dynamic = state.dynamic_skipped if dynamic_skipped is None else dynamic_skipped
     result = replace(
         state,
         phase=phase,
@@ -169,6 +220,7 @@ def observe(
         last_action="fresh_snapshot",
         next_wake_at="" if phase in {DONE, REPAIRING} else now_iso,
         updated_at=now_iso,
+        dynamic_skipped=new_dynamic,
     )
     result.validate()
     return result
@@ -179,12 +231,16 @@ def record_outcome(
     *,
     outcome: str,
     now_iso: str,
+    dynamic_skipped: frozenset | None = None,
 ) -> LoopState:
     """Record repair evidence and choose the next strategy.
 
     No-information never pretends the PR is complete.  After repeated
     unchanged outcomes it enters a resumable recovery state, allowing a new
     check/review event or a later model run to continue the lifecycle.
+
+    `dynamic_skipped` (v1.1.0) — same semantics as in `observe()`:
+    `None` preserves the existing value; a frozenset replaces it.
     """
     if outcome not in {"progress", "partial_progress", "unchanged", "regressed", "inconclusive"}:
         raise ValueError(f"unknown outcome: {outcome}")
@@ -204,7 +260,13 @@ def record_outcome(
             strategy = RECOVER
             phase = RECOVERY_REQUIRED
         result = replace(state, no_information=count, strategy=strategy, phase=phase)
-    result = replace(result, last_action=f"outcome:{outcome}", updated_at=now_iso)
+    new_dynamic = state.dynamic_skipped if dynamic_skipped is None else dynamic_skipped
+    result = replace(
+        result,
+        last_action=f"outcome:{outcome}",
+        updated_at=now_iso,
+        dynamic_skipped=new_dynamic,
+    )
     result.validate()
     return result
 

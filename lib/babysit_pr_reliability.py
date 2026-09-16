@@ -356,6 +356,63 @@ def read_pr_lock_body(path: PathLike) -> str:
         return ""
 
 
+def select_gates_dynamic(
+    *,
+    parent_pr: int,
+    head_sha: str,
+    iteration: int,
+    diff_stat: str,
+    diff_files: list,
+    pr_body: str | None,
+    previous_verdicts: dict,
+    worktree_root: PathLike | None = None,
+) -> frozenset:
+    """Return the frozenset of gate names the LLM-judge recommends skipping.
+
+    v1.1.0 — thin wrapper around `lib.gate_dynamic.select_gates` that:
+      - builds the `GateContext` from babysit-pr's existing snapshot
+        data (diff_stat, diff_files, previous_verdicts, parent_pr,
+        head_sha, iteration),
+      - delegates to `lib.gate_dynamic.select_gates` (which applies
+        the 4 hard rules + per-head_sha caching + 7-day TTL pruning),
+      - flattens the `GateSkipDecision.decisions` tuple into a
+        `frozenset` of gate names whose `skip=True` field survives
+        the hard rules.
+
+    Returns `frozenset()` when the LLM is unavailable (graceful
+    degradation), when iteration is 1 (first push deterministic), or
+    when every decision was vetoed by a hard rule.
+
+    The babysit-pr SKILL flow threads this return value into
+    `persist_loop_snapshot(dynamic_skipped=...)` so STEP 3 CLASSIFY +
+    STEP 5 FETCH LOGS can honor the skip recommendations.
+    """
+    import gate_dynamic  # local import — avoids module-load cycle risk
+    from gates_state import read_state
+
+    root = Path(worktree_root) if worktree_root else Path(".")
+    try:
+        gate_catalog = read_state(root)
+    except Exception:
+        # If gates.json is corrupt or missing mid-iteration, fall back
+        # to an empty catalog — apply_hard_rules needs no scope_globs
+        # to evaluate rule #1 (iteration) and rule #4 (confidence).
+        gate_catalog = {"gates": {}}
+
+    context = gate_dynamic.GateContext(
+        parent_pr=parent_pr,
+        head_sha=head_sha,
+        iteration=iteration,
+        diff_stat=diff_stat,
+        diff_sample="",  # full diff sample lives outside the SKILL hot path
+        pr_body=pr_body,
+        previous_verdicts=previous_verdicts,
+        gate_catalog=gate_catalog,
+    )
+    decision = gate_dynamic.select_gates(context, root)
+    return frozenset(d.gate_name for d in decision.decisions if d.skip)
+
+
 def try_acquire_pr_lock(path: PathLike, body: str) -> bool:
     """Atomically acquire the per-PR lock for PR N.
 

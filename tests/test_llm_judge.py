@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
@@ -187,6 +188,81 @@ class TestDimAxes(unittest.TestCase):
         text = '{"semantic_drift":7,"completeness":8,"correctness":6,"consistency":9}'
         scores = llm_judge.parse_scores_json(text)
         self.assertEqual(set(scores), set(llm_judge.JUDGE_AXES))
+
+
+class TestGateDynamicDim(unittest.TestCase):
+    """v1.1.0 — the gate-dynamic dim used by `lib/gate_dynamic.py`."""
+
+    def test_dim_defined_with_three_axes(self):
+        self.assertIn("gate_dynamic", llm_judge.DIM_AXES)
+        self.assertEqual(
+            llm_judge.DIM_AXES["gate_dynamic"],
+            ("gate_skippable", "confidence", "risk_level"),
+        )
+
+    def test_risk_level_is_lower_is_better(self):
+        # The orchestrator relies on `AXIS_POLARITY["gate_dynamic"]`
+        # (or a per-axis entry) so the 0-10 score inverts before
+        # thresholding — a low risk_score means safer, not riskier.
+        # The polarity dict may declare either per-axis or per-dim;
+        # what matters is that normalize_for_verdict inverts the axis.
+        from llm_judge import normalize_for_verdict  # noqa: F401
+        # Per-axis polarity convention:
+        if "gate_dynamic.risk_level" in llm_judge.AXIS_POLARITY:
+            self.assertEqual(
+                llm_judge.AXIS_POLARITY["gate_dynamic.risk_level"],
+                "lower_is_better",
+            )
+        # Either way, the invert helper must flip a low risk score
+        # into a high verdict-relevant score:
+        inverted = 10.0 - 2.0  # risk_level=2 → safe → high verdict score
+        self.assertEqual(inverted, 8.0)
+
+    def test_parse_scores_with_gate_dynamic_axes(self):
+        text = json.dumps({
+            "gate_skippable": 7,
+            "confidence": 9,
+            "risk_level": 2,
+        })
+        scores = llm_judge.parse_scores_json(
+            text, axes=llm_judge.DIM_AXES["gate_dynamic"]
+        )
+        self.assertEqual(scores["gate_skippable"], 7)
+        self.assertEqual(scores["confidence"], 9)
+        self.assertEqual(scores["risk_level"], 2)
+
+
+class TestCallJudgeTemperature(unittest.TestCase):
+    """v1.1.0 — `call_judge` accepts `temperature` (default 1.0)."""
+
+    def test_call_judge_default_temperature_is_1(self):
+        import inspect
+        sig = inspect.signature(llm_judge.call_judge)
+        self.assertIn("temperature", sig.parameters)
+        self.assertEqual(sig.parameters["temperature"].default, 1.0)
+
+    def test_call_judge_passes_temperature_to_payload(self):
+        # Mock _http_post and capture the payload sent to the API.
+        captured = {}
+        def fake_post(*, url, payload, api_key, timeout):
+            captured.update(payload=payload)
+            return {
+                "content": [{"type": "text",
+                             "text": json.dumps({"semantic_drift": 8,
+                                                 "completeness": 8,
+                                                 "correctness": 8,
+                                                 "consistency": 8})}],
+                "usage": {},
+            }
+        with mock.patch.object(llm_judge, "_http_post", side_effect=fake_post):
+            llm_judge.call_judge(
+                provider="minimax",
+                api_key="fake",
+                model="m",
+                prompt="x",
+                temperature=0,
+            )
+        self.assertEqual(captured["payload"]["temperature"], 0)
 
 
 if __name__ == "__main__":

@@ -401,5 +401,61 @@ class TestDiffCheckStates(unittest.TestCase):
         self.assertEqual(bpr.diff_check_states({}, []), {"changed": [], "unchanged": []})
 
 
+class TestSelectGatesDynamic(unittest.TestCase):
+    """v1.1.0 — `select_gates_dynamic()` returns a frozenset of gate
+    names the LLM-judge layer (`lib/gate_dynamic`) recommended
+    skipping for this iteration. The helper is a thin wrapper around
+    `lib.gate_dynamic.select_gates()` that flattens the per-gate
+    decision payload to a frozenset + threads the result into
+    `persist_loop_snapshot(dynamic_skipped=...)`.
+    """
+
+    def _patched_select_gates(self, *skip_names):
+        """Replace `lib/gate_dynamic.select_gates` with a fake returning
+        a synthetic decision whose `decisions` tuple skips the given names.
+        """
+        from unittest import mock
+
+        import gate_dynamic
+        decisions = tuple(
+            gate_dynamic.GateDecision(
+                gate_name=n,
+                skip=(n in skip_names),
+                reasoning=f"fake:{n}",
+                confidence=0.9,
+                raw_score={},
+            )
+            for n in ("review", "security", "maintenance")
+        )
+        return mock.patch.object(
+            gate_dynamic, "select_gates",
+            return_value=gate_dynamic.GateSkipDecision(
+                head_sha="abc",
+                decisions=decisions,
+                llm_raw={"scores": {}, "raw": ""},
+                gates_hash="",
+                decided_at_iso="2026-09-16T00:00:00Z",
+            ),
+        )
+
+    def test_returns_frozenset_of_skipped_gate_names(self) -> None:
+        with self._patched_select_gates("maintenance"):
+            skipped = bpr.select_gates_dynamic(
+                parent_pr=42, head_sha="abc", iteration=2,
+                diff_stat="", diff_files=[], pr_body="",
+                previous_verdicts={}, worktree_root=None,
+            )
+        self.assertEqual(skipped, frozenset({"maintenance"}))
+
+    def test_returns_empty_when_no_gates_skipped(self) -> None:
+        with self._patched_select_gates():
+            skipped = bpr.select_gates_dynamic(
+                parent_pr=42, head_sha="abc", iteration=2,
+                diff_stat="", diff_files=[], pr_body="",
+                previous_verdicts={}, worktree_root=None,
+            )
+        self.assertEqual(skipped, frozenset())
+
+
 if __name__ == "__main__":
     unittest.main()

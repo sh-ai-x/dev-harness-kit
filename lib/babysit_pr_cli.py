@@ -506,6 +506,7 @@ def persist_loop_snapshot(
     failure_signature: str = "",
     github_tracker_issue: int | None = None,
     linear_issue: str = "",
+    dynamic_skipped: frozenset | None = None,
     state_path: PathLike = STATE_FILE,
 ) -> LoopState:
     """Persist one fresh GitHub snapshot and return its resumable phase.
@@ -513,6 +514,12 @@ def persist_loop_snapshot(
     This is the production seam used by the babysit-pr orchestration layer:
     every fresh snapshot is observed and atomically saved before the next
     action is chosen.
+
+    `dynamic_skipped` (v1.1.0) — the LLM-judge layer's per-iteration skip
+    recommendation. `None` preserves the existing value (so the caller
+    can omit the kwarg when no fresh judge call has happened). The
+    babysit-pr SKILL flow passes the result of
+    `lib.babysit_pr_reliability.select_gates_dynamic()` here.
     """
     state = _load_or_create_loop_state(
         parent_pr, current_pr=current_pr, state_path=state_path
@@ -531,6 +538,7 @@ def persist_loop_snapshot(
         now_epoch=now_epoch,
         now_iso=now_iso,
         failure_signature=failure_signature,
+        dynamic_skipped=dynamic_skipped,
     )
     save_state(state, state_path)
     return state
@@ -544,9 +552,14 @@ def persist_loop_outcome(
     current_pr: int | None = None,
     github_tracker_issue: int | None = None,
     linear_issue: str = "",
+    dynamic_skipped: frozenset | None = None,
     state_path: PathLike = STATE_FILE,
 ) -> LoopState:
-    """Persist repair verification evidence and the next strategy."""
+    """Persist repair verification evidence and the next strategy.
+
+    `dynamic_skipped` (v1.1.0) — same semantics as in
+    `persist_loop_snapshot`: `None` preserves, frozenset replaces.
+    """
     state = _load_or_create_loop_state(
         parent_pr, current_pr=current_pr, state_path=state_path
     )
@@ -556,7 +569,10 @@ def persist_loop_outcome(
             github_tracker_issue=github_tracker_issue or state.github_tracker_issue,
             linear_issue=linear_issue or state.linear_issue,
         )
-    state = record_outcome(state, outcome=outcome, now_iso=now_iso)
+    state = record_outcome(
+        state, outcome=outcome, now_iso=now_iso,
+        dynamic_skipped=dynamic_skipped,
+    )
     save_state(state, state_path)
     return state
 

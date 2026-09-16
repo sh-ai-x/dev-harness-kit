@@ -24,7 +24,24 @@ class TestConstants(unittest.TestCase):
     """The SSOT surface is the module-level constants — pin them."""
 
     def test_schema_version_is_pinned(self) -> None:
-        self.assertEqual(gates_state.SCHEMA_VERSION, "1.0.0")
+        self.assertEqual(gates_state.SCHEMA_VERSION, "1.1.0")
+
+    def test_dynamic_fields_default_present(self) -> None:
+        # Schema v1.1.0 — additive new optional per-gate fields. Operator
+        # may add any subset to gates.json; defaults applied on read.
+        expected = {
+            "dynamic_eligible",
+            "scope_globs",
+            "cost_estimate",
+            "judge_model",
+            "skip_when",
+            "forced_run",
+        }
+        self.assertEqual(set(gates_state.DYNAMIC_FIELDS_DEFAULT.keys()), expected)
+        self.assertIs(gates_state.DYNAMIC_FIELDS_DEFAULT["dynamic_eligible"], False)
+        self.assertIs(gates_state.DYNAMIC_FIELDS_DEFAULT["forced_run"], False)
+        self.assertEqual(gates_state.DYNAMIC_FIELDS_DEFAULT["scope_globs"], [])
+        self.assertIsInstance(gates_state.DYNAMIC_FIELDS_DEFAULT["cost_estimate"], (int, float))
 
     def test_state_rel_path(self) -> None:
         self.assertEqual(gates_state.STATE_REL_PATH, Path(".dev-kit") / "gates.json")
@@ -87,7 +104,7 @@ class TestValidate(unittest.TestCase):
     """Every rule in `validate` has a positive and a negative test."""
 
     VALID = {
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "gates": {
             "review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"},
             "security": {"enabled": False, "workflow": "security.yml", "var": "GATES_SECURITY_ENABLED"},
@@ -102,7 +119,7 @@ class TestValidate(unittest.TestCase):
         # Validate skips PRESENT-only keys; `apply_defaults` fills the rest.
         gates_state.validate(
             {
-                "schema_version": "1.0.0",
+                "schema_version": "1.1.0",
                 "gates": {"review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
             }
         )
@@ -122,13 +139,13 @@ class TestValidate(unittest.TestCase):
 
     def test_non_dict_gates_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError):
-            gates_state.validate({"schema_version": "1.0.0", "gates": "nope"})
+            gates_state.validate({"schema_version": "1.1.0", "gates": "nope"})
 
     def test_unknown_gate_key_raises_with_field_path(self) -> None:
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"lint": {"enabled": True, "workflow": "lint.yml", "var": "GATES_LINT_ENABLED"}},
                 }
             )
@@ -137,14 +154,14 @@ class TestValidate(unittest.TestCase):
 
     def test_gate_not_a_dict_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError) as cm:
-            gates_state.validate({"schema_version": "1.0.0", "gates": {"review": "oops"}})
+            gates_state.validate({"schema_version": "1.1.0", "gates": {"review": "oops"}})
         self.assertIn("gates.review", str(cm.exception))
 
-    def test_gate_with_extra_key_raises(self) -> None:
+    def test_gate_with_unknown_extra_key_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {
                         "review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED", "extra": 1},
                     },
@@ -152,11 +169,67 @@ class TestValidate(unittest.TestCase):
             )
         self.assertIn("gates.review", str(cm.exception))
 
+    def test_gate_with_known_dynamic_field_passes(self) -> None:
+        # Schema v1.1.0 — `dynamic_eligible` is one of the allowed
+        # optional fields; presence must not raise.
+        gates_state.validate(
+            {
+                "schema_version": "1.1.0",
+                "gates": {
+                    "review": {
+                        "enabled": True,
+                        "workflow": "review.yml",
+                        "var": "GATES_REVIEW_ENABLED",
+                        "dynamic_eligible": True,
+                        "scope_globs": ["lib/**"],
+                    },
+                },
+            }
+        )
+
+    def test_gate_with_all_dynamic_fields_passes(self) -> None:
+        gates_state.validate(
+            {
+                "schema_version": "1.1.0",
+                "gates": {
+                    "maintenance": {
+                        "enabled": True,
+                        "workflow": "maintenance.yml",
+                        "var": "GATES_MAINTENANCE_ENABLED",
+                        "dynamic_eligible": True,
+                        "scope_globs": ["skills/**", "lib/**"],
+                        "cost_estimate": 0.05,
+                        "judge_model": "MiniMax-M3[1m]",
+                        "skip_when": "docs_only",
+                        "forced_run": False,
+                    },
+                },
+            }
+        )
+
+    def test_gate_with_malformed_dynamic_field_raises(self) -> None:
+        # `scope_globs` must be a list of strings; a string value should raise.
+        with self.assertRaises(gates_state.ValidationError) as cm:
+            gates_state.validate(
+                {
+                    "schema_version": "1.1.0",
+                    "gates": {
+                        "review": {
+                            "enabled": True,
+                            "workflow": "review.yml",
+                            "var": "GATES_REVIEW_ENABLED",
+                            "scope_globs": "lib/**",  # should be list
+                        },
+                    },
+                }
+            )
+        self.assertIn("scope_globs", str(cm.exception))
+
     def test_gate_missing_required_key_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"review": {"enabled": True, "workflow": "review.yml"}},
                 }
             )
@@ -166,7 +239,7 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"review": {"enabled": "true", "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
                 }
             )
@@ -176,7 +249,7 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"review": {"enabled": True, "workflow": "security.yml", "var": "GATES_REVIEW_ENABLED"}},
                 }
             )
@@ -186,7 +259,7 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"review": {"enabled": True, "workflow": "review.yml", "var": "GATES_LINT_ENABLED"}},
                 }
             )
@@ -199,7 +272,7 @@ class TestReadState(unittest.TestCase):
     def test_missing_file_returns_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             state = gates_state.read_state(Path(td))
-            self.assertEqual(state["schema_version"], "1.0.0")
+            self.assertEqual(state["schema_version"], "1.1.0")
             self.assertEqual(set(state["gates"].keys()), {"review", "security", "maintenance"})
             self.assertTrue(all(state["gates"][k]["enabled"] for k in state["gates"]))
 
@@ -249,6 +322,87 @@ class TestReadState(unittest.TestCase):
             self.assertEqual(state["gates"]["review"]["enabled"], False)
             self.assertEqual(state["gates"]["security"]["enabled"], True)
 
+    def test_v1_0_0_file_auto_migrates_to_v1_1_0_on_read(self) -> None:
+        # Schema-versioned read-time migration. Operator's existing 1.0.0
+        # file is backfilled with DYNAMIC_FIELDS_DEFAULT in memory; nothing
+        # is written back to disk (the next explicit `set` / `write_state`
+        # call persists the bump).
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".dev-kit").mkdir()
+            (target / ".dev-kit" / "gates.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0.0",
+                        "gates": {
+                            "review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"},
+                            "security": {"enabled": True, "workflow": "security.yml", "var": "GATES_SECURITY_ENABLED"},
+                            "maintenance": {"enabled": True, "workflow": "maintenance.yml", "var": "GATES_MAINTENANCE_ENABLED"},
+                        },
+                    }
+                )
+            )
+            state = gates_state.read_state(target)
+            self.assertEqual(state["schema_version"], "1.1.0")
+            for gate in ("review", "security", "maintenance"):
+                entry = state["gates"][gate]
+                self.assertIs(entry["dynamic_eligible"], False)
+                self.assertEqual(entry["scope_globs"], [])
+                self.assertIs(entry["forced_run"], False)
+            # Disk file untouched — still 1.0.0 on disk.
+            on_disk = json.loads((target / ".dev-kit" / "gates.json").read_text())
+            self.assertEqual(on_disk["schema_version"], "1.0.0")
+
+    def test_v1_0_0_partial_file_migrates_and_fills(self) -> None:
+        # Combined: partial file + v1.0.0 schema → backfill missing gates
+        # AND add dynamic-field defaults.
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".dev-kit").mkdir()
+            (target / ".dev-kit" / "gates.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0.0",
+                        "gates": {
+                            "maintenance": {"enabled": False, "workflow": "maintenance.yml", "var": "GATES_MAINTENANCE_ENABLED"},
+                        },
+                    }
+                )
+            )
+            state = gates_state.read_state(target)
+            self.assertEqual(state["schema_version"], "1.1.0")
+            self.assertFalse(state["gates"]["maintenance"]["enabled"])
+            self.assertTrue(state["gates"]["review"]["enabled"])
+            self.assertIs(state["gates"]["maintenance"]["dynamic_eligible"], False)
+
+    def test_v1_1_0_file_with_dynamic_fields_preserves_them(self) -> None:
+        # Operator set dynamic_eligible via the CLI; read_state must not
+        # clobber it with the default False during migration.
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".dev-kit").mkdir()
+            (target / ".dev-kit" / "gates.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "gates": {
+                            "maintenance": {
+                                "enabled": True,
+                                "workflow": "maintenance.yml",
+                                "var": "GATES_MAINTENANCE_ENABLED",
+                                "dynamic_eligible": True,
+                                "scope_globs": ["lib/**", "skills/**"],
+                                "forced_run": True,
+                            },
+                        },
+                    }
+                )
+            )
+            state = gates_state.read_state(target)
+            self.assertTrue(state["gates"]["maintenance"]["dynamic_eligible"])
+            self.assertEqual(state["gates"]["maintenance"]["scope_globs"], ["lib/**", "skills/**"])
+            self.assertTrue(state["gates"]["maintenance"]["forced_run"])
+
 
 class TestWriteState(unittest.TestCase):
     """`write_state` validates, stamps, atomic-writes, returns the payload."""
@@ -258,7 +412,7 @@ class TestWriteState(unittest.TestCase):
             target = Path(td)
             out = gates_state.write_state(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {
                         "review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"},
                     },
@@ -281,7 +435,7 @@ class TestWriteState(unittest.TestCase):
     def test_write_atomic_no_partial_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
-            gates_state.write_state({"schema_version": "1.0.0", "gates": {}}, target)
+            gates_state.write_state({"schema_version": "1.1.0", "gates": {}}, target)
             # .dev-kit dir exists, gates.json exists, no leftover .tmp files
             tmp_files = list((target / ".dev-kit").glob(".gates.json.*.tmp"))
             self.assertEqual(tmp_files, [], f"leftover tmp files: {tmp_files}")
@@ -294,7 +448,7 @@ class TestIsEnabled(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             gates_state.write_state(
-                {"schema_version": "1.0.0", "gates": {"review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}}},
+                {"schema_version": "1.1.0", "gates": {"review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}}},
                 target,
             )
             self.assertFalse(gates_state.is_enabled("review", target))
@@ -333,7 +487,7 @@ class TestRunnersFromGates(unittest.TestCase):
 
     def test_all_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            gates_state.write_state({"schema_version": "1.0.0", "gates": {}}, Path(td))
+            gates_state.write_state({"schema_version": "1.1.0", "gates": {}}, Path(td))
             self.assertEqual(
                 gates_state.runners_from_gates(Path(td)),
                 ["review.yml", "security.yml", "maintenance.yml"],
@@ -344,7 +498,7 @@ class TestRunnersFromGates(unittest.TestCase):
             target = Path(td)
             gates_state.write_state(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
                 },
                 target,
@@ -359,7 +513,7 @@ class TestRunnersFromGates(unittest.TestCase):
             target = Path(td)
             gates_state.write_state(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {
                         "review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"},
                         "security": {"enabled": False, "workflow": "security.yml", "var": "GATES_SECURITY_ENABLED"},
@@ -419,6 +573,41 @@ class TestSetField(unittest.TestCase):
                 {"schema_version": "1.0.0", "gates": {"review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}}},
                 "review", "bogus", "true",
             )
+
+    def test_set_dynamic_eligible(self) -> None:
+        # v1.1.0 — `_set_field` accepts the new optional fields and
+        # stores them on the gate entry.
+        state = {
+            "schema_version": "1.1.0",
+            "gates": {"maintenance": {"enabled": True, "workflow": "maintenance.yml", "var": "GATES_MAINTENANCE_ENABLED"}},
+        }
+        new = gates_state._set_field(state, "maintenance", "dynamic_eligible", "true")
+        self.assertTrue(new["gates"]["maintenance"]["dynamic_eligible"])
+
+    def test_set_forced_run(self) -> None:
+        state = {
+            "schema_version": "1.1.0",
+            "gates": {"review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
+        }
+        new = gates_state._set_field(state, "review", "forced_run", "true")
+        self.assertTrue(new["gates"]["review"]["forced_run"])
+
+    def test_set_scope_globs_csv(self) -> None:
+        # Comma-separated string is coerced to list[str].
+        state = {
+            "schema_version": "1.1.0",
+            "gates": {"maintenance": {"enabled": True, "workflow": "maintenance.yml", "var": "GATES_MAINTENANCE_ENABLED"}},
+        }
+        new = gates_state._set_field(state, "maintenance", "scope_globs", "lib/**,skills/**")
+        self.assertEqual(new["gates"]["maintenance"]["scope_globs"], ["lib/**", "skills/**"])
+
+    def test_set_cost_estimate_float(self) -> None:
+        state = {
+            "schema_version": "1.1.0",
+            "gates": {"review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
+        }
+        new = gates_state._set_field(state, "review", "cost_estimate", "0.05")
+        self.assertEqual(new["gates"]["review"]["cost_estimate"], 0.05)
 
 
 class TestDetectOwnerRepoBodyEquivalence(unittest.TestCase):
