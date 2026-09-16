@@ -192,6 +192,13 @@ LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
            `BABYSIT_NO_VIEWER=1`; auto-skipped under `$CI`. The local
            judge runs /dev-kit:review + /dev-kit:security +
            /dev-kit:maintenance and emits:
+        a-bis. v1.1.0 — `bin/babysit-pr-local.sh` propagates `--dynamic-skip`
+             to `bin/review-local.sh` only when `BABYSIT_DYNAMIC_SKIP=1`.
+             Default OFF — the LLM-judge layer can occasionally flap and
+             babysit-pr's tolerance for flapping is low. Enable for
+             clean-WIP PRs where you trust the LLM to skip gates
+             appropriately. See `docs/skills/gate-dynamic.md` for the
+             hard rules + audit trail.
              - exit 0 → Approve (loop terminates next iteration)
              - exit 1 → Changes Requested / Blocked / parse failure
                         (loop iterates; the audit comment is the

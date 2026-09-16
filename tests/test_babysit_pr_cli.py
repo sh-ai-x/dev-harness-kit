@@ -56,6 +56,10 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "lib"))
 
 import babysit_pr_cli as bpc  # noqa: E402
+from babysit_pr_cli import (  # noqa: E402
+    persist_loop_outcome,
+    persist_loop_snapshot,
+)
 
 
 class _CliResult:
@@ -660,6 +664,66 @@ class TestRunBabysitOnce(unittest.TestCase):
             )
         self.assertEqual(rc, bpc.EXIT_RATIONALE_REQUIRED)
         self.assertEqual(captured.commented, [])
+
+
+class TestPersistDynamicSkipped(unittest.TestCase):
+    """v1.1.0 — persist functions accept `dynamic_skipped` kwarg."""
+
+    def _tmp_state_path(self) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        return tmp / "babysit-state.json"
+
+    def test_persist_loop_snapshot_accepts_dynamic_skipped(self) -> None:
+        state_path = self._tmp_state_path()
+        state = persist_loop_snapshot(
+            parent_pr=42,
+            head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0,
+            now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+            dynamic_skipped=frozenset({"maintenance"}),
+        )
+        self.assertEqual(state.dynamic_skipped, frozenset({"maintenance"}))
+
+    def test_persist_loop_snapshot_omits_dynamic_skipped_preserves(self) -> None:
+        # First call sets dynamic_skipped; second call (without kwarg)
+        # preserves the prior value.
+        state_path = self._tmp_state_path()
+        persist_loop_snapshot(
+            parent_pr=42, head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0, now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+            dynamic_skipped=frozenset({"maintenance"}),
+        )
+        state = persist_loop_snapshot(
+            parent_pr=42, head_sha="def",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 2}],
+            now_epoch=1_700_000_001.0, now_iso="2026-09-16T00:00:01Z",
+            state_path=state_path,
+        )
+        self.assertEqual(state.dynamic_skipped, frozenset({"maintenance"}))
+
+    def test_persist_loop_outcome_accepts_dynamic_skipped(self) -> None:
+        state_path = self._tmp_state_path()
+        # Snapshot first to set up the parent_pr.
+        persist_loop_snapshot(
+            parent_pr=42, head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0, now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+        )
+        state = persist_loop_outcome(
+            parent_pr=42, outcome="progress", now_iso="2026-09-16T00:00:01Z",
+            state_path=state_path,
+            dynamic_skipped=frozenset({"review", "security"}),
+        )
+        self.assertEqual(state.dynamic_skipped, frozenset({"review", "security"}))
 
 
 if __name__ == "__main__":

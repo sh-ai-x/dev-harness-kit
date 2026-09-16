@@ -40,7 +40,7 @@ class TestShow(unittest.TestCase):
             rc, out, err = _run_cli(["show", "--root", td])
             self.assertEqual(rc, 0, err)
             payload = json.loads(out)
-            self.assertEqual(payload["schema_version"], "1.0.0")
+            self.assertEqual(payload["schema_version"], "1.1.0")
             self.assertEqual(
                 set(payload["gates"].keys()),
                 {"review", "security", "maintenance"},
@@ -60,7 +60,7 @@ class TestShow(unittest.TestCase):
             target = Path(td)
             gates_state.write_state(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "1.1.0",
                     "gates": {"review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
                 },
                 target,
@@ -118,6 +118,50 @@ class TestSet(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 _run_cli(["set", "review", "bogus", "x", "--root", td])
             self.assertEqual(cm.exception.code, 2)
+
+    def test_set_dynamic_eligible_field_round_trips(self) -> None:
+        # v1.1.0 — the new optional fields are accepted by the `set`
+        # sub-command. The dispatch is the same `set <gate> <key> <value>`
+        # triple; coercion happens in `_set_field`.
+        with tempfile.TemporaryDirectory() as td:
+            rc, out, err = _run_cli(
+                ["set", "maintenance", "dynamic_eligible", "true", "--root", td]
+            )
+            self.assertEqual(rc, 0, err)
+            self.assertIn("dynamic_eligible", out)
+            _, show_out, _ = _run_cli(["show", "--root", td])
+            payload = json.loads(show_out)
+            self.assertTrue(payload["gates"]["maintenance"]["dynamic_eligible"])
+
+    def test_set_scope_globs_csv_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            rc, _, err = _run_cli(
+                [
+                    "set",
+                    "maintenance",
+                    "scope_globs",
+                    "lib/**,skills/**",
+                    "--root",
+                    td,
+                ]
+            )
+            self.assertEqual(rc, 0, err)
+            _, show_out, _ = _run_cli(["show", "--root", td])
+            payload = json.loads(show_out)
+            self.assertEqual(
+                payload["gates"]["maintenance"]["scope_globs"],
+                ["lib/**", "skills/**"],
+            )
+
+    def test_set_forced_run_field_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            rc, _, err = _run_cli(
+                ["set", "review", "forced_run", "true", "--root", td]
+            )
+            self.assertEqual(rc, 0, err)
+            _, show_out, _ = _run_cli(["show", "--root", td])
+            payload = json.loads(show_out)
+            self.assertTrue(payload["gates"]["review"]["forced_run"])
 
 
 class TestValidate(unittest.TestCase):

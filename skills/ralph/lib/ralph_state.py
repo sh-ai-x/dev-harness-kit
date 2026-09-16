@@ -105,6 +105,11 @@ class RalphState:
     idea: str = ""
     current_stage: str = RESEARCH_GATE
     sub_stage: str = "AWAITING_USER"
+    # Ordered evidence of sub-stages that completed successfully during the
+    # current attended run. This is deliberately separate from ``sub_stage``:
+    # the latter is the cursor, while this list proves which boundaries were
+    # actually crossed before a terminal state was emitted.
+    completed_sub_stages: List[str] = field(default_factory=list)
     attended_lock: bool = False
     iteration: int = 0
     ambiguity_answers: Dict[str, str] = field(default_factory=dict)
@@ -178,6 +183,7 @@ class RalphState:
         if previous == SHIP_CONFIRM_GATE and target == ATTENDED_RUN:
             self.attended_lock = True
             self.sub_stage = "BUILD"
+            self.completed_sub_stages.clear()
         # Reset next_action — caller is expected to populate.
         if not self.next_action:
             self.next_action = f"enter {target}"
@@ -219,6 +225,7 @@ class RalphState:
         self.current_stage = target
         self.attended_lock = False
         self.sub_stage = "AWAITING_USER"
+        self.completed_sub_stages.clear()
         self.ambiguity_answers.clear()
         self.plan_hand_off = ""
         self.build_state = ""

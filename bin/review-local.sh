@@ -479,6 +479,13 @@ RUN_REVIEW=1
 RUN_SECURITY=1
 RUN_MAINTENANCE=1
 RUN_INJECTION_SCAN=1
+DYNAMIC_SKIP=0
+DYNAMIC_SKIP_DECISION=""
+# Cap on the dynamic-skip decision JSON appended to the audit
+# comment. Beyond ~200 chars the GH comment body becomes noisy and
+# the verdict-extraction regex in lib/maintenance_gate.py still
+# parses cleanly without the raw JSON blob.
+DYNAMIC_SKIP_DECISION_MAX=200
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -493,6 +500,7 @@ while [ $# -gt 0 ]; do
     --injection-only)   RUN_REVIEW=0; RUN_SECURITY=0; RUN_MAINTENANCE=0; shift ;;
     --all)              RUN_REVIEW=1; RUN_SECURITY=1; RUN_MAINTENANCE=1; RUN_INJECTION_SCAN=1; shift ;;
     --no-injection-scan) RUN_INJECTION_SCAN=0; shift ;;
+    --dynamic-skip)     DYNAMIC_SKIP=1; shift ;;
     -h|--help)          usage; exit 0 ;;
     *)                  die "unknown flag: $1 (try --help)" ;;
   esac
@@ -936,6 +944,50 @@ The summary MUST begin with a single line exactly of the form:
 # Parallel fan-out (3 backgrounded subshells) is a local-only speedup
 # tracked as a separate follow-up; it leaked into PR #741 scope in a
 # prior commit and is being kept out here per review finding #1.
+# ---------------------------------------------------------------------------
+# 5a-pre. v1.1.0 — dynamic-skip pre-flight (--dynamic-skip flag).
+#
+# When set, query `lib/gate_dynamic.select_gates` for a per-gate skip
+# recommendation before invoking any LLM judge. Pre-flip the
+# `RUN_<NAME>` booleans so the skipped gates' LLM calls are skipped
+# downstream. Graceful degradation: a missing `lib/gate_dynamic.py`
+# (legacy install) leaves all `RUN_*=1` and the script proceeds with
+# full judge coverage — never a hard-fail on this flag.
+#
+# The decision JSON is captured into `DYNAMIC_SKIP_DECISION` for the
+# audit comment (`format_audit ... extras=...`) below.
+# ---------------------------------------------------------------------------
+if [ "$DYNAMIC_SKIP" = "1" ]; then
+  if python3 -c "from lib.gate_dynamic import select_gates" 2>/dev/null; then
+    _head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    DYNAMIC_SKIP_DECISION="$(python3 -m lib.gate_dynamic select --local --head-sha "$_head_sha" --root "$REPO_ROOT" 2>/dev/null || echo '{}')"
+    # Parse the JSON decision; pre-flip RUN_* booleans for any gate
+    # whose `skip=True` field survives hard rules.
+    _skipped_names="$(printf '%s' "$DYNAMIC_SKIP_DECISION" | python3 -c "
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+    for d in payload.get('decisions', []):
+        if d.get('skip'):
+            print(d.get('gate_name', ''))
+except Exception:
+    pass
+")"
+    for _name in $_skipped_names; do
+      case "$_name" in
+        review)      RUN_REVIEW=0      ;;
+        security)    RUN_SECURITY=0    ;;
+        maintenance) RUN_MAINTENANCE=0 ;;
+      esac
+    done
+    # Truncate for the audit comment (avoid GH-comment bloat).
+    DYNAMIC_SKIP_DECISION="${DYNAMIC_SKIP_DECISION:0:$DYNAMIC_SKIP_DECISION_MAX}"
+    log "[dynamic-skip] recommended: $_skipped_names"
+  else
+    log "[dynamic-skip] lib/gate_dynamic unavailable; running all judges"
+  fi
+fi
+
 [ "$RUN_REVIEW" = "1" ]      && { run_skill "dev-kit:review" "$REVIEW_PROMPT"; REVIEW_OUTPUT="$LAST_SKILL_STDOUT"; }
 [ "$RUN_SECURITY" = "1" ]    && { run_skill "dev-kit:security" "$SECURITY_PROMPT"; SECURITY_OUTPUT="$LAST_SKILL_STDOUT"; }
 [ "$RUN_MAINTENANCE" = "1" ] && { run_skill "dev-kit:maintenance" "$MAINTENANCE_PROMPT"; MAINTENANCE_OUTPUT="$LAST_SKILL_STDOUT"; }
@@ -1140,7 +1192,8 @@ AUDIT_BODY="$(format_audit "$WORST" \
   "review=$REVIEW_V" \
   "security=$SECURITY_V" \
   "maintenance=$MAINTENANCE_V" \
-  "provider=$PROVIDER")"
+  "provider=$PROVIDER" \
+  "dynamic_skip=${DYNAMIC_SKIP_DECISION:-}")"
 if [ "$DRY_RUN" = "1" ]; then
   log "would post: $AUDIT_BODY"
 else
