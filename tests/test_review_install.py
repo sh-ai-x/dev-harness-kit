@@ -1,35 +1,37 @@
 #!/usr/bin/env python3
-"""test_review_install.py — regression tests for the self-aware install
-step in templates/ci/.github/workflows/review.yml (and the dev-harness-kit
-repo's own .github/workflows/review.yml).
+"""test_review_install.py — regression tests for templates/ci/.github/workflows/review.yml
+(and the dev-harness-kit repo's own .github/workflows/review.yml).
 
-The install step used to assume the checkout IS the dev-kit plugin
-(symlink + verify). That works for the dev-harness-kit repo's own CI
-(self-install) but BREAKS for consumer repos that installed the same
-review.yml via /dev-kit:ci-setup. The fix: detect at runtime which
-mode applies and act accordingly.
+Phase 4 gates-distribution migration (issue #12, sh-ai-x/dev-harness-kit-gates):
+the "Install dev-kit plugin" self-aware install step (symlink for
+self-install, `git clone` for consumer-install) that used to live inline
+in the TEMPLATE has moved into the reusable workflow at
+sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml. The template
+is now a thin wrapper that `uses:` the reusable and forwards GitHub
+context + this repo's own vars/secrets — see the gates repo's own test
+suite (tests/test_workflow_call_inputs.py) for coverage of the install
+step's self/consumer-install branching, since that logic now lives there.
 
-Coverage:
-  1. Self-install path: checkout has the manifest + skills/review +
-     skills/security → symlink, no clone.
-  2. Consumer-install path: checkout is a plain repo → clone from
-     https://github.com/sh-ai-x/dev-harness-kit.git (mocked in tests).
-  3. Post-install verification runs in BOTH paths and surfaces the
-     failure clearly if the install was incomplete.
-  4. Structural: the install step exists in BOTH review.yml files
-     (template + dev-harness-kit's own workflow) and they are byte-
-     identical so the two paths can't drift.
+This file's coverage after the migration:
+  1. The TEMPLATE `uses:` the gates repo's review.yml reusable, pinned
+     to an explicit tag (never a floating/unpinned ref).
+  2. The TEMPLATE forwards `install_token` (mapped from
+     `secrets.DEV_KIT_GITHUB_TOKEN`) so the reusable's own consumer-install
+     branch can clone this repo when the caller isn't the plugin itself.
+  3. The dev-harness-kit repo's OWN `.github/workflows/review.yml` is
+     UNTOUCHED by this migration (self-install only, still symlinks
+     inline) — deliberately out of scope for issue #12, which only
+     replaces the CONSUMER TEMPLATE other repos install via ci-setup.
+  4. `.claude-plugin/marketplace.json` still points at a valid,
+     public dev-harness-kit source (unrelated to the install-step
+     migration, kept in this file for historical co-location).
 
 Run as:
   pytest tests/test_review_install.py
 """
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
@@ -38,257 +40,97 @@ TEMPLATE_REVIEW_YML = REPO_ROOT / "templates" / "ci" / ".github" / "workflows" /
 OWN_REVIEW_YML = REPO_ROOT / ".github" / "workflows" / "review.yml"
 
 
-def _extract_install_script(yml_path: Path) -> str:
-    """Pull the bash `run:` block out of the 'Install dev-kit plugin' step.
-    Raises if not found."""
-    text = yml_path.read_text()
-    # Match the step name + the indented `run: |` block.
-    m = re.search(
-        r"-\s*name:\s*Install dev-kit plugin[^\n]*\n\s*run:\s*\|\n((?:[ \t]+.*\n)+)",
-        text,
-    )
-    if not m:
-        raise AssertionError(
-            f"could not find 'Install dev-kit plugin' step with `run: |` in {yml_path}"
+class TestTemplateUsesGatesReusable(unittest.TestCase):
+    """The TEMPLATE is a thin wrapper around the gates repo's reusable
+    review.yml (Phase 4 migration, issue #12) — it no longer contains
+    install logic of its own."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.body = TEMPLATE_REVIEW_YML.read_text(encoding="utf-8")
+
+    def test_no_inline_install_step(self) -> None:
+        """The self-aware 'Install dev-kit plugin' step must NOT exist in
+        the template anymore — that logic lives in the gates repo now."""
+        self.assertNotIn(
+            "Install dev-kit plugin", self.body,
+            "template still has an inline install step — the Phase 4 "
+            "migration should have removed it in favor of `uses:` the "
+            "gates repo's reusable review.yml",
         )
-    return textwrap.dedent(m.group(1))
 
-
-def _run_install_script(
-    script: str,
-    workspace: Path,
-    home: Path,
-    env_extra: dict | None = None,
-) -> subprocess.CompletedProcess:
-    """Run the extracted install script in a subprocess. The script
-    references $GITHUB_WORKSPACE, $HOME, etc. — caller provides them.
-    `git` is mocked on PATH so consumer-install doesn't hit the network.
-    Returns the CompletedProcess; caller asserts on the filesystem state
-    under `home` (which the caller owns and must keep alive for the
-    assertion — typically by creating `home` inside the test's own
-    `tempfile.TemporaryDirectory`).
-    """
-    # Mock git on PATH. `git clone <flags> <src> <dest>` — the dest is
-    # the LAST positional arg, not a fixed $N (the script passes
-    # `--depth 1` between src and dest, which shifts the dest to $5).
-    # Mock creates an empty dir at <dest>/.git (enough to pass the
-    # post-install verifications).
-    stub_dir = home.parent / "stub-bin"
-    stub_dir.mkdir(exist_ok=True)
-    mock = stub_dir / "git"
-    mock.write_text(
-        "#!/usr/bin/env bash\n"
-        "# Mock git for tests: `git clone <src> <dest>` → mkdir <dest>/.git\n"
-        "if [ \"$1\" = \"clone\" ]; then\n"
-        "  for last; do :; done\n"
-        "  mkdir -p \"$last/.git\"\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 0\n"
-    )
-    mock.chmod(0o755)
-
-    env = {
-        "PATH": f"{stub_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "HOME": str(home),
-        "GITHUB_WORKSPACE": str(workspace),
-    }
-    if env_extra:
-        env.update(env_extra)
-    return subprocess.run(
-        ["bash", "-c", script],
-        capture_output=True, text=True, timeout=30, env=env,
-    )
-
-
-def _make_workspace(tmp: Path, *, is_devkit_plugin: bool) -> Path:
-    """Create a fake workspace dir. If is_devkit_plugin=True, include
-    the manifest + required skills (so the install step takes the
-    self-install branch)."""
-    ws = tmp / "ws"
-    ws.mkdir(parents=True)
-    if is_devkit_plugin:
-        (ws / ".claude-plugin").mkdir()
-        (ws / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "dev-kit", "version": "0.1.1", "repository": "https://github.com/sh-ai-x/dev-harness-kit"}\n'
+    def test_uses_gates_repo_reusable_pinned_to_a_tag(self) -> None:
+        """Must `uses:` sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml
+        pinned to an explicit tag (`@vX.Y.Z` or `@vX`), never a bare branch
+        name or unpinned ref."""
+        m = re.search(
+            r"uses:\s*sh-ai-x/dev-harness-kit-gates/\.github/workflows/review\.yml@(\S+)",
+            self.body,
         )
-        (ws / "skills" / "review" / "SKILL.md").parent.mkdir(parents=True)
-        (ws / "skills" / "review" / "SKILL.md").write_text("# review\n")
-        (ws / "skills" / "security" / "SKILL.md").parent.mkdir(parents=True)
-        (ws / "skills" / "security" / "SKILL.md").write_text("# security\n")
-    return ws
+        self.assertIsNotNone(
+            m, "template must `uses:` sh-ai-x/dev-harness-kit-gates's reusable review.yml"
+        )
+        ref = m.group(1)
+        self.assertRegex(
+            ref, r"^v\d+(\.\d+){0,2}$",
+            f"gates repo ref must be a version tag (e.g. v1 or v1.2.3), got {ref!r}",
+        )
 
-
-class TestReviewInstallScript(unittest.TestCase):
-    """The 'Install dev-kit plugin' step handles both self-install and
-    consumer-install paths correctly."""
-
-    def test_self_install_when_checkout_is_devkit(self):
-        with tempfile.TemporaryDirectory() as td:
-            td_p = Path(td)
-            ws = _make_workspace(td_p, is_devkit_plugin=True)
-            home = td_p / "home"
-            home.mkdir()
-            script = _extract_install_script(TEMPLATE_REVIEW_YML)
-            r = _run_install_script(script, ws, home)
-            self.assertEqual(r.returncode, 0, f"stderr={r.stderr}\nstdout={r.stdout}")
-            self.assertIn("self-install", r.stdout)
-            self.assertIn("symlinked", r.stdout)
-            self.assertNotIn("consumer-install", r.stdout)
-            self.assertNotIn("cloning", r.stdout)
-            # Filesystem assertion: self-install must leave a symlink at
-            # $HOME/.claude/plugins/marketplaces/dev-kit pointing at the
-            # workspace. Stdout strings alone wouldn't catch a regression
-            # that prints "symlinked" but creates a real dir (or vice versa).
-            marketplace = home / ".claude/plugins/marketplaces/dev-kit"
-            self.assertTrue(
-                marketplace.is_symlink(),
-                f"self-install must create a symlink at {marketplace} (got: "
-                f"{'symlink' if marketplace.is_symlink() else 'real dir' if marketplace.is_dir() else 'missing'})",
-            )
-            self.assertEqual(
-                marketplace.resolve(), ws.resolve(),
-                f"symlink must point at the workspace (expected {ws}, got {marketplace.resolve()})",
-            )
-
-    def test_consumer_install_when_checkout_is_plain(self):
-        with tempfile.TemporaryDirectory() as td:
-            td_p = Path(td)
-            ws = _make_workspace(td_p, is_devkit_plugin=False)
-            home = td_p / "home"
-            home.mkdir()
-            script = _extract_install_script(TEMPLATE_REVIEW_YML)
-            r = _run_install_script(script, ws, home, env_extra={"DEV_KIT_GITHUB_TOKEN": "fake-pat"})
-            self.assertEqual(r.returncode, 0, f"stderr={r.stderr}\nstdout={r.stdout}")
-            self.assertIn("consumer-install", r.stdout)
-            self.assertIn("cloning", r.stdout)
-            self.assertNotIn("self-install", r.stdout)
-            self.assertNotIn("symlinked", r.stdout)
-            # Filesystem assertion: consumer-install (git clone path) must
-            # leave a real directory, NOT a symlink. Stdout strings alone
-            # wouldn't catch a regression that takes the wrong branch.
-            marketplace = home / ".claude/plugins/marketplaces/dev-kit"
-            self.assertFalse(
-                marketplace.is_symlink(),
-                f"consumer-install must NOT leave a symlink at {marketplace}",
-            )
-            self.assertTrue(
-                marketplace.is_dir(),
-                f"consumer-install must leave a real directory at {marketplace}",
-            )
-
-    def test_consumer_install_fails_without_token(self):
-        """When DEV_KIT_GITHUB_TOKEN is unset and the checkout isn't the
-        dev-kit plugin, the consumer-install path must fail loudly with
-        a clear ::error:: explaining the secret requirement."""
-        with tempfile.TemporaryDirectory() as td:
-            td_p = Path(td)
-            ws = _make_workspace(td_p, is_devkit_plugin=False)
-            home = td_p / "home"
-            home.mkdir()
-            script = _extract_install_script(TEMPLATE_REVIEW_YML)
-            r = _run_install_script(script, ws, home)
-            self.assertNotEqual(r.returncode, 0, f"expected failure; got stdout={r.stdout}")
-            self.assertIn("DEV_KIT_GITHUB_TOKEN", r.stdout)
-            self.assertIn("required", r.stdout)
-
-    def test_script_verifies_install_in_both_paths(self):
-        """The TEMPLATE must end with all three verification lines
-        (manifest + skills/review + skills/security). The dev-harness-kit
-        own workflow only needs the basic manifest+review check (it's
-        self-install only), so we only assert the strict version on
-        the template."""
-        script = _extract_install_script(TEMPLATE_REVIEW_YML)
-        for required in (
-            ".claude-plugin/plugin.json",
-            "skills/review",
-            "skills/security",
-        ):
-            self.assertIn(
-                required, script,
-                f"template install script missing verification of {required}",
-            )
-
-    def test_script_uses_https_public_source_for_consumer_install(self):
-        """The TEMPLATE must clone from the dev-harness-kit source. The URL
-        is auth-prefixed (x-access-token:${DEV_KIT_GITHUB_TOKEN}@) when the
-        source is private, plain https:// when it's public — match either."""
-        script = _extract_install_script(TEMPLATE_REVIEW_YML)
+    def test_forwards_install_token_from_dev_kit_github_token(self) -> None:
+        """The reusable's consumer-install branch (when the caller isn't
+        the plugin itself) needs a PAT with contents:read on
+        sh-ai-x/dev-harness-kit — forwarded from this repo's own
+        DEV_KIT_GITHUB_TOKEN secret, same name as before the migration."""
         self.assertIn(
-            "github.com/sh-ai-x/dev-harness-kit", script,
-            "template install script must clone from the dev-harness-kit source",
+            "install_token: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}", self.body,
+            "template must forward secrets.DEV_KIT_GITHUB_TOKEN as install_token",
         )
 
-    def test_self_install_does_not_clone(self):
-        """Regression: self-install path must NOT trigger git clone
-        (no network needed for the dev-harness-kit repo's own CI)."""
-        with tempfile.TemporaryDirectory() as td:
-            ws = _make_workspace(Path(td), is_devkit_plugin=True)
-            script = _extract_install_script(TEMPLATE_REVIEW_YML)
-            # Mock git counts invocations. If self-install wrongly
-            # calls git, the count will be > 0.
-            stub_dir = Path(td) / "stub-bin"
-            stub_dir.mkdir()
-            counter = stub_dir / "git"
-            counter.write_text(
-                "#!/usr/bin/env bash\n"
-                "echo \"git invoked: $*\" >> \"$HOME/git.log\"\n"
-                "if [ \"$1\" = \"clone\" ]; then mkdir -p \"$4/.git\"; fi\n"
-                "exit 0\n"
-            )
-            counter.chmod(0o755)
-            fake_home = Path(td) / "home"
-            fake_home.mkdir()
-            env = {
-                "PATH": f"{stub_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-                "HOME": str(fake_home),
-                "GITHUB_WORKSPACE": str(ws),
-            }
-            r = subprocess.run(
-                ["bash", "-c", script],
-                capture_output=True, text=True, timeout=30, env=env,
-            )
-            self.assertEqual(r.returncode, 0, f"stderr={r.stderr}")
-            log = (fake_home / "git.log").read_text() if (fake_home / "git.log").exists() else ""
-            self.assertNotIn("git invoked: clone", log,
-                             f"self-install must not call git clone (got: {log!r})")
+    def test_preserves_minimax_api_key_secret_name(self) -> None:
+        """MINIMAX_API_KEY is preserved from the prior workflow — renaming
+        it would break every existing consumer repo's secret config."""
+        self.assertIn(
+            "secrets.MINIMAX_API_KEY", self.body,
+            "template must still reference secrets.MINIMAX_API_KEY by that exact name",
+        )
 
 
 class TestReviewYmlStructure(unittest.TestCase):
-    """The TEMPLATE review.yml is what consumer repos get via ci-setup.
-    The dev-harness-kit repo's OWN review.yml doesn't need the
-    consumer-install fallback (the workspace IS the dev-kit plugin,
-    so self-install always works). The two files are intentionally
-    different — only the template ships the self-aware step."""
+    """The TEMPLATE is what consumer repos get via ci-setup. The
+    dev-harness-kit repo's OWN review.yml is a SEPARATE, untouched file —
+    issue #12 only replaces the consumer template, not this repo's own
+    live CI (a deliberately narrower, lower-risk first step)."""
 
-    def test_both_files_exist(self):
+    def test_both_files_exist(self) -> None:
         self.assertTrue(TEMPLATE_REVIEW_YML.exists(), f"missing: {TEMPLATE_REVIEW_YML}")
         self.assertTrue(OWN_REVIEW_YML.exists(), f"missing: {OWN_REVIEW_YML}")
 
-    def test_template_has_consumer_install_fallback(self):
-        """The TEMPLATE must handle consumer repos (plain checkout).
-        This is the file consumer repos get via /dev-kit:ci-setup."""
-        script = _extract_install_script(TEMPLATE_REVIEW_YML)
-        self.assertIn("github.com/sh-ai-x/dev-harness-kit", script,
-                      "template must clone from the dev-harness-kit source")
-        self.assertIn("consumer-install", script)
-        self.assertIn("self-install", script)
-        self.assertIn("x-access-token:${DEV_KIT_GITHUB_TOKEN}", script,
-                      "template must inject the PAT secret into the clone URL for private sources")
-
-    def test_own_workflow_can_stay_self_install_only(self):
-        """The dev-harness-kit repo's own workflow is fine as a pure
-        self-install (workspace IS the dev-kit plugin). We don't
-        require the consumer-install fallback in the own workflow
-        because adding it would force this PR to touch the workflow
-        file (and thus trigger the action's workflow-validation skip).
-        """
-        # Sanity: the own workflow has the self-install path.
+    def test_own_workflow_can_stay_self_install_only(self) -> None:
+        """The dev-harness-kit repo's own workflow is untouched by the
+        Phase 4 migration — it still symlinks the local checkout inline
+        (workspace IS the dev-kit plugin, so self-install always works;
+        no gates-repo dependency needed for this repo's own CI)."""
         if not OWN_REVIEW_YML.exists():
             self.skipTest("own review.yml not present")
-        script = _extract_install_script(OWN_REVIEW_YML)
-        self.assertIn("ln -sfn", script,
-                      "own workflow should at minimum symlink the local checkout")
+        body = OWN_REVIEW_YML.read_text(encoding="utf-8")
+        self.assertIn(
+            "ln -sfn", body,
+            "own workflow should at minimum symlink the local checkout",
+        )
+
+    def test_own_workflow_unchanged_by_this_migration(self) -> None:
+        """Sanity: the own workflow must NOT `uses:` the gates repo --
+        that would mean issue #12's scope crept into dev-harness-kit's
+        own live CI, which is explicitly out of scope (separate, higher-
+        risk decision left for later)."""
+        if not OWN_REVIEW_YML.exists():
+            self.skipTest("own review.yml not present")
+        body = OWN_REVIEW_YML.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "sh-ai-x/dev-harness-kit-gates", body,
+            "own workflow must not reference the gates repo — issue #12 "
+            "only replaces the CONSUMER TEMPLATE, not this repo's own CI",
+        )
 
 
 class TestMarketplaceJsonSource(unittest.TestCase):
@@ -302,12 +144,11 @@ class TestMarketplaceJsonSource(unittest.TestCase):
     'source type your Claude Code version does not support' on install.
     """
 
-    def test_marketplace_source_is_valid_schema_form(self):
+    def test_marketplace_source_is_valid_schema_form(self) -> None:
         import json
         m = json.loads((REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text())
         src = m["plugins"][0]["source"]
         if isinstance(src, str):
-            # Relative path form ("^\\./.*")
             self.assertRegex(
                 src, r"^\./.*",
                 f"bare string source must start with './' (got: {src!r})",
@@ -320,7 +161,7 @@ class TestMarketplaceJsonSource(unittest.TestCase):
         else:
             self.fail(f"marketplace.json source has unrecognized form: {src!r}")
 
-    def test_marketplace_source_points_at_dev_harness_kit(self):
+    def test_marketplace_source_points_at_dev_harness_kit(self) -> None:
         import json
         m = json.loads((REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text())
         src = m["plugins"][0]["source"]
@@ -333,7 +174,7 @@ class TestMarketplaceJsonSource(unittest.TestCase):
             f"marketplace.json source must point at the dev-harness-kit repo, got: {url!r}",
         )
 
-    def test_marketplace_plugin_version_present(self):
+    def test_marketplace_plugin_version_present(self) -> None:
         """feat/skill-versions: `plugin.json` MUST declare `version:` (single
         source of truth restored from PR #31's removal). Per-skill version
         bookkeeping was dropped (DRY) so this is the ONLY version field

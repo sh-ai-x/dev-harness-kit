@@ -583,43 +583,40 @@ class TestCiSetup(unittest.TestCase):
         )
 
     def test_extract_verdict_fallback_reports_agent_ran_false(self):
-        """Issue #219 Bug 2: the `extract_verdict` fallback branch in
-        review.yml must write `agent_ran=false`, not `agent_ran=true`,
-        because the fallback's `gh pr comment` is a placeholder, NOT a
-        real agent review. Without this fix, the severity gate's
-        `agent_ran=false → exit 1` hard-fail is silently defeated.
-        Guards both the review and security job fallback branches.
+        """Issue #219 Bug 2: the `extract_verdict` fallback branch must
+        write `agent_ran=false`, not `agent_ran=true`, because the
+        fallback's `gh pr comment` is a placeholder, NOT a real agent
+        review. Without this fix, the severity gate's `agent_ran=false
+        -> exit 1` hard-fail is silently defeated.
+
+        Phase 4 gates-distribution migration (issue #12): this logic
+        moved from the TEMPLATE (templates/ci/.github/workflows/review.yml)
+        into sh-ai-x/dev-harness-kit-gates' reusable review.yml -- the
+        template is now a thin `uses:` wrapper with no bootstrap-fallback
+        bash of its own. Verified in the gates repo directly at
+        migration time (review.yml:318 writes `agent_ran=false` in the
+        `needs_fallback == 'true'` branch) and pinned there going
+        forward by the gates repo's own test suite
+        (tests/test_bootstrap_fallback_agent_ran.py). This test now only
+        asserts the template correctly delegates instead of re-implementing
+        the fallback logic locally (which would risk drifting from the
+        gates repo's copy).
         """
-        import re
         review_template = (
             PROJECT_ROOT / "templates" / "ci" / ".github" / "workflows"
             / "review.yml"
         )
         self.assertTrue(review_template.is_file(), f"missing: {review_template}")
         text = review_template.read_text()
-        # Find every `if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]`
-        # fallback branch and assert it writes agent_ran=false (not =true).
-        branches = re.findall(
-            r'if \[ "\$\{\{ steps\.fallback\.outputs\.needs_fallback \}\}" = "true" \]; then'
-            r'.*?fi',
-            text,
-            re.DOTALL,
+        self.assertNotIn(
+            "needs_fallback", text,
+            "template should not re-implement the bootstrap-fallback "
+            "branch locally -- that logic belongs to the gates repo's "
+            "reusable workflow now (issue #12)",
         )
-        self.assertTrue(
-            branches,
-            "no extract_verdict fallback branches found in review.yml — "
-            "test invariant changed",
-        )
-        bad = []
-        for i, body in enumerate(branches):
-            # Inside the fallback body, the literal `echo "agent_ran=true" >> "$GITHUB_OUTPUT"`
-            # is the bug. `agent_ran=false` (or comments mentioning the old value) are fine.
-            if re.search(r'echo "agent_ran=true" >> "\$GITHUB_OUTPUT"', body):
-                bad.append(i)
-        self.assertEqual(
-            bad, [],
-            f"extract_verdict fallback branch(es) {bad} still write "
-            f"`agent_ran=true`; issue #219 Bug 2 requires `agent_ran=false`.",
+        self.assertIn(
+            "sh-ai-x/dev-harness-kit-gates/.github/workflows/review.yml", text,
+            "template must delegate to the gates repo's reusable review.yml",
         )
 
     def test_print_checklist_kwarg_does_not_break_existing_callers(self):
