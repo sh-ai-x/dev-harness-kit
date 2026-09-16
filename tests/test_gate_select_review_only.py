@@ -175,7 +175,7 @@ class TestCiSetupReviewOnlyViaGatesJson(unittest.TestCase):
         (target / ".dev-kit").mkdir(parents=True, exist_ok=True)
         gates_state.write_state(
             {
-                "schema_version": "1.0.0",
+                "schema_version": gates_state.SCHEMA_VERSION,
                 "gates": {
                     "review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"},
                     "security": {"enabled": security_enabled, "workflow": "security.yml", "var": "GATES_SECURITY_ENABLED"},

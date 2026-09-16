@@ -383,6 +383,7 @@ def select_gates(
     project_root: Optional[Path] = None,
     *,
     dry_run: bool = False,
+    local: bool = False,
 ) -> GateSkipDecision:
     """Main entry. Run LLM judge, apply hard rules, cache + return decision.
 
@@ -397,6 +398,30 @@ def select_gates(
       6. Return the decision.
     """
     root = project_root or Path(".")
+
+    # 0. Local mode — skip the LLM judge entirely (no network). Used by
+    # `bin/review-local.sh` for offline iterations; returns a "no skip"
+    # decision (all gates skip=False), which the orchestrator then
+    # collapses into "every gate runs" — the safe default.
+    if local:
+        from gates_state import VALID_GATE_KEYS  # local import to avoid cycle
+        decisions = tuple(
+            GateDecision(
+                gate_name=g,
+                skip=False,
+                reasoning="local mode: judge skipped, no LLM call",
+                confidence=0.0,
+                raw_score={},
+            )
+            for g in VALID_GATE_KEYS
+        )
+        return GateSkipDecision(
+            head_sha=context.head_sha,
+            decisions=decisions,
+            llm_raw={"scores": {}, "raw": ""},
+            gates_hash=hash_gates_state(root),
+            decided_at_iso=_now_utc_iso(),
+        )
 
     # 1. Prune stale audit files.
     prune_stale(root)
@@ -420,15 +445,21 @@ def select_gates(
     llm_decisions = []
     for gate_name in VALID_GATE_KEYS:
         # gate_skippable maps to skip; confidence is its own field.
+        # Judge rubric (eval/prompts/judge-gate-dynamic.md): both axes are
+        # raw 0-10. Normalize confidence to 0-1 so the CONFIDENCE_FLOOR
+        # (= 0.7) comparison is on the same scale; otherwise the floor
+        # is effectively unreachable and rule #4 (low-confidence veto)
+        # never fires.
         skip_score = float(scores.get("gate_skippable", 0.0))
-        confidence = float(scores.get("confidence", 0.0))
+        confidence_raw = float(scores.get("confidence", 0.0))
+        confidence = confidence_raw / 10.0
         # Skip iff both: skip_score >= SKIP_THRESHOLD AND confidence >= CONFIDENCE_FLOOR
         skip = skip_score >= SKIP_THRESHOLD and confidence >= CONFIDENCE_FLOOR
         llm_decisions.append(
             GateDecision(
                 gate_name=gate_name,
                 skip=skip,
-                reasoning=f"llm: gate_skippable={skip_score:.1f} confidence={confidence:.1f}",
+                reasoning=f"llm: gate_skippable={skip_score:.1f} confidence_raw={confidence_raw:.1f} (normalized={confidence:.2f})",
                 confidence=confidence,
                 raw_score=scores,
             )
@@ -493,6 +524,12 @@ def main(argv: Optional[list] = None) -> int:
     sel.add_argument("--head-sha", required=True)
     sel.add_argument("--root", default=None)
     sel.add_argument("--dry-run", action="store_true")
+    sel.add_argument(
+        "--local",
+        action="store_true",
+        help="skip the LLM judge (no network); return a no-skip decision. "
+             "Used by bin/review-local.sh for offline iterations.",
+    )
 
     apply_p = sub.add_parser(
         "apply",
@@ -535,7 +572,7 @@ def _cli_select(args) -> int:
         previous_verdicts={},
         gate_catalog=_read_gate_catalog(root),
     )
-    decision = select_gates(ctx, root, dry_run=args.dry_run)
+    decision = select_gates(ctx, root, dry_run=args.dry_run, local=args.local)
     payload = {
         "head_sha": decision.head_sha,
         "decisions": [dataclasses.asdict(d) for d in decision.decisions],
