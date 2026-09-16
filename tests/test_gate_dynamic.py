@@ -165,6 +165,115 @@ class TestHardRules(unittest.TestCase):
         maint = next(d for d in out if d.gate_name == "maintenance")
         self.assertFalse(maint.skip)
 
+    def test_dynamic_eligible_false_no_skip(self) -> None:
+        # Rule #5 (security review LLM01-M2): an operator who leaves
+        # `dynamic_eligible` at the default (False) expects the gate to be
+        # immune to LLM-driven skips. Even if the LLM judge emits skip=True,
+        # the orchestrator must override to skip=False.
+        # GateContext is frozen — use dataclasses.replace to override
+        # gate_catalog with explicit dynamic_eligible=False.
+        from dataclasses import replace
+        ctx = replace(
+            _make_ctx(iteration=2),
+            gate_catalog={
+                "gates": {
+                    "maintenance": {"scope_globs": ["lib/**"], "dynamic_eligible": False},
+                },
+            },
+        )
+        llm_decisions = [
+            gate_dynamic.GateDecision("maintenance", skip=True,
+                                      reasoning="r", confidence=0.9,
+                                      raw_score={}),
+        ]
+        out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
+        maint = next(d for d in out if d.gate_name == "maintenance")
+        self.assertFalse(maint.skip)
+
+    def test_critical_gate_empty_scope_still_vetoed(self) -> None:
+        # Security review LLM01-M1: review/security with empty scope_globs
+        # must still be vetoed (treated as scope=["**"]) so Rule #3 fires
+        # even against the default config that ships with scope_globs=[].
+        ctx = _make_ctx(
+            iteration=2,
+            diff_stat=" lib/foo.py | 1 +",
+            gate_catalog={
+                "gates": {
+                    "review": {"scope_globs": [], "dynamic_eligible": True},
+                    "security": {"scope_globs": [], "dynamic_eligible": True},
+                },
+            },
+        )
+        llm_decisions = [
+            gate_dynamic.GateDecision(gate_name=n, skip=True,
+                                      reasoning="r", confidence=0.9,
+                                      raw_score={})
+            for n in ("review", "security")
+        ]
+        out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
+        for d in out:
+            self.assertFalse(d.skip, f"Rule #3 should veto {d.gate_name} on empty scope")
+
+
+class TestInvokeJudgeTemperature(unittest.TestCase):
+    """Pins the temperature=0 contract documented in
+    eval/prompts/judge-gate-dynamic.md:74-80 and the PR title."""
+
+    def test_invoke_judge_passes_temperature_zero(self) -> None:
+        from unittest.mock import patch
+        # Stub load_config (returns a valid api_key so the early-return
+        # check passes) AND format_prompt (returns a non-empty template)
+        # so invoke_judge reaches the call_judge call.
+        stub_cfg = {
+            "provider": "minimax",
+            "api_key": "fake",
+            "model": "fake-model",
+            "base_url": "https://example.invalid/",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            with patch.object(gate_dynamic.llm_judge, "load_config", return_value=stub_cfg), \
+                 patch.object(gate_dynamic.llm_judge, "format_prompt", return_value="system"), \
+                 patch.object(gate_dynamic.llm_judge, "call_judge", return_value={"scores": {}}) as mock_call:
+                gate_dynamic.invoke_judge(
+                    gate_dynamic.GateContext(
+                        parent_pr=0,
+                        head_sha="abc",
+                        iteration=2,
+                        diff_stat="",
+                        diff_sample="",
+                        pr_body=None,
+                        previous_verdicts={},
+                        gate_catalog={"gates": {}},
+                    ),
+                    target,
+                )
+                self.assertTrue(mock_call.called, "call_judge was not invoked")
+                call_kwargs = mock_call.call_args.kwargs
+                self.assertEqual(
+                    call_kwargs.get("temperature"),
+                    0.0,
+                    f"invoke_judge must pass temperature=0.0 "
+                    f"(got {call_kwargs.get('temperature')!r})",
+                )
+
+
+class TestAuditPathContainment(unittest.TestCase):
+    """Pin A08-m1: _audit_path must refuse head_sha values that escape
+    the audit directory."""
+
+    def test_path_traversal_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            with self.assertRaises(ValueError):
+                gate_dynamic._audit_path(target, "../../../etc/passwd")
+
+    def test_normal_head_sha_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            p = gate_dynamic._audit_path(target, "abc123")
+            self.assertTrue(str(p).endswith(".dev-kit/gate-dynamic/abc123.json"))
+
 
 class TestHashGatesState(unittest.TestCase):
     def test_missing_file_returns_empty_string(self) -> None:

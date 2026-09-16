@@ -151,7 +151,7 @@ def apply_hard_rules(
     context: GateContext,
     llm_decisions: list,
 ) -> list:
-    """Pure: apply 4 bypass rules on top of LLM output.
+    """Pure: apply 5 bypass rules on top of LLM output.
 
     Returns a new list with `skip=False` overrides where hard rules fire.
     Hard rules (in order of precedence):
@@ -159,6 +159,7 @@ def apply_hard_rules(
       2. `forced_run: true` on the gate → skip=False (operator override)
       3. gate_name in {review, security} AND scope matches → skip=False
       4. confidence < CONFIDENCE_FLOOR → skip=False (low-confidence veto)
+      5. `dynamic_eligible: false` (default) → skip=False (LLM-seam closed)
     """
     out = []
     for dec in llm_decisions:
@@ -173,13 +174,29 @@ def apply_hard_rules(
         if gate_entry.get("forced_run"):
             new_skip = False
         # Rule 3 — critical gate in scope.
+        # For the IN_SCOPE_GATES (review, security), an empty `scope_globs`
+        # would defeat Rule #3 against the default config — an attacker who
+        # reaches iteration ≥ 2 with a prompt-injection payload could skip
+        # the critical gates because no operator-configured glob matches.
+        # Treat empty scope for critical gates as "match everything" so
+        # Rule #3 always fires for them.
+        scope_globs = gate_entry.get("scope_globs") or []
+        if not scope_globs and dec.gate_name in IN_SCOPE_GATES:
+            scope_globs = ["**"]
         if (
             dec.gate_name in IN_SCOPE_GATES
-            and is_gate_in_scope(dec.gate_name, gate_entry, _diff_files_from_stat(context))
+            and is_gate_in_scope(dec.gate_name, {**gate_entry, "scope_globs": scope_globs}, _diff_files_from_stat(context))
         ):
             new_skip = False
         # Rule 4 — low-confidence veto.
         if dec.confidence < CONFIDENCE_FLOOR:
+            new_skip = False
+        # Rule 5 — dynamic_eligible opt-in. The default is False, meaning
+        # "do NOT let the LLM judge touch this gate". An operator who
+        # explicitly sets `dynamic_eligible=True` opts the gate in; an
+        # operator who leaves it at the default expects the gate to be
+        # immune to LLM-driven skips.
+        if not gate_entry.get("dynamic_eligible", False):
             new_skip = False
         if new_skip != dec.skip:
             out.append(dataclasses.replace(dec, skip=False))
@@ -214,7 +231,35 @@ def _diff_files_from_stat(context: GateContext) -> list:
 # ----------------------------------------------------------------------------
 
 def _audit_path(root: Path, head_sha: str) -> Path:
-    return (root / DYNAMIC_AUDIT_DIR / f"{head_sha}.json").resolve()
+    """Resolve the audit-JSON path for a given head SHA.
+
+    Defensive: a `--head-sha` value containing path-traversal sequences
+    (e.g. `../../etc/foo`) would otherwise escape `.dev-kit/gate-dynamic/`
+    and let `save_decision` write anywhere the operator's CLI can reach.
+    Pin the resolved path under the audit dir.
+    """
+    audit_dir = (root / DYNAMIC_AUDIT_DIR).resolve()
+    candidate = (audit_dir / f"{head_sha}.json").resolve()
+    try:
+        # Python 3.9+: Path.is_relative_to
+        if not candidate.is_relative_to(audit_dir):
+            raise ValueError(
+                f"_audit_path: head_sha escapes audit dir "
+                f"(audit_dir={audit_dir}, resolved={candidate})"
+            )
+    except AttributeError:
+        # Defensive fallback for <3.9 — should never run on supported
+        # versions (the project pins 3.12+), but assert the prefix
+        # check manually rather than failing open.
+        audit_dir_str = str(audit_dir)
+        candidate_str = str(candidate)
+        if not (candidate_str == audit_dir_str
+                or candidate_str.startswith(audit_dir_str + "/")):
+            raise ValueError(
+                f"_audit_path: head_sha escapes audit dir "
+                f"(audit_dir={audit_dir}, resolved={candidate})"
+            )
+    return candidate
 
 
 def save_decision(decision: GateSkipDecision, root: Optional[Path] = None) -> Path:
@@ -368,6 +413,12 @@ def invoke_judge(context: GateContext, project_root: Path) -> Optional[dict]:
             axes=llm_judge.DIM_AXES["gate_dynamic"],
             dim="gate_dynamic",
             base_url=cfg.get("base_url", "https://api.minimax.io/anthropic"),
+            # The judge rubric (eval/prompts/judge-gate-dynamic.md) and the
+            # PR title both promise `temperature=0` for deterministic
+            # decision stability. Call_judge defaults to 1.0; pin it here so
+            # the cache invalidation story (same SHA + gates_hash -> same
+            # decision) holds across operators.
+            temperature=0.0,
         )
     except Exception:
         return None
