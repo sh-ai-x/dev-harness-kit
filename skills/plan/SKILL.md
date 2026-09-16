@@ -260,12 +260,13 @@ For each step in order:
 
 For a worked example, see `lib/execute.py:examples/plan_step_template.md`.
 
-### team mode — dependency-aware step docs
+### Team-enabled mode — dependency-aware step docs
 
-When `DEV_KIT_MODE=team` (read via `os.environ.get("DEV_KIT_MODE")` or
-`.claude/settings.json` `env.DEV_KIT_MODE`), Gate 4/5 emits extra
-structure that the existing dispatcher / integrity layers already
-consume:
+When `DEV_KIT_TEAM=on` (resolved from the shell or settings scopes) and the
+active `DEV_KIT_MODE` is `full` or `lite`, Gate 4/5 emits extra structure
+that the existing dispatcher / integrity layers already consume. In
+`undev`, the plugin is inactive and this team path is not invoked. The two
+settings remain independently resolved:
 
 1. **Per-step dependency prompt.** After the operator has chosen the
    step titles (the same multi-step picker that runs in `full` / `lite` /
@@ -285,9 +286,9 @@ consume:
    body. `lib/intent_integrity.py:_parse_step_file` already reads this
    field (coerces to int via `_to_int()`); the existing IC-3 gap check
    then enforces step.md ↔ index.json consistency for free.
-4. **Skip the `dependencies:` block in non-team modes.** This section is
-   gated on `DEV_KIT_MODE=team`. In `full` / `lite` / `undev`, Gate 4/5
-   emits exactly as today (no extra prompt, no extra block).
+4. **Skip the `dependencies:` block when team is off.** This section is
+   gated on `DEV_KIT_TEAM=on`. With team off, Gate 4/5 emits exactly as
+   today (no extra prompt, no extra block), regardless of `DEV_KIT_MODE`.
 5. **Build-runner fan-out.** `lib/dispatch_classifier.py:_has_dependency_edge`
    already reads `depends_on` / `consumes` from each step dict in
    `phases/<phase>/index.json`. Once the plan skill persists the
@@ -325,9 +326,9 @@ Then:
 - Pre-build integrity check is enforced by `/dev-kit:build`; the plan emit
   is complete when `phases/<name>/index.json` and `step<N>.md` are written.
 
-### team mode — PRD §4 Dependency DAG subsection
+### Team-enabled mode — PRD §4 Dependency DAG subsection
 
-When `DEV_KIT_MODE=team`, extend PRD §4 (Phase plan) with a "Dependency
+When `DEV_KIT_TEAM=on`, extend PRD §4 (Phase plan) with a "Dependency
 DAG" subsection listing each edge from the per-step `dependencies:`
 block collected in Gate 4/5:
 
@@ -340,8 +341,8 @@ block collected in Gate 4/5:
 
 Edge order follows `compute_dag(steps)["topo"]` so the subsection reads
 in execution order. Skip the subsection entirely when `dependencies` is
-empty for every step (a fully-leaf graph). This is the DoD condition for
-team mode; in `full` / `lite` / `undev`, omit the subsection.
+empty for every step (a fully-leaf graph). With team off, omit the
+subsection.
 
 The DoD item list above (1-6) does not gain a 7th bullet in team; the
 subsection lives inside the existing §4 bullet, not as a separate DoD

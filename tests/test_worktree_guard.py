@@ -226,6 +226,62 @@ class TestWorktreeGuardBlocks(unittest.TestCase):
         finally:
             main_tmp.cleanup()
 
+    def test_main_deny_writes_worktree_list_to_cache_file(self):
+        """Regression for the worktree-guard message compression: when
+        the hook denies a main-checkout edit, it dumps the existing
+        worktree list to .dev-kit/cache/worktree-list.txt (gitignored
+        via the `.dev-kit/` rule) and references that path from the
+        deny reason. The verbose multi-line listing must NOT appear in
+        the reason itself — that was the cognitive-load bug this
+        change closed.
+        """
+        if not shutil.which("jq"):
+            self.skipTest("jq not available")
+        main_tmp, _, _ = _init_main_with_worktree()
+        try:
+            main_root = Path(main_tmp.name)
+            r = _run_hook(
+                "worktree-guard.sh",
+                _edit_payload("/some/file.py"),
+                cwd=main_root,
+            )
+            self.assertEqual(r.returncode, 2)
+            cache_file = main_root / ".dev-kit" / "cache" / "worktree-list.txt"
+            self.assertTrue(
+                cache_file.exists(),
+                f"expected {cache_file} to be written on deny",
+            )
+            content = cache_file.read_text()
+            # The test fixture adds a worktree on branch fix/test, so
+            # the snapshot must contain that branch name.
+            self.assertIn("fix/test", content)
+            # The deny reason must reference the cache file (one-line
+            # pointer) and must NOT contain the old multi-line block.
+            combined = r.stdout + r.stderr
+            deny_lines = [ln for ln in combined.splitlines()
+                          if ln.strip().startswith("{")]
+            reason = ""
+            for line in deny_lines:
+                try:
+                    doc = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                rsn = doc.get("hookSpecificOutput", {}).get(
+                    "permissionDecisionReason", ""
+                )
+                if "WORKTREE GUARD" in rsn:
+                    reason = rsn
+                    break
+            self.assertTrue(reason, f"deny reason not found: {combined!r}")
+            self.assertIn("worktree-list.txt", reason)
+            self.assertNotIn(
+                "Existing worktrees (cd into one, or open a Claude session there):",
+                reason,
+                "verbose worktree listing must not be inlined in the deny reason",
+            )
+        finally:
+            main_tmp.cleanup()
+
     def test_orch_branch_denies_code_path(self):
         """Regression for PR #270 (B): when file_path points inside a
         .worktrees/<name>/... tree AND that worktree's branch is
