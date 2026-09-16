@@ -28,8 +28,12 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 | **Project** (CI workflow gates) | `.dev-kit/gates.json` (NEW) + `.dev-kit/ci-config.json` | `/dev-kit:ci-setup` (install) | Reads gates.json + marker; `enable/disable/sync/init` write gates.json; dispatches ci-setup to install based on it. |
 | **Session** (local-hook gates) | `.dev-kit/harness-mode.session.json` | `/dev-kit:harness-mode` | Reads mode + per-gate values; dispatches to `harness-mode` to change. |
 | **AI-judge** (LLM-judge skills) | (skill-shipped; CI wiring in `.github/workflows/{review,security,maintenance}.yml`) | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` | Reports which judge skills are enabled and whether their CI workflow is wired; dispatches to the right skill. |
+| **Optional integrations** | Integration-specific config (Linear: `.dev-kit/linear-config.json`) | `/dev-kit:linear` | Shows and toggles integrations without adding them to `gates.json` or CI workflow installation. |
 
 ## Sub-commands
+
+Special-case `linear` aliases take precedence over the generic `<gate>` rows
+below; they delegate to `tools/linear_sync.py` and never touch `gates.json`.
 
 | Sub-command | Effect |
 |---|---|
@@ -40,6 +44,9 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 | `enable <gate>` | `python -m lib.gates_state enable <gate>` — flips `gates.<gate>.enabled` to true. |
 | `disable <gate>` | `python -m lib.gates_state disable <gate>` — flips `gates.<gate>.enabled` to false. |
 | `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`). |
+| `enable linear` | `python3 tools/linear_sync.py on` — explicitly opt in to Linear auto-sync. |
+| `disable linear` | `python3 tools/linear_sync.py off` — keep the optional Linear integration off. |
+| `set linear enabled <true\|false>` | Maps `true` to `python3 tools/linear_sync.py on` and `false` to `python3 tools/linear_sync.py off`; does not write `gates.json`. |
 | `sync` | Push enabled flags to `gh variable set GATES_<NAME>_ENABLED`. |
 | `init` | Synthesize `.dev-kit/gates.json` from the current `marker.runners` so a consumer that previously used `--exclude security.yml` upgrades in one step. |
 | `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install). |
@@ -53,6 +60,9 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 /dev-kit:gate-select enable review         # turn review gate on
 /dev-kit:gate-select disable security      # turn security gate off
 /dev-kit:gate-select set review enabled true
+/dev-kit:gate-select enable linear         # explicitly opt in to Linear auto-sync
+/dev-kit:gate-select disable linear        # default/recommended: keep Linear off
+/dev-kit:gate-select set linear enabled false
 /dev-kit:gate-select sync                  # push to gh variable set
 /dev-kit:gate-select init                  # synthesize gates.json from marker
 /dev-kit:gate-select pick                  # legacy 6-question picker
@@ -91,7 +101,27 @@ AI-JUDGE GATES (skills shipped with the plugin; scheduled by .github/workflows/*
   /dev-kit:review        enabled (CI: review.yml,  if: vars.GATES_REVIEW_ENABLED    != 'false')
   /dev-kit:security      enabled (CI: security.yml, if: vars.GATES_SECURITY_ENABLED  != 'false' — but gates.json says disabled; CI gate job SKIPPED)
   /dev-kit:maintenance   enabled (CI: maintenance.yml, if: vars.GATES_MAINTENANCE_ENABLED != 'false')
+
+OPTIONAL INTEGRATIONS (integration-specific SSOT; not part of gates.json)
+  Linear API  enabled=false by default in gate-select
+  disable     python3 tools/linear_sync.py off
+  enable      python3 tools/linear_sync.py on (explicit operator opt-in)
+  status      python3 tools/linear_sync.py status
 ```
+
+### Linear integration policy
+
+Linear remains available for future use, but its API request and complexity
+quotas make it unsuitable as an always-on correctness gate. The gate-select
+default is therefore **off**. `enable linear` and `disable linear` delegate to
+the existing `tools/linear_sync.py` CLI, whose per-worktree
+`.dev-kit/linear-config.json` remains the source of truth. This preserves the
+four automatic Linear hooks and the manual `/dev-kit:linear` skill without
+mixing Linear state into the CI-only `.dev-kit/gates.json` schema.
+
+When Linear is disabled, implicit hooks stay non-blocking and stop before API
+sync. To use it later, run `/dev-kit:gate-select enable linear` (or the
+explicit `/dev-kit:linear on`) and inspect `/dev-kit:linear status`.
 
 ### How `show` reads each dimension
 
@@ -233,7 +263,7 @@ shape as the existing `push_confirm` field). See
 
 | Surface | Today | Why |
 |---|---|---|
-| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used | Referenced only by `skills/config/SKILL.md` + `hooks/linear-*.sh`; gate-select reads from `gates.json` + `ci-config.json` + `harness-mode.session.json`. |
+| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used for project CI gates | Legacy Linear/config compatibility remains in the Linear skill; the optional-integration row delegates to `tools/linear_sync.py` and does not write `gates.json`. |
 | Skill-disable mechanism for AI-judge skills | None exists | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` are always-on with the plugin; gate-select orchestrates their **CI wiring** + **on/off** via `gates.json`, not their skill-level enablement. |
 
 ## Rules (no exceptions)

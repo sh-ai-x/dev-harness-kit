@@ -102,6 +102,47 @@ class TestSyncDocumented(unittest.TestCase):
         )
 
 
+class TestOptionalIntegrationDocumented(unittest.TestCase):
+    """Linear stays available, but gate-select defaults it off."""
+
+    def setUp(self) -> None:
+        self.skill = SKILL.read_text(encoding="utf-8")
+
+    def test_linear_is_an_optional_integration_not_a_ci_gate(self) -> None:
+        self.assertIn("Optional integrations", self.skill)
+        self.assertIn("not part of gates.json", self.skill)
+        self.assertIn("enabled=false by default in gate-select", self.skill)
+
+    def test_linear_toggle_delegates_to_authoritative_cli(self) -> None:
+        table = self.skill.split("## Sub-commands", 1)[1].split("```bash", 1)[0]
+        rows = [line for line in table.splitlines() if line.startswith("| `")]
+        expected = {
+            "`enable linear`": "python3 tools/linear_sync.py on",
+            "`disable linear`": "python3 tools/linear_sync.py off",
+            "`set linear enabled <true\\|false>`": "python3 tools/linear_sync.py on",
+        }
+        for command, dispatch in expected.items():
+            row = next((line for line in rows if command in line), "")
+            self.assertTrue(row, f"missing linear sub-command row: {command}")
+            self.assertIn(dispatch, row)
+        set_row = next(
+            line for line in rows if "`set linear enabled <true\\|false>`" in line
+        )
+        self.assertIn("python3 tools/linear_sync.py off", set_row)
+
+        linear_rows = [line for line in rows if "linear" in line]
+        self.assertTrue(linear_rows)
+        self.assertFalse(
+            any("lib.gates_state" in line for line in linear_rows),
+            "linear aliases must not dispatch through the CI gate writer",
+        )
+        self.assertIn(
+            "Special-case `linear` aliases take precedence",
+            self.skill,
+        )
+        self.assertIn(".dev-kit/linear-config.json", self.skill)
+
+
 class TestInitDocumented(unittest.TestCase):
     """`init` synthesizes gates.json from current marker.runners."""
 
