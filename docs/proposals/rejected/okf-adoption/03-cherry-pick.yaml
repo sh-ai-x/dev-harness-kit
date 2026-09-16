@@ -1,0 +1,150 @@
+title: "Cherry-pick 1건 — lifecycle stale_after, rules/*.md 5개 (delta −138 ~ −228 B)"
+status: rejected
+date: 2026-08-19
+related_prs: [784]
+note: "Cherry-pick (lifecycle stale_after) was proposed but ultimately reverted via PR #784 (`fix(marketplace): revert dev-kit-lite registration + add ADR-0023 + plugin collision guard`)."
+tags: [okf, adoption, stale-after, docs-maintenance, thin-harness]
+
+before:
+  summary: |
+    문서 staleness는 현재 LLM 추정으로 잡는다. `/dev-kit:docs-maintenance`가 `rg`로
+    stale 용어를 검색하고 `git log`로 "의도적 역사 vs 낡은 현재 지침"을 판단한다
+    (`skills/docs-maintenance/SKILL.md:48–49`, 358 B). 결정론적 만료 신호가 없어
+    스킬을 호출하지 않는 한 낡은 규칙 문서는 영원히 신선한 것처럼 읽힌다.
+  evidence:
+    - '`skills/docs-maintenance/SKILL.md:48–49` (358 B) — `rg` + `git log` 휴리스틱'
+    - '`skills/` SKILL.md 42개는 100% frontmatter / `rules/` 6개 중 5개 frontmatter 보유'
+    - '`docs/lessons-token-pricing.md` — 가격 데이터 stale이 실제로 사고를 낸 기록'
+
+after:
+  summary: |
+    OKF §5.4–5.5의 lifecycle 어휘만 차용. `stale_after: YYYY-MM-DD`를 이미 frontmatter를
+    가진 `rules/*.md` 5개에 부여하고, `tools/check_doc_lifecycle.py`가
+    `.github/workflows/ci.yml` validate 잡에서 만료를 결정론적으로 잡는다.
+    상계로 `skills/docs-maintenance/SKILL.md`의 staleness 추정 휴리스틱 2줄을 제거한다.
+    conformance는 주장하지 않는다.
+  files:
+    - path: rules/{git-workflow,session-hygiene,skill-authoring,test-files,token-pricing}.md
+      change: frontmatter에 `stale_after` 1줄 추가 (5파일 × 26 B)
+    - path: tools/check_doc_lifecycle.py
+      change: |
+        신규. `rules/*.md` frontmatter를 `yaml.safe_load`로 파싱해
+        `stale_after < today` 면 stderr 나열 + exit 1. `status: deprecated` 면
+        면제. 파서 패턴은 `tools/harness_audit.py:81` 재사용.
+    - path: tests/test_doc_lifecycle.py
+      change: |
+        신규. 만료 / 미만료 / 필드부재 / `deprecated` 면제 / 파싱실패 5케이스 회귀 테스트.
+    - path: .github/workflows/ci.yml
+      change: |
+        validate 잡에 `python3 tools/check_doc_lifecycle.py` 스텝 1개 추가.
+    - path: skills/docs-maintenance/SKILL.md
+      change: |
+        48–49행(staleness 추정 휴리스틱 358 B) 제거 후 결정론적 게이트 1줄로 대체.
+
+pros:
+  - '`iron-laws/index.md` L7 정합 — LLM 추정을 결정론적 enforcement로 치환'
+  - 'thin-harness 게이트 실측 통과: prompt-token delta −138 ~ −228 B (아래 §delta)'
+  - '적용 대상이 세션마다 읽히는 `rules/` 5파일 — staleness 피해 가장 큰 층에 최소 비용'
+  - '표준 어휘를 그대로 쓴다 (`stale_after`, `status` 부재 시 `stable`). OKF 1.0 도달 시 필드명 재작업 없이 conformance 경로로 승격 가능'
+  - '`status:` 는 부재 시 `stable` 로 간주되므로(§5.4) 5파일 어디에도 적지 않는다 — 추가 바이트 0'
+
+cons:
+  - 'OKF conformance 비주장 — `kcmd` validator / visualizer / enrichment agent 이득 전부 포기 (의식적 수용)'
+  - '만료일 근거 없는 날짜 박힘 시 게이트가 무의미한 알람으로 변질 (완화: PR 리뷰에서 날짜 근거 요구)'
+  - '2026 Q3 cherry-pick 예산 2건 중 1건 소모'
+
+sections:
+  - title: 왜 이 1건만
+    body: |
+      9개 중 8건은 대응 표면이 이미 있거나(R1–R3, D2), 저장소 결정과 충돌하거나(R4),
+      정책을 표현 못하거나(R5), 없는 인프라를 전제한다(R6). `sources`(D1)는 유용하지만
+      두 달 만에 옮긴 필드다.
+
+      `stale_after` 만 다른 이유: **대응 표면은 있는데 그것이 비결정론적.** staleness
+      탐지 휴리스틱(358 B)을 지우면 추가 바이트의 상계가 생긴다 — thin-harness 게이트를
+      통과하는 유일한 구조.
+
+  - title: delta 회계
+    body: |
+      MEMORY thin-harness discipline: 채택 건당 **prompt-token delta ≤ 0**. 바이트 실측.
+
+      | 항목 | 방향 | 바이트 |
+      |---|---|---|
+      | `stale_after: 2026-11-30\n` × 5파일 | 추가 | +130 |
+      | `status:` 필드 | 추가 | 0 (§5.4 기본값 `stable` 활용) |
+      | `---` 펜스 신규 개방 | 추가 | 0 (5파일 모두 frontmatter 보유) |
+      | `skills/docs-maintenance/SKILL.md:48–49` 제거 | 제거 | −358 |
+      | 대체 1줄 (게이트 지시) | 추가 | +약 90 |
+      | **합계** | | **−138** |
+
+      대체 1줄 생략 시 **−228 B**. 어느 쪽이든 게이트 통과.
+
+      ### 게이트 단위
+
+      `tools/*.py` / `tests/*.py`는 어떤 프롬프트에도 로드되지 않는다
+      (CI의 subprocess로 실행). 게이트 단위는 **prompt-token** 이므로 이 바이트는
+      계산에서 제외. **이 해석에 이견이 있으면 리뷰에서 반박 요청** — 게이트 통과
+      여부가 이 한 줄에 달려 있다.
+
+      ```bash
+      sed -n '48,49p' skills/docs-maintenance/SKILL.md | wc -c   # → 358
+      printf 'stale_after: 2026-11-30\n' | wc -c                 # → 26
+      ```
+
+  - title: 대상 파일
+    body: |
+      `rules/`는 `AGENTS.md` → `CLAUDE.md` → `rules/index.md` 체인으로 세션마다 읽힌다.
+      `rules/index.md`는 예약 인덱스라 대상 제외.
+
+      | 파일 | 갱신 트리거 | 제안 만료 |
+      |---|---|---|
+      | `rules/token-pricing.md` | 벤더 가격 / `/dev-kit:llm-refresh` 분기 | 분기 (가장 짧게) |
+      | `rules/git-workflow.md` | 훅 / 워크트리 정책 | 반년 |
+      | `rules/skill-authoring.md` | SKILL.md 스키마 | 반년 |
+      | `rules/session-hygiene.md` | 세션 정책 | 반년 |
+      | `rules/test-files.md` | 테스트 레이아웃 / 러너 | 1년 |
+
+      구체 날짜는 구현 PR에서 확정. **근거 없는 날짜는 리뷰에서 반려 대상.**
+
+  - title: 게이트 동작
+    body: |
+      `.github/workflows/ci.yml` validate 잡에 스텝 1개. 이 잡은 이미 manifest · skill
+      count · version freshness · bash 훅 문법 · import 검사를 순차 실행한다.
+
+      ```yaml
+      - name: Doc lifecycle (stale_after)
+        run: python3 tools/check_doc_lifecycle.py
+      ```
+
+      | 입력 | 동작 |
+      |---|---|
+      | `stale_after` 없음 | 통과 (fail-open) |
+      | `stale_after >= today` | 통과 |
+      | `stale_after < today` | 파일명 + 만료일 stderr, exit 1 |
+      | `status: deprecated` | 만료 면제 (§5.4) |
+      | frontmatter 파싱 실패 | exit 1 (fail-closed) |
+
+      파서는 `tools/harness_audit.py:81` `yaml.safe_load` 재사용. 신규 의존성 0
+      (`requirements.lock`에 PyYAML 존재).
+
+  - title: 롤백 조건
+    body: |
+      관측되면 5라인 + 파일 2개 + 워크플로 스텝 1개 제거 + SKILL.md 2줄 복원:
+
+      1. 만료 알람이 실제 stale 대신 날짜만 미루는 커밋을 3회 이상 유발
+      2. `docs-maintenance` 가 제거된 휴리스릭 없이는 stale을 못 잡는 사례 발생
+      3. OKF가 lifecycle 패밀리를 breaking change로 재정의
+
+      롤백 비용이 낮은 것이 채택 설계의 목표다.
+
+  - title: 구현 순서 (승인 후 별도 PR)
+    body: |
+      1. 별도 이슈 — 제목에 `stale_after` 명시, 본문에 이 문서 링크
+      2. 새 워크트리 + `feat/doc-lifecycle-gate`
+      3. TDD: `tests/test_doc_lifecycle.py` 먼저 (5케이스)
+      4. `tools/check_doc_lifecycle.py`
+      5. `rules/*.md` 5개에 `stale_after` — 각 날짜 근거 PR 본문에 인용
+      6. SKILL.md 48–49행 제거 + 대체 1줄
+      7. ci.yml validate 스텝 추가
+      8. `git diff --stat` 기반 delta 재실측 → PR 본문에 인용
+      9. `/dev-kit:review` → `/dev-kit:babysit-pr`

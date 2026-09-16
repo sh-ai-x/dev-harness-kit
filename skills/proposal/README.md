@@ -8,8 +8,8 @@
 ## What this skill does
 
 Renders any YAML file under `docs/proposals/` into a sibling `<sub>.html`
-alongside it. The bucket (`review` / `accepted` / `rejected`) is
-auto-routed from the YAML's `status:` field. The HTML is:
+alongside it. The bucket (`reviewing` / `pending` / `applied` / `changed` /
+`rejected`) is auto-routed from the YAML's `status:` field. The HTML is:
 
 - **Self-contained** — inline CSS only, no `<script>`, no external
   `<link rel="stylesheet">`, no remote `<img>`. Safe to email, archive, or
@@ -65,7 +65,8 @@ choice is the architecture:
 
 - Proposals are a **distinct artifact** (pre-implementation design records)
   with a **distinct lifecycle** — `draft` → `design-discussion` →
-  `ready-for-review` → `accepted` / `rejected` / `superseded`.
+  `ready-for-review` → `accepted` / `applied-with-changes` /
+  `rejected` / `superseded`.
 - Slash autocomplete does not surface flags. A `proposal` flag on
   `/dev-kit:plan` would be invisible at the moment of invocation.
 - The render output is the **handoff artifact** itself — share the HTML
@@ -86,10 +87,14 @@ lib/
 └── render_proposal_html.py  # pure renderer + __main__ CLI entry point
 
 docs/proposals/
-├── review/                  # status: draft, design-discussion, ready-for-review
+├── reviewing/               # status: draft, design-discussion, in-review
 │   └── <main>/<sub>.{yaml,html}
-├── accepted/                # status: accepted
+├── pending/                 # status: ready-for-review (approved, queued)
 │   └── <main>/<sub>.{yaml,html}
+├── applied/                 # status: accepted (implemented AS DESIGNED)
+│   └── <main>/<sub>.{yaml,html}
+│   └── <main>-mod/          # status: accepted with implementation deviations
+│       └── <sub>.{yaml,html}
 └── rejected/                # status: rejected, superseded
     └── <main>/<sub>.{yaml,html}
 
@@ -117,16 +122,17 @@ with the render logic.
 
 ```
 /dev-kit:proposal <main>/<sub>            # render one (bucket auto-routes from YAML status)
-/dev-kit:proposal accepted/<main>/<sub>   # render one with explicit bucket override
+/dev-kit:proposal applied/<main>/<sub>    # render one with explicit bucket override
 /dev-kit:proposal --list                  # list available proposals
 /dev-kit:proposal --all                   # render every proposal
 /dev-kit:proposal --migrate               # one-shot move legacy flat proposals into bucket dirs
 ```
 
-`<bucket>` is one of `review`, `accepted`, `rejected` -- the CLI picks
-the bucket from the file's `status:` field by default, but accepts an
-explicit override. The legacy 2-level `<main>/<sub>` form is still
-accepted for backward compatibility (CLI scans both shapes when listing,
+`<bucket>` is one of `reviewing`, `pending`, `applied`, `changed`,
+`rejected` -- the CLI picks the bucket from the file's `status:` field
+by default, but accepts an explicit override. The legacy 2-level
+`<main>/<sub>` form is still accepted for backward compatibility
+(CLI scans both shapes when listing,
 renders to the status-routed shape when writing).
 
 ### Direct CLI (debug + scripting)
@@ -167,7 +173,7 @@ html = render(p, now="2026-07-23")              # pass fixed `now` for determini
 **Source**: docs/proposals/<bucket>/<main>/<sub>.yaml
 **Output**: docs/proposals/<bucket>/<main>/<sub>.html (one self-contained HTML doc, inline CSS only, no JS, dark-mode aware)
 **Status**: <status from YAML frontmatter>
-**Bucket**: <review|accepted|rejected, auto-routed from `status:`>
+**Bucket**: <reviewing|pending|applied|changed|rejected, auto-routed from `status:`>
 **Sections**: <count>
 
 **Open in browser**: `open docs/proposals/<bucket>/<main>/<sub>.html` (macOS)
@@ -183,7 +189,7 @@ Create `docs/proposals/<name>.yaml` with this shape:
 
 ```yaml
 title: <one-line title>
-status: draft | design-discussion | ready-for-review | accepted | rejected | superseded
+status: draft | design-discussion | in-review | ready-for-review | accepted | applied-with-changes | rejected | superseded
 issue: <issue number, optional>
 date: YYYY-MM-DD
 tags: [<tag1>, <tag2>]

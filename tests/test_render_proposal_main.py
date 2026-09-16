@@ -30,7 +30,7 @@ class RenderProposalMainTests(unittest.TestCase):
         "path traversal",
         "invalid proposal name",
         "invalid proposal topic",
-        "invalid bucket",  # status-routed shape: `<bucket>/<main>/<sub>` where bucket is review/accepted/rejected
+        "invalid bucket",  # status-routed shape: `<bucket>/<main>/<sub>` where bucket is reviewing/pending/applied/changed/rejected
     )
 
     def _run(self, args: list[str], tmp_cwd: Path) -> subprocess.CompletedProcess:

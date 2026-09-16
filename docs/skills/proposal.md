@@ -4,7 +4,7 @@
 
 **Category:** `design` · **Alpha:** `state` · **Invocation:** `/dev-kit:proposal` (human-invoked)
 
-`proposal` renders any `docs/proposals/<bucket>/<main>/<sub>.yaml` design document (where `<bucket>` is auto-routed from the YAML's `status:` field — `review`/`accepted`/`rejected`) into a single self-contained HTML page at `docs/proposals/<bucket>/<main>/<sub>.html`, for sharing with reviewers before implementation begins. It is a distinct skill (rather than a flag on `/dev-kit:plan`) because proposals are a distinct artifact with their own lifecycle — `draft → design-discussion → ready-for-review → accepted/rejected/superseded` — and because slash-command autocomplete doesn't surface flags, so a dedicated entrypoint is the only reliable way for the user to find it.
+`proposal` renders any `docs/proposals/<bucket>/<main>/<sub>.yaml` design document (where `<bucket>` is auto-routed from the YAML's `status:` field — `reviewing`/`pending`/`applied`/`changed`/`rejected`) into a single self-contained HTML page at `docs/proposals/<bucket>/<main>/<sub>.html`, for sharing with reviewers before implementation begins. It is a distinct skill (rather than a flag on `/dev-kit:plan`) because proposals are a distinct artifact with their own lifecycle — `draft → design-discussion → in-review → ready-for-review → accepted/applied-with-changes/rejected/superseded` — and because slash-command autocomplete doesn't surface flags, so a dedicated entrypoint is the only reliable way for the user to find it.
 
 ## When to use it
 
@@ -17,7 +17,7 @@
 
 Every proposal lives at `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}`:
 
-- `<bucket>` is one of `review` / `accepted` / `rejected`, auto-routed from the YAML's `status:` field via `STATUS_TO_BUCKET` (`draft`/`design-discussion`/`ready-for-review` → `review`; `accepted` → `accepted`; `rejected`/`superseded` → `rejected`). Pass `<bucket>/<main>/<sub>` explicitly to override.
+- `<bucket>` is one of `reviewing` / `pending` / `applied` / `changed` / `rejected`, auto-routed from the YAML's `status:` field via `STATUS_TO_BUCKET` (`draft`/`design-discussion`/`in-review` → `reviewing`; `ready-for-review` → `pending`; `accepted` → `applied`; `applied-with-changes` → `changed`; `rejected`/`superseded` → `rejected`). Pass `<bucket>/<main>/<sub>` explicitly to override.
 - `<main>` is the umbrella grouping N related sub-proposals (e.g. `harness-architecture`).
 - `<sub>` is the sub-topic slug (e.g. `protocol-layer`, `00-index`) — the file is named after the sub-topic, not `index.{yaml,html}`, so it stays recognizable on a flat directory listing or static-site host.
 
@@ -27,7 +27,7 @@ The renderer auto-attaches a `<nav class="back-link">` element (`← 00-index`) 
 
 **Cross-references**: inside a proposal body, link to a sibling as `[label](<other-sub>.html)` (bare relative path, since both files live in the same `<bucket>/<main>/` directory) or `../<other-main>/<sub>.html` for a cross-umbrella link. The relative-path safety check allows bare relative paths and `../<sibling>.html`, but rejects dangerous schemes (`javascript:`, `data:`, `vbscript:`, `file:`).
 
-The topic slug matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (legacy 2-level) or `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (3-level, with the bucket name matching `review|accepted|rejected`). One `/` separator per level, no leading/trailing slash, no `.` segments. The legacy filenames `proposal.yaml` and `index.yaml` are reserved and skipped as leftovers from a previous refactor.
+The topic slug matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (legacy 2-level) or `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (3-level, with the bucket name matching `reviewing|pending|applied|changed|rejected`). One `/` separator per level, no leading/trailing slash, no `.` segments. The legacy filenames `proposal.yaml` and `index.yaml` are reserved and skipped as leftovers from a previous refactor.
 
 ## Usage
 
@@ -55,7 +55,7 @@ The topic slug matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]
 **Source**: docs/proposals/<bucket>/<main>/<sub>.yaml
 **Output**: docs/proposals/<bucket>/<main>/<sub>.html (one self-contained HTML doc, inline CSS only, no JS, dark-mode aware)
 **Status**: <status from YAML frontmatter>
-**Bucket**: <review|accepted|rejected, auto-routed from `status:`>
+**Bucket**: <reviewing|pending|applied|changed|rejected, auto-routed from `status:`>
 **Sections**: <count>
 
 **Open in browser**: `open docs/proposals/<bucket>/<main>/<sub>.html` (macOS)

@@ -88,15 +88,31 @@ STATUS_TAG_CLASS = {
 }
 
 # Status-routed layout (see module docstring). The bucket set is a tight
-# whitelist; adding a fourth name is a deliberate design choice (tests
-# pin `BUCKETS == {"review", "accepted", "rejected"}`).
-BUCKETS = ("review", "accepted", "rejected")
+# whitelist; tests pin `BUCKETS` as the 5-name lifecycle set.
+#
+# Lifecycle stages (left-to-right):
+#   reviewing  → proposal is being iterated on (draft / design-discussion /
+#                in-review revisions). Stays there until promoted or killed.
+#   pending    → proposal is ready-for-review (approved, queued for
+#                implementation). Implementation work has not started.
+#   applied    → proposal was implemented in code AS DESIGNED (no
+#                significant deviations). The shipped date is recorded
+#                in the YAML's `shipped:` field.
+#   changed    → proposal was implemented, but with design CHANGES during
+#                or after implementation. The umbrella directory carries
+#                a `-mod` suffix and the YAML records both the original
+#                proposal intent and the as-shipped deviations.
+#   rejected   → proposal was killed (rejected or superseded without
+#                implementation).
+BUCKETS = ("reviewing", "pending", "applied", "changed", "rejected")
 
 STATUS_TO_BUCKET = {
-    "draft": "review",
-    "design-discussion": "review",
-    "ready-for-review": "review",
-    "accepted": "accepted",
+    "draft": "reviewing",
+    "design-discussion": "reviewing",
+    "in-review": "reviewing",
+    "ready-for-review": "pending",
+    "accepted": "applied",
+    "applied-with-changes": "changed",
     "rejected": "rejected",
     "superseded": "rejected",
 }
@@ -104,9 +120,9 @@ STATUS_TO_BUCKET = {
 
 def bucket_for_status(status: str) -> str:
     """Return the filesystem bucket for a proposal status. Unknown
-    statuses fall back to `review` so a typo in the YAML still produces
+    statuses fall back to `reviewing` so a typo in the YAML still produces
     a routable path rather than crashing the renderer."""
-    return STATUS_TO_BUCKET.get(status, "review")
+    return STATUS_TO_BUCKET.get(status, "reviewing")
 
 
 # Reserved file stems that previous refactors used as canonical
@@ -1651,7 +1667,7 @@ def _in_flight(project_root: Path) -> list[str]:
     # in-flight predicate, so a bucketed SSOT that has `shipped:` set
     # (and therefore isn't in flight) still shadows any stale
     # legacy-flat copy (M3 reviewer, PR #804 2nd round).
-    bucket_dir = pdir / "accepted"
+    bucket_dir = pdir / "applied"
     if bucket_dir.is_dir():
         for main_dir in sorted(bucket_dir.iterdir()):
             if not main_dir.is_dir():
