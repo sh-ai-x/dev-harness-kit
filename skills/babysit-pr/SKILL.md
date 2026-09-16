@@ -299,7 +299,7 @@ parallel tool calls are especially dangerous — they always look fresh.
 
 ```
   1. SNAPSHOT   — fetch PR_NUMBER, REVIEW_VERDICT, CHECKS (single gh call),
-                  call `lib.babysit_pr_cli.persist_loop_snapshot(...)`, and
+                  call `lib/babysit_pr_cli.persist_loop_snapshot(...)`, and
                   atomically save the observed phase before acting.
                     Load the prior iteration's check-state cache from
                     `.dev-kit/babysit-checks.json` (absent on iter 1 —
@@ -309,6 +309,17 @@ parallel tool calls are especially dangerous — they always look fresh.
                     `unchanged` split feeds step 5. Every `gh` call in
                     this step and the steps that follow is itself subject
                     to the MUST rule above; do not trust a cached value.
+  1.5 DYNAMIC GATES (v1.1.0) — between SNAPSHOT and CLASSIFY, call
+                    `lib/babysit_pr_reliability.select_gates_dynamic(...)`
+                    to compute the LLM-judge-recommended skip set for
+                    this iteration. The result (a `frozenset` of gate
+                    names) is passed as `dynamic_skipped=` to the
+                    `persist_loop_snapshot` call. The audit trail lives
+                    at `.dev-kit/gate-dynamic/<head_sha>.json`. See
+                    `docs/skills/gate-dynamic.md` for the hard rules +
+                    cache invalidation story. First push (iter == 1)
+                    is deterministic — `dynamic_skipped` is empty
+                    regardless of what the judge would have said.
   2. TERMINATE  — if REVIEW_VERDICT == "APPROVED"
                     AND every check.conclusion ∈ {success, skipped, neutral}
                     → print "✅ PR #<n> approved — done" + iterate count

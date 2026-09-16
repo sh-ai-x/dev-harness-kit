@@ -12,6 +12,17 @@ Three gates are first-class today (``review``, ``security``, ``maintenance``);
 a fourth gate may be added as an additive bump without a schema version
 change because the validator only allows the pinned keys.
 
+Schema v1.1.0 (additive, forward-compat from v1.0.0):
+- Each gate may additionally carry optional dynamic-skip fields
+  (``dynamic_eligible``, ``scope_globs``, ``cost_estimate``,
+  ``judge_model``, ``skip_when``, ``forced_run``) declared in
+  ``DYNAMIC_FIELDS_DEFAULT``. These power
+  ``/dev-kit:gate-dynamic`` + ``bin/review-local.sh --dynamic-skip``;
+  the legacy 3-key shape (v1.0.0) auto-upgrades in-memory on read.
+- The validator uses a SUBSET rule (``{enabled, workflow, var} ⊆ keys ⊆
+  REQUIRED ∪ DYNAMIC``) instead of strict equality — unknown keys still
+  raise, but operator-known optional fields are accepted.
+
 Schema lives in this module as ``SCHEMA_VERSION`` + ``DEFAULT_GATES`` so
 ``tests/test_ci_setup.py::test_marker_schema_version_current`` can pin the
 contract and ``ci_setup`` can read ``DEFAULT_GATES`` for marker projection
@@ -41,7 +52,24 @@ except ImportError:
     from gh_cli import gh_available  # type: ignore
 
 STATE_REL_PATH = Path(".dev-kit") / "gates.json"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+
+# Per-gate optional fields for the dynamic-skip layer (consumed by
+# `lib/gate_dynamic.py` + `bin/review-local.sh --dynamic-skip`). The
+# validator allows any subset of these alongside the required
+# `{enabled, workflow, var}` keys. Defaults are seeded on every read so
+# callers can introspect a gate entry without a `gate.get(...)` dance.
+#
+# v1.1.0 only ships the 3 fields the orchestrator actually reads:
+# `dynamic_eligible` (opt-in), `scope_globs` (rule #3 input),
+# `forced_run` (rule #2 input). Cost / model / skip-when tuning flags
+# are deferred to v2 — shipping them now would be the OE-2 speculative
+# param pattern.
+DYNAMIC_FIELDS_DEFAULT: dict = {
+    "dynamic_eligible": False,   # opt-in: gate can be considered for LLM-driven skip
+    "scope_globs": [],           # file patterns this gate covers (e.g. ["lib/**", "skills/**"])
+    "forced_run": False,         # operator override — never SKIP this gate
+}
 
 # The 3 first-class gate keys. The validator rejects any other top-level
 # `gates.<key>` to keep the schema tight; adding a fourth gate is a
@@ -145,6 +173,10 @@ def apply_defaults(state: dict) -> dict:
     resolves cleanly with `security` + `maintenance` defaulted on. A
     hand-edited extra key that is NOT in `VALID_GATE_KEYS` is left
     alone here — `validate()` rejects it; `read_state` raises.
+
+    v1.1.0: also backfills DYNAMIC_FIELDS_DEFAULT on every gate entry so
+    callers can `entry["dynamic_eligible"]` without a guard. Operator-set
+    values (e.g. `dynamic_eligible=True`) are preserved via `setdefault`.
     """
     if not isinstance(state, dict):
         raise ValidationError("state must be a dict")
@@ -153,6 +185,12 @@ def apply_defaults(state: dict) -> dict:
     for key, default in DEFAULT_GATES.items():
         if key not in gates:
             gates[key] = dict(default)
+    # Backfill dynamic fields on every gate entry — preserves operator-set
+    # values via `setdefault`, fills absent keys with DYNAMIC_FIELDS_DEFAULT.
+    for entry in gates.values():
+        if isinstance(entry, dict):
+            for dyn_key, dyn_default in DYNAMIC_FIELDS_DEFAULT.items():
+                entry.setdefault(dyn_key, dyn_default)
     out["gates"] = gates
     return out
 
@@ -162,13 +200,18 @@ def validate(state: object) -> None:
 
     Rules (each violation carries a field path in the message):
       1. `state` is a dict.
-      2. `schema_version == "1.0.0"`.
+      2. `schema_version == "1.1.0"`. (Older 1.0.0 files are auto-migrated
+         in-memory by `read_state` before reaching here.)
       3. `gates.keys() ⊆ VALID_GATE_KEYS` (no extra keys).
-      4. Each gate value is a dict with exactly `{enabled, workflow, var}`
-         (no extras; missing key fails).
+      4. Each gate value is a dict whose keys are a subset of
+         `{enabled, workflow, var} ∪ DYNAMIC_FIELDS_DEFAULT`. The required
+         `{enabled, workflow, var}` keys must be present. Unknown keys raise.
       5. `enabled` is a JSON bool (NOT truthy-string).
       6. `workflow` is a non-empty string ending in `.yml` matching the gate key.
       7. `var` is a non-empty string matching `GATES_<KEY_UPPER>_ENABLED`.
+      8. Optional dynamic-skip fields (when present) have the right type:
+         `dynamic_eligible`/`forced_run` → bool; `scope_globs` → list[str];
+         `cost_estimate` → number; `judge_model`/`skip_when` → str.
     """
     if not isinstance(state, dict):
         raise ValidationError("state: must be a dict")
@@ -186,6 +229,8 @@ def validate(state: object) -> None:
             f"gates: unknown key(s) {sorted(extra)} — "
             f"allowed: {sorted(VALID_GATE_KEYS)}"
         )
+    required_keys = frozenset({"enabled", "workflow", "var"})
+    allowed_keys = required_keys | frozenset(DYNAMIC_FIELDS_DEFAULT)
     for key in VALID_GATE_KEYS:
         # Only validate keys that are PRESENT (apply_defaults synthesizes
         # missing keys before validation in the write path). This lets
@@ -196,10 +241,18 @@ def validate(state: object) -> None:
         gate = gates[key]
         if not isinstance(gate, dict):
             raise ValidationError(f"gates.{key}: must be a dict")
-        if set(gate.keys()) != {"enabled", "workflow", "var"}:
+        gate_keys = set(gate.keys())
+        if not required_keys.issubset(gate_keys):
+            missing = sorted(required_keys - gate_keys)
             raise ValidationError(
-                f"gates.{key}: keys must be exactly "
-                f"['enabled', 'workflow', 'var'] (got {sorted(gate.keys())})"
+                f"gates.{key}: missing required key(s) {missing} "
+                f"(got {sorted(gate_keys)})"
+            )
+        unknown = gate_keys - allowed_keys
+        if unknown:
+            raise ValidationError(
+                f"gates.{key}: unknown key(s) {sorted(unknown)} — "
+                f"allowed: {sorted(allowed_keys)}"
             )
         enabled = gate.get("enabled")
         if not isinstance(enabled, bool):
@@ -220,6 +273,24 @@ def validate(state: object) -> None:
             raise ValidationError(
                 f"gates.{key}.var: must equal {expected_var!r} (got {var!r})"
             )
+        # Type checks for v1.1.0 optional fields (only when present).
+        if "dynamic_eligible" in gate and not isinstance(gate["dynamic_eligible"], bool):
+            raise ValidationError(
+                f"gates.{key}.dynamic_eligible: must be a JSON bool "
+                f"(got {type(gate['dynamic_eligible']).__name__})"
+            )
+        if "forced_run" in gate and not isinstance(gate["forced_run"], bool):
+            raise ValidationError(
+                f"gates.{key}.forced_run: must be a JSON bool "
+                f"(got {type(gate['forced_run']).__name__})"
+            )
+        if "scope_globs" in gate:
+            globs = gate["scope_globs"]
+            if not isinstance(globs, list) or not all(isinstance(g, str) for g in globs):
+                raise ValidationError(
+                    f"gates.{key}.scope_globs: must be a list of strings "
+                    f"(got {type(globs).__name__})"
+                )
 
 
 def read_state(root: Optional[Path] = None) -> dict:
@@ -230,6 +301,10 @@ def read_state(root: Optional[Path] = None) -> dict:
       the CLI does so and exits 2).
     - Partial `gates` (only `review`) → defaults fill in the rest.
     - Extra unknown `gates` key → `ValidationError` (strict).
+    - `schema_version: "1.0.0"` → in-memory migration to v1.1.0: each gate
+      gets DYNAMIC_FIELDS_DEFAULT backfilled via `setdefault`. The on-disk
+      file is NOT rewritten; the next explicit `set` / `write_state` call
+      persists the bump.
     """
     path = _state_path(root)
     if not path.exists():
@@ -242,6 +317,18 @@ def read_state(root: Optional[Path] = None) -> dict:
         raw = json.loads(text)
     except json.JSONDecodeError as e:
         raise ValidationError(f"{path}: invalid JSON: {e}") from e
+    # Read-time auto-migration v1.0.0 → v1.1.0. Only adds keys that are
+    # absent — operator-known values (e.g. dynamic_eligible=True already
+    # written by a 1.1.0-aware CLI) are preserved verbatim. The disk file
+    # is untouched here; the next `write_state` call persists the bump.
+    if isinstance(raw, dict) and raw.get("schema_version") == "1.0.0":
+        raw["schema_version"] = "1.1.0"
+        gates_obj = raw.get("gates")
+        if isinstance(gates_obj, dict):
+            for entry in gates_obj.values():
+                if isinstance(entry, dict):
+                    for k, v in DYNAMIC_FIELDS_DEFAULT.items():
+                        entry.setdefault(k, v)
     validate(raw)
     return apply_defaults(raw)
 
@@ -491,29 +578,52 @@ def _set_field(state: dict, gate: str, key: str, value: str) -> dict:
     operator doesn't have to hand-edit JSON. `enabled` accepts
     ``true|false|1|0|yes|no`` (case-insensitive, the same allowlist
     the bash `bin/set-provider.sh:234` uses for provider values).
+    `dynamic_eligible`/`forced_run` accept the same bool aliases;
+    `scope_globs` accepts comma-separated strings OR a JSON list.
     """
     if gate not in VALID_GATE_KEYS:
         raise ValidationError(f"unknown gate: {gate!r}")
-    if key not in {"enabled", "workflow", "var"}:
+    allowed_keys = {"enabled", "workflow", "var"} | set(DYNAMIC_FIELDS_DEFAULT)
+    if key not in allowed_keys:
         raise ValidationError(
-            f"unknown field {key!r} — allowed: enabled, workflow, var"
+            f"unknown field {key!r} — allowed: {sorted(allowed_keys)}"
         )
     gates = dict(state.get("gates") or {})
     entry = dict(gates.get(gate) or {})
-    if key == "enabled":
+    if key == "enabled" or key in ("dynamic_eligible", "forced_run"):
         v = value.strip().lower()
         if v in ("true", "1", "yes"):
-            entry["enabled"] = True
+            entry[key] = True
         elif v in ("false", "0", "no"):
-            entry["enabled"] = False
+            entry[key] = False
         else:
             raise ValidationError(
-                f"enabled: must be true|false|1|0|yes|no (got {value!r})"
+                f"{key}: must be true|false|1|0|yes|no (got {value!r})"
             )
     elif key == "workflow":
         entry["workflow"] = value
     elif key == "var":
         entry["var"] = value
+    elif key == "scope_globs":
+        # Accept either a JSON list (`["lib/**"]`) or a comma-separated
+        # string (`lib/**,skills/**`). The CLI surfaces both shapes.
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError as e:
+                raise ValidationError(
+                    f"scope_globs: invalid JSON list (got {value!r}): {e}"
+                ) from e
+            if not isinstance(parsed, list) or not all(
+                isinstance(g, str) for g in parsed
+            ):
+                raise ValidationError(
+                    f"scope_globs: must be a list of strings (got {value!r})"
+                )
+            entry[key] = parsed
+        else:
+            entry[key] = [g.strip() for g in stripped.split(",") if g.strip()]
     gates[gate] = entry
     new = dict(state)
     new["gates"] = gates
@@ -550,7 +660,10 @@ def main(argv=None) -> int:
         "set", help="set one nested field on a gate entry (JSON-escapable)"
     )
     set_p.add_argument("gate", choices=GATE_ORDER)
-    set_p.add_argument("key", choices=("enabled", "workflow", "var"))
+    set_p.add_argument(
+        "key",
+        choices=("enabled", "workflow", "var") + tuple(DYNAMIC_FIELDS_DEFAULT),
+    )
     set_p.add_argument("value")
     set_p.add_argument("--root", default=None)
 
@@ -588,16 +701,23 @@ def _dispatch(args) -> int:
     if args.command == "show":
         root = Path(args.root) if args.root else None
         state = read_state(root)
+        gates_out = {}
+        for k in GATE_ORDER:
+            entry = state["gates"][k]
+            gates_out[k] = {
+                "enabled": entry["enabled"],
+                "workflow": entry["workflow"],
+                "var": entry["var"],
+            }
+            # v1.1.0 — include dynamic-skip fields when they deviate from
+            # defaults, so the operator can audit gate-skip eligibility
+            # from `show` without opening the raw JSON.
+            for dyn_key, dyn_default in DYNAMIC_FIELDS_DEFAULT.items():
+                if entry.get(dyn_key) != dyn_default:
+                    gates_out[k][dyn_key] = entry[dyn_key]
         out = {
             "schema_version": state.get("schema_version"),
-            "gates": {
-                k: {
-                    "enabled": state["gates"][k]["enabled"],
-                    "workflow": state["gates"][k]["workflow"],
-                    "var": state["gates"][k]["var"],
-                }
-                for k in GATE_ORDER
-            },
+            "gates": gates_out,
         }
         if args.json:
             print(json.dumps(out, sort_keys=True))

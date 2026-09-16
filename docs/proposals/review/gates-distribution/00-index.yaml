@@ -1,0 +1,549 @@
+title: "Distribute dev-kit gates as a GitHub Action + per-path rule-driven gate selection"
+status: design-discussion
+date: 2026-09-15
+tags: [ci-setup, babysit-pr, gates, marketplace, paths, distribution, plugin, schema]
+
+before:
+  summary: |
+    The CI gate machinery that `ci-setup` writes into a consumer repo
+    (review.yml, security.yml, maintenance.yml, auto-fix-pr.yml, and the
+    babysit-pr driving workflows) is shipped as raw `.github/workflows/*.yml`
+    template files inside the dev-harness-kit plugin. Consumers receive
+    the workflows by `cp` from `templates/ci/.github/workflows/`, and a
+    single `.dev-kit/gates.json` controls an on/off flag per workflow
+    with `vars.GATES_<NAME>_ENABLED`. The selection is global per gate:
+    every changed file under the same PR runs the same three judges.
+
+    Two independent problems block scaling:
+
+    1. **Distribution coupling.** `review.yml` alone is 60 KB and
+       `maintenance.yml` is 29 KB and both live next to the plugin code.
+       A small fix to `lib/gates_state.py` does not move the workflow
+       payload. Consumers that pin the plugin version can be months
+       behind a security fix, and a marketplace-style
+       "discover the action, pin a version" path is not available.
+
+    2. **Coarse selection.** The schema at
+       `lib/gates_state.py:50-75` defines exactly three gates — review,
+       security, maintenance — and the validator (`validate()`,
+       `lib/gates_state.py:160-222`) rejects any other key. A consumer
+       that wants "review only on `lib/**`", "security only on
+       `.github/workflows/**`", or "maintenance only on `skills/**`"
+       cannot express it; today the only lever is the global on/off
+       switch, and `paths-filter` cannot be configured from the JSON
+       SSOT.
+
+  evidence:
+    - "`.github/workflows/review.yml` is 59 KB; `.github/workflows/security.yml` and `.github/workflows/maintenance.yml` are likewise large — shipping them as workflow template files inside the plugin couples judge fixes to plugin releases."
+    - "`templates/ci/.github/workflows/` only carries ci.yml, auto-fix-pr.yml, maintenance.yml, review.yml, security.yml; reusable-workflow refs to a separate action repo would let marketplace versioning bypass the plugin version train."
+    - "`lib/gates_state.py:50` `VALID_GATE_KEYS = frozenset({'review', 'security', 'maintenance'})` — the validator rejects any fourth top-level gate and forbids per-path attributes."
+    - "`lib/gates_state.py:59-75` `DEFAULT_GATES` records exactly three gates; each entry is `{enabled, workflow, var}` and the field set is pinned by `lib/gates_state.py:199-202`."
+    - "`lib/gates_state.py:385-424` `sync()` pushes only one boolean per gate (`gh variable set GATES_<NAME>_ENABLED`). The variable is read inside the workflow as `if: vars.GATES_REVIEW_ENABLED != 'false'`; there is no path-level signal."
+    - "`skills/ci-setup/SKILL.md:153-167` Files Installed table — every workflow is template-copied into the consumer repo; there is no `uses: dev-harness-kit/<action>@vX` reference today."
+    - "`skills/babysit-pr/SKILL.md:14-19` documents that `auto-fix-pr.yml` is an event adapter wired to the same babysit state — it too is template-shipped, not marketplace-pinned."
+    - "`skills/gate-select/SKILL.md:64-80` show output lists three judge skills with one on/off per gate; `pick` writes only the global on/off flag (skill/gate-select/SKILL.md:99-115)."
+    - "`.github/workflows/ci.yml:14-58` shows the consumer-side workflow that auto-detects `paths-filter` is NOT used — every push to `main` runs every job unconditionally except for the GATES_* variables."
+    - "`tools/skill_usage.py` exposes a 30-day per-skill counter; the absence of a similar per-path counter makes it impossible to measure today whether coarse-grained selection is wasting AI-judge minutes on doc-only PRs."
+
+after:
+  summary: |
+    The proposal has two coordinated halves that share the same SSOT
+    (`.dev-kit/gates.json`) but land in different planes.
+
+    **Half A — Marketplace distribution.** Move every gate workflow
+    from `templates/ci/.github/workflows/<gate>.yml` to a separate
+    `dev-harness-kit/gates` GitHub repository, exposed as **reusable
+    workflows** with semver tags. Consumers reference them via
+    `uses: dev-harness-kit/gates/.github/workflows/review.yml@v1`,
+    keeping their own repo's `.github/workflows/review.yml` as a tiny
+    `on: pull_request` wrapper that hard-pins the major version.
+    `ci-setup` keeps its idempotent contract but the install payload
+    shrinks to a small set of wrappers plus the existing marker.
+    Updates become `uses: ...@v1.4.0` rather than a plugin release.
+
+    **Half B — Per-path rule-driven selection.** Extend
+    `.dev-kit/gates.json` with an additive `path_rules` block: each
+    rule maps a glob (`lib/**`, `.github/workflows/**`, `skills/**`)
+    to a gate-set (`review`, `security`, `maintenance`, or an
+    extension set). The schema bump (`1.0.0` → `1.1.0`) is additive;
+    consumers without `path_rules` keep the current global behavior.
+    A small action — `dev-harness-kit/gates/resolve-paths` — reads
+    `gates.json` + the PR's changed file list, and emits one boolean
+    per gate. The judge workflows' `if:` conditions become
+    `vars.GATES_REVIEW_ENABLED != 'false' && steps.resolve.outputs.review == 'true'`,
+    so a doc-only PR automatically skips the security and maintenance
+    judges, while a workflow-edit PR runs security only.
+
+    Both halves preserve the existing `.dev-kit/gates.json` SSOT, the
+    `gh variable set GATES_<NAME>_ENABLED` sync path, the
+    `pick` UX in `gate-select`, and the human merge boundary.
+  files:
+    - path: docs/proposals/review/gates-distribution/00-index.yaml
+      change: This proposal source.
+    - path: docs/proposals/review/gates-distribution/00-index.html
+      change: Derived HTML render; regenerated by the proposal renderer.
+    - path: docs/proposals/review/gates-distribution/marketplace-checklist.md
+      change: Companion document listing the GitHub Marketplace publishing requirements (action.yml, README, branding, version tags, doc signing) the new gates repo must satisfy before public release.
+
+    # --- Half A: marketplace distribution ------------------------------
+    - path: ../dev-harness-kit-gates/README.md
+      change: |
+        New sibling repository that owns the reusable workflows. The
+        README documents the public contract, version policy, and the
+        SSOT link back to `.dev-kit/gates.json` in consumer repos.
+    - path: ../dev-harness-kit-gates/.github/workflows/review.yml
+      change: |
+        Moved verbatim from `templates/ci/.github/workflows/review.yml`,
+        stripping the `on:` block and the secrets wiring, which now
+        live in the consumer wrapper. Inputs are declared via
+        `workflow_call` (`gates_json_b64`, `provider`, `model`,
+        `output_artifact`).
+    - path: ../dev-harness-kit-gates/.github/workflows/security.yml
+      change: Same shape as review; promoted to reusable workflow.
+    - path: ../dev-harness-kit-gates/.github/workflows/maintenance.yml
+      change: Same shape as review; promoted to reusable workflow.
+    - path: ../dev-harness-kit-gates/.github/workflows/auto-fix-pr.yml
+      change: Same shape; kept as reusable because babysit-pr depends on it.
+    - path: ../dev-harness-kit-gates/.github/workflows/resolve-paths.yml
+      change: |
+        New reusable workflow used by every consumer wrapper. Reads the
+        changed files via `dorny/paths-filter`, merges the result with
+        `.dev-kit/gates.json` `path_rules`, and emits one boolean per
+        gate as step outputs. Half B's central artifact.
+    - path: ../dev-harness-kit-gates/action.yml
+      change: |
+        Composite action variant for consumers that prefer a single
+        `uses: dev-harness-kit/gates@v1` reference instead of three
+        workflow_call blocks. Resolves paths and exports outputs for
+        downstream jobs in the same workflow file.
+    - path: templates/ci/.github/workflows/review.yml
+      change: |
+        Reduced to a thin wrapper: `on: pull_request`, `permissions:`,
+        one `jobs: review: uses: dev-harness-kit/gates/.github/workflows/review.yml@v1`
+        call, secrets passthrough.
+    - path: templates/ci/.github/workflows/security.yml
+      change: Same wrapper shape, points to the security reusable workflow.
+    - path: templates/ci/.github/workflows/maintenance.yml
+      change: Same wrapper shape, points to the maintenance reusable workflow.
+    - path: templates/ci/.github/workflows/auto-fix-pr.yml
+      change: Same wrapper shape, points to the auto-fix reusable workflow.
+    - path: lib/ci_setup.py
+      change: |
+        Idempotent install still writes the wrappers; an `EXPECTED_PATHS`
+        diff makes the reduction visible in the install report. The
+        helper `expected_workflow_size()` enforces a size budget so a
+        future PR that bloats a wrapper back into a copy of the workflow
+        body is caught at install time.
+    - path: skills/ci-setup/SKILL.md
+      change: |
+        Document the marketplace pin contract (`uses: ...@v1`, never
+        `@main` or `@v0`), the wrapper budget, and the migration story
+        for consumers on a pre-distribution install.
+
+    # --- Half B: per-path rule-driven selection ------------------------
+    - path: lib/gates_state.py
+      change: |
+        Bump `SCHEMA_VERSION` to `1.1.0`. Add `apply_defaults()` for a
+        new `path_rules: list[PathRule]` block. Each rule is a dataclass
+        `{name: str, when: GlobSet, gates: tuple[str, ...], mode: all|any}`.
+        Add `path_rule_for_paths(rules, paths)` projection. Keep the
+        `VALID_GATE_KEYS` validator additive (path_rules entries may
+        name future gate keys without bumping SCHEMA_VERSION again —
+        a follow-up minor bump freezes the allowed set).
+    - path: lib/gates_path_resolver.py
+      change: |
+        New pure module. Inputs: `gates.json`, list of changed paths.
+        Outputs: `{gate: bool}`. Order: explicit path_rule wins over
+        gate default; conflicting rules resolved by longest `when`
+        glob; ties broken by `mode: all` first then by rule order in
+        JSON. Pure function with a public `resolve()` entry; tests
+        pin ties, missing files, and glob edge cases.
+    - path: lib/gates_state.py (sync)
+      change: |
+        Extend `sync()` to also push a `GATES_PATH_RULES_B64` variable
+        (bas64-encoded JSON) so reusable workflows read the ruleset
+        without `actions/checkout`ing `.dev-kit/`.
+    - path: tests/test_gates_state.py
+      change: |
+        Add schema tests for the `1.1.0` additive bump, default-fill
+        when `path_rules` is absent, and rejection of unknown keys at
+        the rule level (not just the top level).
+    - path: tests/test_gates_path_resolver.py
+      change: |
+        New pure-function tests: rule precedence, longest-glob wins,
+        mode=all vs mode=any, unknown gate key rejection, and the
+        `INSUFFICIENT_EVIDENCE` reporting contract when paths is empty.
+    - path: tests/test_marketplace_wrapper_budget.py
+      change: |
+        Asserts the install-time wrapper size budget — the wrapper
+        bodies stay under a small line cap; full judge body never
+        lands in a consumer repo.
+    - path: skills/gate-select/SKILL.md
+      change: |
+        Document `pick path <name>` for adding/editing path rules via
+        the picker (instead of hand-editing JSON), the resolver test
+        command, and the sync b64 push.
+    - path: skills/ci-doctor/SKILL.md
+      change: |
+        Add a `path-rules` check: every `path_rules[].gates[*]` value
+        must currently exist in `VALID_GATE_KEYS` OR be a known
+        forward-reference extension (lint, but not blocking until the
+        referenced action ships).
+    - path: docs/quality/ci-setup.md
+      change: |
+        Add the marketplace publishing checklist (branding, action.yml
+        schema, version tag policy, README contract, security hardening
+        baseline) so the ops team has one document when opening the
+        gates repo for public use.
+    - path: docs/proposals/review/gates-distribution/migration.md
+      change: |
+        Companion migration document: how a consumer installed before
+        this proposal lands upgrades to wrapper-only workflows without
+        losing gate state, and how `gates.json path_rules` adopters
+        roll back if a rule is misconfigured.
+
+pros:
+  - "Distribution decouples judge fixes from plugin releases; a security patch in `dev-harness-kit/gates@v1.4.3` reaches consumers without a `dev-harness-kit` plugin bump."
+  - "Per-path selection removes AI-judge minutes from doc-only PRs and security-only runs from PRs that do not touch `.github/`; expected cost reduction is measurable via `tools/skill_usage.py`."
+  - "Both halves share `.dev-kit/gates.json` as the SSOT, so a single `gate-select pick path <name>` writes both the on/off flag and the rule — no new operator surface."
+  - "The schema bump is additive (`1.0.0 → 1.1.0`); consumers without `path_rules` keep working, and consumers without the marketplace action can stay on the legacy wrapper indefinitely."
+  - "Reusable workflows + a thin consumer wrapper make the workflow payload in the consumer repo small and auditable; the wrapper budget test prevents regression."
+  - "Tightens the `gates_state` invariant: `gate` is one of three first-class keys, but the rule space is open-ended and validated independently."
+
+cons:
+  - "A second repo to maintain (branch protection, release process, README/docs, marketplace listing renewal). Mitigation: keep the repo narrow (only workflows + action.yml + tests) and rely on the consumer repo for templates/docs already owned by dev-kit."
+  - "Reusable workflows cannot import secrets defined only in the calling repo without explicit passthrough; the wrappers must enumerate every secret the judges need. Mitigation: ship a `required_secrets_for(provider)` helper from `lib/ci_setup.py` so the wrapper regeneration is data-driven."
+  - "Marketplace listing requires brand assets, an icon, a release pipeline, and version tags; the first publish is non-trivial. Mitigation: stage the release — first publish `v0` privately, then promote to public marketplace once the wrapper budget test is green."
+  - "A path_rules rule that names a gate which does not exist (e.g. typo `securty`) silently makes the rule a no-op. Mitigation: `ci-doctor` lint warns on unknown rule gate names; the resolver returns `INSUFFICIENT_EVIDENCE` for paths where no rule matches rather than auto-defaulting to `enabled=true`."
+  - "Backwards compatibility requires a migration period where the legacy `templates/ci/.github/workflows/*.yml` files still exist; the install report prints both shapes so an operator can see the wrapper shrinkage."
+  - "Long-glob ties are an arbitrary-feeling rule. Mitigation: `gates_path_resolver` documents the tie-breaker (longest `when`, then `mode=all`, then JSON order) and the rule ordering is part of the linter output."
+
+limitations:
+  - "Per-path selection cannot prove semantic quality; it only chooses which judges run. The actual review verdict and human merge boundary remain unchanged."
+  - "Marketplace publishing does not eliminate Action minutes cost; reusable workflows still run on the consumer's GH-Actions budget. Cost reduction comes from skipping irrelevant judges, not from skipping the platform."
+  - "The `gates_path_resolver` runs in the reusable workflow; if the resolver action is unavailable (e.g. on a self-hosted runner without network), the workflow must fail closed to `enabled=true` (do not silently skip judges). This is documented but not enforced by the schema."
+  - "Reusable workflows cannot `uses:` private actions by default without an `actions: read` token. The wrappers must request the appropriate `permissions:` block; this proposal sets the baseline but does not enumerate every consumer's permission model."
+  - "The proposal does not introduce a fourth first-class gate (e.g. `performance`, `compliance`); it only opens the path_rules gate vocabulary so a future proposal can ship a fourth gate without a schema bump."
+  - "Marketplace naming and icon policy are GitHub-controlled; the final action name `dev-harness-kit/gates` is provisional and may need to be renamed if GitHub rejects it during publishing review."
+
+scope:
+  in_scope:
+    - "A new `dev-harness-kit/gates` repository hosting reusable workflows for review, security, maintenance, auto-fix-pr, and resolve-paths."
+    - "Wrapper-only consumer workflows that pin the action to `v1` and pass through secrets, the provider, the model, and the `gates.json` b64 payload."
+    - "`gates.json` schema bump to `1.1.0` with an additive `path_rules` block; new `lib/gates_path_resolver.py` pure module."
+    - "`lib/gates_state.py: sync()` push of `GATES_PATH_RULES_B64`; `gate-select pick path <name>` UX for editing rules via the picker."
+    - "`ci-doctor` lint for unknown gate names in path rules and wrapper size budget."
+    - "Migration document for legacy consumers; the install report prints the wrapper shrinkage."
+  out_of_scope:
+    - "Adding a fourth first-class gate (review/security/maintenance remain the only `VALID_GATE_KEYS`); the proposal opens the vocabulary but does not promote any new judge to first-class status."
+    - "Replacing `.dev-kit/gates.json` with a different SSOT; both halves preserve it."
+    - "Marketing, branding assets, and the marketplace listing page (handled by the ops checklist, not the plugin)."
+    - "Self-hosted runner support beyond documenting the fail-closed expectation in `gates_path_resolver`."
+    - "Cross-PR learning (e.g. \"this gate has been skipped 5 times, demote it\"); the rule set is operator-controlled, not learned."
+    - "Removing the legacy `templates/ci/.github/workflows/*.yml` files; they coexist with the wrappers until the migration window closes."
+
+ambiguity:
+  - id: GD-A1
+    question: "Should the new gates repo ship as a single composite action, multiple reusable workflows, or both?"
+    default: "Both. The composite action (`action.yml`) wraps `resolve-paths` and is the consumer-side default for new repos; the reusable workflows are the lower-level entry for repos that already have a custom workflow file with additional jobs. The wrapper templates in dev-kit use the reusable workflows because they preserve the existing one-workflow-per-gate layout."
+    blocking: true
+  - id: GD-A2
+    question: "What happens when `gates.json` does not exist on the consumer repo?"
+    default: "Resolver returns `INSUFFICIENT_EVIDENCE` (fail-closed) and the wrappers skip the path-resolver step, falling back to `vars.GATES_<NAME>_ENABLED` only. This matches the existing `is_enabled` contract in `lib/gates_state.py:270-280` — a missing gates.json is treated as \"all gates enabled\" for backward compatibility, but path selection is opt-in."
+    blocking: true
+  - id: GD-A3
+    question: "Does the action repo accept forward-references to gates that do not exist yet?"
+    default: "Yes, with a lint warning from `ci-doctor`. The resolver returns `enabled=false` for any path where the only matching rule names a non-existent gate. A rule that always disables a gate has the same effect as a no-op but is visible in the resume report."
+    blocking: false
+  - id: GD-A4
+    question: "How is the path_rules sync encoded in the GH variable?"
+    default: "Base64-encoded JSON payload pushed to `GATES_PATH_RULES_B64`. The base64 wrapper avoids quoting headaches in shell; the JSON content is the same shape as `gates.json:path_rules`. Re-running `gate-select sync` is idempotent."
+    blocking: false
+  - id: GD-A5
+    question: "Should the wrapper pin a major version (`@v1`) or a minor version (`@v1.4`) by default?"
+    default: "Major only (`@v1`). The marketplace publishing checklist documents the backward-compat contract; minor bumps must not change the `workflow_call` input shape. A new major version is allowed to break the contract and consumers opt in explicitly."
+    blocking: false
+
+sections:
+  - title: Decision and rollout ordering
+    body: |
+      Both halves of this proposal land in three coordinated phases. The
+      schema bump and the wrapper budget are the load-bearing pieces;
+      Half A and Half B can ship in either order, but neither half is
+      usable without the SSOT discipline that already lives in
+      `lib/gates_state.py`.
+
+      | Phase | Scope | Exit condition |
+      |---|---|---|
+      | 1 | Add `path_rules` to `gates.json` schema (`1.1.0`); `lib/gates_path_resolver.py`; `ci-doctor` lint; tests | Schema accepts the new block; resolver returns correct booleans for ties and unknown gates; `gates.json` from a `1.0.0` consumer still loads. |
+      | 2 | Create `dev-harness-kit/gates` repo with the five reusable workflows; publish `@v0` privately | Reusable workflow call from a fixture consumer repo succeeds with PR-level check verdicts; secret passthrough works; `resolve-paths` outputs the expected booleans. |
+      | 3 | Replace `templates/ci/.github/workflows/<gate>.yml` with thin wrappers pointing at `@v1`; promote `@v1` to public marketplace | Wrapper size budget test is green; an existing consumer's `.dev-kit/ci-config.json` round-trip install is idempotent; the marketplace listing is approved. |
+
+      Phase 1 is additive and reversible. Phase 2 introduces a second
+      repo but does not change any consumer behavior. Phase 3 is the
+      only user-visible change; before it lands, both halves exist as
+      opt-in surfaces behind `gate-select pick path <name>` and a
+      `--beta` flag on `ci-setup`.
+
+  - title: Half A — marketplace distribution architecture
+    body: |
+      The new repository `dev-harness-kit/gates` owns five reusable
+      workflows plus one composite action:
+
+      ```text
+      dev-harness-kit/gates
+      ├── action.yml                       # composite, single-line uses entry
+      ├── .github/workflows/
+      │   ├── review.yml                   # workflow_call
+      │   ├── security.yml                 # workflow_call
+      │   ├── maintenance.yml              # workflow_call
+      │   ├── auto-fix-pr.yml              # workflow_call
+      │   └── resolve-paths.yml            # workflow_call (Half B central)
+      ├── tests/
+      │   ├── test_workflow_call_inputs.py # schema pin for workflow_call inputs
+      │   ├── test_resolve_paths_action.py # resolver via reusable entry
+      │   └── test_wrapper_budget.py       # pin wrapper size cap
+      └── docs/
+          ├── marketplace-checklist.md
+          └── release-process.md
+      ```
+
+      Each reusable workflow declares its inputs explicitly
+      (`gates_json_b64`, `provider`, `model`, `changed_paths`,
+      `output_artifact`, `anthropic_api_key`, `minimax_api_key`,
+      `dev_kit_github_token`). Secrets are passed through from the
+      consumer wrapper, not declared in the action repo — that keeps
+      the action repo free of consumer secrets and the marketplace
+      review process focused on shape, not policy.
+
+      The consumer-side wrapper shrinks to the canonical shape:
+
+      ```yaml
+      # .github/workflows/review.yml  (consumer, after Half A)
+      name: review
+      on:
+        pull_request:
+          branches: [main]
+      permissions:
+        contents: read
+        pull-requests: write
+      jobs:
+        review:
+          uses: dev-harness-kit/gates/.github/workflows/review.yml@v1
+          with:
+            gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
+            provider: ${{ vars.CI_REVIEW_PROVIDER }}
+          secrets:
+            DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
+            anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+            minimax_api_key: ${{ secrets.MINIMAX_API_KEY }}
+      ```
+
+      The wrapper budget test (`tests/test_marketplace_wrapper_budget.py`)
+      enforces that the body never grows past a small line cap (e.g.
+      60 lines including YAML header). A PR that bloats a wrapper back
+      into a copy of the workflow body is rejected at `ci-local.sh`
+      time — the same gate that catches format drift today.
+
+  - title: Half B — path_rules schema and resolver
+    body: |
+      The schema bump is additive; the validator (`validate()` in
+      `lib/gates_state.py`) keeps the strict top-level gate allowlist
+      and adds a separate validator for `path_rules`:
+
+      ```yaml
+      # .dev-kit/gates.json  (1.1.0)
+      {
+        "schema_version": "1.1.0",
+        "installed_by": "dev-kit:gate-select",
+        "installed_at": "2026-09-15T10:00:00Z",
+        "installed_dev_kit_version": "0.7.0",
+        "provider_env_key": "CI_REVIEW_PROVIDER",
+        "gates": {
+          "review":     {"enabled": true,  "workflow": "review.yml",     "var": "GATES_REVIEW_ENABLED"},
+          "security":   {"enabled": true,  "workflow": "security.yml",   "var": "GATES_SECURITY_ENABLED"},
+          "maintenance":{"enabled": true,  "workflow": "maintenance.yml","var": "GATES_MAINTENANCE_ENABLED"}
+        },
+        "path_rules": [
+          {
+            "name": "doc-only-skips-judges",
+            "when": ["docs/**/*.md", "README.md"],
+            "gates": [],
+            "mode":  "all"
+          },
+          {
+            "name": "workflow-edit-runs-security-only",
+            "when": [".github/workflows/**"],
+            "gates": ["security"],
+            "mode":  "all"
+          },
+          {
+            "name": "skill-changes-run-all",
+            "when": ["skills/**"],
+            "gates": ["review", "security", "maintenance"],
+            "mode":  "all"
+          }
+        ]
+      }
+      ```
+
+      The resolver (`lib/gates_path_resolver.py`) is a pure function:
+
+      ```python
+      def resolve(gates: dict, path_rules: list[dict], changed_paths: list[str]) -> dict[str, bool]:
+          """Return {gate_name: should_run} for this PR's changed paths.
+
+          Rules in order:
+            1. Start from the gate default (`enabled`).
+            2. For each matching rule (in JSON order), set the gate
+               value to True iff the rule's `gates` list includes the
+               gate AND the rule's `mode` matches the path set
+               (`all` = every changed path matches `when`,
+                `any` = at least one path matches `when`).
+            3. Tie-breaker: the last matching rule wins; the JSON
+               order is therefore the operator-visible precedence.
+            4. Unknown gate names in a rule produce a `RuleWarning`
+               collected in the resolver return; they do not raise.
+          """
+      ```
+
+      The reusable workflow `resolve-paths.yml` runs the resolver
+      against the b64-decoded `gates.json` and the PR's changed file
+      list, then exports the booleans as step outputs:
+
+      ```text
+      outputs:
+        review:      { description: "Run review gate",    value: ${{ steps.resolve.outputs.review }} }
+        security:    { description: "Run security gate",  value: ${{ steps.resolve.outputs.security }} }
+        maintenance: { description: "Run maintenance",    value: ${{ steps.resolve.outputs.maintenance }} }
+        warnings:    { description: "RuleWarning list",   value: ${{ steps.resolve.outputs.warnings }} }
+      ```
+
+      The judge workflows gate on both the existing global flag and
+      the resolver output:
+
+      ```yaml
+      # reusable workflow body
+      review:
+        needs: resolve-paths
+        if: |
+          vars.GATES_REVIEW_ENABLED != 'false' &&
+          needs.resolve-paths.outputs.review == 'true'
+        ...
+      ```
+
+      A doc-only PR matches the first rule, sets all gates to False,
+      and the three judge jobs skip. A workflow-edit PR matches the
+      second rule, runs security only, and the review + maintenance
+      skips are visible in the run summary.
+
+  - title: Operator workflow and SSOT discipline
+    body: |
+      `gate-select pick` extends to `gate-select pick path <name>` with
+      the same question-style picker:
+
+      ```text
+      /dev-kit:gate-select pick path                 # show current rules
+      /dev-kit:gate-select pick path add             # open the rule editor
+      /dev-kit:gate-select pick path remove <name>   # remove a rule
+      /dev-kit:gate-select pick path edit <name>     # edit globs/gates/mode
+      /dev-kit:gate-select sync                     # push GATES_PATH_RULES_B64
+      ```
+
+      `sync` now pushes two variables per gate (the boolean flag and
+      the b64 ruleset). A `ci-doctor` check verifies that the b64
+      payload in the GH variable round-trips to the same `path_rules`
+      block in `.dev-kit/gates.json` — drift between the file and the
+      variable is reported as `FAIL` with a one-line remediation.
+
+      The skill surfaces the same migration hint that
+      `_init_synthesize()` already prints: every `gate-select init`
+      writes the new `1.1.0` schema and `path_rules: []` if absent.
+      Consumers who never call `gate-select pick path` keep
+      `path_rules: []` and the resolver returns the gate default
+      unchanged.
+
+  - title: Marketplace publishing checklist
+    body: |
+      The companion `docs/proposals/review/gates-distribution/marketplace-checklist.md`
+      enumerates the GitHub Action publishing requirements so the ops
+      team has one place to look:
+
+      | Step | Owner | Exit |
+      |---|---|---|
+      | Adopt `action.yml` schema v1 with `inputs:` and `outputs:` blocks | gates repo maintainer | `action.yml` validates with `actionlint` |
+      | Provide an icon (SVG/PNG, 64x64+) and a one-line description | ops | icon uploads via repo settings |
+      | Ship a `README.md` with usage example, inputs/outputs, and license | gates repo maintainer | README renders on the marketplace listing |
+      | Tag a release `v0`, `v1.0.0`; the marketplace listens to tag-based releases | ops | `gh release create v1.0.0` succeeds |
+      | Run the GH-Actions security baseline (`pinned actions`, `least-privilege permissions`, no `pull_request_target`) | gates repo maintainer | `zizmor` clean |
+      | Promote `@v0` to `@v1` only after the wrapper budget test is green on dev-harness-kit's own consumer fixture | both | `tests/test_marketplace_wrapper_budget.py` passes on `@v0` |
+      | Document a backward-compat contract: `v1.x` may add inputs/outputs, may not change or remove existing ones | gates repo maintainer | contract published in `gates/release-process.md` |
+
+  - title: Migration and rollback
+    body: |
+      Consumers installed before this proposal land in one of three
+      states:
+
+      1. **No gates.json**: nothing changes. The new resolver is a
+         no-op, the wrappers pin `@v1`, and the install report prints
+         the wrapper shrinkage.
+      2. **Gates.json at 1.0.0**: `gate-select init` bumps to `1.1.0`
+         and writes `path_rules: []`. The first call to `pick path add`
+         is the only operator-visible change.
+      3. **Gates.json at 1.1.0 with rules**: nothing changes; the
+         resolver picks them up automatically after `sync`.
+
+      Rollback is one action: revert the consumer wrapper
+      (`git revert` the PR that added the `uses:` line) and re-run
+      `ci-setup --force`. The marker reinstalls the legacy
+      `templates/ci/.github/workflows/<gate>.yml` files from the
+      current dev-kit commit. The `dev-harness-kit/gates` repo
+      continues to exist but no consumer references it during the
+      rollback window.
+
+      Path-rules rollback is even simpler: `gate-select pick path
+      remove <name>` deletes a rule, `sync` pushes the empty b64
+      payload, and the next PR runs every judge as before.
+
+  - title: Verification matrix and acceptance checklist
+    body: |
+      Definition of done for the first two PRs (Phase 1 + Phase 2):
+
+      - [ ] `lib/gates_state.py:validate()` accepts `1.1.0` and rejects unknown keys at both top level and `path_rules[].gates[*]`.
+      - [ ] `lib/gates_path_resolver.py:resolve()` returns the gate default when `path_rules` is empty and the rule-set value when it is not; ties are resolved by JSON order.
+      - [ ] `tests/test_gates_state.py` covers the additive bump (a `1.0.0` file still loads), the new validator, and the lint for unknown rule gate names.
+      - [ ] `tests/test_gates_path_resolver.py` covers precedence, mode=all vs mode=any, longest-glob ties, empty path list, and unknown gate warnings.
+      - [ ] `dev-harness-kit/gates` repo exists with the five reusable workflows plus `action.yml`; `tests/test_workflow_call_inputs.py` pins the input shape.
+      - [ ] A fixture consumer repo at `.dev-kit/ci-config.json` round-trips `ci-setup --force` and lands the wrapper-only workflows.
+      - [ ] `tests/test_marketplace_wrapper_budget.py` enforces the wrapper line cap; a wrapper that bloats past the cap fails the test.
+      - [ ] `gate-select sync` pushes both `GATES_<NAME>_ENABLED` and `GATES_PATH_RULES_B64`; `ci-doctor path-rules` checks drift.
+      - [ ] A doc-only PR matches `docs/**` rule, sets every gate to False, and the three judge jobs are skipped in the run summary.
+      - [ ] A workflow-edit PR matches `.github/workflows/**` rule, runs security only, and review + maintenance are skipped.
+      - [ ] No consumer-side secret is declared in the `dev-harness-kit/gates` repo; all secrets passthrough from the wrapper.
+      - [ ] Existing `VALID_GATE_KEYS` invariant is preserved; `path_rules[].gates[*]` may name a future gate but it is a lint warning, not a schema error.
+      - [ ] Rollback documented: reverting the wrapper PR and re-running `ci-setup --force` restores the legacy workflow files; `gate-select pick path remove <name>` removes a misconfigured rule.
+
+  - title: References and relationship to existing dev-kit proposals
+    body: |
+      This proposal is additive to the existing gate system. It builds on
+      the JSON-driven gate SSOT introduced for `gates.json 1.0.0`
+      (which added `vars.GATES_<NAME>_ENABLED` to keep `if:` conditions
+      JSON-controlled rather than YAML-edited) and the previous
+      `pick` UX in `gate-select`.
+
+      It does not reopen the three-gate decision (review/security/maintenance)
+      or the human merge boundary. The marketplace distribution is the
+      first operational separation between the dev-kit plugin and the
+      gate payloads it installs; it does not change the
+      `ci-setup` idempotent contract or the marker SSOT.
+
+      Internal SSOT:
+
+      - `lib/gates_state.py` — current schema, validator, sync, `is_enabled`
+      - `skills/gate-select/SKILL.md` — `pick` UX, `sync`, `init`, `show`
+      - `skills/ci-setup/SKILL.md` — idempotent install, `EXPECTED_PATHS`, marker
+      - `lib/ci_setup.py` — install payload, `required_secrets_for_provider`, `lint_installed_workflows`
+      - `templates/ci/.github/workflows/*.yml` — current workflow payload
+      - `docs/quality/ci-setup.md` — quality and ops documentation
+      - `tests/test_gates_state.py` — current schema and sync tests
+      - `docs/proposals/review/ralph-loop-engineering/loop-control-metrics.yaml` — companion durable-state proposal (this proposal does not depend on it)

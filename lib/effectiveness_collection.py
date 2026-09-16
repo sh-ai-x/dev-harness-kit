@@ -1,7 +1,7 @@
 """effectiveness_collection.py — bounded automatic harness measurement.
 
 Implements the journal + incremental projection design from the merged
-proposal ``docs/proposals/review/harness-effectiveness/auto-collection.html``
+proposal ``docs/proposals/applied/harness-effectiveness-mod/auto-collection.html``
 (PR #817). One compact segmented journal per project root, one
 disposable projection, strict per-root locking and fsync durability.
 

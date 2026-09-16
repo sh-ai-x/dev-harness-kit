@@ -23,20 +23,42 @@ The skill is generic across proposals; the MCP harness content
 
 **Status-routed layout invariant** (default for new renders): every
 proposal lives at `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}`
-where `<bucket>` is one of `review`, `accepted`, `rejected`. The bucket
-is auto-routed from the YAML's `status:` field via `STATUS_TO_BUCKET`:
+where `<bucket>` is one of `reviewing`, `pending`, `applied`, `rejected`.
+The bucket is auto-routed from the YAML's `status:` field via
+`STATUS_TO_BUCKET`:
 
-      draft               -> review
-      design-discussion   -> review
-      ready-for-review    -> review
-      accepted            -> accepted
-      rejected            -> rejected
-      superseded          -> rejected
+      draft                  -> reviewing
+      design-discussion      -> reviewing
+      in-review              -> reviewing
+      ready-for-review       -> pending
+      accepted               -> applied
+      applied-with-changes   -> applied
+      rejected               -> rejected
+      superseded             -> rejected
 
-Unknown statuses fall back to `review` so a typo in the YAML still
+Unknown statuses fall back to `reviewing` so a typo in the YAML still
 produces a routable path. Pass `<bucket>/<main>/<sub>` explicitly to
-override (e.g. `accepted/main/sub` forces `accepted/` regardless of
+override (e.g. `applied/main/sub` forces `applied/` regardless of
 the YAML's `status:`).
+
+**Lifecycle semantics** (left-to-right, terminal states are `applied`
+and `rejected`):
+
+- `reviewing/` — proposal is being iterated on (draft / design-discussion /
+  in-review revisions). Stays there until promoted or killed.
+- `pending/` — proposal is ready-for-review, approved, queued for
+  implementation. Implementation work has not started.
+- `applied/` — proposal was implemented in code. BOTH `status: accepted`
+  (AS DESIGNED) and `status: applied-with-changes` (WITH design
+  deviations) live here; the umbrella directory carries a `-mod`
+  suffix and the YAML records the as-shipped deviations in a
+  `modifications:` block for the latter. Co-locating them keeps the
+  umbrella grouping (e.g. all `harness-effectiveness-*` proposals
+  together) intact across 2-level re-renders — splitting them into
+  separate buckets would silently rename the umbrella on every render.
+  The shipped date is recorded in the YAML's `shipped:` field.
+- `rejected/` — proposal was killed (rejected or superseded without
+  implementation).
 
 **Legacy flat layout** (`docs/proposals/<main>/<sub>.{yaml,html}` --
 no bucket prefix) is read-only supported: `--list` scans both shapes
@@ -200,7 +222,7 @@ Create `docs/proposals/<main>/<sub>.yaml` with this shape:
 
 ```yaml
 title: <one-line title>
-status: draft | design-discussion | ready-for-review | accepted | rejected | superseded
+status: draft | design-discussion | in-review | ready-for-review | accepted | applied-with-changes | rejected | superseded
 issue: <issue number, optional>
 date: YYYY-MM-DD
 tags: [<tag1>, <tag2>]
@@ -285,17 +307,17 @@ whose `started:` is set and `shipped:` is unset, newest started first:
 
 ```bash
 python3 -m lib.render_proposal_html --in-flight
-# accepted/foo/bar
-# accepted/foo/baz
+# applied/foo/bar
+# applied/foo/baz
 ```
 
-**Why dates, not a fourth bucket.** "Currently being implemented"
+**Why dates, not a sixth bucket.** "Currently being implemented"
 is a time-bound property: a proposal is in-flight for a few days,
-then `accepted` forever. Adding an `in-progress/` bucket would mean
-a 4-name `BUCKETS` whitelist, a new `STATUS_TO_BUCKET` entry, and a
-migration pass for the 13 legacy flat-layout dirs -- all to encode
-a property the YAML already carries. Storing the dates directly
-keeps `BUCKETS` at three and gives `--in-flight` for free.
+then `applied` forever. Adding an `in-progress/` bucket would mean
+a 6-name `BUCKETS` whitelist, a new `STATUS_TO_BUCKET` entry, and a
+migration pass for every existing umbrella -- all to encode a property
+the YAML already carries. Storing the dates directly keeps `BUCKETS`
+at five and gives `--in-flight` for free.
 
 Both fields are optional and back-compatible: legacy proposals
 without `started:` / `shipped:` render unchanged. Strict YYYY-MM-DD
@@ -319,11 +341,11 @@ The proposal skill does not enforce a single umbrella -- each
 
 Per CLAUDE.md Iron Law L6, every new skill must declare an `alpha:` field. The
 proposal artifact has **stateful lifecycle**: a YAML source on disk, a derived
-HTML rendered from it, a status tag (draft → design-discussion →
-ready-for-review → accepted/rejected/superseded) that the maintainer advances
-over time. That is `state` by definition -- the skill persists a proposal
-artifact and gates its progression, distinct from analysis (reasoning over a
-corpus) and enforcement (deterministic guards).
+HTML rendered from it, a status tag (draft → design-discussion → in-review →
+ready-for-review → accepted/applied-with-changes/rejected/superseded) that
+the maintainer advances over time. That is `state` by definition -- the
+skill persists a proposal artifact and gates its progression, distinct from
+analysis (reasoning over a corpus) and enforcement (deterministic guards).
 
 **L7 fit**: the deterministic render + status-tag + HTML-escape contract is
 exactly the part next-gen models can't self-impose. The model can reason

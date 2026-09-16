@@ -88,15 +88,30 @@ STATUS_TAG_CLASS = {
 }
 
 # Status-routed layout (see module docstring). The bucket set is a tight
-# whitelist; adding a fourth name is a deliberate design choice (tests
-# pin `BUCKETS == {"review", "accepted", "rejected"}`).
-BUCKETS = ("review", "accepted", "rejected")
+# whitelist; tests pin `BUCKETS` as the 4-name lifecycle set.
+#
+# Lifecycle stages (left-to-right):
+#   reviewing  → proposal is being iterated on (draft / design-discussion /
+#                in-review revisions). Stays there until promoted or killed.
+#   pending    → proposal is ready-for-review (approved, queued for
+#                implementation). Implementation work has not started.
+#   applied    → proposal was implemented in code. Both AS-DESIGNED
+#                (status: accepted) and WITH-CHANGES (status:
+#                applied-with-changes) live here; the umbrella directory
+#                carries a `-mod` suffix and the YAML records the
+#                as-shipped deviations for the latter. The shipped date
+#                is recorded in the YAML's `shipped:` field.
+#   rejected   → proposal was killed (rejected or superseded without
+#                implementation).
+BUCKETS = ("reviewing", "pending", "applied", "rejected")
 
 STATUS_TO_BUCKET = {
-    "draft": "review",
-    "design-discussion": "review",
-    "ready-for-review": "review",
-    "accepted": "accepted",
+    "draft": "reviewing",
+    "design-discussion": "reviewing",
+    "in-review": "reviewing",
+    "ready-for-review": "pending",
+    "accepted": "applied",
+    "applied-with-changes": "applied",
     "rejected": "rejected",
     "superseded": "rejected",
 }
@@ -104,9 +119,9 @@ STATUS_TO_BUCKET = {
 
 def bucket_for_status(status: str) -> str:
     """Return the filesystem bucket for a proposal status. Unknown
-    statuses fall back to `review` so a typo in the YAML still produces
+    statuses fall back to `reviewing` so a typo in the YAML still produces
     a routable path rather than crashing the renderer."""
-    return STATUS_TO_BUCKET.get(status, "review")
+    return STATUS_TO_BUCKET.get(status, "reviewing")
 
 
 # Reserved file stems that previous refactors used as canonical
@@ -562,8 +577,8 @@ class Proposal:
     # (PR merged, or the proposal is otherwise considered done).
     # The renderer emits timeline chips when these are set; the
     # `--in-flight` CLI filter lists accepted proposals where
-    # `started` is set and `shipped` is not. BUCKETS is unchanged --
-    # timeline state is time-bound, not a categorical bucket.
+    # `started` is set and `shipped` is not. Timeline state is
+    # time-bound, not a categorical bucket.
     started: Optional[str] = None
     shipped: Optional[str] = None
 
@@ -1579,7 +1594,7 @@ def render_from_yaml(text: str) -> str:
 # Both halves of `<main>/<sub>` are kebab/snake; one `/` separator per
 # half is allowed; no leading/trailing slash, no double slash, no `.`
 # segments. The 3-level shape requires `<bucket>` to be one of the
-# three whitelist names in `BUCKETS` -- any other bucket name is
+# four whitelist names in `BUCKETS` -- any other bucket name is
 # rejected with an actionable error message.
 _TWO_LEVEL_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
@@ -1623,7 +1638,7 @@ def _in_flight(project_root: Path) -> list[str]:
     """Return accepted proposals currently being shipped, newest started first.
 
     A proposal is "in flight" iff it has `status: accepted` (whether or
-    not it has been routed into the `accepted/` bucket yet), has a
+    not it has been routed into the `applied/` bucket yet), has a
     `started:` date set, AND has no `shipped:` date. This is a derived
     view over data the proposal YAML already carries -- it does NOT
     move files, does NOT require a new bucket, and does NOT depend on
@@ -1651,7 +1666,7 @@ def _in_flight(project_root: Path) -> list[str]:
     # in-flight predicate, so a bucketed SSOT that has `shipped:` set
     # (and therefore isn't in flight) still shadows any stale
     # legacy-flat copy (M3 reviewer, PR #804 2nd round).
-    bucket_dir = pdir / "accepted"
+    bucket_dir = pdir / "applied"
     if bucket_dir.is_dir():
         for main_dir in sorted(bucket_dir.iterdir()):
             if not main_dir.is_dir():

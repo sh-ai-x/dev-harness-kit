@@ -1,6 +1,6 @@
 """Tests for lib.effectiveness_collection — bounded journal + projection.
 
-The proposal (docs/proposals/review/harness-effectiveness/auto-collection.html)
+The proposal (docs/proposals/applied/harness-effectiveness-mod/auto-collection.html)
 specifies the design; these tests pin the contract.
 
 Each test uses a fresh tmp_path so the per-root journal is isolated and

@@ -120,6 +120,19 @@ DIM_AXES: Dict[str, Tuple[str, ...]] = {
         "docs_coverage_score",
         "scope_discipline_score",
     ),
+    # Phase 8 (v1.1.0): gate-dynamic dim used by `lib/gate_dynamic.py`
+    # to recommend per-gate skip decisions on babysit-pr iterations.
+    # `gate_skippable` (higher = safer to skip) is the primary signal;
+    # `confidence` (raw 0-10, normalized to 0-1 by the orchestrator)
+    # gates the skip via a 0.7 floor; `risk_level` is `lower_is_better`
+    # (lower = safer). The orchestrator (`lib/gate_dynamic.apply_hard_rules`)
+    # combines these with the 4 hard rules (iteration==1, forced_run,
+    # critical-gate-in-scope, low-confidence-veto).
+    "gate_dynamic": (
+        "gate_skippable",
+        "confidence",
+        "risk_level",
+    ),
 }
 
 # Per-dim score range. Most dims are 0-10 (higher = better, with the
@@ -249,6 +262,7 @@ def call_judge(
     base_url: str = "https://api.minimax.io/anthropic",
     max_tokens: int = 512,
     timeout: int = 30,
+    temperature: float = 1.0,
 ) -> Dict:
     """Call LLM judge and return {scores, tokens_in, tokens_out, raw}.
 
@@ -264,6 +278,12 @@ def call_judge(
     ``DIM_SCORE_RANGE`` (e.g. "each 0-5" for plan_value). Defaults to
     0-10 when the dim is unknown.
 
+    `temperature` (v1.1.0) — defaults to 1.0 (provider default) for
+    backward compat with all existing callers. Pass `0.0` to pin
+    determinism (used by `lib/gate_dynamic.py` for the
+    skip-decision layer — non-deterministic temperature would defeat
+    the per-head_sha cache).
+
     provider is informational only — both 'minimax' and 'anthropic' use
     the Anthropic-compatible POST /v1/messages endpoint.
     """
@@ -274,6 +294,7 @@ def call_judge(
     payload = {
         "model": model,
         "max_tokens": max_tokens,
+        "temperature": temperature,
         "messages": [{"role": "user", "content": prompt}],
         "system": (
             f"You are a code review judge. Respond ONLY with a JSON object "
@@ -353,8 +374,13 @@ def score_aggregate(axes: Dict[str, float]) -> float:
 # (per the local semantic in lib/interview_engine.py where
 # MISSING_FIELD_SCORE=10 and CLEAR_FIELD_SCORE=2), so the aggregate
 # verdict path must invert before applying verdict_from_score.
+# `gate_dynamic.risk_level` is also `lower_is_better` (low risk = safer
+# to skip the gate). Keys may be either the bare axis name (per-dim
+# convention) or `<dim>.<axis>` (per-axis convention) — normalize_for_verdict
+# checks both.
 AXIS_POLARITY: Dict[str, str] = {
     "interview_ambiguity": "lower_is_better",
+    "gate_dynamic.risk_level": "lower_is_better",
 }
 
 

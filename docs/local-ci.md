@@ -65,6 +65,26 @@ bin/review-local.sh --pr 123 --security-only --provider anthropic --dry-run
 The slash command is a thin wrapper over `bin/review-local.sh`. Both
 paths apply the same provider switching + gate logic.
 
+### Dynamic gate skip (v1.1.0)
+
+`--dynamic-skip` opt-in flag that runs `lib/gate_dynamic.select_gates`
+BEFORE invoking the LLM judges. The judge inspects the diff + previous
+verdicts + the gate catalog and pre-flips the per-judge `RUN_<NAME>`
+booleans for any gate it recommends skipping. The 4 hard rules
+(first-push-deterministic, `forced_run`, critical-gate-in-scope,
+low-confidence-veto) are applied AFTER the LLM call so the judge
+can't override them.
+
+```bash
+bin/review-local.sh --pr 123 --dynamic-skip
+```
+
+Propagate from `bin/babysit-pr-local.sh` via `BABYSIT_DYNAMIC_SKIP=1`
+(opt-in; default OFF). The audit trail lives at
+`.dev-kit/gate-dynamic/<head_sha>.json`. See
+[`docs/skills/gate-dynamic.md`](skills/gate-dynamic.md) for the full
+reference.
+
 ### Provider setup
 
 The script reads `CI_REVIEW_PROVIDER` from the process env, then

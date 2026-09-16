@@ -1538,7 +1538,10 @@ class TestSearchFlagEndToEnd(unittest.TestCase):
             cp = self._run(
                 root,
                 "--logs-dir", str(logs),
-                "--days", "30",
+                # Keep the fixture inside the window as wall-clock time
+                # advances; this test targets the no-match warning, not
+                # date-window expiry.
+                "--days", "3650",
                 "--filter", "zzz-no-match",
                 "--json",
             )

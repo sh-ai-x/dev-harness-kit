@@ -238,7 +238,7 @@ def test_iteration_counter_increments_on_transition():
 
 def test_save_load_round_trip(project_root: Path):
     state = rs.new_state("hello world", session="alpha")
-    state.proposal_html = "docs/proposals/review/foo/main.html"
+    state.proposal_html = "docs/proposals/reviewing/foo/main.html"
     state.ambiguity_answers["A1"] = "ok"
     state.transition(rs.PROPOSAL_GATE)
     path = state.save(project_root)
@@ -246,7 +246,7 @@ def test_save_load_round_trip(project_root: Path):
     assert path.exists()
     loaded = rs.RalphState.load(project_root, session="alpha")
     assert loaded.idea == "hello world"
-    assert loaded.proposal_html == "docs/proposals/review/foo/main.html"
+    assert loaded.proposal_html == "docs/proposals/reviewing/foo/main.html"
     assert loaded.ambiguity_answers == {"A1": "ok"}
     assert loaded.current_stage == rs.PROPOSAL_GATE
 

@@ -43,7 +43,7 @@ below; they delegate to `tools/linear_sync.py` and never touch `gates.json`.
 | `pick` | Legacy 6-question picker; threads writes to gates.json + ci-setup. Kept as compat for the original AI-judge picker UX. |
 | `enable <gate>` | `python -m lib.gates_state enable <gate>` — flips `gates.<gate>.enabled` to true. |
 | `disable <gate>` | `python -m lib.gates_state disable <gate>` — flips `gates.<gate>.enabled` to false. |
-| `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`). |
+| `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`, or the v1.1.0 dynamic-skip fields `dynamic_eligible`, `scope_globs`, `forced_run`). |
 | `enable linear` | `python3 tools/linear_sync.py on` — explicitly opt in to Linear auto-sync. |
 | `disable linear` | `python3 tools/linear_sync.py off` — keep the optional Linear integration off. |
 | `set linear enabled <true\|false>` | Maps `true` to `python3 tools/linear_sync.py on` and `false` to `python3 tools/linear_sync.py off`; does not write `gates.json`. |
@@ -51,6 +51,9 @@ below; they delegate to `tools/linear_sync.py` and never touch `gates.json`.
 | `init` | Synthesize `.dev-kit/gates.json` from the current `marker.runners` so a consumer that previously used `--exclude security.yml` upgrades in one step. |
 | `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install). |
 | `install-session <fast\|full\|custom>` | Dispatch to `/dev-kit:harness-mode`. |
+| `eval-dynamic [--head-sha SHA]` | Run the LLM judge (`lib/gate_dynamic.select_gates`) and print the per-gate skip recommendation. Read-only. |
+| `apply-dynamic [--head-sha SHA]` | Apply the judge's recommendation (writes `forced_run: true` overrides per gate where `skip=false` survives hard rules). |
+| `audit-dynamic [--head-sha SHA]` | Show past decisions from `.dev-kit/gate-dynamic/`. |
 
 ```bash
 /dev-kit:gate-select                       # = show
@@ -212,6 +215,35 @@ python3 -m lib.gates_state init [--root PATH]   # reads marker.runners, writes g
 workflow in the EXPECTED set NOT in marker.runners becomes a gate with
 `enabled=False`. The operator can spot-check the output, then run
 `gate-select sync` to push the flags to GH.
+
+## Dynamic gate skip (v1.1.0)
+
+`gate-select` orchestrates the v1.1.0 dynamic-skip layer for
+`babysit-pr` iterations: a non-deterministic LLM judge (`lib/gate_dynamic`)
+inspects the current diff + previous verdicts + the gate catalog and
+recommends a per-gate skip set. The 4 hard rules (iteration=1,
+`forced_run`, critical-gate-in-scope, low-confidence) are applied
+BEFORE the recommendation surfaces. Three sub-commands:
+
+| Sub-command | Use case |
+|---|---|
+| `eval-dynamic [--head-sha SHA]` | "What would the judge recommend for this iteration?" — read-only JSON to stdout. Useful for spot-checking the LLM before babysit-pr trusts it. |
+| `apply-dynamic [--head-sha SHA]` | Bake the recommendation into `gates.json`: any gate the judge said `skip=false` (with `confidence >= 0.7`) gets `forced_run: true`, which short-circuits future judge calls for that gate. |
+| `audit-dynamic [--head-sha SHA]` | Show the audit trail at `.dev-kit/gate-dynamic/<sha>.json` (full prompt + response + decision). The `--tail N` flag (default 20) trims to the N most recent decisions. |
+
+Each gate can also be opt-in for the dynamic layer via `set`:
+
+```bash
+# Opt maintenance in for dynamic-skip evaluation, scoped to lib/ + skills/.
+/dev-kit:gate-select set maintenance dynamic_eligible true
+/dev-kit:gate-select set maintenance scope_globs lib/**,skills/**
+
+# Operator override — never SKIP review regardless of the judge.
+/dev-kit:gate-select set review forced_run true
+```
+
+See `docs/skills/gate-dynamic.md` for the full reference (hard rules,
+cache invalidation, audit-trail shape, interactive mode).
 
 ## `classify` / `route` — actor-aware PR routing
 

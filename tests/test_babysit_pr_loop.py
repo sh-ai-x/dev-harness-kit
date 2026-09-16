@@ -116,6 +116,78 @@ def test_head_sha_change_bumps_context_epoch_and_resets_stale_strategy() -> None
     assert state.phase == WAIT_FOR_APPROVAL
 
 
+def test_dynamic_skipped_defaults_to_empty_frozenset() -> None:
+    # v1.1.0 — `LoopState` carries an optional `dynamic_skipped` set
+    # of gate names that the LLM-judge layer recommended skipping for
+    # the current head_sha. Defaults to empty so older persisted
+    # state files (without the field) load cleanly.
+    state = LoopState(7, 7)
+    assert state.dynamic_skipped == frozenset()
+
+
+def test_dynamic_skipped_persists_through_observe() -> None:
+    # observe() without `dynamic_skipped` kwarg preserves the
+    # existing value — the LLM-judge layer sets it on iteration N,
+    # and iteration N+1 (without a new judge call) inherits it.
+    state = LoopState(7, 7, dynamic_skipped=frozenset({"maintenance"}))
+    state = observe(
+        state,
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+    )
+    assert state.dynamic_skipped == frozenset({"maintenance"})
+
+
+def test_dynamic_skipped_persists_through_record_outcome() -> None:
+    state = LoopState(7, 7, dynamic_skipped=frozenset({"maintenance"}))
+    state = record_outcome(state, outcome="progress", now_iso="t")
+    assert state.dynamic_skipped == frozenset({"maintenance"})
+
+
+def test_observe_accepts_dynamic_skipped_kwarg() -> None:
+    # Fresh judge decision: observer passes it explicitly.
+    state = LoopState(7, 7)
+    state = observe(
+        state,
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+        dynamic_skipped=frozenset({"review", "maintenance"}),
+    )
+    assert state.dynamic_skipped == frozenset({"review", "maintenance"})
+
+
+def test_dynamic_skipped_validates_known_gate_names() -> None:
+    # Operator typo / stray value should fail closed at validate() time.
+    with pytest.raises(ValueError):
+        LoopState(7, 7, dynamic_skipped=frozenset({"lint"}))
+
+
+def test_dynamic_skipped_round_trip_via_save_load() -> None:
+    import tempfile
+    state = LoopState(7, 7, dynamic_skipped=frozenset({"maintenance"}))
+    state = observe(
+        state,
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+        dynamic_skipped=frozenset({"review"}),
+    )
+    with tempfile.TemporaryDirectory() as td:
+        from babysit_pr_loop import load_state, save_state
+        path = save_state(state, f"{td}/state.json")
+        loaded = load_state(path)
+    assert loaded is not None
+    assert loaded.dynamic_skipped == frozenset({"review"})
+
+
 def test_no_information_evolves_then_resets_then_waits_for_recovery() -> None:
     state = new_state(7)
     state = record_outcome(state, outcome="unchanged", now_iso="t1")

@@ -461,7 +461,7 @@ class ComposeYamlTests(unittest.TestCase):
             repo = Path(td)
             html = poip.render_html(
                 text, repo_root=repo,
-                bucket="review", main="long-running-priorities",
+                bucket="reviewing", main="long-running-priorities",
                 sub="open-work-priority",
             )
             self.assertTrue(html.exists())
@@ -486,7 +486,7 @@ class ComposeYamlTests(unittest.TestCase):
                 poip.render_html(
                     "title: x\nstatus: draft\nsections: []\n",
                     repo_root=Path(td),
-                    bucket="review",
+                    bucket="reviewing",
                     main="../escape",
                     sub="s",
                 )

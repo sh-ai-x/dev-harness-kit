@@ -232,7 +232,14 @@ fi
 # pipeline status (Changes Requested / Blocked -> exit 1) doesn't trip
 # `set -e` before RC is captured and the sentinel is written.
 set +e
-"$SCRIPT_DIR/review-local.sh" --pr "$PR_NUMBER" 2>&1 | tee -a "$LIVE_LOG"
+# v1.1.0 — propagate `--dynamic-skip` only when `BABYSIT_DYNAMIC_SKIP=1`.
+# Default OFF so operators opt in explicitly (the LLM-judge layer can
+# occasionally flap and babysit-pr's tolerance for flapping is low).
+DYNAMIC_SKIP_FLAG=""
+if [ "${BABYSIT_DYNAMIC_SKIP:-0}" = "1" ]; then
+  DYNAMIC_SKIP_FLAG="--dynamic-skip"
+fi
+"$SCRIPT_DIR/review-local.sh" --pr "$PR_NUMBER" $DYNAMIC_SKIP_FLAG 2>&1 | tee -a "$LIVE_LOG"
 RC=${PIPESTATUS[0]}
 set -e
 echo "##BABYSIT-DONE exit_code=$RC##" >> "$LIVE_LOG"

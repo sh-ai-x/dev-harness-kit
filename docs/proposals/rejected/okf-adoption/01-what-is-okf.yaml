@@ -1,0 +1,111 @@
+title: "OKF 스펙 사실관계 — v0.1(2026-06) / v0.2(main)"
+status: rejected
+date: 2026-08-19
+tags: [okf, spec, research]
+
+before:
+  summary: |
+    "AI가 읽을 문서 표준"으로 OKF가 유통되나, 판정 전에 실제 요구사항 · 소비자 ·
+    버전 안정성을 1차 출처에서 확인해야 한다.
+  evidence:
+    - '검토 시점 2026-08-19. `GoogleCloudPlatform/knowledge-catalog` main의 `okf/SPEC.md` = v0.2'
+    - 'Google Cloud Blog 발표일 2026-06-12 (v0.1)'
+    - '`okf.md/faq` 는 같은 시점에도 버전 표기가 "0.1 (Draft)" — 1차 출처 간 불일치'
+
+after:
+  summary: |
+    스펙 요구사항 · 소비 경로 · 툴링 · 버전 이력을 인용 가능한 형태로 고정한다.
+    이 문서는 판정을 내리지 않는다 (판정은 02-rejection-rationale).
+  files:
+    - path: docs/proposals/okf-adoption/01-what-is-okf.yaml
+      change: |
+        스펙 사실관계 전용. 판정·권고 문장 없음.
+
+pros:
+  - '1차 출처(SPEC.md, Google Cloud Blog, okf.md FAQ)만 인용'
+  - '버전 이력 명시 — 향후 재검토 시 diff 가능'
+
+cons:
+  - 'WebFetch 추출 요약이라 §번호는 v0.2 기준. 스펙 갱신 시 §번호가 밀릴 수 있다'
+
+sections:
+  - title: 정의
+    body: |
+      **YAML frontmatter를 가진 UTF-8 Markdown 파일들의 디렉터리 트리.** 파일 1개 =
+      개념 1개, 파일 경로가 신원. 개념 간 연결은 표준 markdown 링크
+      (bundle-relative `/path/...` 권장). Karpathy의 "LLM-wiki 패턴"의 포터블 형식화.
+
+  - title: 필드
+    body: |
+      | 구분 | 필드 | 비고 |
+      |---|---|---|
+      | **필수** | `type` | non-empty string. **항상 필수인 유일한 키** |
+      | 권장 (§4.1) | `title`, `description`, `resource`, `tags` | 없어도 conformant |
+      | provenance (§5.1) | `sources` (각 항목 `resource` 필수), `usage_window` | v0.2 신규. body `# Citations` 대체 |
+      | trust (§5.2) | `generated{by,at}`, `verified[{by,at}]` | v0.2 신규. `timestamp` 대체 |
+      | lifecycle (§5.4–5.5) | `status` (`draft` / `stable` / `deprecated`), `stale_after` (`YYYY-MM-DD`) | `status` 부재 시 `stable` |
+      | computation (§10.2) | `runtime` 필수, `parameters`, `computation`, `executor`, `attester` | `type: Attested Computation` 전용 |
+      | 버전 (§12) | `okf_version` | **bundle-root `index.md` frontmatter에만 허용** |
+
+      임의 키 보존 SHOULD. `okf_version` 추가는 02에서 별도 거부 (스펙 불안정).
+
+  - title: 예약 파일 (§3.1)
+    body: |
+      `index.md` (디렉터리 리스팅), `log.md` (변경 이력). 예약 파일은 `type` 면제.
+
+  - title: Conformance (§11)
+    body: |
+      1. 모든 비예약 `.md`가 파싱 가능한 frontmatter 보유.
+      2. 모든 frontmatter에 non-empty `type`.
+      3. 예약 파일이 존재하면 §8/§9.
+
+      **"일부 파일만 OKF"는 conformance가 아니다.** 부분 채택은 어휘 빌리기에 불과하고
+      validator/visualizer는 통과하지 못한다. 합의된 예외: 선택 필드 미존재, 미지의
+      `type` / 추가 키, 깨진 링크, `index.md` 미존재, trust 미존재 — 모두 거부 사유 불가.
+
+  - title: 소비자 (FAQ)
+    body: |
+      - 모든 LLM (Claude / GPT / Gemini) — "그냥 markdown이라서" 읽힘
+      - 코딩 에이전트 — 프로젝트 컨텍스트 경유
+      - MCP 에이전트 — `kcmd` MCP 서버 경유
+      - 사람 — 어떤 에디터로든
+
+      **자동 discovery 메커니즘 없음.** "discovery is intentionally explicit".
+      frontmatter를 넣는 행위 자체로 런타임 동작이 바뀌지 않는다. 이득은 OKF-aware
+      툴을 실제로 돌릴 때만 발생.
+
+  - title: 툴링
+    body: |
+      - `kcmd` — CLI + MCP 서버
+      - 브라우저 validator — `okf.md/validator` (클라이언트 사이드)
+      - static HTML visualizer — 자기완결 HTML 그래프
+      - enrichment agent — BigQuery 데이터셋을 순회해 OKF 문서 초안 생성
+      - 샘플 bundle 3종 — GA4 e-commerce / Stack Overflow / Bitcoin
+
+      무게중심이 **데이터 카탈로그** 임에 주의. FAQ는 runbook · ADR · API 등 조직 지식
+      전반이라고 주장하지만, 레퍼런스 구현은 BigQuery 메타데이터 생성기다.
+
+  - title: 버전 이력 / 안정성
+    body: |
+      | 시점 | 상태 |
+      |---|---|
+      | 2026-06-12 | Google Cloud Blog v0.1 발표 |
+      | 2026-06-19 | W3C Holon Community Group 출범 — 상위 DataBook 프로파일 작업 |
+      | 2026-08-19 (검토 시점) | main = **v0.2**, breaking 2건 |
+
+      v0.1 → v0.2 breaking:
+
+      1. `timestamp` (top-level) → `generated: {by, at}` (§5.2)
+      2. body `# Citations` 플랫 리스트 → `sources` frontmatter (§5.1)
+
+      추가 신규: `status`/`stale_after`, `sources` 신뢰 신호, `Attested Computation`,
+      actor 표기 (`<producer>/<version>`, `human:<id>`, `process:<id>`).
+
+      **안정성 보장 없음.** FAQ는 Apache 2.0 + "could stall before reaching 1.0"을
+      명시. 1차 출처 간 버전 표기도 불일치 (main=v0.2 vs FAQ=0.1 Draft).
+
+  - title: 출처
+    body: |
+      - [Google Cloud Blog — OKF 발표 (2026-06-12)](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
+      - [okf/SPEC.md — GoogleCloudPlatform/knowledge-catalog (main, v0.2)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+      - [okf.md — FAQ](https://okf.md/faq/)

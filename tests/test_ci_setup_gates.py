@@ -48,7 +48,7 @@ class TestResolveRunnersFromGates(unittest.TestCase):
             target = Path(td)
             gates_state.write_state(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": gates_state.SCHEMA_VERSION,
                     "gates": {"review": {"enabled": False, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
                 },
                 target,
@@ -110,7 +110,7 @@ class TestInstallWithGatesJson(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             r = _install(target, gates_json={
-                "schema_version": "1.0.0",
+                "schema_version": gates_state.SCHEMA_VERSION,
                 "gates": {},
             })
             self.assertEqual(r.errors, [])
@@ -125,7 +125,7 @@ class TestInstallWithGatesJson(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             r = _install(target, gates_json={
-                "schema_version": "1.0.0",
+                "schema_version": gates_state.SCHEMA_VERSION,
                 "gates": {
                     "review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"},
                     "security": {"enabled": False, "workflow": "security.yml", "var": "GATES_SECURITY_ENABLED"},
@@ -154,7 +154,7 @@ class TestInstallWithGatesJson(unittest.TestCase):
                     target,
                     exclude=frozenset({"security.yml"}),
                     gates_json={
-                        "schema_version": "1.0.0",
+                        "schema_version": gates_state.SCHEMA_VERSION,
                         "gates": {},
                     },
                 )
@@ -180,7 +180,7 @@ class TestInstallWithGatesJson(unittest.TestCase):
                     target,
                     exclude=frozenset(),
                     gates_json={
-                        "schema_version": "1.0.0",
+                        "schema_version": gates_state.SCHEMA_VERSION,
                         "gates": {},
                     },
                 )
@@ -198,7 +198,7 @@ class TestMarkerShapeWithGates(unittest.TestCase):
     def test_gates_source_field_present(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
-            _install(target, gates_json={"schema_version": "1.0.0", "gates": {}})
+            _install(target, gates_json={"schema_version": gates_state.SCHEMA_VERSION, "gates": {}})
             data = json.loads((target / ".dev-kit" / "ci-config.json").read_text())
             self.assertEqual(data["gates_source"], "gates.json")
             self.assertEqual(data["gates_path"], ".dev-kit/gates.json")

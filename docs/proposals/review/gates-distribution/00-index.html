@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distribute dev-kit gates as a GitHub Action + per-path rule-driven gate selection</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Distribute dev-kit gates as a GitHub Action + per-path rule-driven gate selection</h1>
+<p class="meta">2026-09-15 · <span class="tag tag-info">design-discussion</span></p>
+<div class="tags"><span class="tag tag-info">ci-setup</span><span class="tag tag-info">babysit-pr</span><span class="tag tag-info">gates</span><span class="tag tag-info">marketplace</span><span class="tag tag-info">paths</span><span class="tag tag-info">distribution</span><span class="tag tag-info">plugin</span><span class="tag tag-info">schema</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and rollout ordering</a></li><li><a href="#sec-1">Half A — marketplace distribution architecture</a></li><li><a href="#sec-2">Half B — path_rules schema and resolver</a></li><li><a href="#sec-3">Operator workflow and SSOT discipline</a></li><li><a href="#sec-4">Marketplace publishing checklist</a></li><li><a href="#sec-5">Migration and rollback</a></li><li><a href="#sec-6">Verification matrix and acceptance checklist</a></li><li><a href="#sec-7">References and relationship to existing dev-kit proposals</a></li><li><a href="#amb-section">Ambiguities (open questions)</a></li><li><a href="#scope-section">Scope</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Decision and rollout ordering</h2>
+<p>Both halves of this proposal land in three coordinated phases. The schema bump and the wrapper budget are the load-bearing pieces; Half A and Half B can ship in either order, but neither half is usable without the SSOT discipline that already lives in <code>lib/gates_state.py</code>.</p>
+<table><thead><tr><th>Phase</th><th>Scope</th><th>Exit condition</th></tr></thead><tbody><tr><td>1</td><td>Add <code>path_rules</code> to <code>gates.json</code> schema (<code>1.1.0</code>); <code>lib/gates_path_resolver.py</code>; <code>ci-doctor</code> lint; tests</td><td>Schema accepts the new block; resolver returns correct booleans for ties and unknown gates; <code>gates.json</code> from a <code>1.0.0</code> consumer still loads.</td></tr><tr><td>2</td><td>Create <code>dev-harness-kit/gates</code> repo with the five reusable workflows; publish <code>@v0</code> privately</td><td>Reusable workflow call from a fixture consumer repo succeeds with PR-level check verdicts; secret passthrough works; <code>resolve-paths</code> outputs the expected booleans.</td></tr><tr><td>3</td><td>Replace <code>templates/ci/.github/workflows/&lt;gate&gt;.yml</code> with thin wrappers pointing at <code>@v1</code>; promote <code>@v1</code> to public marketplace</td><td>Wrapper size budget test is green; an existing consumer's <code>.dev-kit/ci-config.json</code> round-trip install is idempotent; the marketplace listing is approved.</td></tr></tbody></table>
+<p>Phase 1 is additive and reversible. Phase 2 introduces a second repo but does not change any consumer behavior. Phase 3 is the only user-visible change; before it lands, both halves exist as opt-in surfaces behind <code>gate-select pick path &lt;name&gt;</code> and a <code>--beta</code> flag on <code>ci-setup</code>.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Half A — marketplace distribution architecture</h2>
+<p>The new repository <code>dev-harness-kit/gates</code> owns five reusable workflows plus one composite action:</p>
+<pre><code class="language-text">dev-harness-kit/gates
+├── action.yml                       # composite, single-line uses entry
+├── .github/workflows/
+│   ├── review.yml                   # workflow_call
+│   ├── security.yml                 # workflow_call
+│   ├── maintenance.yml              # workflow_call
+│   ├── auto-fix-pr.yml              # workflow_call
+│   └── resolve-paths.yml            # workflow_call (Half B central)
+├── tests/
+│   ├── test_workflow_call_inputs.py # schema pin for workflow_call inputs
+│   ├── test_resolve_paths_action.py # resolver via reusable entry
+│   └── test_wrapper_budget.py       # pin wrapper size cap
+└── docs/
+    ├── marketplace-checklist.md
+    └── release-process.md</code></pre>
+<p>Each reusable workflow declares its inputs explicitly (<code>gates_json_b64</code>, <code>provider</code>, <code>model</code>, <code>changed_paths</code>, <code>output_artifact</code>, <code>anthropic_api_key</code>, <code>minimax_api_key</code>, <code>dev_kit_github_token</code>). Secrets are passed through from the consumer wrapper, not declared in the action repo — that keeps the action repo free of consumer secrets and the marketplace review process focused on shape, not policy.</p>
+<p>The consumer-side wrapper shrinks to the canonical shape:</p>
+<pre><code class="language-yaml"># .github/workflows/review.yml  (consumer, after Half A)
+name: review
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  review:
+    uses: dev-harness-kit/gates/.github/workflows/review.yml@v1
+    with:
+      gates_json_b64: ${{ vars.GATES_PATH_RULES_B64 }}
+      provider: ${{ vars.CI_REVIEW_PROVIDER }}
+    secrets:
+      DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      minimax_api_key: ${{ secrets.MINIMAX_API_KEY }}</code></pre>
+<p>The wrapper budget test (<code>tests/test_marketplace_wrapper_budget.py</code>) enforces that the body never grows past a small line cap (e.g. 60 lines including YAML header). A PR that bloats a wrapper back into a copy of the workflow body is rejected at <code>ci-local.sh</code> time — the same gate that catches format drift today.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Half B — path_rules schema and resolver</h2>
+<p>The schema bump is additive; the validator (<code>validate()</code> in <code>lib/gates_state.py</code>) keeps the strict top-level gate allowlist and adds a separate validator for <code>path_rules</code>:</p>
+<pre><code class="language-yaml"># .dev-kit/gates.json  (1.1.0)
+{
+  &quot;schema_version&quot;: &quot;1.1.0&quot;,
+  &quot;installed_by&quot;: &quot;dev-kit:gate-select&quot;,
+  &quot;installed_at&quot;: &quot;2026-09-15T10:00:00Z&quot;,
+  &quot;installed_dev_kit_version&quot;: &quot;0.7.0&quot;,
+  &quot;provider_env_key&quot;: &quot;CI_REVIEW_PROVIDER&quot;,
+  &quot;gates&quot;: {
+    &quot;review&quot;:     {&quot;enabled&quot;: true,  &quot;workflow&quot;: &quot;review.yml&quot;,     &quot;var&quot;: &quot;GATES_REVIEW_ENABLED&quot;},
+    &quot;security&quot;:   {&quot;enabled&quot;: true,  &quot;workflow&quot;: &quot;security.yml&quot;,   &quot;var&quot;: &quot;GATES_SECURITY_ENABLED&quot;},
+    &quot;maintenance&quot;:{&quot;enabled&quot;: true,  &quot;workflow&quot;: &quot;maintenance.yml&quot;,&quot;var&quot;: &quot;GATES_MAINTENANCE_ENABLED&quot;}
+  },
+  &quot;path_rules&quot;: [
+    {
+      &quot;name&quot;: &quot;doc-only-skips-judges&quot;,
+      &quot;when&quot;: [&quot;docs/**/*.md&quot;, &quot;README.md&quot;],
+      &quot;gates&quot;: [],
+      &quot;mode&quot;:  &quot;all&quot;
+    },
+    {
+      &quot;name&quot;: &quot;workflow-edit-runs-security-only&quot;,
+      &quot;when&quot;: [&quot;.github/workflows/**&quot;],
+      &quot;gates&quot;: [&quot;security&quot;],
+      &quot;mode&quot;:  &quot;all&quot;
+    },
+    {
+      &quot;name&quot;: &quot;skill-changes-run-all&quot;,
+      &quot;when&quot;: [&quot;skills/**&quot;],
+      &quot;gates&quot;: [&quot;review&quot;, &quot;security&quot;, &quot;maintenance&quot;],
+      &quot;mode&quot;:  &quot;all&quot;
+    }
+  ]
+}</code></pre>
+<p>The resolver (<code>lib/gates_path_resolver.py</code>) is a pure function:</p>
+<pre><code class="language-python">def resolve(gates: dict, path_rules: list[dict], changed_paths: list[str]) -&gt; dict[str, bool]:
+    &quot;&quot;&quot;Return {gate_name: should_run} for this PR&#x27;s changed paths.
+
+    Rules in order:
+      1. Start from the gate default (`enabled`).
+      2. For each matching rule (in JSON order), set the gate
+         value to True iff the rule&#x27;s `gates` list includes the
+         gate AND the rule&#x27;s `mode` matches the path set
+         (`all` = every changed path matches `when`,
+          `any` = at least one path matches `when`).
+      3. Tie-breaker: the last matching rule wins; the JSON
+         order is therefore the operator-visible precedence.
+      4. Unknown gate names in a rule produce a `RuleWarning`
+         collected in the resolver return; they do not raise.
+    &quot;&quot;&quot;</code></pre>
+<p>The reusable workflow <code>resolve-paths.yml</code> runs the resolver against the b64-decoded <code>gates.json</code> and the PR's changed file list, then exports the booleans as step outputs:</p>
+<pre><code class="language-text">outputs:
+  review:      { description: &quot;Run review gate&quot;,    value: ${{ steps.resolve.outputs.review }} }
+  security:    { description: &quot;Run security gate&quot;,  value: ${{ steps.resolve.outputs.security }} }
+  maintenance: { description: &quot;Run maintenance&quot;,    value: ${{ steps.resolve.outputs.maintenance }} }
+  warnings:    { description: &quot;RuleWarning list&quot;,   value: ${{ steps.resolve.outputs.warnings }} }</code></pre>
+<p>The judge workflows gate on both the existing global flag and the resolver output:</p>
+<pre><code class="language-yaml"># reusable workflow body
+review:
+  needs: resolve-paths
+  if: |
+    vars.GATES_REVIEW_ENABLED != &#x27;false&#x27; &amp;&amp;
+    needs.resolve-paths.outputs.review == &#x27;true&#x27;
+  ...</code></pre>
+<p>A doc-only PR matches the first rule, sets all gates to False, and the three judge jobs skip. A workflow-edit PR matches the second rule, runs security only, and the review + maintenance skips are visible in the run summary.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Operator workflow and SSOT discipline</h2>
+<p><code>gate-select pick</code> extends to <code>gate-select pick path &lt;name&gt;</code> with the same question-style picker:</p>
+<pre><code class="language-text">/dev-kit:gate-select pick path                 # show current rules
+/dev-kit:gate-select pick path add             # open the rule editor
+/dev-kit:gate-select pick path remove &lt;name&gt;   # remove a rule
+/dev-kit:gate-select pick path edit &lt;name&gt;     # edit globs/gates/mode
+/dev-kit:gate-select sync                     # push GATES_PATH_RULES_B64</code></pre>
+<p><code>sync</code> now pushes two variables per gate (the boolean flag and the b64 ruleset). A <code>ci-doctor</code> check verifies that the b64 payload in the GH variable round-trips to the same <code>path_rules</code> block in <code>.dev-kit/gates.json</code> — drift between the file and the variable is reported as <code>FAIL</code> with a one-line remediation.</p>
+<p>The skill surfaces the same migration hint that <code>_init_synthesize()</code> already prints: every <code>gate-select init</code> writes the new <code>1.1.0</code> schema and <code>path_rules: []</code> if absent. Consumers who never call <code>gate-select pick path</code> keep <code>path_rules: []</code> and the resolver returns the gate default unchanged.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Marketplace publishing checklist</h2>
+<p>The companion <code>docs/proposals/review/gates-distribution/marketplace-checklist.md</code> enumerates the GitHub Action publishing requirements so the ops team has one place to look:</p>
+<table><thead><tr><th>Step</th><th>Owner</th><th>Exit</th></tr></thead><tbody><tr><td>Adopt <code>action.yml</code> schema v1 with <code>inputs:</code> and <code>outputs:</code> blocks</td><td>gates repo maintainer</td><td><code>action.yml</code> validates with <code>actionlint</code></td></tr><tr><td>Provide an icon (SVG/PNG, 64x64+) and a one-line description</td><td>ops</td><td>icon uploads via repo settings</td></tr><tr><td>Ship a <code>README.md</code> with usage example, inputs/outputs, and license</td><td>gates repo maintainer</td><td>README renders on the marketplace listing</td></tr><tr><td>Tag a release <code>v0</code>, <code>v1.0.0</code>; the marketplace listens to tag-based releases</td><td>ops</td><td><code>gh release create v1.0.0</code> succeeds</td></tr><tr><td>Run the GH-Actions security baseline (<code>pinned actions</code>, <code>least-privilege permissions</code>, no <code>pull_request_target</code>)</td><td>gates repo maintainer</td><td><code>zizmor</code> clean</td></tr><tr><td>Promote <code>@v0</code> to <code>@v1</code> only after the wrapper budget test is green on dev-harness-kit's own consumer fixture</td><td>both</td><td><code>tests/test_marketplace_wrapper_budget.py</code> passes on <code>@v0</code></td></tr><tr><td>Document a backward-compat contract: <code>v1.x</code> may add inputs/outputs, may not change or remove existing ones</td><td>gates repo maintainer</td><td>contract published in <code>gates/release-process.md</code></td></tr></tbody></table>
+<hr class="section-divider">
+
+<h2 id="sec-5">Migration and rollback</h2>
+<p>Consumers installed before this proposal land in one of three states:</p>
+<ol><li><strong>No gates.json</strong>: nothing changes. The new resolver is a no-op, the wrappers pin <code>@v1</code>, and the install report prints the wrapper shrinkage.</li><li><strong>Gates.json at 1.0.0</strong>: <code>gate-select init</code> bumps to <code>1.1.0</code> and writes <code>path_rules: []</code>. The first call to <code>pick path add</code> is the only operator-visible change.</li><li><strong>Gates.json at 1.1.0 with rules</strong>: nothing changes; the resolver picks them up automatically after <code>sync</code>.</li></ol>
+<p>Rollback is one action: revert the consumer wrapper (<code>git revert</code> the PR that added the <code>uses:</code> line) and re-run <code>ci-setup --force</code>. The marker reinstalls the legacy <code>templates/ci/.github/workflows/&lt;gate&gt;.yml</code> files from the current dev-kit commit. The <code>dev-harness-kit/gates</code> repo continues to exist but no consumer references it during the rollback window.</p>
+<p>Path-rules rollback is even simpler: <code>gate-select pick path remove &lt;name&gt;</code> deletes a rule, <code>sync</code> pushes the empty b64 payload, and the next PR runs every judge as before.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Verification matrix and acceptance checklist</h2>
+<p>Definition of done for the first two PRs (Phase 1 + Phase 2):</p>
+<ul><li>[ ] <code>lib/gates_state.py:validate()</code> accepts <code>1.1.0</code> and rejects unknown keys at both top level and <code>path_rules[].gates[*]</code>.</li><li>[ ] <code>lib/gates_path_resolver.py:resolve()</code> returns the gate default when <code>path_rules</code> is empty and the rule-set value when it is not; ties are resolved by JSON order.</li><li>[ ] <code>tests/test_gates_state.py</code> covers the additive bump (a <code>1.0.0</code> file still loads), the new validator, and the lint for unknown rule gate names.</li><li>[ ] <code>tests/test_gates_path_resolver.py</code> covers precedence, mode=all vs mode=any, longest-glob ties, empty path list, and unknown gate warnings.</li><li>[ ] <code>dev-harness-kit/gates</code> repo exists with the five reusable workflows plus <code>action.yml</code>; <code>tests/test_workflow_call_inputs.py</code> pins the input shape.</li><li>[ ] A fixture consumer repo at <code>.dev-kit/ci-config.json</code> round-trips <code>ci-setup --force</code> and lands the wrapper-only workflows.</li><li>[ ] <code>tests/test_marketplace_wrapper_budget.py</code> enforces the wrapper line cap; a wrapper that bloats past the cap fails the test.</li><li>[ ] <code>gate-select sync</code> pushes both <code>GATES_&lt;NAME&gt;_ENABLED</code> and <code>GATES_PATH_RULES_B64</code>; <code>ci-doctor path-rules</code> checks drift.</li><li>[ ] A doc-only PR matches <code>docs/**</code> rule, sets every gate to False, and the three judge jobs are skipped in the run summary.</li><li>[ ] A workflow-edit PR matches <code>.github/workflows/**</code> rule, runs security only, and review + maintenance are skipped.</li><li>[ ] No consumer-side secret is declared in the <code>dev-harness-kit/gates</code> repo; all secrets passthrough from the wrapper.</li><li>[ ] Existing <code>VALID_GATE_KEYS</code> invariant is preserved; <code>path_rules[].gates[*]</code> may name a future gate but it is a lint warning, not a schema error.</li><li>[ ] Rollback documented: reverting the wrapper PR and re-running <code>ci-setup --force</code> restores the legacy workflow files; <code>gate-select pick path remove &lt;name&gt;</code> removes a misconfigured rule.</li></ul>
+<hr class="section-divider">
+
+<h2 id="sec-7">References and relationship to existing dev-kit proposals</h2>
+<p>This proposal is additive to the existing gate system. It builds on the JSON-driven gate SSOT introduced for <code>gates.json 1.0.0</code> (which added <code>vars.GATES_&lt;NAME&gt;_ENABLED</code> to keep <code>if:</code> conditions JSON-controlled rather than YAML-edited) and the previous <code>pick</code> UX in <code>gate-select</code>.</p>
+<p>It does not reopen the three-gate decision (review/security/maintenance) or the human merge boundary. The marketplace distribution is the first operational separation between the dev-kit plugin and the gate payloads it installs; it does not change the <code>ci-setup</code> idempotent contract or the marker SSOT.</p>
+<p>Internal SSOT:</p>
+<ul><li><code>lib/gates_state.py</code> — current schema, validator, sync, <code>is_enabled</code></li><li><code>skills/gate-select/SKILL.md</code> — <code>pick</code> UX, <code>sync</code>, <code>init</code>, <code>show</code></li><li><code>skills/ci-setup/SKILL.md</code> — idempotent install, <code>EXPECTED_PATHS</code>, marker</li><li><code>lib/ci_setup.py</code> — install payload, <code>required_secrets_for_provider</code>, <code>lint_installed_workflows</code></li><li><code>templates/ci/.github/workflows/*.yml</code> — current workflow payload</li><li><code>docs/quality/ci-setup.md</code> — quality and ops documentation</li><li><code>tests/test_gates_state.py</code> — current schema and sync tests</li><li><code>docs/proposals/review/ralph-loop-engineering/loop-control-metrics.yaml</code> — companion durable-state proposal (this proposal does not depend on it)</li></ul>
+<hr class="section-divider">
+
+
+<hr class="section-divider">
+
+<section id="amb-section" class="amb-section"><h3>Ambiguities (open questions)</h3><ol class="amb-list"><li id="amb-GD-A1" class="amb-item"><div class="amb-header"><code class="amb-id">GD-A1</code><span class="amb-badge amb-badge-blocking">blocking</span></div><div class="amb-question">Should the new gates repo ship as a single composite action, multiple reusable workflows, or both?</div><div class="amb-default"><strong>Default:</strong> Both. The composite action (<code>action.yml</code>) wraps <code>resolve-paths</code> and is the consumer-side default for new repos; the reusable workflows are the lower-level entry for repos that already have a custom workflow file with additional jobs. The wrapper templates in dev-kit use the reusable workflows because they preserve the existing one-workflow-per-gate layout.</div></li><li id="amb-GD-A2" class="amb-item"><div class="amb-header"><code class="amb-id">GD-A2</code><span class="amb-badge amb-badge-blocking">blocking</span></div><div class="amb-question">What happens when <code>gates.json</code> does not exist on the consumer repo?</div><div class="amb-default"><strong>Default:</strong> Resolver returns <code>INSUFFICIENT_EVIDENCE</code> (fail-closed) and the wrappers skip the path-resolver step, falling back to <code>vars.GATES_&lt;NAME&gt;_ENABLED</code> only. This matches the existing <code>is_enabled</code> contract in <code>lib/gates_state.py:270-280</code> — a missing gates.json is treated as "all gates enabled" for backward compatibility, but path selection is opt-in.</div></li><li id="amb-GD-A3" class="amb-item"><div class="amb-header"><code class="amb-id">GD-A3</code><span class="amb-badge amb-badge-default">default</span></div><div class="amb-question">Does the action repo accept forward-references to gates that do not exist yet?</div><div class="amb-default"><strong>Default:</strong> Yes, with a lint warning from <code>ci-doctor</code>. The resolver returns <code>enabled=false</code> for any path where the only matching rule names a non-existent gate. A rule that always disables a gate has the same effect as a no-op but is visible in the resume report.</div></li><li id="amb-GD-A4" class="amb-item"><div class="amb-header"><code class="amb-id">GD-A4</code><span class="amb-badge amb-badge-default">default</span></div><div class="amb-question">How is the path_rules sync encoded in the GH variable?</div><div class="amb-default"><strong>Default:</strong> Base64-encoded JSON payload pushed to <code>GATES_PATH_RULES_B64</code>. The base64 wrapper avoids quoting headaches in shell; the JSON content is the same shape as <code>gates.json:path_rules</code>. Re-running <code>gate-select sync</code> is idempotent.</div></li><li id="amb-GD-A5" class="amb-item"><div class="amb-header"><code class="amb-id">GD-A5</code><span class="amb-badge amb-badge-default">default</span></div><div class="amb-question">Should the wrapper pin a major version (<code>@v1</code>) or a minor version (<code>@v1.4</code>) by default?</div><div class="amb-default"><strong>Default:</strong> Major only (<code>@v1</code>). The marketplace publishing checklist documents the backward-compat contract; minor bumps must not change the <code>workflow_call</code> input shape. A new major version is allowed to break the contract and consumers opt in explicitly.</div></li></ol></section><section id="scope-section" class="scope-section"><h3>Scope</h3><div class="scope-grid"><div class="scope-card scope-in-card"><h4>In scope</h4><ul class="scope-list"><li>A new <code>dev-harness-kit/gates</code> repository hosting reusable workflows for review, security, maintenance, auto-fix-pr, and resolve-paths.</li><li>Wrapper-only consumer workflows that pin the action to <code>v1</code> and pass through secrets, the provider, the model, and the <code>gates.json</code> b64 payload.</li><li><code>gates.json</code> schema bump to <code>1.1.0</code> with an additive <code>path_rules</code> block; new <code>lib/gates_path_resolver.py</code> pure module.</li><li><code>lib/gates_state.py: sync()</code> push of <code>GATES_PATH_RULES_B64</code>; <code>gate-select pick path &lt;name&gt;</code> UX for editing rules via the picker.</li><li><code>ci-doctor</code> lint for unknown gate names in path rules and wrapper size budget.</li><li>Migration document for legacy consumers; the install report prints the wrapper shrinkage.</li></ul></div><div class="scope-card scope-out-card"><h4>Out of scope</h4><ul class="scope-list"><li>Adding a fourth first-class gate (review/security/maintenance remain the only <code>VALID_GATE_KEYS</code>); the proposal opens the vocabulary but does not promote any new judge to first-class status.</li><li>Replacing <code>.dev-kit/gates.json</code> with a different SSOT; both halves preserve it.</li><li>Marketing, branding assets, and the marketplace listing page (handled by the ops checklist, not the plugin).</li><li>Self-hosted runner support beyond documenting the fail-closed expectation in <code>gates_path_resolver</code>.</li><li>Cross-PR learning (e.g. "this gate has been skipped 5 times, demote it"); the rule set is operator-controlled, not learned.</li><li>Removing the legacy <code>templates/ci/.github/workflows/*.yml</code> files; they coexist with the wrappers until the migration window closes.</li></ul></div></div></section><section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>The CI gate machinery that <code>ci-setup</code> writes into a consumer repo (review.yml, security.yml, maintenance.yml, auto-fix-pr.yml, and the babysit-pr driving workflows) is shipped as raw <code>.github/workflows/*.yml</code> template files inside the dev-harness-kit plugin. Consumers receive the workflows by <code>cp</code> from <code>templates/ci/.github/workflows/</code>, and a single <code>.dev-kit/gates.json</code> controls an on/off flag per workflow with <code>vars.GATES_&lt;NAME&gt;_ENABLED</code>. The selection is global per gate: every changed file under the same PR runs the same three judges.</p>
+<p>Two independent problems block scaling:</p>
+<ol><li><strong>Distribution coupling.</strong> <code>review.yml</code> alone is 60 KB and <code>maintenance.yml</code> is 29 KB and both live next to the plugin code. A small fix to <code>lib/gates_state.py</code> does not move the workflow payload. Consumers that pin the plugin version can be months behind a security fix, and a marketplace-style "discover the action, pin a version" path is not available.</li></ol>
+<ol><li><strong>Coarse selection.</strong> The schema at <code>lib/gates_state.py:50-75</code> defines exactly three gates — review, security, maintenance — and the validator (<code>validate()</code>, <code>lib/gates_state.py:160-222</code>) rejects any other key. A consumer that wants "review only on <code>lib/**</code>", "security only on <code>.github/workflows/**</code>", or "maintenance only on <code>skills/**</code>" cannot express it; today the only lever is the global on/off switch, and <code>paths-filter</code> cannot be configured from the JSON SSOT.</li></ol><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>.github/workflows/review.yml</code> is 59 KB; <code>.github/workflows/security.yml</code> and <code>.github/workflows/maintenance.yml</code> are likewise large — shipping them as workflow template files inside the plugin couples judge fixes to plugin releases.</li><li><code>templates/ci/.github/workflows/</code> only carries ci.yml, auto-fix-pr.yml, maintenance.yml, review.yml, security.yml; reusable-workflow refs to a separate action repo would let marketplace versioning bypass the plugin version train.</li><li><code>lib/gates_state.py:50</code> <code>VALID_GATE_KEYS = frozenset({'review', 'security', 'maintenance'})</code> — the validator rejects any fourth top-level gate and forbids per-path attributes.</li><li><code>lib/gates_state.py:59-75</code> <code>DEFAULT_GATES</code> records exactly three gates; each entry is <code>{enabled, workflow, var}</code> and the field set is pinned by <code>lib/gates_state.py:199-202</code>.</li><li><code>lib/gates_state.py:385-424</code> <code>sync()</code> pushes only one boolean per gate (<code>gh variable set GATES_&lt;NAME&gt;_ENABLED</code>). The variable is read inside the workflow as <code>if: vars.GATES_REVIEW_ENABLED != 'false'</code>; there is no path-level signal.</li><li><code>skills/ci-setup/SKILL.md:153-167</code> Files Installed table — every workflow is template-copied into the consumer repo; there is no <code>uses: dev-harness-kit/&lt;action&gt;@vX</code> reference today.</li><li><code>skills/babysit-pr/SKILL.md:14-19</code> documents that <code>auto-fix-pr.yml</code> is an event adapter wired to the same babysit state — it too is template-shipped, not marketplace-pinned.</li><li><code>skills/gate-select/SKILL.md:64-80</code> show output lists three judge skills with one on/off per gate; <code>pick</code> writes only the global on/off flag (skill/gate-select/SKILL.md:99-115).</li><li><code>.github/workflows/ci.yml:14-58</code> shows the consumer-side workflow that auto-detects <code>paths-filter</code> is NOT used — every push to <code>main</code> runs every job unconditionally except for the GATES_* variables.</li><li><code>tools/skill_usage.py</code> exposes a 30-day per-skill counter; the absence of a similar per-path counter makes it impossible to measure today whether coarse-grained selection is wasting AI-judge minutes on doc-only PRs.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>The proposal has two coordinated halves that share the same SSOT (<code>.dev-kit/gates.json</code>) but land in different planes.</p>
+<p><strong>Half A — Marketplace distribution.</strong> Move every gate workflow from <code>templates/ci/.github/workflows/&lt;gate&gt;.yml</code> to a separate <code>dev-harness-kit/gates</code> GitHub repository, exposed as <strong>reusable workflows</strong> with semver tags. Consumers reference them via <code>uses: dev-harness-kit/gates/.github/workflows/review.yml@v1</code>, keeping their own repo's <code>.github/workflows/review.yml</code> as a tiny <code>on: pull_request</code> wrapper that hard-pins the major version. <code>ci-setup</code> keeps its idempotent contract but the install payload shrinks to a small set of wrappers plus the existing marker. Updates become <code>uses: ...@v1.4.0</code> rather than a plugin release.</p>
+<p><strong>Half B — Per-path rule-driven selection.</strong> Extend <code>.dev-kit/gates.json</code> with an additive <code>path_rules</code> block: each rule maps a glob (<code>lib/**</code>, <code>.github/workflows/**</code>, <code>skills/**</code>) to a gate-set (<code>review</code>, <code>security</code>, <code>maintenance</code>, or an extension set). The schema bump (<code>1.0.0</code> → <code>1.1.0</code>) is additive; consumers without <code>path_rules</code> keep the current global behavior. A small action — <code>dev-harness-kit/gates/resolve-paths</code> — reads <code>gates.json</code> + the PR's changed file list, and emits one boolean per gate. The judge workflows' <code>if:</code> conditions become <code>vars.GATES_REVIEW_ENABLED != 'false' &amp;&amp; steps.resolve.outputs.review == 'true'</code>, so a doc-only PR automatically skips the security and maintenance judges, while a workflow-edit PR runs security only.</p>
+<p>Both halves preserve the existing <code>.dev-kit/gates.json</code> SSOT, the <code>gh variable set GATES_&lt;NAME&gt;_ENABLED</code> sync path, the <code>pick</code> UX in <code>gate-select</code>, and the human merge boundary.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">docs/proposals/review/gates-distribution/00-index.yaml</span><p>This proposal source.</p></li><li><span class="file-path">docs/proposals/review/gates-distribution/00-index.html</span><p>Derived HTML render; regenerated by the proposal renderer.</p></li><li><span class="file-path">docs/proposals/review/gates-distribution/marketplace-checklist.md</span><p>Companion document listing the GitHub Marketplace publishing requirements (action.yml, README, branding, version tags, doc signing) the new gates repo must satisfy before public release.</p></li><li><span class="file-path">../dev-harness-kit-gates/README.md</span><p>New sibling repository that owns the reusable workflows. The README documents the public contract, version policy, and the SSOT link back to <code>.dev-kit/gates.json</code> in consumer repos.</p></li><li><span class="file-path">../dev-harness-kit-gates/.github/workflows/review.yml</span><p>Moved verbatim from <code>templates/ci/.github/workflows/review.yml</code>, stripping the <code>on:</code> block and the secrets wiring, which now live in the consumer wrapper. Inputs are declared via <code>workflow_call</code> (<code>gates_json_b64</code>, <code>provider</code>, <code>model</code>, <code>output_artifact</code>).</p></li><li><span class="file-path">../dev-harness-kit-gates/.github/workflows/security.yml</span><p>Same shape as review; promoted to reusable workflow.</p></li><li><span class="file-path">../dev-harness-kit-gates/.github/workflows/maintenance.yml</span><p>Same shape as review; promoted to reusable workflow.</p></li><li><span class="file-path">../dev-harness-kit-gates/.github/workflows/auto-fix-pr.yml</span><p>Same shape; kept as reusable because babysit-pr depends on it.</p></li><li><span class="file-path">../dev-harness-kit-gates/.github/workflows/resolve-paths.yml</span><p>New reusable workflow used by every consumer wrapper. Reads the changed files via <code>dorny/paths-filter</code>, merges the result with <code>.dev-kit/gates.json</code> <code>path_rules</code>, and emits one boolean per gate as step outputs. Half B's central artifact.</p></li><li><span class="file-path">../dev-harness-kit-gates/action.yml</span><p>Composite action variant for consumers that prefer a single <code>uses: dev-harness-kit/gates@v1</code> reference instead of three workflow_call blocks. Resolves paths and exports outputs for downstream jobs in the same workflow file.</p></li><li><span class="file-path">templates/ci/.github/workflows/review.yml</span><p>Reduced to a thin wrapper: <code>on: pull_request</code>, <code>permissions:</code>, one <code>jobs: review: uses: dev-harness-kit/gates/.github/workflows/review.yml@v1</code> call, secrets passthrough.</p></li><li><span class="file-path">templates/ci/.github/workflows/security.yml</span><p>Same wrapper shape, points to the security reusable workflow.</p></li><li><span class="file-path">templates/ci/.github/workflows/maintenance.yml</span><p>Same wrapper shape, points to the maintenance reusable workflow.</p></li><li><span class="file-path">templates/ci/.github/workflows/auto-fix-pr.yml</span><p>Same wrapper shape, points to the auto-fix reusable workflow.</p></li><li><span class="file-path">lib/ci_setup.py</span><p>Idempotent install still writes the wrappers; an <code>EXPECTED_PATHS</code> diff makes the reduction visible in the install report. The helper <code>expected_workflow_size()</code> enforces a size budget so a future PR that bloats a wrapper back into a copy of the workflow body is caught at install time.</p></li><li><span class="file-path">skills/ci-setup/SKILL.md</span><p>Document the marketplace pin contract (<code>uses: ...@v1</code>, never <code>@main</code> or <code>@v0</code>), the wrapper budget, and the migration story for consumers on a pre-distribution install.</p></li><li><span class="file-path">lib/gates_state.py</span><p>Bump <code>SCHEMA_VERSION</code> to <code>1.1.0</code>. Add <code>apply_defaults()</code> for a new <code>path_rules: list[PathRule]</code> block. Each rule is a dataclass</p>
+<p><code>{name: str, when: GlobSet, gates: tuple[str, ...], mode: all|any}</code>.</p>
+<p>Add <code>path_rule_for_paths(rules, paths)</code> projection. Keep the <code>VALID_GATE_KEYS</code> validator additive (path_rules entries may name future gate keys without bumping SCHEMA_VERSION again — a follow-up minor bump freezes the allowed set).</p></li><li><span class="file-path">lib/gates_path_resolver.py</span><p>New pure module. Inputs: <code>gates.json</code>, list of changed paths. Outputs: <code>{gate: bool}</code>. Order: explicit path_rule wins over gate default; conflicting rules resolved by longest <code>when</code> glob; ties broken by <code>mode: all</code> first then by rule order in JSON. Pure function with a public <code>resolve()</code> entry; tests pin ties, missing files, and glob edge cases.</p></li><li><span class="file-path">lib/gates_state.py (sync)</span><p>Extend <code>sync()</code> to also push a <code>GATES_PATH_RULES_B64</code> variable (bas64-encoded JSON) so reusable workflows read the ruleset without <code>actions/checkout</code>ing <code>.dev-kit/</code>.</p></li><li><span class="file-path">tests/test_gates_state.py</span><p>Add schema tests for the <code>1.1.0</code> additive bump, default-fill when <code>path_rules</code> is absent, and rejection of unknown keys at the rule level (not just the top level).</p></li><li><span class="file-path">tests/test_gates_path_resolver.py</span><p>New pure-function tests: rule precedence, longest-glob wins, mode=all vs mode=any, unknown gate key rejection, and the <code>INSUFFICIENT_EVIDENCE</code> reporting contract when paths is empty.</p></li><li><span class="file-path">tests/test_marketplace_wrapper_budget.py</span><p>Asserts the install-time wrapper size budget — the wrapper bodies stay under a small line cap; full judge body never lands in a consumer repo.</p></li><li><span class="file-path">skills/gate-select/SKILL.md</span><p>Document <code>pick path &lt;name&gt;</code> for adding/editing path rules via the picker (instead of hand-editing JSON), the resolver test command, and the sync b64 push.</p></li><li><span class="file-path">skills/ci-doctor/SKILL.md</span><p>Add a <code>path-rules</code> check: every <code>path_rules[].gates[*]</code> value must currently exist in <code>VALID_GATE_KEYS</code> OR be a known forward-reference extension (lint, but not blocking until the referenced action ships).</p></li><li><span class="file-path">docs/quality/ci-setup.md</span><p>Add the marketplace publishing checklist (branding, action.yml schema, version tag policy, README contract, security hardening baseline) so the ops team has one document when opening the gates repo for public use.</p></li><li><span class="file-path">docs/proposals/review/gates-distribution/migration.md</span><p>Companion migration document: how a consumer installed before this proposal lands upgrades to wrapper-only workflows without losing gate state, and how <code>gates.json path_rules</code> adopters roll back if a rule is misconfigured.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Distribution decouples judge fixes from plugin releases; a security patch in <code>dev-harness-kit/gates@v1.4.3</code> reaches consumers without a <code>dev-harness-kit</code> plugin bump.</li><li>Per-path selection removes AI-judge minutes from doc-only PRs and security-only runs from PRs that do not touch <code>.github/</code>; expected cost reduction is measurable via <code>tools/skill_usage.py</code>.</li><li>Both halves share <code>.dev-kit/gates.json</code> as the SSOT, so a single <code>gate-select pick path &lt;name&gt;</code> writes both the on/off flag and the rule — no new operator surface.</li><li>The schema bump is additive (<code>1.0.0 → 1.1.0</code>); consumers without <code>path_rules</code> keep working, and consumers without the marketplace action can stay on the legacy wrapper indefinitely.</li><li>Reusable workflows + a thin consumer wrapper make the workflow payload in the consumer repo small and auditable; the wrapper budget test prevents regression.</li><li>Tightens the <code>gates_state</code> invariant: <code>gate</code> is one of three first-class keys, but the rule space is open-ended and validated independently.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>A second repo to maintain (branch protection, release process, README/docs, marketplace listing renewal). Mitigation: keep the repo narrow (only workflows + action.yml + tests) and rely on the consumer repo for templates/docs already owned by dev-kit.</li><li>Reusable workflows cannot import secrets defined only in the calling repo without explicit passthrough; the wrappers must enumerate every secret the judges need. Mitigation: ship a <code>required_secrets_for(provider)</code> helper from <code>lib/ci_setup.py</code> so the wrapper regeneration is data-driven.</li><li>Marketplace listing requires brand assets, an icon, a release pipeline, and version tags; the first publish is non-trivial. Mitigation: stage the release — first publish <code>v0</code> privately, then promote to public marketplace once the wrapper budget test is green.</li><li>A path_rules rule that names a gate which does not exist (e.g. typo <code>securty</code>) silently makes the rule a no-op. Mitigation: <code>ci-doctor</code> lint warns on unknown rule gate names; the resolver returns <code>INSUFFICIENT_EVIDENCE</code> for paths where no rule matches rather than auto-defaulting to <code>enabled=true</code>.</li><li>Backwards compatibility requires a migration period where the legacy <code>templates/ci/.github/workflows/*.yml</code> files still exist; the install report prints both shapes so an operator can see the wrapper shrinkage.</li><li>Long-glob ties are an arbitrary-feeling rule. Mitigation: <code>gates_path_resolver</code> documents the tie-breaker (longest <code>when</code>, then <code>mode=all</code>, then JSON order) and the rule ordering is part of the linter output.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>Per-path selection cannot prove semantic quality; it only chooses which judges run. The actual review verdict and human merge boundary remain unchanged.</li><li>Marketplace publishing does not eliminate Action minutes cost; reusable workflows still run on the consumer's GH-Actions budget. Cost reduction comes from skipping irrelevant judges, not from skipping the platform.</li><li>The <code>gates_path_resolver</code> runs in the reusable workflow; if the resolver action is unavailable (e.g. on a self-hosted runner without network), the workflow must fail closed to <code>enabled=true</code> (do not silently skip judges). This is documented but not enforced by the schema.</li><li>Reusable workflows cannot <code>uses:</code> private actions by default without an <code>actions: read</code> token. The wrappers must request the appropriate <code>permissions:</code> block; this proposal sets the baseline but does not enumerate every consumer's permission model.</li><li>The proposal does not introduce a fourth first-class gate (e.g. <code>performance</code>, <code>compliance</code>); it only opens the path_rules gate vocabulary so a future proposal can ship a fourth gate without a schema bump.</li><li>Marketplace naming and icon policy are GitHub-controlled; the final action name <code>dev-harness-kit/gates</code> is provisional and may need to be renamed if GitHub rejects it during publishing review.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-15 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>
