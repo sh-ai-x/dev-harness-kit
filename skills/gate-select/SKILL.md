@@ -37,7 +37,7 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 | `pick` | Legacy 6-question picker; threads writes to gates.json + ci-setup. Kept as compat for the original AI-judge picker UX. |
 | `enable <gate>` | `python -m lib.gates_state enable <gate>` — flips `gates.<gate>.enabled` to true. |
 | `disable <gate>` | `python -m lib.gates_state disable <gate>` — flips `gates.<gate>.enabled` to false. |
-| `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`, or the v1.1.0 dynamic-skip fields `dynamic_eligible`, `scope_globs`, `cost_estimate`, `judge_model`, `skip_when`, `forced_run`). |
+| `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`, or the v1.1.0 dynamic-skip fields `dynamic_eligible`, `scope_globs`, `forced_run`). |
 | `sync` | Push enabled flags to `gh variable set GATES_<NAME>_ENABLED`. |
 | `init` | Synthesize `.dev-kit/gates.json` from the current `marker.runners` so a consumer that previously used `--exclude security.yml` upgrades in one step. |
 | `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install). |

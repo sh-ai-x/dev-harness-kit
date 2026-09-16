@@ -163,16 +163,6 @@ class TestSet(unittest.TestCase):
             payload = json.loads(show_out)
             self.assertTrue(payload["gates"]["review"]["forced_run"])
 
-    def test_set_cost_estimate_field_round_trips(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            rc, _, err = _run_cli(
-                ["set", "review", "cost_estimate", "0.05", "--root", td]
-            )
-            self.assertEqual(rc, 0, err)
-            _, show_out, _ = _run_cli(["show", "--root", td])
-            payload = json.loads(show_out)
-            self.assertEqual(payload["gates"]["review"]["cost_estimate"], 0.05)
-
 
 class TestValidate(unittest.TestCase):
     def test_validate_clean_exits_0(self) -> None:

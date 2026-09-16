@@ -481,6 +481,11 @@ RUN_MAINTENANCE=1
 RUN_INJECTION_SCAN=1
 DYNAMIC_SKIP=0
 DYNAMIC_SKIP_DECISION=""
+# Cap on the dynamic-skip decision JSON appended to the audit
+# comment. Beyond ~200 chars the GH comment body becomes noisy and
+# the verdict-extraction regex in lib/maintenance_gate.py still
+# parses cleanly without the raw JSON blob.
+DYNAMIC_SKIP_DECISION_MAX=200
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -976,7 +981,7 @@ except Exception:
       esac
     done
     # Truncate for the audit comment (avoid GH-comment bloat).
-    DYNAMIC_SKIP_DECISION="${DYNAMIC_SKIP_DECISION:0:200}"
+    DYNAMIC_SKIP_DECISION="${DYNAMIC_SKIP_DECISION:0:$DYNAMIC_SKIP_DECISION_MAX}"
     log "[dynamic-skip] recommended: $_skipped_names"
   else
     log "[dynamic-skip] lib/gate_dynamic unavailable; running all judges"

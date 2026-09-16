@@ -59,12 +59,15 @@ SCHEMA_VERSION = "1.1.0"
 # validator allows any subset of these alongside the required
 # `{enabled, workflow, var}` keys. Defaults are seeded on every read so
 # callers can introspect a gate entry without a `gate.get(...)` dance.
+#
+# v1.1.0 only ships the 3 fields the orchestrator actually reads:
+# `dynamic_eligible` (opt-in), `scope_globs` (rule #3 input),
+# `forced_run` (rule #2 input). Cost / model / skip-when tuning flags
+# are deferred to v2 — shipping them now would be the OE-2 speculative
+# param pattern.
 DYNAMIC_FIELDS_DEFAULT: dict = {
     "dynamic_eligible": False,   # opt-in: gate can be considered for LLM-driven skip
     "scope_globs": [],           # file patterns this gate covers (e.g. ["lib/**", "skills/**"])
-    "cost_estimate": 0.0,        # USD hint
-    "judge_model": "",           # override judge model (empty = use default)
-    "skip_when": "",             # static skip conditions (e.g. "docs_only")
     "forced_run": False,         # operator override — never SKIP this gate
 }
 
@@ -287,17 +290,6 @@ def validate(state: object) -> None:
                 raise ValidationError(
                     f"gates.{key}.scope_globs: must be a list of strings "
                     f"(got {type(globs).__name__})"
-                )
-        if "cost_estimate" in gate and not isinstance(gate["cost_estimate"], (int, float)):
-            raise ValidationError(
-                f"gates.{key}.cost_estimate: must be a number "
-                f"(got {type(gate['cost_estimate']).__name__})"
-            )
-        for str_field in ("judge_model", "skip_when"):
-            if str_field in gate and not isinstance(gate[str_field], str):
-                raise ValidationError(
-                    f"gates.{key}.{str_field}: must be a string "
-                    f"(got {type(gate[str_field]).__name__})"
                 )
 
 
@@ -587,8 +579,7 @@ def _set_field(state: dict, gate: str, key: str, value: str) -> dict:
     ``true|false|1|0|yes|no`` (case-insensitive, the same allowlist
     the bash `bin/set-provider.sh:234` uses for provider values).
     `dynamic_eligible`/`forced_run` accept the same bool aliases;
-    `scope_globs` accepts comma-separated strings OR a JSON list;
-    `cost_estimate` accepts a JSON number string; the rest are strings.
+    `scope_globs` accepts comma-separated strings OR a JSON list.
     """
     if gate not in VALID_GATE_KEYS:
         raise ValidationError(f"unknown gate: {gate!r}")
@@ -633,16 +624,6 @@ def _set_field(state: dict, gate: str, key: str, value: str) -> dict:
             entry[key] = parsed
         else:
             entry[key] = [g.strip() for g in stripped.split(",") if g.strip()]
-    elif key == "cost_estimate":
-        try:
-            entry[key] = float(value)
-        except ValueError as e:
-            raise ValidationError(
-                f"cost_estimate: must be a number (got {value!r})"
-            ) from e
-    else:
-        # judge_model, skip_when — pass through as-is.
-        entry[key] = value
     gates[gate] = entry
     new = dict(state)
     new["gates"] = gates

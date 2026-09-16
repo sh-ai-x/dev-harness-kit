@@ -49,13 +49,13 @@ Available fields per gate (schema bump 1.0.0 → 1.1.0):
 |---|---|---|---|
 | `dynamic_eligible` | bool | `false` | Opt in to the dynamic-skip layer. |
 | `scope_globs` | list[str] | `[]` | File globs the gate's LLM judge covers. Used by hard rule #3. |
-| `cost_estimate` | number | `0.0` | USD hint for the cost-aware judge (informational; not enforced). |
-| `judge_model` | string | `""` | Override the default judge model for this gate. |
-| `skip_when` | string | `""` | Static skip conditions (e.g. `"docs_only"`). Reserved for v2. |
 | `forced_run` | bool | `false` | Hard rule #2. |
 
 The legacy 3-key shape (1.0.0) auto-upgrades in memory on read — no
-operator action needed.
+operator action needed. Cost / model / skip-when tuning flags were
+considered but deferred to v2 — shipping them without a consumer
+would be the OE-2 speculative-param pattern (per the maintenance
+gate review).
 
 ## Cache invalidation
 

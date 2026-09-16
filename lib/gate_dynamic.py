@@ -52,8 +52,19 @@ from atomic import atomic_write_json  # noqa: E402
 # Audit-trail location, sibling of `.dev-kit/gates.json`.
 DYNAMIC_AUDIT_DIR = Path(".dev-kit") / "gate-dynamic"
 
-# Hard rules — confidence floor + interactive env var.
+# Hard rules — confidence floor.
 CONFIDENCE_FLOOR = 0.7
+
+# Skip threshold for `gate_skippable`. The LLM judge emits a 0-10
+# score; `>= SKIP_THRESHOLD` AND `confidence >= CONFIDENCE_FLOOR`
+# together gate the skip. 7/10 maps to "pretty clearly safe to skip"
+# without being too aggressive on marginal scores.
+SKIP_THRESHOLD = 7.0
+
+# Body truncation budget for `diff_sample` in the LLM prompt.
+# ~2 KB is enough for the judge to ground its scope-discipline
+# judgment without blowing the input-token budget on long diffs.
+DIFF_SAMPLE_MAX_BYTES = 2048
 
 # Stale-decision TTL. Decisions older than this are pruned on every
 # `select_gates` call. 7 days matches the worktree-prune cadence so
@@ -306,7 +317,7 @@ def build_user_prompt(context: GateContext) -> str:
         (context.diff_stat or "").strip() or "(empty)",
         "",
         "DIFF SAMPLE:",
-        (context.diff_sample or "").strip()[:2048] or "(empty)",
+        (context.diff_sample or "").strip()[:DIFF_SAMPLE_MAX_BYTES] or "(empty)",
         "",
         "PR BODY:",
         (context.pr_body or "").strip() or "(empty)",
@@ -371,7 +382,6 @@ def select_gates(
     context: GateContext,
     project_root: Optional[Path] = None,
     *,
-    interactive: bool = False,
     dry_run: bool = False,
 ) -> GateSkipDecision:
     """Main entry. Run LLM judge, apply hard rules, cache + return decision.
@@ -385,10 +395,6 @@ def select_gates(
       4. Apply hard rules (`apply_hard_rules`).
       5. Build `GateSkipDecision` + save (unless `dry_run`).
       6. Return the decision.
-
-    `interactive=True` blocks with `AskUserQuestion` BEFORE applying
-    hard rules + saving — but only if `os.environ.get(
-    "DEV_KIT_GATE_DYNAMIC_INTERACTIVE") == "1"`. Default is audit-only.
     """
     root = project_root or Path(".")
 
@@ -416,8 +422,8 @@ def select_gates(
         # gate_skippable maps to skip; confidence is its own field.
         skip_score = float(scores.get("gate_skippable", 0.0))
         confidence = float(scores.get("confidence", 0.0))
-        # Skip iff both: skip_score >= 7 AND confidence >= 0.7
-        skip = skip_score >= 7.0 and confidence >= CONFIDENCE_FLOOR
+        # Skip iff both: skip_score >= SKIP_THRESHOLD AND confidence >= CONFIDENCE_FLOOR
+        skip = skip_score >= SKIP_THRESHOLD and confidence >= CONFIDENCE_FLOOR
         llm_decisions.append(
             GateDecision(
                 gate_name=gate_name,
@@ -487,8 +493,15 @@ def main(argv: Optional[list] = None) -> int:
     sel.add_argument("--head-sha", required=True)
     sel.add_argument("--root", default=None)
     sel.add_argument("--dry-run", action="store_true")
-    sel.add_argument("--local", action="store_true",
-                     help="use local cwd + git for the diff context (Phase 1; not used yet)")
+
+    apply_p = sub.add_parser(
+        "apply",
+        help="bake the judge's recommendation into gates.json "
+             "(sets forced_run: true for gates the judge said should NOT be skipped)",
+    )
+    apply_p.add_argument("--head-sha", required=True)
+    apply_p.add_argument("--root", default=None)
+    apply_p.add_argument("--dry-run", action="store_true")
 
     load_p = sub.add_parser("load", help="read a cached decision")
     load_p.add_argument("head_sha")
@@ -501,6 +514,8 @@ def main(argv: Optional[list] = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "select":
         return _cli_select(args)
+    if args.command == "apply":
+        return _cli_apply(args)
     if args.command == "load":
         return _cli_load(args)
     if args.command == "audit":
@@ -528,6 +543,48 @@ def _cli_select(args) -> int:
         "decided_at_iso": decision.decided_at_iso,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def _cli_apply(args) -> int:
+    """Bake the judge's recommendation into gates.json.
+
+    For each gate the judge said should NOT be skipped
+    (`skip=False`, `confidence >= CONFIDENCE_FLOOR`), set
+    `forced_run: true` so future iterations honor the override.
+    The decision must already exist (run `select` first) and the
+    cache must be valid (gates.json unchanged since decision).
+
+    Returns 1 + JSON error if the decision is missing/invalid.
+    """
+    root = Path(args.root) if args.root else Path(".")
+    decision = load_decision(args.head_sha, root)
+    if decision is None:
+        print(json.dumps({
+            "error": "no valid cached decision — run `select` first",
+            "head_sha": args.head_sha,
+        }))
+        return 1
+
+    # Read current state; write back with forced_run overrides.
+    state = _read_gate_catalog(root)
+    overrides = {}
+    for d in decision.decisions:
+        if not d.skip and d.confidence >= CONFIDENCE_FLOOR:
+            overrides[d.gate_name] = True
+    for gate_name in overrides:
+        entry = state["gates"].get(gate_name, {})
+        entry["forced_run"] = True
+        state["gates"][gate_name] = entry
+
+    if not args.dry_run:
+        gates_state.write_state(state, root)
+
+    print(json.dumps({
+        "head_sha": args.head_sha,
+        "applied_overrides": overrides,
+        "gates_hash_after": hash_gates_state(root),
+    }, indent=2, sort_keys=True))
     return 0
 
 

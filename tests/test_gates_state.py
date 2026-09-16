@@ -29,19 +29,18 @@ class TestConstants(unittest.TestCase):
     def test_dynamic_fields_default_present(self) -> None:
         # Schema v1.1.0 — additive new optional per-gate fields. Operator
         # may add any subset to gates.json; defaults applied on read.
+        # Only the 3 fields the orchestrator reads ship in v1.1.0;
+        # cost_estimate / judge_model / skip_when are deferred to v2
+        # (no caller consumes them yet — the OE-2 pattern).
         expected = {
             "dynamic_eligible",
             "scope_globs",
-            "cost_estimate",
-            "judge_model",
-            "skip_when",
             "forced_run",
         }
         self.assertEqual(set(gates_state.DYNAMIC_FIELDS_DEFAULT.keys()), expected)
         self.assertIs(gates_state.DYNAMIC_FIELDS_DEFAULT["dynamic_eligible"], False)
         self.assertIs(gates_state.DYNAMIC_FIELDS_DEFAULT["forced_run"], False)
         self.assertEqual(gates_state.DYNAMIC_FIELDS_DEFAULT["scope_globs"], [])
-        self.assertIsInstance(gates_state.DYNAMIC_FIELDS_DEFAULT["cost_estimate"], (int, float))
 
     def test_state_rel_path(self) -> None:
         self.assertEqual(gates_state.STATE_REL_PATH, Path(".dev-kit") / "gates.json")
@@ -198,9 +197,6 @@ class TestValidate(unittest.TestCase):
                         "var": "GATES_MAINTENANCE_ENABLED",
                         "dynamic_eligible": True,
                         "scope_globs": ["skills/**", "lib/**"],
-                        "cost_estimate": 0.05,
-                        "judge_model": "MiniMax-M3[1m]",
-                        "skip_when": "docs_only",
                         "forced_run": False,
                     },
                 },
@@ -600,14 +596,6 @@ class TestSetField(unittest.TestCase):
         }
         new = gates_state._set_field(state, "maintenance", "scope_globs", "lib/**,skills/**")
         self.assertEqual(new["gates"]["maintenance"]["scope_globs"], ["lib/**", "skills/**"])
-
-    def test_set_cost_estimate_float(self) -> None:
-        state = {
-            "schema_version": "1.1.0",
-            "gates": {"review": {"enabled": True, "workflow": "review.yml", "var": "GATES_REVIEW_ENABLED"}},
-        }
-        new = gates_state._set_field(state, "review", "cost_estimate", "0.05")
-        self.assertEqual(new["gates"]["review"]["cost_estimate"], 0.05)
 
 
 class TestDetectOwnerRepoBodyEquivalence(unittest.TestCase):
