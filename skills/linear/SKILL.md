@@ -32,6 +32,22 @@ Resolve the current repository name and the user's Linear capability before maki
 - If `.dev-kit/.enabled.json` exists, respect its Linear/MCP selection. Missing configuration means `auto`, not a hard failure.
 - Do not invoke Linear for read-only work such as inspect, review, security, or code-viz unless the user explicitly requests registration.
 
+### Gate-select integration
+
+Linear is an optional integration, not one of the CI gates in `.dev-kit/gates.json`.
+To keep API usage opt-in while preserving the integration for future use, use the
+unified gate selector when the workflow calls for a gate-style toggle:
+
+```text
+/dev-kit:gate-select disable linear   # recommended default
+/dev-kit:gate-select enable linear    # explicit opt-in later
+/dev-kit:gate-select show             # inspect the optional integration state
+```
+
+These commands delegate to the same authoritative CLI as this skill
+(`python3 tools/linear_sync.py off|on|status`) and write only the per-worktree
+`.dev-kit/linear-config.json`. They do not modify the CI-only `gates.json`.
+
 ## Auto-sync trigger (every Edit|Write)
 
 When Linear is configured (`LINEAR_API_KEY` env var OR user-scope `~/.config/dev-kit/.env` OR per-worktree `.dev-kit/.env.linear` OR per-worktree `.dev-kit/linear-config.json:enabled` OR legacy `.dev-kit/.enabled.json:mcp.linear` ∈ {`auto`, `on`}), `hooks/linear-autosync.sh` runs `tools/linear_sync.py auto-sync` before every Edit|Write|MultiEdit. The script:
@@ -98,6 +114,7 @@ Set `LINEAR_DEBUG=1` to surface every activation decision, state transition, and
 | `/dev-kit:linear` (no args) | Run one auto-sync round (re-evaluates the current task and creates/updates the matching Linear issue). |
 | `/dev-kit:linear on` | Enable auto-sync in this worktree. Writes `enabled: true` to `<worktree>/.dev-kit/linear-config.json`. |
 | `/dev-kit:linear off` | Disable auto-sync in this worktree. Writes `enabled: false`. Project name and team id are preserved. |
+| `/dev-kit:gate-select enable\|disable linear` | Unified gate-select alias for `/dev-kit:linear on\|off`; keeps Linear outside the CI gate schema. |
 | `/dev-kit:linear setup` | Print the one-time setup checklist + the current state (whether `LINEAR_API_KEY` is set, what the resolved project name is, whether the worktree config exists). |
 | `/dev-kit:linear project-name <name>` | Override the auto-detected project name for this worktree. Without an argument, prints the resolved name. |
 | `/dev-kit:linear free-tier-cleanup on\|off\|status` | Opt in/out of free-tier recovery. When enabled, a confirmed free issue-limit creation error archives up to the 10 oldest non-terminal issues in the active project, then retries once. Disabled by default. |

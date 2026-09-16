@@ -20,12 +20,26 @@
 | `/dev-kit:linear` (no args) | Run one auto-sync round (re-evaluates the current task and creates/updates the matching Linear issue). |
 | `/dev-kit:linear on` | Enable auto-sync in this worktree. Writes `enabled: true` to `<worktree>/.dev-kit/linear-config.json`. |
 | `/dev-kit:linear off` | Disable auto-sync in this worktree. Project name and team id are preserved. |
+| `/dev-kit:gate-select enable\|disable linear` | Unified gate-select alias for `/dev-kit:linear on\|off`; Linear remains outside the CI gate schema. |
 | `/dev-kit:linear setup` | Print the one-time setup checklist + the current state (whether `LINEAR_API_KEY` is set, the resolved project name, whether the worktree config exists). |
 | `/dev-kit:linear project-name <name>` | Override the auto-detected project name for this worktree. Without an argument, prints the resolved name. |
 | `/dev-kit:linear free-tier-cleanup on\|off\|status` | Optional recovery mode. On a confirmed free issue-limit error, archive up to 10 oldest non-terminal issues in the active project and retry once. Off by default. |
 | `/dev-kit:linear status` | Print a JSON snapshot of the resolved state (worktree path, slug, config, env-var presence, resolved project + team). |
 
 Each subcommand delegates to `tools/linear_sync.py`, which is the authoritative implementation. The skill exists so the user does not have to remember the script path; the script exists so the hook, the skill, and any future caller share one code path.
+
+Linear is intentionally an optional integration rather than a CI gate. Because
+the API has usage limits, gate-select keeps it off by default and exposes the
+same per-worktree toggle without adding Linear to `.dev-kit/gates.json`:
+
+```text
+/dev-kit:gate-select disable linear   # recommended default
+/dev-kit:gate-select enable linear    # explicit opt-in later
+/dev-kit:gate-select show             # inspect state
+```
+
+The alias delegates to `python3 tools/linear_sync.py off|on|status` and keeps
+the existing hooks and `/dev-kit:linear` skill available for future use.
 
 ## Auto-sync trigger
 

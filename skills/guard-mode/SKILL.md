@@ -95,6 +95,7 @@ No side effects — safe to run any time to check what's currently bypassed.
 |---|---|---|
 | `tdd_guard` | `hooks/tdd-guard.sh` | Iron Law L1 — denies a core-code edit unless `.dev-kit/.tdd-cycle.json` shows a logged RED (failing) test run |
 | `worktree_guard` | `hooks/worktree-guard.sh` | `rules/git-workflow.md` — denies Edit/Write/MultiEdit while the session cwd is the main checkout |
+| `fork_pr_confirm` | `hooks/pr-create-route.sh` | Ask-tier confirmation before `gh pr create` when `lib/actor_classifier` routes a fork PR to `fork_pr_review_environment`. Default **off** — silent breadcrumb only; flip on per-session to surface every consumer_fork classification to the human before the PR is opened. |
 
 Turning a guard `off` does not touch the other guard, and does not touch
 anything `/dev-kit:harness-mode` controls (`tdd_scope_judge`,
