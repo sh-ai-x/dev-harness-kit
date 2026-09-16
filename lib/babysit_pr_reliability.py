@@ -386,7 +386,12 @@ def try_acquire_pr_lock(path: PathLike, body: str) -> bool:
         for the next arrival; returns False.
     """
     lock_path = Path(path)
-    lockdir = lock_path.with_suffix(lock_path.suffix + ".d")
+    # Use parent/name construction instead of with_suffix(): appending
+    # ".d" to a path that already has a suffix (e.g. ".lock") would
+    # produce ".lock.d" instead of the intended ".lock.d" sibling dir.
+    # Parent/name construction is suffix-agnostic and always produces
+    # a "<name>.d" sibling directory next to the lock file.
+    lockdir = lock_path.parent / (lock_path.name + ".d")
     try:
         lockdir.mkdir(mode=0o700)
     except FileExistsError:
