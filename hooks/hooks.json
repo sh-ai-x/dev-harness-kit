@@ -59,6 +59,12 @@
             "type": "command",
             "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/destructive-confirm.sh",
             "fail_closed": true
+          },
+          {
+            "type": "command",
+            "command": "DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/pr-create-route.sh",
+            "timeout": 120,
+            "fail_closed": false
           }
         ]
       },
