@@ -28,16 +28,25 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 | **Project** (CI workflow gates) | `.dev-kit/gates.json` (NEW) + `.dev-kit/ci-config.json` | `/dev-kit:ci-setup` (install) | Reads gates.json + marker; `enable/disable/sync/init` write gates.json; dispatches ci-setup to install based on it. |
 | **Session** (local-hook gates) | `.dev-kit/harness-mode.session.json` | `/dev-kit:harness-mode` | Reads mode + per-gate values; dispatches to `harness-mode` to change. |
 | **AI-judge** (LLM-judge skills) | (skill-shipped; CI wiring in `.github/workflows/{review,security,maintenance}.yml`) | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` | Reports which judge skills are enabled and whether their CI workflow is wired; dispatches to the right skill. |
+| **Optional integrations** | Integration-specific config (Linear: `.dev-kit/linear-config.json`) | `/dev-kit:linear` | Shows and toggles integrations without adding them to `gates.json` or CI workflow installation. |
 
 ## Sub-commands
+
+Special-case `linear` aliases take precedence over the generic `<gate>` rows
+below; they delegate to `tools/linear_sync.py` and never touch `gates.json`.
 
 | Sub-command | Effect |
 |---|---|
 | `show` (default) | Read gates.json + marker; print the 3 dimensions. No edits. |
+| `classify` | Run `python -m lib.actor_classifier` for the current HEAD; print the actor type + recommended gate. Read-only. |
+| `route [--json]` | Run `classify` + write `.dev-kit/.pr-route.json` (the breadcrumb `hooks/pr-create-route.sh` consumes on every `gh pr create`). |
 | `pick` | Legacy 6-question picker; threads writes to gates.json + ci-setup. Kept as compat for the original AI-judge picker UX. |
 | `enable <gate>` | `python -m lib.gates_state enable <gate>` — flips `gates.<gate>.enabled` to true. |
 | `disable <gate>` | `python -m lib.gates_state disable <gate>` — flips `gates.<gate>.enabled` to false. |
 | `set <gate> <key> <value>` | Generic field writer (for `enabled`, `workflow`, `var`). |
+| `enable linear` | `python3 tools/linear_sync.py on` — explicitly opt in to Linear auto-sync. |
+| `disable linear` | `python3 tools/linear_sync.py off` — keep the optional Linear integration off. |
+| `set linear enabled <true\|false>` | Maps `true` to `python3 tools/linear_sync.py on` and `false` to `python3 tools/linear_sync.py off`; does not write `gates.json`. |
 | `sync` | Push enabled flags to `gh variable set GATES_<NAME>_ENABLED`. |
 | `init` | Synthesize `.dev-kit/gates.json` from the current `marker.runners` so a consumer that previously used `--exclude security.yml` upgrades in one step. |
 | `install-project` | Dispatch to `/dev-kit:ci-setup` (idempotent marker-driven install). |
@@ -46,9 +55,14 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 ```bash
 /dev-kit:gate-select                       # = show
 /dev-kit:gate-select show                  # explicit read-only
+/dev-kit:gate-select classify              # one-shot: actor_type + recommended_gate
+/dev-kit:gate-select route --json          # same, plus writes .dev-kit/.pr-route.json
 /dev-kit:gate-select enable review         # turn review gate on
 /dev-kit:gate-select disable security      # turn security gate off
 /dev-kit:gate-select set review enabled true
+/dev-kit:gate-select enable linear         # explicitly opt in to Linear auto-sync
+/dev-kit:gate-select disable linear        # default/recommended: keep Linear off
+/dev-kit:gate-select set linear enabled false
 /dev-kit:gate-select sync                  # push to gh variable set
 /dev-kit:gate-select init                  # synthesize gates.json from marker
 /dev-kit:gate-select pick                  # legacy 6-question picker
@@ -59,6 +73,16 @@ edit + `gate-select sync`, not a YAML edit + isolation-hook bypass.
 ## `show` output
 
 ```text
+ACTOR ROUTE (lib/actor_classifier, deterministic — never calls gh)
+  actor_type:        consumer_fork
+  repo_kind:         dev_harness_kit
+  recommended_gate:  fork_pr_review_environment
+  head_branch:       feat/actor-route-gate-select
+  base_branch:       main
+  remote:            eve/dev-harness-kit
+  reason:            fork PR without maintainer signal — route via
+                     fork-pr-review.yml Environment gate (manual approval required)
+
 PROJECT GATES (.dev-kit/gates.json + .dev-kit/ci-config.json marker)
   review.yml     enabled=true   var=GATES_REVIEW_ENABLED
   security.yml   enabled=false  var=GATES_SECURITY_ENABLED   # disabled via gates.json
@@ -77,11 +101,34 @@ AI-JUDGE GATES (skills shipped with the plugin; scheduled by .github/workflows/*
   /dev-kit:review        enabled (CI: review.yml,  if: vars.GATES_REVIEW_ENABLED    != 'false')
   /dev-kit:security      enabled (CI: security.yml, if: vars.GATES_SECURITY_ENABLED  != 'false' — but gates.json says disabled; CI gate job SKIPPED)
   /dev-kit:maintenance   enabled (CI: maintenance.yml, if: vars.GATES_MAINTENANCE_ENABLED != 'false')
+
+OPTIONAL INTEGRATIONS (integration-specific SSOT; not part of gates.json)
+  Linear API  enabled=false by default in gate-select
+  disable     python3 tools/linear_sync.py off
+  enable      python3 tools/linear_sync.py on (explicit operator opt-in)
+  status      python3 tools/linear_sync.py status
 ```
+
+### Linear integration policy
+
+Linear remains available for future use, but its API request and complexity
+quotas make it unsuitable as an always-on correctness gate. The gate-select
+default is therefore **off**. `enable linear` and `disable linear` delegate to
+the existing `tools/linear_sync.py` CLI, whose per-worktree
+`.dev-kit/linear-config.json` remains the source of truth. This preserves the
+four automatic Linear hooks and the manual `/dev-kit:linear` skill without
+mixing Linear state into the CI-only `.dev-kit/gates.json` schema.
+
+When Linear is disabled, implicit hooks stay non-blocking and stop before API
+sync. To use it later, run `/dev-kit:gate-select enable linear` (or the
+explicit `/dev-kit:linear on`) and inspect `/dev-kit:linear status`.
 
 ### How `show` reads each dimension
 
 ```bash
+# Actor route — deterministic; never calls gh.
+python3 -m lib.actor_classifier --root . --json
+
 # Project — gates.json is the SSOT; marker.gates_source is the audit breadcrumb.
 python3 -m lib.gates_state show --json --root .
 python3 -c "import json; print(json.load(open('.dev-kit/ci-config.json'))['runners'])"
@@ -166,11 +213,57 @@ workflow in the EXPECTED set NOT in marker.runners becomes a gate with
 `enabled=False`. The operator can spot-check the output, then run
 `gate-select sync` to push the flags to GH.
 
+## `classify` / `route` — actor-aware PR routing
+
+The `actor_classifier` module lifts the maintainer-vs-consumer
+classification out of the four duplicated YAML `if:` predicates in
+`review.yml` / `maintenance.yml` / `fork-pr-review.yml`. It reads
+three local signals (no `gh` calls):
+
+| Signal | Source | Indicates |
+|---|---|---|
+| `git remote get-url origin` | local git | owner/repo pair |
+| `.claude-plugin/plugin.json:owner` | plugin manifest | "this repo IS the dev-harness-kit source" |
+| `.dev-kit/team.json:maintainers` | optional hand-maintained file | GH logins trusted as maintainers |
+
+Plus an optional `--gh-author-association` injection for callers that
+already verified the value via `gh api`. The five scenario outcomes map
+to one of three recommended gates:
+
+| Scenario | `actor_type` | `recommended_gate` |
+|---|---|---|
+| dev-harness-kit, maintainer | `maintainer_self` | `standard_gates` |
+| dev-harness-kit, no maintainer signal | `consumer_self` | `standard_gates` (server-side trusted-author filter still applies) |
+| dev-harness-kit fork, maintainer | `maintainer_fork` | `standard_gates` (server-side `pull_request_target` + `author_association` filter) |
+| Any fork, no maintainer signal | `consumer_fork` | `fork_pr_review_environment` |
+| No git origin | `unknown` | `manual_review` (fail-closed) |
+
+```bash
+# Read-only — print the classification for the current HEAD branch.
+python3 -m lib.actor_classifier --root .
+
+# Same payload, machine-readable JSON.
+python3 -m lib.actor_classifier --root . --json
+
+# Persist the breadcrumb `hooks/pr-create-route.sh` consumes on
+# every `gh pr create`. The hook runs the same command internally;
+# this sub-command is the operator's escape hatch to inspect or
+# pre-populate the route before opening a PR.
+python3 -m lib.actor_classifier --root . --write-breadcrumb --json
+```
+
+The `hooks/pr-create-route.sh` PreToolUse:Bash hook fires on every
+`gh pr create` invocation and runs this classifier inline. Default
+mode is silent (one-line stderr summary); opt-in ask mode is toggled
+via `fork_pr_confirm=on` in `.dev-kit/guard-mode.session.json` (same
+shape as the existing `push_confirm` field). See
+`skills/guard-mode/SKILL.md` for the picker surface.
+
 ## What is out of scope
 
 | Surface | Today | Why |
 |---|---|---|
-| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used | Referenced only by `skills/config/SKILL.md` + `hooks/linear-*.sh`; gate-select reads from `gates.json` + `ci-config.json` + `harness-mode.session.json`. |
+| `lib/config_state.py` / `.dev-kit/.enabled.json` | Not used for project CI gates | Legacy Linear/config compatibility remains in the Linear skill; the optional-integration row delegates to `tools/linear_sync.py` and does not write `gates.json`. |
 | Skill-disable mechanism for AI-judge skills | None exists | `/dev-kit:review`, `/dev-kit:security`, `/dev-kit:maintenance` are always-on with the plugin; gate-select orchestrates their **CI wiring** + **on/off** via `gates.json`, not their skill-level enablement. |
 
 ## Rules (no exceptions)

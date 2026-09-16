@@ -30,12 +30,20 @@ from atomic import atomic_write_json  # noqa: E402
 
 STATE_REL_PATH = Path(".dev-kit") / "guard-mode.session.json"
 
-GUARDS = ("tdd_guard", "worktree_guard", "push_confirm")
+GUARDS = ("tdd_guard", "worktree_guard", "push_confirm", "fork_pr_confirm")
+
+# Opt-in guards — defaults to "off" rather than "on". The other three
+# are "always-on by default, opt-out" hard blocks; this one is an
+# opt-in ask feature (silent breadcrumb by default, human-visible
+# confirmation only when the operator explicitly toggles it on for
+# the session).
+OPT_IN_GUARDS = frozenset({"fork_pr_confirm"})
 
 GUARD_DESCRIPTIONS = {
     "tdd_guard": "hooks/tdd-guard.sh — blocks prod code edits without RED evidence (Iron Law L1)",
     "worktree_guard": "hooks/worktree-guard.sh — blocks Edit/Write/MultiEdit in the main checkout (rules/git-workflow.md worktree isolation)",
     "push_confirm": "hooks/destructive-confirm.sh — ask-tier gate for first-push and force-with-lease; toggled off by /dev-kit:babysit-pr[-local] for the loop lifetime",
+    "fork_pr_confirm": "hooks/pr-create-route.sh — ask-tier gate for `gh pr create` when actor_classifier routes to fork_pr_review_environment; default off (silent breadcrumb only)",
 }
 
 
@@ -44,7 +52,15 @@ def _state_path(root: Optional[Path] = None) -> Path:
 
 
 def _default_state() -> dict:
-    return {g: "on" for g in GUARDS}
+    """Synthesise a fresh state payload.
+
+    Always-on guards default to ``"on"``; opt-in guards (see
+    ``OPT_IN_GUARDS``) default to ``"off"`` so a fresh session never
+    auto-asks. The two sets are split here (rather than at the call
+    site) so the SessionStart reset hook can write a single, uniform
+    state file without per-guard branching.
+    """
+    return {g: ("off" if g in OPT_IN_GUARDS else "on") for g in GUARDS}
 
 
 def read_state(root: Optional[Path] = None) -> dict:
