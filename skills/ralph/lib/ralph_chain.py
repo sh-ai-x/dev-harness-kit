@@ -36,8 +36,10 @@ Exit-code mapping (from ``lib/ralph_chain.run_attended``):
   populated by ``assert_can_ask``).
 * ``RecoveryRequired`` (custom exception raised by a dispatch shim) →
   ``RECOVERY_REQUIRED``.
-* ``UserMergeRequired`` → ``USER_MERGE_REQUIRED`` (build green + review
-  approved + tag pushed, but the human-merge boundary is intact).
+* ``UserMergeRequired`` → ``USER_MERGE_REQUIRED`` only from ``SHIP`` (build
+  green + review approved + tag pushed, but the human-merge boundary is
+  intact). A child that reports this terminal earlier is rejected and lands
+  in ``RECOVERY_REQUIRED``.
 * Any other ``Exception`` → ``RECOVERY_REQUIRED`` with the traceback
   captured into ``state.last_action``.
 
@@ -134,7 +136,7 @@ class ChainDispatch(abc.ABC):
 
     @abc.abstractmethod
     def babysit(self, state: "rs.RalphState") -> "DispatchResult":
-        """Execute the BABYSIT sub_stage with --operator-is-only-human."""
+        """Execute BABYSIT; success must continue to the SHIP sub_stage."""
 
     @abc.abstractmethod
     def ship(self, state: "rs.RalphState") -> "DispatchResult":
@@ -150,7 +152,8 @@ class DispatchResult:
     ``terminal`` says where to land on success:
 
     * ``None`` → continue to next sub_stage (default).
-    * ``"USER_MERGE_REQUIRED"`` → emit USER_MERGE_REQUIRED.
+    * ``"USER_MERGE_REQUIRED"`` → emit USER_MERGE_REQUIRED, but only when
+      returned by the SHIP sub_stage.
     """
 
     exit_code: int = 0
@@ -242,11 +245,6 @@ class RealDispatch(ChainDispatch):
             "--rationale",
             rationale,
         )
-        # babysit-pr exits 0 on green; USER_MERGE_REQUIRED is the chain's
-        # terminal for "build green + review approved + tag pushed but
-        # human must run gh pr merge".
-        if result.exit_code == 0:
-            result.terminal = "USER_MERGE_REQUIRED"
         return result
 
     def ship(self, state: "rs.RalphState") -> DispatchResult:
@@ -256,7 +254,13 @@ class RealDispatch(ChainDispatch):
         extra: List[str] = []
         if pr_number is not None:
             extra.extend(["--pr", str(pr_number)])
-        return self._run("/dev-kit:ship", *extra)
+        result = self._run("/dev-kit:ship", *extra)
+        # /dev-kit:ship deliberately never auto-merges. A successful ship
+        # therefore reaches the human merge boundary; this is the sole
+        # production owner of USER_MERGE_REQUIRED.
+        if result.exit_code == 0:
+            result.terminal = "USER_MERGE_REQUIRED"
+        return result
 
 
 # ----------------------------------------------------------------------------
@@ -336,6 +340,12 @@ def _coerce_recovery_or_merge(
     if sub_stage == SHIP and result.exit_code == USER_MERGE_EXIT_CODE:
         return "USER_MERGE_REQUIRED"
     return "RECOVERY_REQUIRED"
+
+
+def _record_completed_sub_stage(state: "rs.RalphState", sub_stage: str) -> None:
+    """Record a successful boundary once, preserving execution order."""
+    if sub_stage not in state.completed_sub_stages:
+        state.completed_sub_stages.append(sub_stage)
 
 
 # ----------------------------------------------------------------------------
@@ -430,6 +440,18 @@ def run_attended(
             state.save(project_root)
             return state
         except UserMergeRequired:
+            if sub != SHIP:
+                state.last_action = (
+                    f"{sub} raised UserMergeRequired before SHIP; "
+                    "invalid terminal boundary"
+                )
+                state.next_action = "operator reviews child contract + resumes"
+                state.transition(
+                    rs.RECOVERY_REQUIRED, action=state.last_action
+                )
+                state.save(project_root)
+                return state
+            _record_completed_sub_stage(state, sub)
             state.last_action = (
                 f"{sub} raised UserMergeRequired; build green + review approved"
             )
@@ -484,6 +506,18 @@ def run_attended(
             state.save(project_root)
             return state
         if result.terminal == "USER_MERGE_REQUIRED":
+            if sub != SHIP:
+                state.last_action = (
+                    f"{sub} returned USER_MERGE_REQUIRED before SHIP; "
+                    "invalid terminal boundary"
+                )
+                state.next_action = "operator reviews child contract + resumes"
+                state.transition(
+                    rs.RECOVERY_REQUIRED, action=state.last_action
+                )
+                state.save(project_root)
+                return state
+            _record_completed_sub_stage(state, sub)
             state.last_action = f"{sub} signalled USER_MERGE_REQUIRED"
             state.next_action = "operator runs gh pr merge"
             state.transition(
@@ -493,6 +527,7 @@ def run_attended(
             return state
 
         # Sub succeeded → record and continue.
+        _record_completed_sub_stage(state, sub)
         state.last_action = f"{sub} exit_code=0; continuing"
         try:
             next_sub = SUB_STAGE_ORDER[SUB_STAGE_ORDER.index(sub) + 1]
@@ -579,11 +614,12 @@ def _cli(argv: List[str]) -> int:
         )
     else:
         # dry-run: RecordingDispatch with successful defaults + terminal
-        # USER_MERGE_REQUIRED at BABYSIT (mirrors RealDispatch.babysit).
+        # USER_MERGE_REQUIRED at SHIP (mirrors RealDispatch.ship).
         dispatch = RecordingDispatch(
             results={
                 BUILD: DispatchResult(exit_code=0),
-                BABYSIT: DispatchResult(
+                BABYSIT: DispatchResult(exit_code=0),
+                SHIP: DispatchResult(
                     exit_code=0, terminal="USER_MERGE_REQUIRED"
                 ),
             }
