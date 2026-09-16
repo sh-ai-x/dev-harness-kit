@@ -88,23 +88,22 @@ STATUS_TAG_CLASS = {
 }
 
 # Status-routed layout (see module docstring). The bucket set is a tight
-# whitelist; tests pin `BUCKETS` as the 5-name lifecycle set.
+# whitelist; tests pin `BUCKETS` as the 4-name lifecycle set.
 #
 # Lifecycle stages (left-to-right):
 #   reviewing  → proposal is being iterated on (draft / design-discussion /
 #                in-review revisions). Stays there until promoted or killed.
 #   pending    → proposal is ready-for-review (approved, queued for
 #                implementation). Implementation work has not started.
-#   applied    → proposal was implemented in code AS DESIGNED (no
-#                significant deviations). The shipped date is recorded
-#                in the YAML's `shipped:` field.
-#   changed    → proposal was implemented, but with design CHANGES during
-#                or after implementation. The umbrella directory carries
-#                a `-mod` suffix and the YAML records both the original
-#                proposal intent and the as-shipped deviations.
+#   applied    → proposal was implemented in code. Both AS-DESIGNED
+#                (status: accepted) and WITH-CHANGES (status:
+#                applied-with-changes) live here; the umbrella directory
+#                carries a `-mod` suffix and the YAML records the
+#                as-shipped deviations for the latter. The shipped date
+#                is recorded in the YAML's `shipped:` field.
 #   rejected   → proposal was killed (rejected or superseded without
 #                implementation).
-BUCKETS = ("reviewing", "pending", "applied", "changed", "rejected")
+BUCKETS = ("reviewing", "pending", "applied", "rejected")
 
 STATUS_TO_BUCKET = {
     "draft": "reviewing",
@@ -112,7 +111,7 @@ STATUS_TO_BUCKET = {
     "in-review": "reviewing",
     "ready-for-review": "pending",
     "accepted": "applied",
-    "applied-with-changes": "changed",
+    "applied-with-changes": "applied",
     "rejected": "rejected",
     "superseded": "rejected",
 }
@@ -578,8 +577,8 @@ class Proposal:
     # (PR merged, or the proposal is otherwise considered done).
     # The renderer emits timeline chips when these are set; the
     # `--in-flight` CLI filter lists accepted proposals where
-    # `started` is set and `shipped` is not. BUCKETS is unchanged --
-    # timeline state is time-bound, not a categorical bucket.
+    # `started` is set and `shipped` is not. Timeline state is
+    # time-bound, not a categorical bucket.
     started: Optional[str] = None
     shipped: Optional[str] = None
 
@@ -1595,7 +1594,7 @@ def render_from_yaml(text: str) -> str:
 # Both halves of `<main>/<sub>` are kebab/snake; one `/` separator per
 # half is allowed; no leading/trailing slash, no double slash, no `.`
 # segments. The 3-level shape requires `<bucket>` to be one of the
-# three whitelist names in `BUCKETS` -- any other bucket name is
+# four whitelist names in `BUCKETS` -- any other bucket name is
 # rejected with an actionable error message.
 _TWO_LEVEL_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
@@ -1639,7 +1638,7 @@ def _in_flight(project_root: Path) -> list[str]:
     """Return accepted proposals currently being shipped, newest started first.
 
     A proposal is "in flight" iff it has `status: accepted` (whether or
-    not it has been routed into the `accepted/` bucket yet), has a
+    not it has been routed into the `applied/` bucket yet), has a
     `started:` date set, AND has no `shipped:` date. This is a derived
     view over data the proposal YAML already carries -- it does NOT
     move files, does NOT require a new bucket, and does NOT depend on

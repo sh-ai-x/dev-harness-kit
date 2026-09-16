@@ -1173,7 +1173,7 @@ class StatusBucketMappingTests(unittest.TestCase):
             "in-review": "reviewing",
             "ready-for-review": "pending",
             "accepted": "applied",
-            "applied-with-changes": "changed",
+            "applied-with-changes": "applied",
             "rejected": "rejected",
             "superseded": "rejected",
         }
@@ -1189,14 +1189,18 @@ class StatusBucketMappingTests(unittest.TestCase):
         crashing the renderer."""
         self.assertEqual(rph.STATUS_TO_BUCKET.get("my-custom-state", "reviewing"), "reviewing")
 
-    def test_buckets_set_is_exactly_five_names(self):
+    def test_buckets_set_is_exactly_four_names(self):
         """The bucket set is a tight whitelist covering the full
-        proposal lifecycle: reviewing → pending → applied/changed →
-        rejected. Adding or removing a name is a deliberate choice —
-        pin it."""
+        proposal lifecycle: reviewing → pending → applied → rejected.
+        The `-mod` suffix on an umbrella directory is the
+        as-shipped-with-changes marker, NOT a separate bucket — both
+        `status: accepted` and `status: applied-with-changes` route
+        to `applied/` so the umbrella grouping survives 2-level
+        re-renders. Adding or removing a name is a deliberate choice
+        — pin it."""
         self.assertEqual(
             sorted(rph.BUCKETS),
-            ["applied", "changed", "pending", "rejected", "reviewing"],
+            ["applied", "pending", "rejected", "reviewing"],
         )
 
 
@@ -1367,20 +1371,25 @@ class StatusRoutedListTests(unittest.TestCase):
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{sub}.yaml").write_text("title: T\nstatus: draft\nsections: []\n", encoding="utf-8")
 
-    def test_list_scans_all_five_buckets(self):
+    def test_list_scans_all_four_buckets(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self._make_in_bucket(root, "reviewing", "main1", "topic1", "draft")
             self._make_in_bucket(root, "pending", "main1", "topic2", "ready-for-review")
             self._make_in_bucket(root, "applied", "main1", "topic3", "accepted")
-            self._make_in_bucket(root, "changed", "main1", "topic4", "applied-with-changes")
+            # `applied-with-changes` is co-located with `accepted` under
+            # `applied/` (the `-mod` suffix lives on the umbrella dir,
+            # not in a separate bucket). The test exercises the
+            # filesystem layout, not the status->bucket mapping, so
+            # plant both kinds in `applied/`.
+            self._make_in_bucket(root, "applied", "main1-mod", "topic4", "applied-with-changes")
             self._make_in_bucket(root, "rejected", "main1", "topic5", "rejected")
             topics = rph._list_proposals(root)
             self.assertEqual(
                 topics,
                 [
                     "applied/main1/topic3",
-                    "changed/main1/topic4",
+                    "applied/main1-mod/topic4",
                     "pending/main1/topic2",
                     "rejected/main1/topic5",
                     "reviewing/main1/topic1",
@@ -1431,7 +1440,7 @@ class StatusRoutedListTests(unittest.TestCase):
         not surface as sub-topic slugs in any bucket."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            for bucket in ("reviewing", "pending", "applied", "changed", "rejected"):
+            for bucket in ("reviewing", "pending", "applied", "rejected"):
                 d = root / "docs" / "proposals" / bucket / "main"
                 d.mkdir(parents=True, exist_ok=True)
                 (d / "proposal.yaml").write_text("x", encoding="utf-8")
@@ -1444,7 +1453,6 @@ class StatusRoutedListTests(unittest.TestCase):
                 topics,
                 [
                     "applied/main/real",
-                    "changed/main/real",
                     "pending/main/real",
                     "rejected/main/real",
                     "reviewing/main/real",
@@ -1481,6 +1489,10 @@ class MigrateTests(unittest.TestCase):
             rc = rph._migrate(root)
             self.assertEqual(rc, 0)
             # Each pair lives under the bucket its YAML declared.
+            # `applied-with-changes` lands under `applied/` (the `-mod`
+            # umbrella suffix is an on-disk convention, not a separate
+            # bucket — see STATUS_TO_BUCKET comment in
+            # lib/render_proposal_html.py).
             self.assertTrue(
                 (root / "docs" / "proposals" / "applied" / "main1" / "alpha.yaml").is_file()
             )
@@ -1494,7 +1506,7 @@ class MigrateTests(unittest.TestCase):
                 (root / "docs" / "proposals" / "pending" / "main4" / "delta.yaml").is_file()
             )
             self.assertTrue(
-                (root / "docs" / "proposals" / "changed" / "main5" / "epsilon.yaml").is_file()
+                (root / "docs" / "proposals" / "applied" / "main5" / "epsilon.yaml").is_file()
             )
             # Legacy locations are empty after migrate.
             self.assertFalse(

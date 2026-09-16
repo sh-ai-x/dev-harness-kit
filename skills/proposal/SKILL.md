@@ -23,16 +23,16 @@ The skill is generic across proposals; the MCP harness content
 
 **Status-routed layout invariant** (default for new renders): every
 proposal lives at `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}`
-where `<bucket>` is one of `reviewing`, `pending`, `applied`, `changed`,
-`rejected`. The bucket is auto-routed from the YAML's `status:` field
-via `STATUS_TO_BUCKET`:
+where `<bucket>` is one of `reviewing`, `pending`, `applied`, `rejected`.
+The bucket is auto-routed from the YAML's `status:` field via
+`STATUS_TO_BUCKET`:
 
       draft                  -> reviewing
       design-discussion      -> reviewing
       in-review              -> reviewing
       ready-for-review       -> pending
       accepted               -> applied
-      applied-with-changes   -> changed
+      applied-with-changes   -> applied
       rejected               -> rejected
       superseded             -> rejected
 
@@ -41,20 +41,22 @@ produces a routable path. Pass `<bucket>/<main>/<sub>` explicitly to
 override (e.g. `applied/main/sub` forces `applied/` regardless of
 the YAML's `status:`).
 
-**Lifecycle semantics** (left-to-right, terminal states are `applied`,
-`changed`, `rejected`):
+**Lifecycle semantics** (left-to-right, terminal states are `applied`
+and `rejected`):
 
 - `reviewing/` — proposal is being iterated on (draft / design-discussion /
   in-review revisions). Stays there until promoted or killed.
 - `pending/` — proposal is ready-for-review, approved, queued for
   implementation. Implementation work has not started.
-- `applied/` — proposal was implemented in code AS DESIGNED (no
-  significant deviations). The shipped date is recorded in the YAML's
-  `shipped:` field.
-- `changed/` — proposal was implemented, but with design CHANGES during
-  or after implementation. The umbrella directory carries a `-mod`
-  suffix and the YAML records both the original proposal intent and
-  the as-shipped deviations in `before:` / `after:` blocks.
+- `applied/` — proposal was implemented in code. BOTH `status: accepted`
+  (AS DESIGNED) and `status: applied-with-changes` (WITH design
+  deviations) live here; the umbrella directory carries a `-mod`
+  suffix and the YAML records the as-shipped deviations in a
+  `modifications:` block for the latter. Co-locating them keeps the
+  umbrella grouping (e.g. all `harness-effectiveness-*` proposals
+  together) intact across 2-level re-renders — splitting them into
+  separate buckets would silently rename the umbrella on every render.
+  The shipped date is recorded in the YAML's `shipped:` field.
 - `rejected/` — proposal was killed (rejected or superseded without
   implementation).
 
