@@ -85,7 +85,7 @@ fi
 STATE_JSON=$(PYTHONPATH="${RALPH_LIB}" \
   RALPH_STATE_FILE="${STATE_FILE}" \
   RALPH_PROJECT_ROOT="${PROJECT_ROOT}" \
-  python3 - <<PY 2>/dev/null
+  python3 - <<'PY' 2>/dev/null
 import json, os, sys
 from pathlib import Path
 try:

@@ -114,10 +114,15 @@ class TestTddGuardBypass(unittest.TestCase):
 
 
 class TestSessionStartGuardModeReset(unittest.TestCase):
-    def test_reset_hook_restores_both_guards_to_on(self):
+    def test_reset_hook_restores_every_guard_to_default(self):
+        # The three always-on guards → "on"; the opt-in guard
+        # ``fork_pr_confirm`` → "off" (see OPT_IN_GUARDS).
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            gms.write_state({"tdd_guard": "off", "worktree_guard": "off"}, root=root)
+            gms.write_state(
+                {"tdd_guard": "off", "worktree_guard": "off", "fork_pr_confirm": "on"},
+                root=root,
+            )
 
             r = subprocess.run(
                 ["bash", str(HOOKS / "session-start-guard-mode-reset.sh")],
@@ -126,7 +131,10 @@ class TestSessionStartGuardModeReset(unittest.TestCase):
             )
             self.assertEqual(r.returncode, 0, r.stderr)
             state = gms.read_state(root)
-            self.assertEqual(state, {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on"})
+            self.assertEqual(
+                state,
+                {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+            )
 
 
 if __name__ == "__main__":

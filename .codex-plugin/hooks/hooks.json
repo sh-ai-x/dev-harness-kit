@@ -52,6 +52,11 @@
           },
           {
             "type": "command",
+            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/pr-create-route.sh",
+            "fail_closed": false
+          },
+          {
+            "type": "command",
             "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/review-yml-isolation.sh",
             "fail_closed": true
           },

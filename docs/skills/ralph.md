@@ -85,6 +85,10 @@ unattended. This is the LAST review surface. On Approve, the chain sets
 `Skill("babysit-pr")` → `Skill("ship")` run unattended. The
 `MAX_ITERS=1000` watchdog + 3-consecutive-no-progress guard from
 babysit-pr cap runtime at ~45 min before surfacing `RECOVERY_REQUIRED`.
+BABYSIT success always continues to SHIP. Only SHIP may emit
+`USER_MERGE_REQUIRED`; an early child terminal is rejected into
+`RECOVERY_REQUIRED` so the ship gate cannot be skipped. The persisted state
+also records ordered `completed_sub_stages` evidence for the run.
 
 ## State machine
 
@@ -108,7 +112,9 @@ The `attended_lock` field defaults to `False`. The transition
 `True`. Once set, `can_ask_question()` returns `False` and `rewind_to()`
 raises `AttendedLockError`. The lock is reset only by an explicit
 `rewind_to()` to a prior gate (which clears the lock AND downstream
-state).
+state). During an attended run, `completed_sub_stages` is the auditable
+ordered list of successful BUILD/BABYSIT/SHIP boundaries; `sub_stage` alone
+is only the current cursor.
 
 ## Bash glue
 

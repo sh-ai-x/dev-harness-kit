@@ -39,6 +39,7 @@ per-runtime wiring differences), see
 | `review-yml-isolation` | Forces `review.yml` PRs to be `review.yml`-only | All |
 | `notification-collapse` | Stderr WARN when ≥ 2 `<task-notification>` envelopes are in a UserPromptSubmit payload (the `Monitor` / `run_in_background` bloat pattern from the 2026-08-11 `/dev-kit:token-analyzer` diagnostic) | All |
 | `context-window-guard` | Stderr tiered WARN (100K / 200K / 300K cumulative input tokens) recommending `/compact` per `rules/session-hygiene.md` Iron Law 4; thresholds tunable via `CONTEXT_WINDOW_*_KB` env vars | All |
+| `pr-create-route` | Deterministic actor classification on every `gh pr create` via `lib/actor_classifier`; writes `.dev-kit/.pr-route.json` breadcrumb + prints one-line route to stderr; silent by default, opt-in ask via `fork_pr_confirm=on` in `.dev-kit/guard-mode.session.json`. Mirrors the `push_confirm` opt-in pattern. | All |
 
 ## Hook inventory, by event
 
@@ -70,6 +71,7 @@ useful when you're debugging *why* a hook did or didn't run:
 | `acp-tier-assert.sh` | PreToolUse (`*`) | Enforce ACP agent tier-assertion line on first tool call (M/T/L) | hard-block |
 | `stop-verify.sh` | Stop | Run regression tests + pre-completion intent checklist on session end | hard-block |
 | `sub-agent-handoff.sh` | PostToolUse (Agent) | Verify sub-agent response carries STATUS / EVIDENCE / NEXT-ACTION pieces; advisory; fail-closed on jq missing | advisory (fail-closed on missing jq) |
+| `pr-create-route.sh` | PreToolUse (Bash) | Classify `gh pr create` via `lib/actor_classifier`; persist `.dev-kit/.pr-route.json`; one-line route to stderr; opt-in ask via `fork_pr_confirm`. Non-blocking, 120s timeout, fail-closed per `feedback-tmux-long-running-safety.md`. | advisory (silent default, opt-in ask) |
 
 **Reading the "Mode" column:** `hard-block` means the tool call is denied
 outright — there is no override short of removing the hook. `advisory`
