@@ -141,7 +141,7 @@ renders to the status-routed shape when writing).
 # from the repo root
 python3 -m lib.render_proposal_html main/alpha                   # auto-route by status
 python3 -m lib.render_proposal_html accepted/main/alpha          # explicit bucket
-python3 -m lib.render_proposal_html --list                       # list across all 3 buckets + legacy
+python3 -m lib.render_proposal_html --list                       # list across all 4 buckets + legacy
 python3 -m lib.render_proposal_html --all                        # render every topic
 python3 -m lib.render_proposal_html --migrate                    # legacy -> bucket dirs
 python3 -m lib.render_proposal_html my-slug --project-root /path/to/repo

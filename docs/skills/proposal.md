@@ -21,7 +21,7 @@ Every proposal lives at `docs/proposals/<bucket>/<main>/<sub>.{yaml,html}`:
 - `<main>` is the umbrella grouping N related sub-proposals (e.g. `harness-architecture`).
 - `<sub>` is the sub-topic slug (e.g. `protocol-layer`, `00-index`) — the file is named after the sub-topic, not `index.{yaml,html}`, so it stays recognizable on a flat directory listing or static-site host.
 
-The render pipeline: (1) list available topics via `python3 -m lib.render_proposal_html --list` (scans all three buckets + the legacy flat shape); (2) render one topic via `python3 -m lib.render_proposal_html <main>/<sub>` (bucket auto-routes from the YAML's `status:`) or `<bucket>/<main>/<sub>` (explicit override), which writes the HTML into the status-routed layout; (3) print the output path so the user can open it (`open docs/proposals/<bucket>/<main>/<sub>.html` on macOS, or any browser via `file://`); (4) stop — the skill never edits the YAML, only renders it. `--migrate` is a one-shot that moves legacy flat proposals into the bucket each YAML declares (idempotent). The render logic is a pure function in `lib/render_proposal_html.py` plus a `__main__` CLI entry; there is no separate `bin/dev-kit-proposal.py` binary, since the proposal skill is the only caller.
+The render pipeline: (1) list available topics via `python3 -m lib.render_proposal_html --list` (scans all four buckets + the legacy flat shape); (2) render one topic via `python3 -m lib.render_proposal_html <main>/<sub>` (bucket auto-routes from the YAML's `status:`) or `<bucket>/<main>/<sub>` (explicit override), which writes the HTML into the status-routed layout; (3) print the output path so the user can open it (`open docs/proposals/<bucket>/<main>/<sub>.html` on macOS, or any browser via `file://`); (4) stop — the skill never edits the YAML, only renders it. `--migrate` is a one-shot that moves legacy flat proposals into the bucket each YAML declares (idempotent). The render logic is a pure function in `lib/render_proposal_html.py` plus a `__main__` CLI entry; there is no separate `bin/dev-kit-proposal.py` binary, since the proposal skill is the only caller.
 
 The renderer auto-attaches a `<nav class="back-link">` element (`← 00-index`) at the top of every non-index sub-topic page when a sibling `00-index.yaml` exists in either the source umbrella directory OR the output bucket directory; the 00-index page itself gets no back link. The pure `render()` function takes optional `back_to_href=`/`back_to_label=` kwargs, which the CLI driver wires based on the filesystem sibling check.
 
@@ -34,14 +34,14 @@ The topic slug matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9_-]
 ```bash
 /dev-kit:proposal [<main>/<sub>]              # bucket auto-routes from YAML status
 /dev-kit:proposal [<bucket>/<main>/<sub>]     # explicit bucket override
-/dev-kit:proposal --list                       # list all (across all 3 buckets + legacy)
+/dev-kit:proposal --list                       # list all (across all 4 buckets + legacy)
 /dev-kit:proposal --all                        # render every proposal
 /dev-kit:proposal --migrate                    # one-shot move legacy flat -> bucket dirs
 ```
 
 | Form | Effect |
 |---|---|
-| `--list` | Lists available proposal topics across all three buckets and the legacy flat shape. |
+| `--list` | Lists available proposal topics across all four buckets and the legacy flat shape. |
 | `--all` | Renders every discovered proposal to its routed bucket. |
 | `--migrate` | One-shot: moves every legacy flat `<main>/<sub>.{yaml,html}` into the bucket its YAML's `status:` declares. Idempotent. |
 | `<main>/<sub>` | Renders that topic's YAML to HTML (bucket auto-routes). |
