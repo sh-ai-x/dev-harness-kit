@@ -94,7 +94,7 @@ class TestHardRules(unittest.TestCase):
         ctx = _make_ctx(iteration=2)
         llm_decisions = [
             gate_dynamic.GateDecision("review", skip=True, reasoning="r",
-                                      confidence=0.9, raw_score={}),
+                                      confidence=0.9, risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         # review has forced_run=True (per fixture) AND is in scope of
@@ -108,7 +108,7 @@ class TestHardRules(unittest.TestCase):
         ctx = _make_ctx(iteration=1)
         llm_decisions = [
             gate_dynamic.GateDecision(gate_name=n, skip=True, reasoning="r",
-                                      confidence=0.9, raw_score={})
+                                      confidence=0.9, risk_level=0.0, raw_score={})
             for n in ("review", "security", "maintenance")
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
@@ -133,7 +133,7 @@ class TestHardRules(unittest.TestCase):
         )
         llm_decisions = [
             gate_dynamic.GateDecision(gate_name=n, skip=True, reasoning="r",
-                                      confidence=0.9, raw_score={})
+                                      confidence=0.9, risk_level=0.0, raw_score={})
             for n in ("review", "security", "maintenance")
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
@@ -147,7 +147,7 @@ class TestHardRules(unittest.TestCase):
         llm_decisions = [
             gate_dynamic.GateDecision("maintenance", skip=True,
                                       reasoning="r", confidence=0.5,
-                                      raw_score={}),
+                                      risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         maint = next(d for d in out if d.gate_name == "maintenance")
@@ -159,7 +159,7 @@ class TestHardRules(unittest.TestCase):
         llm_decisions = [
             gate_dynamic.GateDecision("maintenance", skip=True,
                                       reasoning="r", confidence=0.0,
-                                      raw_score={}),
+                                      risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         maint = next(d for d in out if d.gate_name == "maintenance")
@@ -184,11 +184,36 @@ class TestHardRules(unittest.TestCase):
         llm_decisions = [
             gate_dynamic.GateDecision("maintenance", skip=True,
                                       reasoning="r", confidence=0.9,
-                                      raw_score={}),
+                                      risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         maint = next(d for d in out if d.gate_name == "maintenance")
         self.assertFalse(maint.skip)
+
+    def test_high_risk_veto_no_skip(self) -> None:
+        # Rule 6: risk_level > RISK_FLOOR (3.0) → skip=False even when
+        # gate_skippable and confidence are both high.
+        ctx = _make_ctx(iteration=2)
+        llm_decisions = [
+            gate_dynamic.GateDecision("maintenance", skip=True,
+                                      reasoning="r", confidence=0.9,
+                                      risk_level=5.0, raw_score={}),
+        ]
+        out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
+        maint = next(d for d in out if d.gate_name == "maintenance")
+        self.assertFalse(maint.skip)
+
+    def test_low_risk_allows_skip(self) -> None:
+        # risk_level below the floor AND high skip/confidence scores → skip.
+        ctx = _make_ctx(iteration=2)
+        llm_decisions = [
+            gate_dynamic.GateDecision("maintenance", skip=True,
+                                      reasoning="r", confidence=0.9,
+                                      risk_level=2.0, raw_score={}),
+        ]
+        out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
+        maint = next(d for d in out if d.gate_name == "maintenance")
+        self.assertTrue(maint.skip)
 
     def test_critical_gate_empty_scope_still_vetoed(self) -> None:
         # Security review LLM01-M1: review/security with empty scope_globs
@@ -207,7 +232,7 @@ class TestHardRules(unittest.TestCase):
         llm_decisions = [
             gate_dynamic.GateDecision(gate_name=n, skip=True,
                                       reasoning="r", confidence=0.9,
-                                      raw_score={})
+                                      risk_level=0.0, raw_score={})
             for n in ("review", "security")
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
@@ -300,7 +325,7 @@ class TestDecisionIO(unittest.TestCase):
             decisions=(
                 gate_dynamic.GateDecision("maintenance", skip=True,
                                           reasoning="r", confidence=0.9,
-                                          raw_score={}),
+                                          risk_level=0.0, raw_score={}),
             ),
             llm_raw={"scores": {}, "raw": ""},
             gates_hash="",

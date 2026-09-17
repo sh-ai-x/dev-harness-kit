@@ -61,6 +61,14 @@ CONFIDENCE_FLOOR = 0.7
 # without being too aggressive on marginal scores.
 SKIP_THRESHOLD = 7.0
 
+# Risk ceiling for `risk_level`. The LLM judge emits 0-10; a gate
+# with risk_level > RISK_FLOOR is never skipped regardless of how high
+# gate_skippable or confidence scores are. Default 3.0 means "low risk
+# only" — a relaxed ceiling for a v1.1 feature (per OE-1 philosophy).
+# This also prevents the 0.0 default (no LLM response) from accidentally
+# bypassing the risk rule on the first legitimate call.
+RISK_FLOOR = 3.0
+
 # Body truncation budget for `diff_sample` in the LLM prompt.
 # ~2 KB is enough for the judge to ground its scope-discipline
 # judgment without blowing the input-token budget on long diffs.
@@ -98,6 +106,7 @@ class GateDecision:
     skip: bool
     reasoning: str
     confidence: float                 # 0.0-1.0
+    risk_level: float                # 0.0-10.0, lower_is_better
     raw_score: dict
 
 
@@ -151,7 +160,7 @@ def apply_hard_rules(
     context: GateContext,
     llm_decisions: list,
 ) -> list:
-    """Pure: apply 5 bypass rules on top of LLM output.
+    """Pure: apply 6 bypass rules on top of LLM output.
 
     Returns a new list with `skip=False` overrides where hard rules fire.
     Hard rules (in order of precedence):
@@ -160,6 +169,7 @@ def apply_hard_rules(
       3. gate_name in {review, security} AND scope matches → skip=False
       4. confidence < CONFIDENCE_FLOOR → skip=False (low-confidence veto)
       5. `dynamic_eligible: false` (default) → skip=False (LLM-seam closed)
+      6. risk_level > RISK_FLOOR → skip=False (high-risk veto; lower_is_better)
     """
     out = []
     for dec in llm_decisions:
@@ -197,6 +207,11 @@ def apply_hard_rules(
         # operator who leaves it at the default expects the gate to be
         # immune to LLM-driven skips.
         if not gate_entry.get("dynamic_eligible", False):
+            new_skip = False
+        # Rule 6 — high-risk veto. risk_level is lower_is_better (0=safe,
+        # 10=dangerous); a gate with risk above the ceiling is never
+        # skipped regardless of how good the other scores look.
+        if dec.risk_level > RISK_FLOOR:
             new_skip = False
         if new_skip != dec.skip:
             out.append(dataclasses.replace(dec, skip=False))
@@ -462,6 +477,7 @@ def select_gates(
                 skip=False,
                 reasoning="local mode: judge skipped, no LLM call",
                 confidence=0.0,
+                risk_level=0.0,
                 raw_score={},
             )
             for g in VALID_GATE_KEYS
@@ -504,14 +520,21 @@ def select_gates(
         skip_score = float(scores.get("gate_skippable", 0.0))
         confidence_raw = float(scores.get("confidence", 0.0))
         confidence = confidence_raw / 10.0
-        # Skip iff both: skip_score >= SKIP_THRESHOLD AND confidence >= CONFIDENCE_FLOOR
-        skip = skip_score >= SKIP_THRESHOLD and confidence >= CONFIDENCE_FLOOR
+        risk_level = float(scores.get("risk_level", 0.0))
+        # Skip iff all three: skip_score >= SKIP_THRESHOLD AND
+        # confidence >= CONFIDENCE_FLOOR AND risk_level <= RISK_FLOOR.
+        skip = (
+            skip_score >= SKIP_THRESHOLD
+            and confidence >= CONFIDENCE_FLOOR
+            and risk_level <= RISK_FLOOR
+        )
         llm_decisions.append(
             GateDecision(
                 gate_name=gate_name,
                 skip=skip,
-                reasoning=f"llm: gate_skippable={skip_score:.1f} confidence_raw={confidence_raw:.1f} (normalized={confidence:.2f})",
+                reasoning=f"llm: gate_skippable={skip_score:.1f} confidence_raw={confidence_raw:.1f} (normalized={confidence:.2f}) risk_level={risk_level:.1f}",
                 confidence=confidence,
+                risk_level=risk_level,
                 raw_score=scores,
             )
         )
@@ -544,6 +567,7 @@ def _no_skip_decision(context: GateContext, root: Path) -> GateSkipDecision:
             skip=False,
             reasoning="llm unavailable; defaulting to no-skip",
             confidence=0.0,
+            risk_level=0.0,
             raw_score={},
         )
         for g in VALID_GATE_KEYS
