@@ -86,7 +86,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`docs-maintenance`](docs-maintenance.md) | `analysis` | Audits repository docs with the README as the highest-priority document; always audits and verifies the README, updates when needed. |
 | [`prune-propose`](prune-propose.md) | `state` | Usage-telemetry dump + per-skill delete proposal, user-approved. |
 | [`ralph`](ralph.md) | `state` | End-to-end autonomous loop with 4 user gates + unattended build/babysit/ship. Once SHIP_CONFIRM_GATE approves, attended_lock is set and AskUserQuestion is invariant-forbidden during ATTENDED_RUN. Linear is OUT OF SCOPE. |
-| [`learn`](learn.md) | `state` | Distill source text (file path, URL, prose, or session transcript) into a candidate `skills/<name>/SKILL.md`, gated by deterministic G1–G5 checks + a per-candidate approval step. |
 
 ### Shortcuts / maintenance
 
@@ -147,7 +146,6 @@ step inside their parent skill's flow; you never type them directly.
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | model |
 | [`inspect`](inspect.md) | `audit` | `analysis` | human |
 | [`interview`](interview.md) | `design` | `enforcement` | human |
-| [`learn`](learn.md) | `audit` | `state` | human |
 | [`linear`](linear.md) | `config` | `state` | human |
 | [`llm-refresh`](llm-refresh.md) | `shortcuts` | `analysis` | human |
 | [`log`](log.md) | `shortcuts` | `state` | human |

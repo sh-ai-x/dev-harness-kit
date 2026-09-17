@@ -2,11 +2,11 @@
 
 This index lists every skill shipped by the `dev-kit` plugin. Click into any skill to read its full `SKILL.md`; every `SKILL.md` has a back-link at the top to return here.
 
-**52 skills** across 13 categories (50 human-invocable, 2 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
+**51 skills** across 13 categories (49 human-invocable, 2 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
 
 ## By category
 
-### `audit` (12)
+### `audit` (11)
 
 | Skill | α | Description |
 |---|---|---|
@@ -17,7 +17,6 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `analysis` | Audit repository documentation with the project README as the highest-priority document. The README is always audited AND verified every run, and updated when needed. |
 | [`hook-doctor`](hook-doctor/SKILL.md) 🔒 | `enforcement` | Diagnose failed Claude Code or Codex hooks, repair safe cache and registration drift, and report the exact restart step. |
 | [`inspect`](inspect/SKILL.md) | `analysis` | 0-arg read-only code health audit. 8-dim fan-out (dead, dup, smell, overeng, overarch, cleancode, tokenbudget, slop) + --secrets/--slop aliases to the audit family (lib/analysis_core/dimensions.py). |
-| [`learn`](learn/SKILL.md) | `state` | Distill source text into a new SKILL.md with approval gate. |
 | [`maintenance`](maintenance/SKILL.md) | `enforcement` | Code-sanity gate. Judges the PR diff against the 20-checkbox rubric from eval/prompts/judge-code-sanity.md (CC-1..8 clean code, OE-1..8 over-engineering, VM-1..4 value/meaning). Mirrors .github/workflows/maintenance.yml… |
 | [`prune-propose`](prune-propose/SKILL.md) | `state` | 0-arg skill — usage telemetry dump + per-skill delete proposal. User approves each deletion explicitly. |
 | [`ralph`](ralph/SKILL.md) | `state` | End-to-end autonomous loop with 4 user gates + unattended build/babysit/ship. |
@@ -151,32 +150,31 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 22 | [`hook-doctor`](hook-doctor/SKILL.md) | `audit` | `enforcement` | model |
 | 23 | [`inspect`](inspect/SKILL.md) | `audit` | `analysis` | human |
 | 24 | [`interview`](interview/SKILL.md) | `design` | `enforcement` | human |
-| 25 | [`learn`](learn/SKILL.md) | `audit` | `state` | human |
-| 26 | [`linear`](linear/SKILL.md) | `config` | `state` | human |
-| 27 | [`llm-refresh`](llm-refresh/SKILL.md) | `shortcuts` | `analysis` | human |
-| 28 | [`log`](log/SKILL.md) | `shortcuts` | `state` | human |
-| 29 | [`maintenance`](maintenance/SKILL.md) | `audit` | `enforcement` | human |
-| 30 | [`mode`](mode/SKILL.md) | `mode` | `state` | human |
-| 31 | [`plan`](plan/SKILL.md) | `plan` | `state` | human |
-| 32 | [`pr-verify`](pr-verify/SKILL.md) | `ship` | `enforcement` | human |
-| 33 | [`proposal`](proposal/SKILL.md) | `design` | `state` | human |
-| 34 | [`proposal-orch-issue-pr`](proposal-orch-issue-pr/SKILL.md) | `design` | `state` | human |
-| 35 | [`prune`](prune/SKILL.md) | `build` | `analysis` | human |
-| 36 | [`prune-propose`](prune-propose/SKILL.md) | `audit` | `state` | human |
-| 37 | [`ralph`](ralph/SKILL.md) | `audit` | `state` | human |
-| 38 | [`refactor`](refactor/SKILL.md) | `build` | `analysis` | human |
-| 39 | [`research`](research/SKILL.md) | `design` | `enforcement` | human |
-| 40 | [`review`](review/SKILL.md) | `review` | `analysis` | human |
-| 41 | [`review-local`](review-local/SKILL.md) | `ship` | `state` | human |
-| 42 | [`security`](security/SKILL.md) | `security` | `enforcement` | human |
-| 43 | [`security-metrics`](security-metrics/SKILL.md) | `security` | `enforcement` | human |
-| 44 | [`ship`](ship/SKILL.md) | `ship` | `state` | human |
-| 45 | [`skill-usage`](skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
-| 46 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
-| 47 | [`status`](status/SKILL.md) | `status` | `state` | human |
-| 48 | [`sync-version`](sync-version/SKILL.md) | `config` | `state` | human |
-| 49 | [`team`](team/SKILL.md) | `config` | `state` | human |
-| 50 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
-| 51 | [`valuate`](valuate/SKILL.md) | `design` | `enforcement` | model |
-| 52 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
+| 25 | [`linear`](linear/SKILL.md) | `config` | `state` | human |
+| 26 | [`llm-refresh`](llm-refresh/SKILL.md) | `shortcuts` | `analysis` | human |
+| 27 | [`log`](log/SKILL.md) | `shortcuts` | `state` | human |
+| 28 | [`maintenance`](maintenance/SKILL.md) | `audit` | `enforcement` | human |
+| 29 | [`mode`](mode/SKILL.md) | `mode` | `state` | human |
+| 30 | [`plan`](plan/SKILL.md) | `plan` | `state` | human |
+| 31 | [`pr-verify`](pr-verify/SKILL.md) | `ship` | `enforcement` | human |
+| 32 | [`proposal`](proposal/SKILL.md) | `design` | `state` | human |
+| 33 | [`proposal-orch-issue-pr`](proposal-orch-issue-pr/SKILL.md) | `design` | `state` | human |
+| 34 | [`prune`](prune/SKILL.md) | `build` | `analysis` | human |
+| 35 | [`prune-propose`](prune-propose/SKILL.md) | `audit` | `state` | human |
+| 36 | [`ralph`](ralph/SKILL.md) | `audit` | `state` | human |
+| 37 | [`refactor`](refactor/SKILL.md) | `build` | `analysis` | human |
+| 38 | [`research`](research/SKILL.md) | `design` | `enforcement` | human |
+| 39 | [`review`](review/SKILL.md) | `review` | `analysis` | human |
+| 40 | [`review-local`](review-local/SKILL.md) | `ship` | `state` | human |
+| 41 | [`security`](security/SKILL.md) | `security` | `enforcement` | human |
+| 42 | [`security-metrics`](security-metrics/SKILL.md) | `security` | `enforcement` | human |
+| 43 | [`ship`](ship/SKILL.md) | `ship` | `state` | human |
+| 44 | [`skill-usage`](skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
+| 45 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
+| 46 | [`status`](status/SKILL.md) | `status` | `state` | human |
+| 47 | [`sync-version`](sync-version/SKILL.md) | `config` | `state` | human |
+| 48 | [`team`](team/SKILL.md) | `config` | `state` | human |
+| 49 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
+| 50 | [`valuate`](valuate/SKILL.md) | `design` | `enforcement` | model |
+| 51 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
 

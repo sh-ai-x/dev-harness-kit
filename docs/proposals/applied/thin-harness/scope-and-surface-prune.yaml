@@ -16,7 +16,10 @@ modifications: |
   implementation moved out of the active skill into `tools/code_viz.py`;
   bootstrap, proposal, and babysit-pr skill bodies were reduced to contracts
   with detailed references lazy-loaded from `docs/skills/`. The
-  main-branch-specific prompt is intentionally still deferred.
+  `learn` generator was subsequently removed after the user explicitly
+  confirmed it is not needed; its historical proposal is marked superseded
+  and retained under the rejected lifecycle bucket. The main-branch-specific
+  prompt is intentionally still deferred.
 tags: [scope, hooks, worktree, token-efficiency, dead-code, skills, installation]
 
 before:
@@ -86,6 +89,14 @@ after:
       change: Show the local override without enabling it by default.
     - path: skills/bootstrap/SKILL.md
       change: Ask once during first bootstrap whether to enable guards and write the choice to project or local scope; keep the active body thin.
+    - path: skills/learn/SKILL.md
+      change: Delete the unused transcript-to-skill generator.
+    - path: skills/learn/scripts/validate_skill.py
+      change: Delete the validator used only by the removed learn generator.
+    - path: docs/skills/learn.md
+      change: Delete the operator documentation for the removed learn skill.
+    - path: tests/test_learn_skill.py
+      change: Delete tests for the removed learn skill and validator.
     - path: docs/skills/bootstrap.md
       change: Mirror the guard policy and retain the detailed bootstrap reference.
     - path: docs/skills/bootstrap.ko.md
@@ -188,6 +199,10 @@ after:
       change: Delete stale generated architecture image paired with the removed graph.
     - path: docs/proposals/applied/thin-harness/scope-and-surface-prune.yaml
       change: This proposal SSOT; update status/started/shipped as implementation progresses.
+    - path: docs/proposals/rejected/learn-skill-mod/main.yaml
+      change: Mark the shipped learn proposal superseded while preserving its historical record.
+    - path: docs/proposals/rejected/learn-skill-mod/main.html
+      change: Re-render the superseded learn proposal in the rejected lifecycle bucket.
 
 pros:
   - 'A user-scope plugin can be installed without silently imposing repository-specific edit or branch policy on every project.'
@@ -197,12 +212,10 @@ pros:
   - 'The retained safety and verification behavior remains deterministic and testable at the hook layer.'
 
 cons:
-  - 'Guards stay off until bootstrap receives an explicit choice, so an unconfigured main checkout is intentionally permissive.'
-  - 'Bootstrap adds one setup decision; keeping it to enable/disable plus project/local scope avoids recurring session friction.'
+  - 'Unconfigured checkouts remain permissive until the one-time bootstrap opt-in; this is the deliberate safety/usability trade-off for zero recurring prompts.'
 
 limitations:
-  - 'This changes repository guard activation, not plugin discovery; user-scope installation may load the plugin but cannot turn guards on.'
-  - 'A later proposal may add a main-branch-specific default or prompt; this proposal deliberately keeps one explicit bootstrap choice.'
+  - 'Removing `/dev-kit:learn` leaves skill authoring manual; a replacement is deferred until usage evidence justifies another surface.'
 
 sections:
   - title: Decision and scope
@@ -290,13 +303,12 @@ sections:
       The eval-session judge remains; only the monitor handshake assertions
       are removed or rewritten.
 
-      Second-wave candidate: model-only `build-tdd`, `build-verify`, and
-      `build-refactor` skills. Their deterministic enforcement already lives
-      in hooks and their parent stages. Candidate-only, pending the usage and
-      import scan: `valuate`, `interview`, `learn`, `status`, and
-      `prune-propose` must not be deleted just because their prose is long;
-      each needs a separate evidence-backed decision because it owns a
-      distinct artifact or operator workflow.
+      Second-wave deletion: model-only `build-tdd`, `build-verify`, and
+      `build-refactor` skills, plus `learn` and its validator/test/docs. The
+      three build skills duplicate deterministic hooks/parent stages; `learn`
+      has no runtime consumer and its generator workflow is not needed. Keep
+      `valuate`, `interview`, `status`, and `prune-propose`: each still owns a
+      distinct artifact or operator workflow and was not proven dead.
 
   - title: Context and token budget
     body: |

@@ -80,7 +80,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`code-viz`](code-viz.md) | `state` | 범용 플러그인-아키텍처 시각화기 — 다단계 뷰 + 도메인 필러 맵 + 스킬별 워크플로를 하나의 자체 완결 HTML 페이지로. |
 | [`docs-maintenance`](docs-maintenance.md) | `analysis` | README를 최우선 문서로 저장소 문서를 감사; 항상 README를 감사하고 검증하며 필요 시 업데이트. |
 | [`prune-propose`](prune-propose.md) | `state` | 사용량 원격 측정 덤프 + 스킬별 삭제 제안, 사용자 승인. |
-| [`learn`](learn.md) | `state` | 원본 텍스트(파일 경로, URL, 산문, 또는 세션 트랜스크립트)를 후보 `skills/<name>/SKILL.md`로 증류, 결정론적 G1–G5 점검 + 후보별 승인 단계로 게이트됨. |
 
 ### 단축 명령 / 유지보수
 
@@ -139,7 +138,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | 모델 |
 | [`inspect`](inspect.md) | `audit` | `analysis` | 사용자 |
 | [`interview`](interview.md) | `design` | `enforcement` | 사용자 |
-| [`learn`](learn.md) | `audit` | `state` | 사용자 |
 | [`linear`](linear.md) | `config` | `state` | 사용자 |
 | [`llm-refresh`](llm-refresh.md) | `shortcuts` | `analysis` | 사용자 |
 | [`log`](log.md) | `shortcuts` | `state` | 사용자 |

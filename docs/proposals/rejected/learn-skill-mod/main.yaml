@@ -1,5 +1,5 @@
 title: "/dev-kit:learn — dev-harness-kit 자체의 신규 스킬"
-status: applied-with-changes
+status: superseded
 date: 2026-08-05
 started: 2026-08-05
 shipped: 2026-08-06
@@ -8,6 +8,7 @@ modifications:
   - 'Phase 1 shipped as designed: skills/learn/SKILL.md, validate_skill.py, its regression tests, and the skill registry landed in commits 8711c578..4fa1c92c.'
   - 'Phase 2 parse_source.py and the proposed external standards crib were not shipped; they remain deferred as designed.'
   - 'The proposal moved from reviewing/ to applied/learn-skill-mod/ to match the lifecycle renderer contract.'
+  - 'The shipped learn surface was later removed by the thin-harness cleanup because it had no runtime consumer; this proposal is retained as superseded history.'
 sections:
   - title: Executive summary
     body: |
