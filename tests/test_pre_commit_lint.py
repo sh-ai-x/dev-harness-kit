@@ -151,6 +151,18 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("conflict marker", result.stderr.lower())
             self.assertIn("notes.txt", result.stderr)
 
+    def test_allows_markdown_setext_heading(self):
+        """A long Markdown underline is not a Git conflict marker."""
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.md").write_text("Architecture\n============\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.md"], check=True)
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("conflict marker", result.stderr.lower())
+
     def test_fails_closed_when_index_is_invalid(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)

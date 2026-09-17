@@ -144,11 +144,10 @@ idempotency, duration rounding, reset semantics)). 더해 `tests/test_dispatch_c
 
 ## 관련
 
-- [build-tdd](build-tdd.md) — `methodology=tdd`일 때 빌드 동안 활성
-  Red-Green-Refactor 서브-스킬.
 - [build-debug](build-debug.md) — 단계의 서브에이전트가 체계적인 디버깅을
   필요로 할 때 호출.
-- [build-verify](build-verify.md) — "done" 선언 전 증거를 시행.
+- `tdd-guard`와 `stop-verify` — 테스트 우선 편집과 완료 증거를 결정적으로
+  시행하는 훅.
 - `/dev-kit:review` 그리고 `/dev-kit:security`, 그 다음 `/dev-kit:ship` —
   `build` 완료 후 다음 단계.
 - `lib/execute.py` — 이 스킬이 래핑하는 하네스-러너 엔진.

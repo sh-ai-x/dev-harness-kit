@@ -17,7 +17,7 @@
 
 `prune` runs four ordered phases, each a separate call:
 
-1. **SWEEP (Phase 1 — 3-pass deletion sweep).** Sibling of `build-refactor` (which rewrites) — `prune` deletes. Iron Law: no deletion without a reproducible signal plus a regression test. Three passes, one kind per pass, each confirmed by a green regression test:
+1. **SWEEP (Phase 1 — 3-pass deletion sweep).** Sibling of the refactor cleanup pass (which rewrites) — `prune` deletes. Iron Law: no deletion without a reproducible signal plus a regression test. Three passes, one kind per pass, each confirmed by a green regression test:
    - `[1/3] ORPHAN-CODE` — exports with no callers, files with no importers, unreachable branches.
    - `[2/3] DEAD-FEATURE` — entire capabilities with no live users (unused env vars, deprecated paths).
    - `[3/3] SLOP-PATTERN` — AI-tell patterns: defensive over-engineering, comment-as-narration, `try/except pass` blocks.
@@ -58,7 +58,7 @@ The full suite must run in under 10 minutes. There are no version-gated precondi
 ## Related
 
 - [refactor](refactor.md) — the rewrite counterpart; `prune` deletes, `refactor` rewrites.
-- [build-refactor](build-refactor.md) — sibling skill for the rewrite pipeline; explicitly contrasted as "prune deletes."
+- [refactor](refactor.md) — rewrite pipeline; explicitly contrasted as "prune deletes."
 - [build-debug](build-debug.md) — where a red Phase 4 verify routes for systematic reproduction.
 - `lib/analysis_core.runner.run_analysis` (`mode="delete"`) — the shared engine backing both Phase 1 and Phase 2.
 - `python3 -m lib.analysis_core --delete --target <feat>` — the Phase 2 dependents walker (CLI entry into `lib/analysis_core/__main__.py`).

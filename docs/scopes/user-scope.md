@@ -20,6 +20,7 @@
 - ❌ `enabledPlugins.dev-kit@dev-kit: true` — **fires in every project on this machine**
 - ❌ `enabledPlugins.dev-kit-lite@dev-kit-lite: true` — same leak
 - ❌ Project-specific hooks
+- ❌ `env.DEV_KIT_GUARDS` — user scope must not activate repository guards
 - ❌ Anything that should be team-shared
 - ❌ Personal theme/preferences that only matter inside one project
 
@@ -61,3 +62,6 @@ jq '.extraKnownMarketplaces // {} | keys' ~/.claude/settings.json
 ```
 
 If `enabledPlugins` lists `dev-kit*`, the plugin leaks to every project. Move it to project scope or remove it.
+
+Even when the plugin is intentionally enabled at user scope, repository guards
+remain off until the project or local checkout opts in through bootstrap.

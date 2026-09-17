@@ -48,7 +48,7 @@ user-invocable: true             # expose as /dev-kit:build
 
 ```yaml
 ---
-name: build-tdd
+name: valuate
 category: build
 description: Red-Green-Refactor cycle. Internal sub-skill of /dev-kit:build.
 disable-model-invocation: false  # model may auto-invoke
@@ -71,7 +71,7 @@ The current human-use and model-use inventories are defined by each skill's
 `user-invocable` frontmatter. Do not duplicate those inventories or their
 counts in this rule; inspect `skills/*/SKILL.md` when needed.
 
-> Note: `simplify` → `refactor` rename (this PR) and `build-simplify` → `build-refactor` rename. The verb `simplify` still appears in the human-facing description of `refactor` (e.g., "refactor everything" is a common user phrase) but the skill name is `refactor`. For the deletion counterpart, see `/dev-kit:prune`.
+> Note: `simplify` was renamed to `refactor`. The verb `simplify` still appears in the human-facing description of `refactor` (e.g., "refactor everything" is a common user phrase) but the skill name is `refactor`. For the deletion counterpart, see `/dev-kit:prune`.
 
 > Note: `plan-ralph` was merged into `plan` (issue #58) — the plan skill is
 > now self-contained and does not delegate to a non-invocable sub-skill.

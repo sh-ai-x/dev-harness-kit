@@ -12,6 +12,7 @@
 
 - **Your personal debug flags** / env vars
 - **Your temporary hotfix mode** — `setup-guard off` for spike work
+- **Checkout-only guard opt-in** — `env.DEV_KIT_GUARDS=on` after bootstrap asks
 - **Extra caution permissions** — `ask: ["Bash(rm -rf:*)"]` beyond team default
 
 ## What does NOT belong here
@@ -49,6 +50,7 @@ See [`templates/settings.local.json`](templates/settings.local.json). Common fie
 | Forgot `.gitignore` line | Personal file is committed; `git log` shows your overrides | Add `.gitignore` line; `git rm --cached` the file |
 | Put team-shared rules here | Teammates don't get your settings | Move to project scope |
 | Used this to "disable" the kit globally | Other projects on your machine still have the leak | Edit user-scope `enabledPlugins: {}` instead |
+| Want guards only in this checkout | Project setting would affect teammates | Put `DEV_KIT_GUARDS=on` in this file |
 | File contains API keys | Risk of accidental commit despite gitignore | Use a credential manager, not this file |
 
 ## Audit

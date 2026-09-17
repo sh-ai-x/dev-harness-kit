@@ -1,5 +1,0 @@
-{"timestamp":"2026-07-16T11:00:00.000Z","type":"session_meta","payload":{"type":"session_id","session_id":"019f-codex-plain","cwd":"/repo","model":"gpt-5.6-luna","model_provider":"openai"}}
-{"timestamp":"2026-07-16T11:00:01.000Z","type":"turn_context","payload":{"turn_id":"t1","cwd":"/repo","model":"gpt-5.6-luna"}}
-{"timestamp":"2026-07-16T11:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"do a small task"}}
-{"timestamp":"2026-07-16T11:00:10.000Z","type":"event_msg","payload":{"type":"agent_message","message":"done","phase":"final_answer"}}
-{"timestamp":"2026-07-16T11:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"cached_input_tokens":100,"output_tokens":40,"reasoning_output_tokens":10}}}}
