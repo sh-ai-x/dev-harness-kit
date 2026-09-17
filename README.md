@@ -334,6 +334,29 @@ Then work inside that folder. If you try to edit the main checkout, the
 can jump into one. The full rule (branch naming, the exact protocol, the hooks
 that enforce it) lives in [`rules/git-workflow.md`](rules/git-workflow.md).
 
+### Remove the oldest worktrees directly
+
+The underlying script can be run without the `/dev-kit:worktree-prune` skill. It
+sorts removable worktrees by branch-tip age, oldest first, and excludes the main
+checkout and detached-HEAD worktrees. To preview and then remove half of the
+current candidates:
+
+```bash
+repo_root="$(git rev-parse --show-toplevel)"
+worktree_total="$(python3 -m lib.worktree_prune --repo "$repo_root" --count)"
+remove_count=$((worktree_total / 2))
+
+# Preview only; no changes are made.
+bash "$repo_root/bin/worktree-prune.sh" -n "$remove_count"
+
+# After reviewing the preview, remove the oldest half without another prompt.
+bash "$repo_root/bin/worktree-prune.sh" -y "$remove_count"
+```
+
+For an odd number of candidates, the calculation rounds down. The removal loop
+passes `--force` to the safe-removal wrapper, so selected worktrees' uncommitted
+or untracked files can be deleted; always review the `-n` output first.
+
 ---
 
 ## Doc map
