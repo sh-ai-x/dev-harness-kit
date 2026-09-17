@@ -463,7 +463,6 @@ sequenceDiagram
 | [`/dev-kit:log`](docs/skills/log.md) | 세션 로깅을 켜고 끈다. `token-analyzer`, `skill-usage`, 세션 모니터가 데이터로 쓸 수 있게 한다. |
 | [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | 어떤 스킬을 실제로 얼마나 쓰는지 보여준다 — 가지치기에 유용. |
 | [`/dev-kit:sot-harness-writer`](docs/skills/sot-harness-writer.md) | 5라운드 × 2–3개의 증거 기반 추천을 인터뷰하는 Single Source of Truth 하네스 문서 작성기 — `/dev-kit:plan`으로 핸드오프한다. |
-| [`/dev-kit:learn`](docs/skills/learn.md) | 소스 텍스트(파일, URL, 산문, 또는 세션 트랜스크립트)를 후보 `SKILL.md`로 증류 — 결정론적 G1–G5 검사 + 후보별 승인 단계를 거친다. |
 
 위 목록을 넘어서는 전체 스킬의 최신 목록은
 [`docs/skills/README.ko.md`](docs/skills/README.ko.md)를 참고한다. 카테고리별로
