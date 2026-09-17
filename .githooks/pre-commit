@@ -21,7 +21,9 @@ set -euo pipefail
 # conflict markers that are already staged for commit. The NUL-delimited
 # capture preserves paths and matched content containing whitespace or quotes.
 grep_tmp=$(mktemp "${TMPDIR:-/tmp}/pre-commit-grep.XXXXXX")
-if git grep --cached -z -n -E '^[ \t]*(<{7}|={7}|\|{7}|>{7})' -- . > "$grep_tmp"; then
+# Require a complete merge-marker line. A prefix-only `={7}` pattern falsely
+# treats Markdown setext headings such as `============` as conflicts.
+if git grep --cached -z -n -E '^[ \t]*(<{7}|={7}|\|{7}|>{7})([ \t].*)?$' -- . > "$grep_tmp"; then
   echo "[pre-commit] BLOCKED: staged conflict marker found." >&2
   while IFS= read -r -d '' hit; do
     if [ -n "$hit" ]; then

@@ -11,6 +11,15 @@ bootstrap 파이프라인(sanity, codebase-map, hook-matrix, write-claude-md)을
 레거시 `/dev-kit:bootstrap-full` 슬래시와 일치 — 세 개의 SSOT 파일 + 15개
 CI 워크플로 템플릿 + pre-push 훅 + `.dev-kit/ci-config.json` 마커.
 
+가드는 별도의 옵트인 정책이다. `main`을 포함한 모든 checkout은
+`DEV_KIT_GUARDS=off`로 시작하며 user scope의 플러그인 활성화만으로 가드가
+켜지지 않는다. 첫 bootstrap에서만 `Enable repository guards (worktree, git,
+TDD)? [y/N]`와 `If yes, save to project scope or this checkout only?
+[project/local]`을 묻는다. project 선택은 `.claude/settings.json`, local
+선택은 `.claude/settings.local.json`에 기존 JSON 키를 보존하며 기록한다.
+우선순위는 shell > local > project > 기본 off이고 user scope는 무시한다.
+SessionStart는 결과만 기록하며 질문하지 않는다. main 전용 질문은 보류한다.
+
 ## 사용 시점
 
 - 사용자가 새 프로젝트에서 처음으로 `/dev-kit:bootstrap`을 실행.
@@ -18,8 +27,8 @@ CI 워크플로 템플릿 + pre-push 훅 + `.dev-kit/ci-config.json` 마커.
 
 ## 작동 방식
 
-Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을 7단계
-오케스트레이션(4 자동 단계, 1 프롬프트, 1 ci-setup, 1 종료)에서 실행:
+Bootstrap은 무조건적 파이프라인, 최초 1회의 guard 정책 선택, 선택적
+ci-setup/git-defaults를 포함한 오케스트레이션으로 실행:
 
 1. **Sanity** (결정론적, LLM 없음) — 7-검사 감사: 매니페스트 존재
    (`package.json`/`pyproject.toml`), `.git/` 건강, `docs/` 템플릿
@@ -43,15 +52,18 @@ Bootstrap은 무조건적 파이프라인을 그 다음 옵션으로 ci-setup을
 4. **write-claude-md** — `lib/write_project_md.py`가 `CLAUDE.md`와
    `AGENTS.md`(CLIs가 AGENTS.md를 읽는 경우를 위한 CLAUDE.md로의 1줄
    포인터)를 §1-§5 섹션으로 원자적으로 작성.
-5. **ci-setup prompt** — 무조건적인 bootstrap 세트가 착륙한 후 스킬은
+5. **Guard policy** — 최초 실행에서만 위의 저장소 가드 질문을 묻고
+   project/local 중 하나에 `on`을 기록하거나 기본 `off`를 유지한다.
+   SessionStart에서는 다시 묻지 않는다.
+6. **ci-setup prompt** — 무조건적인 bootstrap 세트가 착륙한 후 스킬은
    `Also install CI templates (ci-setup)? [y/N]`을 묻는다. 기본은 N.
    프롬프트를 건너뛰려면 `--yes`(Y 가정), 건너뛰고 불가-기능 리스트를
    출력하려면 `--skip-ci`.
-6. **ci-setup** (Y에 한해) — `lib/ci_setup.py:install_ci_config(force=True)`에
+7. **ci-setup** (Y에 한해) — `lib/ci_setup.py:install_ci_config(force=True)`에
    위임(Phase 1.5 사전 비행 프로브 + 15 EXPECTED_PATHS + `.dev-kit/ci-config.json`
    마커 + Phase 1.7 lint + Phase 4 사후-설치 체크리스트). `--skip-verify`와
    함께면 Phase 3 verify가 건너뜀. `--force` 없이는 재실행이 no-op.
-7. **Exit** — 정식 plan -> build 루프를 시작하려면 `/dev-kit:build <first-feature>`,
+8. **Exit** — 정식 plan -> build 루프를 시작하려면 `/dev-kit:build <first-feature>`,
    사후-설치 드리프트 검증을 하려면 `/dev-kit:ci-doctor`로의 포인터.
 
 숨겨진 플래그(보이는 옵션 프롬프트 없음 — MUST-NOT-13): `--skip-sanity`,

@@ -159,17 +159,11 @@ multi-level views (architecture → code → skill → hook → tools → extern
 a per-skill workflow extraction. The same approach renders GH Actions pipelines,
 multi-phase repair loops, or any long-running process with discrete phases.
 
-The map below inventories every skill shipped by this repository and groups
-them by the role they play in the development harness. The live inventory lives
-at [`docs/skills/README.md`](docs/skills/README.md); the per-skill Mermaid
+The live inventory of every skill shipped by this repository lives at
+[`docs/skills/README.md`](docs/skills/README.md); the per-skill Mermaid
 diagrams, the GH Actions gate workflow, and the per-skill extraction +
 loop-back + edge-semantics mechanics live in
 [`docs/architecture/visualization.md`](docs/architecture/visualization.md).
-
-<img src="docs/screenshots/architecture/overall-skill-architecture.png" alt="Overall dev-harness-kit skill relationship map created with Archidraw MCP" width="1200" />
-
-Portable Archidraw scene data is alongside the image at
-[`docs/architecture/2026-08-23/overall-skill-architecture.json`](docs/architecture/2026-08-23/overall-skill-architecture.json).
 The [`babysit-pr` architecture reference](docs/architecture/2026-08-24/babysit-pr-architecture.md)
 is a sibling doc — repair state machine, not a fixed number of commits.
 
@@ -230,7 +224,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | Command | What it does |
 |---|---|
 | [`/dev-kit:inspect`](docs/skills/inspect.md) | Read-only whole-codebase health scan (dead code, duplication, smells) → one report. |
-| [`/dev-kit:refactor`](docs/skills/refactor.md) | 3-phase cleanup chain — `inspect → build-refactor → review` with quoted exit codes between each gate. |
+| [`/dev-kit:refactor`](docs/skills/refactor.md) | 3-phase cleanup chain — `inspect → cleanup → review` with quoted exit codes between each gate. |
 | [`/dev-kit:prune`](docs/skills/prune.md) | Slop-removal chain — `inspect → 3-pass delete sweep → review`. Reaches for AI slop or dead features (not refactored). |
 | [`/dev-kit:status`](docs/skills/status.md) | HOTL visualization — current loop progress, cumulative cycles, hand-off chain, eval score on one screen. |
 | [`/dev-kit:code-viz`](docs/skills/code-viz.md) | Generic plugin-architecture visualizer — multi-level views + domain pillar map + per-skill workflows to one self-contained HTML page. |
@@ -240,12 +234,11 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:research`](docs/skills/research.md) | Every factual claim you write either cites a source or gets removed. |
 | [`/dev-kit:docs-maintenance`](docs/skills/docs-maintenance.md) | Audits stale docs and refreshes the README without baking in facts that go out of date. |
 | [`/dev-kit:ci-triage`](docs/skills/ci-triage.md) | Triages failing GitHub Actions runs across recent commits, deduplicates against a persisted case store. |
-| [`/dev-kit:log`](docs/skills/log.md) | Turns session logging on/off — feeds `token-analyzer`, `skill-usage`, and the session monitor. |
+| [`/dev-kit:log`](docs/skills/log.md) | Turns session logging on/off — feeds `token-analyzer` and `skill-usage`. |
 | [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | Shows which skills you actually use, and how much — useful for pruning. |
 | [`/dev-kit:sot-harness-writer`](docs/skills/sot-harness-writer.md) | Interview-based Single Source of Truth harness document writer — hands off to `/dev-kit:plan`. |
 | [`/dev-kit:evaluate`](docs/skills/evaluate.md) | LLM-judge eval across registered rubrics + the five-component harness-effectiveness report. Programmatic gate after any harness change. |
 | [`/dev-kit:harness-effectiveness`](docs/skills/harness-effectiveness.md) | The five-component scorecard (prevention / first-pass / recovery / learning / measurement-integrity) standalone — sub-second, zero API spend. |
-| [`/dev-kit:learn`](docs/skills/learn.md) | Distill source text (file, URL, prose, or transcript) into a candidate `SKILL.md`, gated by deterministic G1–G5 checks. |
 | [`/dev-kit:prune-propose`](docs/skills/prune-propose.md) | Usage-telemetry dump + per-skill delete proposal, each deletion approved explicitly. The evidence step before `/dev-kit:prune`. |
 | [`/dev-kit:worktree-prune`](skills/worktree-prune/SKILL.md) | Counts registered worktrees, lists them oldest-first by branch-tip age, removes the N oldest behind a y/N gate. |
 | [`/dev-kit:llm-refresh`](docs/skills/llm-refresh.md) | Refreshes `docs/llm-info/<provider>.json` from each vendor's official pricing page. Diff-then-commit, never silent. |
@@ -258,7 +251,7 @@ let autocomplete show you what's available. For the **metric / gate family**
 and their relationships, see [`docs/observability/metrics.md`](docs/observability/metrics.md).
 
 > A name that doesn't appear in autocomplete is an internal helper the model
-> runs on its own (e.g. `build-tdd` inside `build`) — type the parent command.
+> runs on its own — type the parent command.
 > User-facing commands are the *verbs*; internal skills are the *machinery*.
 
 ---
@@ -280,10 +273,9 @@ at step 3 — no flag, no re-planning.
 small correction; if the whole plan is wrong at the root, re-plan it from scratch.
 
 **You came back on a different day or a different terminal** and lost your place.
-Run `python3 tools/session_monitor.py`. It lists your recent sessions across the
-repo's worktrees and hands you back the exact command to resume the right one.
-(This needs `/dev-kit:log` to have been on — that's what records the sessions.)
-See [Session monitor](#session-monitor) below for the flag reference.
+Run `/dev-kit:status` and inspect `phases/<name>/index.json`; build resumes from
+the first unfinished step in the current worktree. Use your runtime's normal
+session history when you need to reopen a different conversation.
 
 **You want to switch between `full` / `lite` / `undev` modes.** Run
 [`/dev-kit:mode`](skills/mode/SKILL.md). `full` is the multi-session/multi-agent
@@ -375,7 +367,7 @@ table — HTML / MD / 한국어 sibling / what each doc gives you — lives in
 | See all stages in one place | [`docs/stages/STAGES.md`](docs/stages/STAGES.md) |
 | Recover from a broken flow | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | Audit cost or back a factual claim | [`docs/observability/token-efficiency.md`](docs/observability/token-efficiency.md) |
-| Pick up a session from a new shell | [`docs/observability/session-monitor.md`](docs/observability/session-monitor.md) |
+| Resume interrupted work | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | See what custom subagents this repo ships | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
 
 Everything else — HTML siblings, Korean docs, deep reference — is in

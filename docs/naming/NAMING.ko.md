@@ -20,7 +20,7 @@
 |---|---|---|
 | `bootstrap` | `<category>-<instrument>` | `bootstrap` (sanity / codebase-map / hook-matrix는 인라인 서브스테이지), `ci-setup` (슬래시 간결성을 위해 프런트매터에서는 `bootstrap` 카테고리에 속하지만 `/dev-kit:bootstrap-ci-setup`이 아니라 `/dev-kit:ci-setup`으로 참조됨) |
 | `plan` | (없음 — `plan`은 독립형) | — |
-| `build` | `build-<discipline>` | `build-tdd`, `build-debug`, `build-verify`, `build-refactor` |
+| `build` | `build-<discipline>` | `build-debug` |
 | `review` | `review-<subject>` | (없음 — `review`는 독립형) |
 | `security` | `security-<subject>` | (없음 — `security`는 독립형) |
 | `audit` | `audit-<subject>` | `audit` (slop / secret / outdated는 인라인 모드) |

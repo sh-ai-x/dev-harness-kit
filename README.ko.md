@@ -450,7 +450,7 @@ sequenceDiagram
 | 명령 | 하는 일 |
 |---|---|
 | [`/dev-kit:inspect`](docs/skills/inspect.md) | 읽기 전용 전체 코드베이스 건강 스캔(죽은 코드, 중복, 스멜) → 리포트 1부. |
-| [`/dev-kit:refactor`](docs/skills/refactor.md) | 3단계 정리 체인 — `inspect → build-refactor → review` 각 게이트 사이에 종료 코드 인용. |
+| [`/dev-kit:refactor`](docs/skills/refactor.md) | 3단계 정리 체인 — `inspect → cleanup → review` 각 게이트 사이에 종료 코드 인용. |
 | [`/dev-kit:prune`](docs/skills/prune.md) | 슬롭 제거 체인 — `inspect → 3회차 삭제 스윕 → review`. AI 슬롭이나 죽은 기능을 (리팩터가 아니라) 제거하고 싶을 때 손을 댄다. |
 | [`/dev-kit:status`](docs/skills/status.md) | HOTL 시각화 — 현재 루프 진행도, 누적 사이클, 핸드오프 체인, 평가 점수를 한 화면에. |
 | [`/dev-kit:code-viz`](docs/skills/code-viz.md) | 범용 플러그인 아키텍처 시각화 — 다중 레벨 뷰 + 도메인 필러 맵 + 스킬별 워크플로를 자기 완결 HTML 1페이지로. |
@@ -463,7 +463,6 @@ sequenceDiagram
 | [`/dev-kit:log`](docs/skills/log.md) | 세션 로깅을 켜고 끈다. `token-analyzer`, `skill-usage`, 세션 모니터가 데이터로 쓸 수 있게 한다. |
 | [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | 어떤 스킬을 실제로 얼마나 쓰는지 보여준다 — 가지치기에 유용. |
 | [`/dev-kit:sot-harness-writer`](docs/skills/sot-harness-writer.md) | 5라운드 × 2–3개의 증거 기반 추천을 인터뷰하는 Single Source of Truth 하네스 문서 작성기 — `/dev-kit:plan`으로 핸드오프한다. |
-| [`/dev-kit:learn`](docs/skills/learn.md) | 소스 텍스트(파일, URL, 산문, 또는 세션 트랜스크립트)를 후보 `SKILL.md`로 증류 — 결정론적 G1–G5 검사 + 후보별 승인 단계를 거친다. |
 
 위 목록을 넘어서는 전체 스킬의 최신 목록은
 [`docs/skills/README.ko.md`](docs/skills/README.ko.md)를 참고한다. 카테고리별로
@@ -471,7 +470,7 @@ sequenceDiagram
 떠오르는 목록을 봐도 된다.
 
 > **스킬 이름에 대한 메모:** 자동완성에 안 뜨는 이름은 모델이 스스로
-> 호출하는 내부 헬퍼다 (`build` 내부의 `build-tdd` 등) — 헬퍼를 직접
+> 호출하는 내부 동작이다 — 헬퍼를 직접
 > 입력하는 게 아니라 부모 명령을 입력한다. 단순한 규칙: 사용자가 부르는
 > 명령은 **동사**, 내부 스킬은 **기계**.
 
@@ -495,9 +494,9 @@ sequenceDiagram
 계획 전체가 뿌리부터 틀렸을 때 사용한다.
 
 **다음 날 또는 다른 터미널**로 돌아왔고 어디까지 했는지 잃어버렸다.
-`python3 tools/session_monitor.py`를 실행한다. 저장소 워크트리 전반의
-최근 세션을 나열하고, 정확한 재개 명령을 알려준다(`/dev-kit:log`이 켜져
-있어야 기록이 있다 — 아래 [세션 모니터](#세션-모니터) 참고).
+`/dev-kit:status`와 `phases/<name>/index.json`을 확인한다. Build는 현재
+워크트리에서 완료되지 않은 첫 단계부터 재개한다. 다른 대화를 다시 열어야
+하면 사용 중인 런타임의 일반 세션 기록 기능을 사용한다.
 
 **Valuate 단계를 건너뛰고 싶다.** 그렇게 해도 된다 — 권고 단계일 뿐이다.
 `valuate`는 계획이 빌드할 가치가 있는지 점수를 매기지만, 빌드는 어쨌든
@@ -555,7 +554,7 @@ git worktree add -b feat/my-task .worktrees/feat-my-task origin/main
 | 모든 단계를 한곳에서 보기 | [`docs/stages/STAGES.ko.md`](docs/stages/STAGES.ko.md) |
 | 망가진 흐름에서 복구 | [`docs/workflow/WORKFLOW-SCENARIOS.ko.md`](docs/workflow/WORKFLOW-SCENARIOS.ko.md) |
 | 비용 감사 또는 사실 주장 검증 | [`docs/observability/token-efficiency.ko.md`](docs/observability/token-efficiency.ko.md) |
-| 새 셸에서 세션 재개 | [`docs/observability/session-monitor.ko.md`](docs/observability/session-monitor.ko.md) |
+| 중단된 작업 재개 | [`docs/workflow/WORKFLOW-SCENARIOS.ko.md`](docs/workflow/WORKFLOW-SCENARIOS.ko.md) |
 | 이 저장소가 제공하는 커스텀 서브에이전트 보기 | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
 
 나머지 — HTML 형제, 한국어 문서, 깊은 레퍼런스 — 는
@@ -810,34 +809,6 @@ gitignored다. [`docs/skills/log.md`](docs/skills/log.md) 참고.
 지출 원장을 출력하고 PR 집계기가 필요로 하는 트레일러 블록을 발행한다.
 도구 호출을 차단하지 않는다 — 관찰 전용. 임계값, 오버라이드 환경변수,
 트레일러 포맷은 [`docs/skills/cost-gate.md`](docs/skills/cost-gate.md).
-
-### 세션 모니터
-
-`tools/session_monitor.py`는 *"터미널을 닫았는데 그 빌드로 어떻게
-돌아가죠?"* 에 답한다 — 일시 중지된 세션을 찾아 다시 들어가게 해준다.
-CLI 형태는 진짜 CLI 친화적이다: 셸 어디서나 평범한 `--list`가 동작하고,
-피커는 진짜 TTY가 필요하며, `--print-resume-command`는 `cd <wt> &&
-claude --resume <sid>` 한 줄을 `!`로 실행할 수 있도록 출력한다.
-
-![session-monitor --list, dev-harness-kit, last 30 days](docs/screenshots/session-monitor.png)
-
-```bash
-python3 tools/session_monitor.py                       # 인터랙티브 피커 (진짜 TTY)
-python3 tools/session_monitor.py --list --days 30       # 평범한 리스트, 모든 셸
-python3 tools/session_monitor.py --json --days 30        # 기계가 읽을 수 있는 형태
-python3 tools/session_monitor.py --print-resume-command  # 재개 명령을 출력하고 종료
-python3 tools/session_monitor.py --cli-setup             # `session-monitor` 셸 별칭 설치
-```
-
-Enter를 누르면 피커가 세션의 워크트리로 이동해 대화를 다시 열고
-(`claude --resume <sid>` 또는 `codex resume <sid>`); 워크트리가 사라졌다면
-경고와 함께 메인 체크아웃으로 폴백한다.
-
-**더 알아보기** — 모든 플래그, 상태 글리프 시맨틱, 피커 아키텍처
-(termios + ANSI, curses 미사용), "왜 스킬과 함께 도구인가" 근거는
-[`docs/observability/session-monitor.ko.md`](docs/observability/session-monitor.ko.md).
-"언제" 손을 대는지 서사(다른 터미널/다른 날에서 재개)는
-[워크플로 시나리오, Case 2](docs/workflow/WORKFLOW-SCENARIOS.ko.md#case-2-다른-터미널또는-날에서-돌아옴) 참고.
 
 ### 스킬 사용량(`/dev-kit:skill-usage`)
 

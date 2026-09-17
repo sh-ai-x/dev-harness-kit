@@ -22,7 +22,7 @@ section has a 2-4 sentence pointer for each case.
 | Situation | What to do | Where the detail is |
 |---|---|---|
 | Build stopped partway (you closed the terminal, hit an error, or paused) | Re-run `/dev-kit:build` — it resumes from the first unfinished step | [Case 1](#case-1-a-build-that-stopped-partway) |
-| You're back on a different day or a different terminal and lost your place | `python3 tools/session_monitor.py` finds the session and prints the resume command | [Case 2](#case-2-coming-back-from-a-different-terminal-or-day) |
+| You're back on a different day or a different terminal and lost your place | `/dev-kit:status` plus `phases/<name>/index.json` shows the current worktree state | [Case 2](#case-2-coming-back-from-a-different-terminal-or-day) |
 | You don't want to run the Valuate step | Just skip it — it's advisory, nothing blocks the build | [Case 3](#case-3-skipping-the-valuate-step) |
 | You want to go straight to Build without a full Plan | Scope Plan tightly, or hand-seed a one-step phase file — there is no bypass flag | [Case 4](#case-4-skipping-straight-to-build-without-a-full-plan) |
 
@@ -91,49 +91,18 @@ cat phases/<name>/index.json      # look at each step's "status"
 
 ## Case 2: coming back from a different terminal or day
 
-You paused a build yesterday. Today you open a fresh terminal and you're not sure
-which worktree the build was in, or what the session id was.
-
-Use the session monitor:
+You paused a build yesterday and open a fresh terminal today. Start in the
+worktree where the change lives, then inspect the durable phase state:
 
 ```bash
-python3 tools/session_monitor.py
+/dev-kit:status
+cat phases/<name>/index.json
 ```
 
-It reads the session transcripts captured by the `/dev-kit:log` hooks (under
-`logs/claude-code/` and `logs/codex/`), lists every recent Claude Code and Codex
-session across this repo's worktrees, and lets you pick one with the arrow keys.
-On Enter it changes into that session's worktree and re-opens the conversation
-for you (`claude --resume <sid>` for Claude Code, `codex resume <sid>` for Codex).
-
-If you're on a plain shell with no interactive terminal (over SSH, in a script),
-use the non-interactive forms instead:
-
-```bash
-python3 tools/session_monitor.py --list --days 30       # plain listing, no picker
-python3 tools/session_monitor.py --json --days 30        # machine-readable
-python3 tools/session_monitor.py --print-resume-command  # print the cd + resume line for the first session
-```
-
-Each session shows a status glyph so you can tell what you're resuming into:
-
-| Glyph | Status | Meaning |
-|:---:|---|---|
-| `●` | `live` | A `claude`/`codex` process is running in that worktree, or the last turn was very recent |
-| `○` | `idle` | Captured recently, but not currently active |
-| `⌀` | `stale` | The worktree was merged or deleted; resume falls back to the main checkout |
-
-A `stale` session means the branch is already merged or the worktree is gone —
-there may be nothing left to resume there. `live` and `idle` are the ones you'll
-usually want.
-
-> **This needs `/dev-kit:log` to have been on.** The session monitor reads the
-> transcripts that the log hooks write. If you never turned logging on for the
-> project (`/dev-kit:log on`), there are no transcripts to list. See
-> [`docs/skills/log.md`](../skills/log.md).
-
-The full flag reference for `session_monitor.py` lives in the README's tooling
-section.
+`/dev-kit:build` resumes from the first step whose status is not `completed`.
+If you need a different conversation, use the normal session-history and resume
+features provided by the runtime; the repository does not maintain a second
+session index.
 
 ---
 
@@ -205,7 +174,7 @@ is nothing to verify against, which is the whole point of the harness.
 - [`docs/stages/STAGES.md`](../stages/STAGES.md) — the full per-stage spec (what
   each of bootstrap / plan / valuate / build / review / security / ship must do).
 - [`docs/skills/build.md`](../skills/build.md) — the Build skill in detail.
-- [`docs/skills/log.md`](../skills/log.md) — turning session logging on so the
-  session monitor has data.
+- [`docs/skills/log.md`](../skills/log.md) — optional local telemetry for
+  token and skill-usage analysis.
 - Main [`README.md`](../../README.md) — install, quickstart, and the short
   version of these scenarios.
