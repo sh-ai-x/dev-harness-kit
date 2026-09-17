@@ -20,7 +20,7 @@
 | 상황 | 할 일 | 자세한 곳 |
 |---|---|---|
 | 빌드가 중간에 멈춤 (터미널을 닫음, 에러 발생, 일시 중지) | `/dev-kit:build` 재실행 — 미완료 첫 단계부터 재개 | [Case 1](#case-1-빌드가-중간에-멈춤) |
-| 다른 날 또는 다른 터미널로 돌아왔고 어디까지 했는지 잃음 | `python3 tools/session_monitor.py`가 세션을 찾고 재개 명령을 출력 | [Case 2](#case-2-다른-터미널또는-날에서-돌아옴) |
+| 다른 날 또는 다른 터미널로 돌아왔고 어디까지 했는지 잃음 | `/dev-kit:status`와 `phases/<name>/index.json`으로 현재 워크트리 상태 확인 | [Case 2](#case-2-다른-터미널또는-날에서-돌아옴) |
 | Valuate 단계를 실행하고 싶지 않음 | 그냥 건너뛰기 — 권고일 뿐, 빌드를 막는 것은 없음 | [Case 3](#case-3-valuate-단계-건너뛰기) |
 | 전체 계획 없이 Build로 직행하고 싶음 | Plan을 좁게 범위화하거나, 한 단계 phase 파일을 직접 시드 — 우회 플래그 없음 | [Case 4](#case-4-전체-계획-없이-build로-직행) |
 
@@ -88,48 +88,17 @@ cat phases/<name>/index.json      # 각 단계의 "status"를 본다
 
 ## Case 2: 다른 터미널/또는 날에서 돌아옴
 
-어제 빌드를 일시 중지. 오늘 새 터미널을 열고 빌드가 어느 워크트리에
-있었는지, 또는 세션 id가 무엇이었는지 확신이 없다.
-
-세션 모니터를 사용:
+어제 빌드를 일시 중지하고 오늘 새 터미널을 열었다면 변경이 있는
+워크트리에서 시작한 뒤 디스크에 저장된 phase 상태를 확인한다.
 
 ```bash
-python3 tools/session_monitor.py
+/dev-kit:status
+cat phases/<name>/index.json
 ```
 
-`/dev-kit:log` 훅이 캡처한 세션 트랜스크립트(`logs/claude-code/`와
-`logs/codex/` 아래)를 읽고, 이 저장소의 워크트리 전반의 최근 모든
-Claude Code와 Codex 세션을 나열하며, 화살표 키로 하나를 고를 수 있게
-한다. Enter에서 그 세션의 워크트리로 변경해 대화를 다시 열어준다
-(Claude Code의 경우 `claude --resume <sid>`, Codex의 경우 `codex resume <sid>`).
-
-인터랙티브 터미널 없는 평범한 셸(SSH, 스크립트)에 있다면 비-인터랙티브
-형태를 대신 사용:
-
-```bash
-python3 tools/session_monitor.py --list --days 30       # 평범한 리스트, 피커 없음
-python3 tools/session_monitor.py --json --days 30        # 기계가 읽을 수 있는 형태
-python3 tools/session_monitor.py --print-resume-command  # 첫 세션의 cd + resume 줄을 출력
-```
-
-각 세션은 상태 글리프를 표시하여 재개 대상을 알 수 있게:
-
-| 글리프 | 상태 | 의미 |
-|:---:|---|---|
-| `●` | `live` | 그 워크트리에서 `claude`/`codex` 프로세스가 실행 중이거나, 마지막 턴이 매우 최근 |
-| `○` | `idle` | 최근에 캡처되었지만 현재는 활성 아님 |
-| `⌀` | `stale` | 워크트리가 머지되었거나 삭제됨; 재개는 메인 체크아웃으로 폴백 |
-
-`stale` 세션은 브랜치가 이미 머지되었거나 워크트리가 사라졌음을 의미 —
-거기서 재개할 것이 없을 수 있다. `live`와 `idle`이 평상시 원하는 것이다.
-
-> **이 기능은 `/dev-kit:log`가 켜져 있어야 동작.** 세션 모니터는 로그
-> 훅이 쓰는 트랜스크립트를 읽는다. 프로젝트에 로깅을 켠 적이 없으면
-> (`/dev-kit:log on`) 나열할 트랜스크립트가 없다. [`docs/skills/log.md`](../skills/log.md)
-> 참고.
-
-`session_monitor.py`의 전체 플래그 레퍼런스는 README의 tooling 섹션에
-있다.
+`/dev-kit:build`는 상태가 `completed`가 아닌 첫 단계부터 재개한다. 다른
+대화를 다시 열어야 하면 런타임이 제공하는 일반 세션 기록/재개 기능을
+사용한다. 저장소는 별도의 세션 색인을 유지하지 않는다.
 
 ---
 

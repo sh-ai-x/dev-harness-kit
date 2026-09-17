@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for lib/guard_mode_state (session-scoped tdd-guard / worktree-guard toggle).
+"""Tests for lib/guard_mode_state and the scoped guard policy.
 
 Covers:
 - read/write round-trip for the session state file
-- missing/corrupt/invalid file defaults to both guards "on"
+- missing/corrupt/invalid file defaults to repository guards "off"
 - `set` overrides one guard without touching the other
-- `reset` forces every guard back to "on"
+- `reset` applies the all-off default or explicit policy
 - unknown guard name resolves "on" (fail closed)
 - write_state() drops unknown guard keys and non on/off values
 - CLI: get / set / reset / show
@@ -31,23 +31,25 @@ class TestReadWriteRoundTrip(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_missing_file_defaults_to_all_on_except_opt_in(self):
-        # ``fork_pr_confirm`` is opt-in (default "off"); the other
-        # three are always-on ("on"). See ``OPT_IN_GUARDS``.
+    def test_missing_file_defaults_to_repository_guards_off(self):
         state = gms.read_state(self.root)
         self.assertEqual(
             state,
-            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+            {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+             "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+             "policy_source": "default", "branch_class": "unknown"},
         )
 
-    def test_corrupt_file_defaults_to_all_on_except_opt_in(self):
+    def test_corrupt_file_defaults_to_repository_guards_off(self):
         path = gms._state_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json", encoding="utf-8")
         state = gms.read_state(self.root)
         self.assertEqual(
             state,
-            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+            {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+             "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+             "policy_source": "default", "branch_class": "unknown"},
         )
 
     def test_invalid_value_in_file_defaults_that_guard_to_on(self):
@@ -55,14 +57,16 @@ class TestReadWriteRoundTrip(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"tdd_guard": "bogus"}), encoding="utf-8")
         state = gms.read_state(self.root)
-        self.assertEqual(state["tdd_guard"], "on")
+        self.assertEqual(state["tdd_guard"], "off")
 
     def test_write_state_round_trips_one_guard(self):
         gms.write_state({"tdd_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
         self.assertEqual(
             state,
-            {"tdd_guard": "off", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+            {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+             "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+             "policy_source": "default", "branch_class": "unknown"},
         )
 
     def test_write_state_does_not_disturb_other_guard(self):
@@ -71,30 +75,45 @@ class TestReadWriteRoundTrip(unittest.TestCase):
         state = gms.read_state(self.root)
         self.assertEqual(
             state,
-            {"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on", "fork_pr_confirm": "off"},
+            {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+             "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+             "policy_source": "default", "branch_class": "unknown"},
         )
 
     def test_write_state_drops_unknown_guard_key(self):
-        gms.write_state({"git_guard": "off"}, root=self.root)
+        gms.write_state({"unknown_guard": "off"}, root=self.root)
         state = gms.read_state(self.root)
         self.assertEqual(
             state,
-            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+            {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+             "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+             "policy_source": "default", "branch_class": "unknown"},
         )
 
     def test_write_state_drops_non_on_off_value(self):
         gms.write_state({"tdd_guard": "maybe"}, root=self.root)
         state = gms.read_state(self.root)
-        self.assertEqual(state["tdd_guard"], "on")
+        self.assertEqual(state["tdd_guard"], "off")
 
-    def test_reset_state_forces_all_on_except_opt_in(self):
-        gms.write_state({"tdd_guard": "off", "worktree_guard": "off", "push_confirm": "on"}, root=self.root)
+    def test_reset_state_applies_off_policy(self):
+        gms.write_state({"tdd_guard": "on", "worktree_guard": "on", "git_guard": "on"}, root=self.root)
         gms.reset_state(self.root)
         state = gms.read_state(self.root)
         self.assertEqual(
             state,
-            {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+            {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+             "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+             "policy_source": "default", "branch_class": "unknown"},
         )
+
+    def test_reset_state_records_explicit_policy_metadata(self):
+        state = gms.reset_state(self.root, policy="on", policy_source="project",
+                                branch_class="main")
+        self.assertEqual(state["policy"], "on")
+        self.assertEqual(state["policy_source"], "project")
+        self.assertEqual(state["branch_class"], "main")
+        for guard in gms.POLICY_GUARDS:
+            self.assertEqual(state[guard], "on")
 
     def test_fork_pr_confirm_round_trips(self):
         gms.write_state({"fork_pr_confirm": "on"}, root=self.root)
@@ -118,17 +137,18 @@ class TestResolvedGuard(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_resolved_guard_default_on(self):
-        self.assertEqual(gms.resolved_guard("tdd_guard", self.root), "on")
-        self.assertEqual(gms.resolved_guard("worktree_guard", self.root), "on")
+    def test_resolved_guard_default_off(self):
+        self.assertEqual(gms.resolved_guard("tdd_guard", self.root), "off")
+        self.assertEqual(gms.resolved_guard("worktree_guard", self.root), "off")
+        self.assertEqual(gms.resolved_guard("git_guard", self.root), "off")
 
     def test_resolved_guard_reflects_off(self):
         gms.write_state({"worktree_guard": "off"}, root=self.root)
         self.assertEqual(gms.resolved_guard("worktree_guard", self.root), "off")
-        self.assertEqual(gms.resolved_guard("tdd_guard", self.root), "on")
+        self.assertEqual(gms.resolved_guard("tdd_guard", self.root), "off")
 
     def test_resolved_guard_unknown_name_fails_closed_to_on(self):
-        self.assertEqual(gms.resolved_guard("git_guard", self.root), "on")
+        self.assertEqual(gms.resolved_guard("unknown_guard", self.root), "on")
 
 
 class TestCli(unittest.TestCase):
@@ -151,7 +171,7 @@ class TestCli(unittest.TestCase):
         out = capsys.readouterr()
         return rc, out
 
-    def test_cli_get_defaults_to_on(self):
+    def test_cli_get_defaults_to_off(self):
         import contextlib
         import io
 
@@ -159,7 +179,7 @@ class TestCli(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             rc = gms.main(["get", "tdd_guard"])
         self.assertEqual(rc, 0)
-        self.assertEqual(buf.getvalue().strip(), "on")
+        self.assertEqual(buf.getvalue().strip(), "off")
 
     def test_cli_set_then_get_reflects_off(self):
         import contextlib
@@ -172,7 +192,7 @@ class TestCli(unittest.TestCase):
             gms.main(["get", "worktree_guard"])
         self.assertEqual(buf.getvalue().strip(), "off")
 
-    def test_cli_reset_restores_on(self):
+    def test_cli_reset_restores_off(self):
         import contextlib
         import io
 
@@ -182,7 +202,7 @@ class TestCli(unittest.TestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             gms.main(["get", "tdd_guard"])
-        self.assertEqual(buf.getvalue().strip(), "on")
+        self.assertEqual(buf.getvalue().strip(), "off")
 
     def test_cli_show_json_contains_every_guard(self):
         import contextlib
@@ -197,9 +217,9 @@ class TestCli(unittest.TestCase):
                 self.assertIn(guard, parsed)
                 self.assertIn("value", parsed[guard])
                 self.assertIn("description", parsed[guard])
-                # Default value: always-on guards → "on"; opt-in
-                # guards (see ``OPT_IN_GUARDS``) → "off".
-                expected = "off" if guard in gms.OPT_IN_GUARDS else "on"
+                # Repository guards default off; push confirmation remains
+                # an independent ask-tier surface.
+                expected = "on" if guard == "push_confirm" else "off"
                 self.assertEqual(parsed[guard]["value"], expected)
 
 

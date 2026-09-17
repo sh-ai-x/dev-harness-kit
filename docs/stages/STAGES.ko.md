@@ -117,10 +117,9 @@
   삭제. 여러 변경을 배치로 묶기.
 - **AC**: 모든 스텝이 `status=completed`. `pytest`가 exit 0 + 개수
   인용. 2-커밋 프로토콜 준수.
-- **활성 스킬**: `build-tdd`, `build-debug`, `build-verify`,
-  `build-refactor`(스텝별 하네스 러너 + 방법론 선택기는
-  `lib/execute.py` + `lib/methodology/`에 있다; prune의 3단계 스윕은
-  `prune`에 인라인됨)
+- **활성 스킬**: `build`, `build-debug`(스텝별 하네스 러너, 테스트 우선
+  규율, 완료 증거는 `lib/execute.py`, `lib/methodology/`, 활성 훅에 있다;
+  prune의 3단계 스윕은 `prune`에 인라인됨)
 - **활성 훅**: `tdd-guard`, `bash-guard`, `secret-scan`,
   `slop-detector`, `stop-verify` — 모두 ON
 - **서브에이전트**: Phase 3(계획됨). 현재는 순차 실행만.

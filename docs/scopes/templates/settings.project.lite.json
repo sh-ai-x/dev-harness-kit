@@ -3,6 +3,7 @@
     "dev-kit@dev-kit": true
   },
   "env": {
-    "DEV_KIT_MODE": "lite"
+    "DEV_KIT_MODE": "lite",
+    "DEV_KIT_GUARDS": "off"
   }
 }

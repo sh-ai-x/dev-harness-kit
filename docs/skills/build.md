@@ -85,9 +85,8 @@ Template behavior is validated by `tests/test_long_running_templates.py` (struct
 
 ## Related
 
-- [build-tdd](build-tdd.md) — the Red-Green-Refactor sub-skill active during build when `methodology=tdd`.
 - [build-debug](build-debug.md) — invoked when a step's sub-agent needs systematic debugging.
-- [build-verify](build-verify.md) — enforces evidence before a "done" declaration.
+- `tdd-guard` and `stop-verify` — deterministic hook enforcement for test-first edits and completion evidence.
 - `/dev-kit:review` and `/dev-kit:security`, then `/dev-kit:ship` — the next stages after `build` completes.
 - `lib/execute.py` — the harness-runner engine this skill wraps.
 - `lib/dispatch_classifier.py` — pure-Python classifier that decides parallel vs sequential per batch (5-rule priority order, default sequential; replaces the legacy `--parallel` flag).

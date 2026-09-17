@@ -65,9 +65,9 @@ git rm -rf tools/save_log.py logs/
 
 ## Per-skill usage telemetry
 
-`tools/skill_usage.py` and the `--skill-usage` flag on `tools/session_monitor.py`
-turn the two distinct signals in every captured JSONL into a standing
-data feed, so future cut/merge calls don't have to re-aggregate by hand.
+`tools/skill_usage.py` turns the two distinct signals in every captured JSONL
+into a standing data feed, so future cut/merge calls don't have to re-aggregate
+by hand.
 
 ### Two signals
 
@@ -101,19 +101,6 @@ python3 tools/skill_usage.py --json --per-cwd
 
 Output is sorted by `turns` desc, ties broken by `invocations` desc.
 The default window is 30 days; pass `--days 0` to disable.
-
-### session_monitor integration
-
-`tools/session_monitor.py --list --skill-usage` adds a per-worktree
-`TOP SKILLS:` line (3 skills) and a global top-10 panel at the bottom:
-
-```text
-  ▸ feat/p5  [live]  (2 sessions)  last: "feat: p5 telemetry"
-    TOP SKILLS: dev-kit:feat-fix:14 inv:3  dev-kit:inspect:5 inv:1
-```
-
-The `--skill-usage` flag aggregates once per `--skill-days N` window
-(default 30); pass `--skill-days 0` to disable the window.
 
 ### Interpretation
 

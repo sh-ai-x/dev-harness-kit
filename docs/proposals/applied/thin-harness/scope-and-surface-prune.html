@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoped guard defaults and thin-harness surface prune</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Scoped guard defaults and thin-harness surface prune</h1>
+<p class="meta">2026-09-17 · <span class="tag tag-info">applied-with-changes</span> · <span class="timeline-chip timeline-started">started 2026-09-17</span> · <span class="timeline-chip timeline-shipped">shipped 2026-09-18</span></p>
+<div class="tags"><span class="tag tag-info">scope</span><span class="tag tag-info">hooks</span><span class="tag tag-info">worktree</span><span class="tag tag-info">token-efficiency</span><span class="tag tag-info">dead-code</span><span class="tag tag-info">skills</span><span class="tag tag-info">installation</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision and scope</a></li><li><a href="#sec-1">Guard policy and scope precedence</a></li><li><a href="#sec-2">SessionStart records policy only</a></li><li><a href="#sec-3">Deletion rubric and candidates</a></li><li><a href="#sec-4">Context and token budget</a></li><li><a href="#sec-5">Implementation and verification order</a></li><li><a href="#sec-6">Proposal lifecycle updates</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Decision and scope</h2>
+<p>Adopt this as a two-phase cleanup. Phase 1 changes guard activation and removes the session-monitor feature. Phase 2 removes only skills, docs, and tests that meet the deletion rubric below. The implementation must not weaken catastrophic command blocking, secret scanning, prompt injection scanning, review/security checks, or completion verification.</p>
+<p>The proposal is intentionally about policy and surface area. It does not add a replacement dashboard, background monitor, MCP layer, or a new model orchestration protocol.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Guard policy and scope precedence</h2>
+<p>Add one setting: <code>DEV_KIT_GUARDS=on|off</code>.</p>
+<p>Resolution order is:</p>
+<pre><code class="language-text">shell DEV_KIT_GUARDS
+  &gt; .claude/settings.local.json env.DEV_KIT_GUARDS
+  &gt; .claude/settings.json env.DEV_KIT_GUARDS
+  &gt; default: off</code></pre>
+<p>User-scope settings are not read for this key. They may enable the plugin so commands resolve, but they cannot activate repository guards. Invalid values are ignored with one compact diagnostic and resolve to the next layer. Plugin installation never writes this key. On the first <code>/dev-kit:bootstrap</code>, ask once:</p>
+<pre><code class="language-text">Enable worktree, git, and TDD guards for this repo? [y/N]
+If yes, save it to project scope or local scope? [project/local]</code></pre>
+<p><code>N</code> leaves the effective default <code>off</code>. <code>Y + project</code> writes <code>DEV_KIT_GUARDS=on</code> to <code>.claude/settings.json</code>; <code>Y + local</code> writes it to <code>.claude/settings.local.json</code>. Existing settings are not silently overwritten. Re-running bootstrap reports the current value and keeps SessionStart prompt-free.</p>
+<p><code>on</code> enables worktree, git, and tdd guards in every session. <code>off</code> disables those three session-policy checks. Existing catastrophic and ask-tier hooks keep their own contracts and are not silently disabled by this setting.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">SessionStart records policy only</h2>
+<p><code>session-start-check.sh</code> classifies the checkout before emitting its context. The state writer records <code>policy</code>, <code>policy_source</code>, <code>branch_class</code>, and the effective guard map in <code>.dev-kit/guard-mode.session.json</code>.</p>
+<p>With no explicit project/local/shell policy, every checkout resolves to <code>off</code>:</p>
+<table><thead><tr><th>Checkout</th><th>worktree guard</th><th>git guard</th><th>tdd guard</th><th>reason</th></tr></thead><tbody><tr><td><code>main</code></td><td>off</td><td>off</td><td>off</td><td>bootstrap-only choice; SessionStart stays prompt-free</td></tr><tr><td>feature worktree</td><td>off</td><td>off</td><td>off</td><td>default thin session</td></tr><tr><td>detached/outside project</td><td>off</td><td>off</td><td>off</td><td>no repository policy</td></tr></tbody></table>
+<p>An explicit <code>DEV_KIT_GUARDS=on</code> changes every row to on. An explicit <code>off</code> keeps every row off. The one-line SessionStart context reports the resolved policy and branch class. The hook never asks a question or blocks SessionStart; it writes the decision and leaves enforcement to the individual PreToolUse hooks. Bootstrap owns the one-time setup question and the project/local write.</p>
+<hr class="section-divider">
+
+<h2 id="sec-3">Deletion rubric and candidates</h2>
+<p>A surface is removable only when all four checks pass:</p>
+<ol><li>no runtime/import/manifest consumer remains;</li><li>its behavior is either duplicated by a deterministic hook or has no current product value;</li><li>a replacement command/path is documented when users need continuity;</li><li>focused tests prove the absence or the retained contract.</li></ol>
+<p>First-wave deletion: the session-monitor code, its fixtures, tests, screenshot, ownership entry, and observability/workflow references. The eval-session judge remains; only the monitor handshake assertions are removed or rewritten.</p>
+<p>Second-wave candidate: model-only <code>build-tdd</code>, <code>build-verify</code>, and <code>build-refactor</code> skills. Their deterministic enforcement already lives in hooks and their parent stages. Candidate-only, pending the usage and import scan: <code>valuate</code>, <code>interview</code>, <code>learn</code>, <code>status</code>, and <code>prune-propose</code> must not be deleted just because their prose is long; each needs a separate evidence-backed decision because it owns a distinct artifact or operator workflow.</p>
+<hr class="section-divider">
+
+<h2 id="sec-4">Context and token budget</h2>
+<p>Active SKILL.md files should contain only: trigger, inputs, outputs, state transition, hard invariant, and next hand-off. Detailed rationale belongs in the linked SSOT docs and proposal, not in every skill.</p>
+<p>Measure before and after with the existing token analyzer and a stable file list. Acceptance target: at least 20% fewer instruction tokens in active skill files plus zero loss of command names, required files, hook names, or verification commands. Hook output is capped at one compact SessionStart context line; verbose diagnostics remain on disk or behind explicit status commands.</p>
+<hr class="section-divider">
+
+<h2 id="sec-5">Implementation and verification order</h2>
+<ol><li>Add the resolver/state truth table and bootstrap prompt tests first; the no-prompt SessionStart and all-off default are part of the contract.</li><li>Wire the policy into worktree/git/tdd guards; run their focused hook suites.</li><li>Remove session-monitor files and references; run import, README, documentation, and eval-session tests.</li><li>Run the skill usage/import scan, delete only approved duplicate skills, and regenerate both skill indexes.</li><li>Render this proposal, run the full test suite, and update this YAML's <code>status</code>, <code>started</code>, <code>shipped</code>, and <code>modifications</code> only from the resulting diff and evidence.</li></ol>
+<p>Required checks include <code>pytest tests/test_guard_policy.py</code>, the guard hook suites, a repository-wide <code>git grep</code> proving no live <code>session_monitor</code> reference remains, the skill registry audit, and a token analyzer report with the before/after file set.</p>
+<hr class="section-divider">
+
+<h2 id="sec-6">Proposal lifecycle updates</h2>
+<p>Existing proposal records should be updated only when their design is demonstrably shipped. In particular, an implemented skill or hook must move from <code>reviewing/</code> or <code>pending/</code> to <code>applied/</code> with <code>started</code> and <code>shipped</code> dates and a short <code>modifications</code> block when the code differs from the design. Removing a feature also updates its proposal to <code>superseded</code> or <code>applied-with-changes</code>; leaving stale <code>draft</code> text that describes shipped behavior is not acceptable.</p>
+<p>The user accepted the thin default. The implementation is applied with the deletions and documentation substitutions recorded in <code>modifications</code>; only a main-branch-specific default or recurring SessionStart question remains deferred.</p>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>Plugin loading and guard activation are coupled too loosely. A user-scope plugin can be present before a project has made a guard decision, while SessionStart resets the session guard file to on. The current resolver has mode precedence but no equivalent project/local guard policy, and git-guard has no session policy check. The repository also ships a standalone session-monitor surface and several model-only skills whose rules duplicate deterministic hooks or the parent stage skills.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>hooks/lib/mode-resolve.sh:8-13,78-142</code> resolves shell/project/local mode but has no guard-policy layer and defaults an enabled project to full.</li><li><code>hooks/session-start-guard-mode-reset.sh:4-17</code> resets the session guards at every SessionStart; <code>lib/guard_mode_state.py:54-63</code> defaults tdd/worktree to on.</li><li><code>hooks/worktree-guard.sh:46-49</code> and <code>hooks/tdd-guard.sh:10-11</code> already contain deterministic enforcement; <code>hooks/git-guard.sh:1-8</code> has no equivalent session-policy read.</li><li><code>hooks/session-start-check.sh:123-128</code> emits a main-checkout reminder but does not record an explicit on/off decision for the guards.</li><li><code>tools/session_monitor.py</code> plus six split helpers, fixtures, <code>tests/test_session_monitor.py</code>, and two observability docs form a standalone cross-terminal session picker.</li><li><code>skills/build-tdd</code>, <code>skills/build-verify</code>, and <code>skills/build-refactor</code> are model-only sub-skills while <code>tdd-guard</code>, <code>stop-verify</code>, <code>prune</code>, and the parent <code>build</code>/<code>refactor</code> skills carry the executable contracts.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Separate plugin discovery from guard activation. A compact project/local setting controls guards; user-scope plugin installation never enables repository safety policy by itself. SessionStart resolves the policy, detects main versus worktree, writes the effective decision to the session state, and emits one short context line. The default is off for every checkout, including main. SessionStart does not ask guard-by-guard questions and does not auto-enable a main-branch exception. During the first <code>/dev-kit:bootstrap</code>, the operator is asked once whether guards should be enabled and whether the choice belongs to shared project scope or this checkout's local scope.</p>
+<p>Remove session-monitor and other proven-dead or duplicate surfaces, then trim surviving skill prose to invocation, inputs/outputs, invariants, and links to the SSOT. Keep deterministic safety, secret, injection, verification, review, and security hooks.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">hooks/session-start-check.sh</span><p>Resolve and persist the scoped guard policy and compact main/worktree context.</p></li><li><span class="file-path">hooks/session-start-guard-mode-reset.sh</span><p>Reset from the resolved policy rather than unconditional all-on state.</p></li><li><span class="file-path">hooks/lib/guard-policy.sh</span><p>New shell resolver with shell &gt; local &gt; project &gt; default-off precedence; user scope is intentionally ignored.</p></li><li><span class="file-path">lib/guard_mode_state.py</span><p>Store policy source, branch class, and effective tdd/worktree/git values in the session file.</p></li><li><span class="file-path">hooks/worktree-guard.sh</span><p>Honor the resolved session policy while retaining fail-closed payload parsing.</p></li><li><span class="file-path">hooks/git-guard.sh</span><p>Add the same policy check before branch protection checks.</p></li><li><span class="file-path">hooks/tdd-guard.sh</span><p>Use the policy state; keep its deterministic RED evidence check when enabled.</p></li><li><span class="file-path">docs/scopes/README.md</span><p>Make guard activation a separate project/local decision from plugin discovery.</p></li><li><span class="file-path">docs/scopes/modes.md</span><p>Document guard precedence, the all-off default, bootstrap choice, and explicit off.</p></li><li><span class="file-path">docs/scopes/user-scope.md</span><p>State that user-scope plugin enablement does not activate repository guards.</p></li><li><span class="file-path">docs/scopes/project-scope.md</span><p>Add the committed guard-policy setting and bootstrap choice.</p></li><li><span class="file-path">docs/scopes/local-scope.md</span><p>Add the checkout-only guard override and its precedence.</p></li><li><span class="file-path">docs/scopes/templates/settings.project.full.json</span><p>Include the explicit off default used before bootstrap opt-in.</p></li><li><span class="file-path">docs/scopes/templates/settings.project.lite.json</span><p>Emit the same guard key for lite projects.</p></li><li><span class="file-path">docs/scopes/templates/settings.local.json</span><p>Show the local override without enabling it by default.</p></li><li><span class="file-path">skills/bootstrap/SKILL.md</span><p>Ask once during first bootstrap whether to enable guards and write the choice to project or local scope; keep the active body thin.</p></li><li><span class="file-path">docs/skills/bootstrap.md</span><p>Mirror the guard policy and retain the detailed bootstrap reference.</p></li><li><span class="file-path">docs/skills/bootstrap.ko.md</span><p>Keep the Korean bootstrap reference aligned with the guard policy.</p></li><li><span class="file-path">skills/proposal/SKILL.md</span><p>Keep only the renderer contract, schema, lifecycle, and safety invariants; lazy-load detailed reference docs.</p></li><li><span class="file-path">docs/skills/proposal.md</span><p>Retain the detailed proposal renderer and schema reference.</p></li><li><span class="file-path">skills/babysit-pr/SKILL.md</span><p>Keep target evidence and safety gates in the active contract; lazy-load the full repair-loop reference.</p></li><li><span class="file-path">docs/skills/babysit-pr.md</span><p>Retain the detailed babysit algorithm, state, and bypass reference.</p></li><li><span class="file-path">skills/code-viz/SKILL.md</span><p>Keep only the operator contract and delegate implementation to the executable tool.</p></li><li><span class="file-path">tools/code_viz.py</span><p>New executable implementation SSOT extracted from the oversized skill heredoc.</p></li><li><span class="file-path">docs/skills/code-viz.md</span><p>Point the canonical visualizer list and implementation reference to tools/code_viz.py.</p></li><li><span class="file-path">tests/test_code_viz_skill.py</span><p>Compile and execute the extracted visualizer tool instead of parsing an embedded heredoc.</p></li><li><span class="file-path">tests/test_bootstrap_guard_policy.py</span><p>Cover prompt defaults, project/local writes, and explicit off.</p></li><li><span class="file-path">tests/test_guard_policy.py</span><p>Add the scope/branch truth table and SessionStart state contract.</p></li><li><span class="file-path">tests/test_guard_mode_state.py</span><p>Cover policy metadata and git-guard state resolution.</p></li><li><span class="file-path">tests/test_worktree_guard.py</span><p>Opt enforcement regression tests into explicit guard-on policy; default-off behavior is covered separately.</p></li><li><span class="file-path">.githooks/pre-commit</span><p>Stop treating long Markdown setext underlines as staged Git conflict markers.</p></li><li><span class="file-path">tests/test_pre_commit_lint.py</span><p>Pin the conflict-marker boundary and Markdown-heading regression contract.</p></li><li><span class="file-path">tools/session_monitor.py</span><p>Delete the obsolete session picker.</p></li><li><span class="file-path">tools/session_monitor_*.py</span><p>Delete the split monitor helpers and renderer.</p></li><li><span class="file-path">tools/render_session_monitor.py</span><p>Delete the obsolete screenshot renderer with the monitor feature.</p></li><li><span class="file-path">tests/test_session_monitor.py</span><p>Delete tests for the removed feature; preserve eval-session tests that do not depend on it.</p></li><li><span class="file-path">tests/test_eval_session.py</span><p>Remove only monitor-handshake assertions; keep the session-judge and golden-diff tests.</p></li><li><span class="file-path">tests/fixtures/session_monitor/</span><p>Delete monitor-only fixtures.</p></li><li><span class="file-path">docs/observability/session-monitor*.md</span><p>Delete legacy monitor documentation and links.</p></li><li><span class="file-path">docs/screenshots/session-monitor.png</span><p>Delete the obsolete monitor screenshot.</p></li><li><span class="file-path">README.md</span><p>Remove session-monitor instructions and update the minimal install/scope guidance.</p></li><li><span class="file-path">README.ko.md</span><p>Keep Korean parity while removing the deleted monitor surface.</p></li><li><span class="file-path">docs/home/DOC-MAP.md</span><p>Remove the deleted observability entry.</p></li><li><span class="file-path">docs/workflow/WORKFLOW-SCENARIOS.md</span><p>Replace the monitor resume scenario with the supported session hand-off path or remove it.</p></li><li><span class="file-path">docs/workflow/WORKFLOW-SCENARIOS.ko.md</span><p>Keep Korean workflow parity.</p></li><li><span class="file-path">docs/observability/dashboards.md</span><p>Remove monitor references; retain token-efficiency documentation only.</p></li><li><span class="file-path">logs/README.md</span><p>Remove the monitor integration section.</p></li><li><span class="file-path">.github/CODEOWNERS</span><p>Remove ownership for deleted monitor files.</p></li><li><span class="file-path">skills/README.md</span><p>Regenerate the skill registry after pruning model-only duplicates.</p></li><li><span class="file-path">docs/skills/README.md</span><p>Regenerate the English skill index without removed skills.</p></li><li><span class="file-path">docs/skills/README.ko.md</span><p>Regenerate the Korean skill index without removed skills.</p></li><li><span class="file-path">skills/build/SKILL.md</span><p>Absorb only the useful build contract from deleted sub-skills; point to deterministic hooks for enforcement.</p></li><li><span class="file-path">skills/refactor/SKILL.md</span><p>Collapse the redundant build-refactor hand-off into the parent cleanup contract.</p></li><li><span class="file-path">skills/inspect/SKILL.md</span><p>Remove references to the deleted build-refactor phase while preserving audit dimensions.</p></li><li><span class="file-path">skills/build-debug/SKILL.md</span><p>Remove stale build-tdd/build-verify references and preserve reproduce-first behavior.</p></li><li><span class="file-path">docs/skills/build*.md</span><p>Delete or rewrite legacy pages only when their source skill is removed; do not duplicate active contracts.</p></li><li><span class="file-path">skills/build-tdd/SKILL.md</span><p>Delete redundant model-only TDD layer; retain tdd-guard and build-stage contract.</p></li><li><span class="file-path">skills/build-verify/SKILL.md</span><p>Delete redundant model-only completion layer; retain stop-verify and build-stage contract.</p></li><li><span class="file-path">skills/build-refactor/SKILL.md</span><p>Delete redundant model-only cleanup layer; retain the refactor orchestrator cleanup pass.</p></li><li><span class="file-path">docs/skills/build-tdd.md</span><p>Delete documentation for the removed model-only skill.</p></li><li><span class="file-path">docs/skills/build-verify.md</span><p>Delete documentation for the removed model-only skill.</p></li><li><span class="file-path">docs/skills/build-refactor.md</span><p>Delete documentation for the removed model-only skill.</p></li><li><span class="file-path">evals/build-tdd-triggers/</span><p>Delete trigger fixtures for the removed skill.</p></li><li><span class="file-path">evals/refactor-triggers/</span><p>Delete trigger fixtures for the removed model-only chain.</p></li><li><span class="file-path">docs/architecture/2026-08-23/overall-skill-architecture.json</span><p>Delete stale generated architecture data that listed removed skills.</p></li><li><span class="file-path">docs/screenshots/architecture/overall-skill-architecture.png</span><p>Delete stale generated architecture image paired with the removed graph.</p></li><li><span class="file-path">docs/proposals/applied/thin-harness/scope-and-surface-prune.yaml</span><p>This proposal SSOT; update status/started/shipped as implementation progresses.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>A user-scope plugin can be installed without silently imposing repository-specific edit or branch policy on every project.</li><li>Every unconfigured checkout starts with the same thin, predictable guard state instead of a hidden main-branch exception.</li><li>SessionStart records the effective decision, making on/off behavior inspectable and reproducible instead of implicit.</li><li>Deleting the session monitor and duplicate model-only layers reduces install surface, prompt tokens, tests, and documentation drift.</li><li>The retained safety and verification behavior remains deterministic and testable at the hook layer.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Guards stay off until bootstrap receives an explicit choice, so an unconfigured main checkout is intentionally permissive.</li><li>Bootstrap adds one setup decision; keeping it to enable/disable plus project/local scope avoids recurring session friction.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>This changes repository guard activation, not plugin discovery; user-scope installation may load the plugin but cannot turn guards on.</li><li>A later proposal may add a main-branch-specific default or prompt; this proposal deliberately keeps one explicit bootstrap choice.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-18 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

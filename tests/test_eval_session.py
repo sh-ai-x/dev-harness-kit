@@ -47,14 +47,6 @@ class TestSessionAxes(unittest.TestCase):
     def test_session_axes_count(self):
         self.assertEqual(len(eval_runner.SESSION_AXES), 8)
 
-    def test_session_axes_match_handshake(self):
-        # Mirror contract: tools/session_monitor.py EVAL_AXES tuple
-        # shares the same axis names.
-        sys.path.insert(0, str(REPO_ROOT / "tools"))
-        import session_monitor  # type: ignore  # noqa: E402
-        self.assertEqual(set(eval_runner.SESSION_AXES),
-                         set(session_monitor.EVAL_AXES))
-
 
 class TestSessionIdFromLog(unittest.TestCase):
     def test_derives_session_id_from_first_line(self):
@@ -374,52 +366,6 @@ class TestWriteReports(unittest.TestCase):
         self.assertIn("recall", body)
         self.assertIn("review-v1", body)
         self.assertIn("critical", body)
-
-
-class TestSessionMonitorHandshake(unittest.TestCase):
-    """The monitor surfaces the eval handshake — it never invokes the judge."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        # Fake worktree + session data.
-        from tools.session_monitor import Session, Status, WorktreeInfo  # noqa: E402
-        sys.path.insert(0, str(REPO_ROOT / "tools"))
-        from tools import session_monitor  # type: ignore  # noqa: E402,F401
-        agg = {
-            "session_id": "sid-handshake",
-            "source": "claude-code",
-            "worktree": "(main)",
-            "branch": "feat/x",
-            "model": "MiniMax-M3[1m]",
-            "last_ts": None,
-            "log_path": "/repo/logs/cc/sid-handshake.jsonl",
-        }
-        sess = Session(agg=agg, worktree_state="live",
-                       status=Status.LIVE, pids=[], wt_path=self.root)
-        wt = WorktreeInfo(dirname="(main)", state="live",
-                          path=self.root, sessions=[sess])
-        self.handshake = session_monitor.build_eval_handshake([wt])
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_handshake_carries_axes_and_session(self):
-        self.assertTrue(self.handshake["opt_in"])
-        self.assertEqual(len(self.handshake["axes"]), 8)
-        self.assertEqual(len(self.handshake["sessions"]), 1)
-        s = self.handshake["sessions"][0]
-        self.assertEqual(s["session_id"], "sid-handshake")
-        self.assertIn("--session-log", s["judge_command"])
-        self.assertIn(s["log_path"], s["judge_command"])
-
-    def test_handshake_in_session_monitor_json_output(self):
-        # The JSON output of session_monitor exposes eval_handshake.
-        # (Smoke check; full session_monitor tests live in test_session_monitor.py.)
-        sys.path.insert(0, str(REPO_ROOT / "tools"))
-        from tools import session_monitor  # type: ignore  # noqa: E402
-        self.assertTrue(hasattr(session_monitor, "build_eval_handshake"))
-        self.assertEqual(len(session_monitor.EVAL_AXES), 8)
 
 
 if __name__ == "__main__":

@@ -513,7 +513,7 @@ class TestGitGuardRefactor(unittest.TestCase):
         r = subprocess.run(
             [_bash(), str(HOOKS / "git-guard.sh")],
             input=payload, capture_output=True, text=True, timeout=5,
-            env={**os.environ, "PATH": minimal_path},
+            env={**os.environ, "PATH": minimal_path, "DEV_KIT_GUARDS": "on"},
         )
         self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
         self.assertIn("jq is required", r.stderr)

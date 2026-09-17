@@ -67,7 +67,7 @@ implicit `LINEAR_ERROR`; do not invoke it between debugging phases. See
 - Asserting "probably X" without root cause quoted ❌.
 - One change at a time. Multiple changes at once ❌.
 - Standalone Phase 4 refuses to write a regression test, patch source,
-  or invoke `/dev-kit:build`/`/dev-kit:build-tdd` directly — that work
+  or invoke `/dev-kit:build` directly — that work
   is scoped and reviewed by `/dev-kit:plan` first.
 
 ## Hook integration
