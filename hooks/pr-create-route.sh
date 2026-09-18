@@ -55,7 +55,7 @@ fi
 command -v python3 >/dev/null 2>&1 || { echo "[$HOOK_PREFIX] python3 missing — fail-open (route skipped)" >&2; exit 0; }
 
 # Resolve the project root. Prefer DEV_KIT_TDD_ROOT (the convention
-# the tdd-guard / tdd-scope-judge hooks already established) and
+# the tdd-guard policy already established) and
 # fall back to `git rev-parse --show-toplevel`.
 ROOT="${DEV_KIT_TDD_ROOT:-$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || pwd)}"
 HEAD=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")

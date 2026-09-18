@@ -29,7 +29,6 @@ sys.path.insert(0, str(LIB))
 import guard_mode_state as gms  # noqa: E402
 
 # Hooks invoke `python3 -m lib.guard_mode_state` bare (matching the
-# existing `python3 -m lib.tdd_scope_policy` call already in
 # hooks/tdd-guard.sh), which resolves correctly in production because
 # Claude Code always sets the hook's cwd to the real project root
 # (co-located with `lib/`). These tests instead build a throwaway git

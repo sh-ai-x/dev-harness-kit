@@ -27,11 +27,6 @@
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/destructive-confirm.sh",
-            "fail_closed": true
-          },
-          {
-            "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/linear-autosync.sh",
             "fail_closed": false
           }
@@ -52,14 +47,19 @@
           },
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/pr-create-route.sh",
-            "fail_closed": false
-          },
-          {
-            "type": "command",
             "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/review-yml-isolation.sh",
             "fail_closed": true
           },
+          {
+            "type": "command",
+            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/pr-create-route.sh",
+            "fail_closed": false
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
           {
             "type": "command",
             "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/destructive-confirm.sh",
@@ -81,11 +81,6 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/tdd-scope-judge.sh",
-            "fail_closed": true
-          },
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/worktree-auto-cut.sh",
@@ -116,70 +111,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/session-start-check.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/log-on-session-start.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/provider-divergence-check.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/linear-session-start.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-janitor-session-start.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-harness-mode-reset.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/session-start-guard-mode-reset.sh",
-            "fail_closed": false
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/plugin-cache-refresh.sh",
+            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/session-start.sh",
             "fail_closed": false
           }
         ]
@@ -257,8 +189,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/stop-verify.sh",
-            "fail_closed": true
+            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/trace-session-end.sh",
+            "fail_closed": false
           }
         ]
       },
@@ -266,8 +198,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/trace-session-end.sh",
-            "fail_closed": false
+            "command": "bash ${PLUGIN_ROOT}/hooks/stop-verify.sh",
+            "fail_closed": true
           }
         ]
       }

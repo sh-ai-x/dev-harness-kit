@@ -39,6 +39,11 @@
 같은 훅을 그것을 발화시키는 Claude Code / Codex 이벤트 인덱스 —
 *왜* 훅이 작동했거나 작동하지 않았는지 디버깅할 때 유용:
 
+각 런타임 manifest에는 27개 command entry가 등록된다. SessionStart의
+등록점은 `session-start.sh` 하나이며, 독립 테스트 가능한 child 모듈로
+분배한 뒤 하나의 advisory envelope으로 합친다. 따라서 기존 SessionStart
+동작은 유지하면서 등록 오버헤드만 줄인다.
+
 | 훅 | 이벤트 | 목적 | 모드 |
 |---|---|---|---|
 | `tdd-guard.sh` | PreToolUse (Write\|Edit\|MultiEdit) | TDD 테스트 우선 시행 | advisory / `--strict` |
@@ -48,9 +53,10 @@
 | [`linear-autosync.sh`](linear-autosync.ko.md) | PreToolUse (Write\|Edit\|MultiEdit) | `tools/linear_sync.py`를 통해 모든 Edit를 사용자 Linear 워크스페이스에 자동 동기화 (dev-kit 프로젝트 디렉터리가 아니면 silent-bail) | advisory (silent exit 0) |
 | `review-yml-isolation.sh` | PreToolUse (Bash) | `review.yml` 변경을 자체 커밋/PR로 강제 | hard-block |
 | `worktree-auto-cut.sh` | UserPromptSubmit | 메인에서 새-작업 프롬프트에 대해 워크트리를 자동 생성 | advisory (fails open) |
-| `session-start-check.sh` | SessionStart | 워크트리 규칙을 알려준다 | advisory |
-| `log-on-session-start.sh` | SessionStart | 매 세션마다 로그 훅을 (idempotent하게) 자동 설치 | advisory |
-| `provider-divergence-check.sh` | SessionStart | `.env:CI_REVIEW_PROVIDER`가 off-list거나, 발산하거나, 누락되었을 때 알린다 | advisory |
+| `session-start.sh` | SessionStart | SessionStart lifecycle bundle을 분배하고 child context를 합친다 | advisory / fail-open |
+| `session-start-check.sh` (child) | `session-start.sh`를 통한 SessionStart | 워크트리 규칙 알림 및 active-hook 상태 재생성 | advisory |
+| `log-on-session-start.sh` (child) | `session-start.sh`를 통한 SessionStart | 매 세션 로그 훅 자동 설치 (idempotent) | advisory |
+| `provider-divergence-check.sh` (child) | `session-start.sh`를 통한 SessionStart | `.env:CI_REVIEW_PROVIDER`가 off-list거나 발산/누락되었을 때 알림 | advisory |
 | `secret-scan.sh` | PostToolUse (Write\|Edit) | 편집에서 자격 증명을 감지 | hard-block |
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | AI 슬롭 차단 (어구 + 구조 + 점수, KO+EN) | advisory (opt-in strict) |
 | `worktree-log-auto-install.sh` | PostToolUse (Bash) | 새로 추가된 워크트리에 로그 훅을 설치 | advisory |
@@ -94,22 +100,14 @@
 
 ## 타임아웃 정책
 
-UserPromptSubmit 훅(특히 `tdd-scope-judge.sh`와 `worktree-auto-cut.sh`)은
-`hooks.json`에 명시적 `timeout: 60`을 가진다. 30초 기본값은 이 훅들에
-불충분하다:
+`worktree-auto-cut.sh` UserPromptSubmit 훅은 `hooks.json`에 명시적
+`timeout: 120`을 가진다. 원격 및 worktree 작업을 수행하므로 30초
+기본값은 불충분하다:
 
 - `worktree-auto-cut.sh`는 `git fetch origin main` + `git worktree add`를
   실행하며, 둘 다 느린 origin이나 큰 HEAD에서 30초를 초과할 수 있다.
-- `tdd-scope-judge.sh`는 path-규칙 미스 폴백으로 LLM judge
-  (`lib.tdd_scope_judge`)를 실행한다. state 파일 root는
-  `${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel)}`로 결정되며,
-  이는 `tdd-guard.sh`가 `.tdd-scope.json`을 읽을 때 쓰는 것과 동일한
-  폴백이다 — `DEV_KIT_TDD_ROOT`가 git toplevel 밖을 가리켜도 두 훅이
-  같은 state 경로에 합의하도록 한다.
-
-두 훅 모두 advisory이므로(스크립트 레벨 계약에 따라 실패 시 exit 0)
-타임아웃은 정확성을 깨는 대신 알림을 조용히 버린다 — 그러나 사용자가
-제안을 잃는다. 120초는 전형적인 경우(<10s)보다 충분히 위이며
-600초 기본 훅 천장보다 충분히 아래다. 다른 훅 그룹(PreToolUse,
-SessionStart, PostToolUse, Stop)은 30초 기본값을 상속; 현재 무거운
-경로를 실행하는 것이 없어 기본값이 적절하다.
+이 훅은 advisory이므로(스크립트 레벨 계약에 따라 실패 시 exit 0)
+타임아웃은 정확성을 깨는 대신 라우팅 힌트를 조용히 버린다. 120초는
+일반 실행보다 충분히 길고 플랫폼 제한보다 짧다. 다른 훅 그룹
+(PreToolUse, SessionStart, PostToolUse, Stop)은 30초 기본값을 상속하며
+현재 무거운 경로를 실행하지 않는다.

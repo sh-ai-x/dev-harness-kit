@@ -51,7 +51,7 @@ gh variable list --repo <owner>/<repo> | grep CI_REVIEW_PROVIDER
 gh secret   list --repo <owner>/<repo> | grep -E '(MINIMAX|ANTHROPIC|DEEPSEEK)_API_KEY'
 ```
 
-The matching local selector is `.env:CI_REVIEW_PROVIDER` (managed via `bin/set-provider.sh <provider>`); the local half is gitignored and per-user, while the GitHub variable is per-repo. The `provider-divergence-check.sh` SessionStart hook nudges when the two disagree.
+The matching local selector is `.env:CI_REVIEW_PROVIDER` (managed via `bin/set-provider.sh <provider>`); the local half is gitignored and per-user, while the GitHub variable is per-repo. The `provider-divergence-check.sh` SessionStart child, invoked by the shared `hooks/session-start.sh` dispatcher, nudges when the two disagree.
 
 ### Adding a new provider
 

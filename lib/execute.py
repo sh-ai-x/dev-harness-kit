@@ -69,23 +69,19 @@ def _agent_timeout_seconds() -> int:
 def _gate_summary_line(root: Path) -> str:
     """One-line gate summary appended to every step preamble.
 
-    Tells the sub-agent which optional gates are off this session (e.g.
-    tdd_scope_judge via `/dev-kit:harness-mode fast`) so it does not wonder
-    why no test framework is loading, and reiterates that correctness gates
-    (stop_verify, secret_scan) are non-negotiable regardless of mode.
+    Tells the sub-agent which optional gates are off this session and
+    reiterates that correctness gates (stop_verify, secret_scan) are
+    non-negotiable regardless of mode.
 
     ``root`` is the orchestrator's main checkout (where the SessionStart
     hook writes `.dev-kit/harness-mode.session.json`), NOT the per-step
     worktree — resolved_gate() must read the session-scoped file, not a
     fresh per-step worktree that never saw the SessionStart reset.
     """
-    tdd = resolved_gate("tdd_scope_judge", root)
     slop = resolved_gate("slop_detector", root)
     return (
         f"Gates in effect: stop_verify=ON, secret_scan=ON, "
-        f"tdd_scope_judge={tdd.upper()}, slop_detector={slop.upper()}. "
-        f"If tdd_scope_judge is OFF, do not write tests for non-production "
-        f"code unless the step file asks for them. If stop_verify or "
+        f"slop_detector={slop.upper()}. If stop_verify or "
         f"secret_scan fires, treat it as a hard stop regardless of mode."
     )
 
@@ -103,14 +99,7 @@ def _agent_command(worktree: Path, prompt: str) -> list[str]:
     Claude remains the default for compatibility. Codex is selected with
     ``DEV_KIT_BUILD_AGENT=codex`` and receives the same worktree + prompt.
 
-    Related env flags (issue #647):
-      - ``DEV_KIT_BUILD_AGENT`` selects the runner for both this step
-        agent AND the TDD scope judge (``lib.tdd_scope_judge``).
-      - ``DEV_KIT_SKIP_TDD=1`` is an escape hatch that bypasses the
-        TDD scope judge entirely (``tdd_required=False``). Use only
-        when ``claude -p`` is unresponsive and ``codex exec`` is
-        unavailable — may produce lower-quality builds; not for
-        production use.
+    ``DEV_KIT_BUILD_AGENT`` selects the runner for this step agent.
     """
     agent = os.environ.get("DEV_KIT_BUILD_AGENT", "claude").strip().lower()
     if agent == "claude":

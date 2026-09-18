@@ -94,9 +94,9 @@ pre-push 훅에 `bash -n`; 설치된 모든 `.py`에 `ast.parse`; `python3 scrip
 | `scripts/branch-policy.sh` | CI 스크립트 컨텍스트를 위한 pre-push 훅의 미러 |
 | `scripts/ci-local.sh` | 로컬-러너 진입점 |
 | `hooks/worktree-guard.sh` | 메인 체크아웃에 대한 PreToolUse Write/Edit 블록 |
-| `hooks/session-start-check.sh` | 메인 체크아웃에서 시작 시 SessionStart 알림 |
+| `hooks/session-start.sh` | 단일 SessionStart 등록점; lifecycle child 훅을 분배 |
 | `hooks/lib/worktree-detect.sh` | 공유 `--git-dir`/`--git-common-dir` 판별자 |
-| `hooks/hooks.json` | 4개 훅 파일을 올바른 이벤트 matcher에 배선 |
+| `hooks/hooks.json` | canonical hook registry와 SessionStart dispatcher를 올바른 이벤트 matcher에 배선 |
 | `.claude/rules/git-workflow.md` | 브랜치 / 워크트리 / PR 규약 |
 | `tests/test_worktree_guard.py` | 4개 규칙 훅 + hooks.json 배선에 대한 회귀 테스트 |
 

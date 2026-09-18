@@ -70,9 +70,9 @@ Failure exit codes: `1` = arg error, `2` = marker present + no `--force`, `3` = 
 | `scripts/branch-policy.sh` | Mirror of the pre-push hook for CI script context |
 | `scripts/ci-local.sh` | Local-runner entrypoint |
 | `hooks/worktree-guard.sh` | PreToolUse Write/Edit block on main checkout |
-| `hooks/session-start-check.sh` | SessionStart reminder when started in main checkout |
+| `hooks/session-start.sh` | Single SessionStart registration; dispatches the lifecycle child hooks |
 | `hooks/lib/worktree-detect.sh` | Shared `--git-dir`/`--git-common-dir` discriminator |
-| `hooks/hooks.json` | Wires the 4 hook files into the right event matchers |
+| `hooks/hooks.json` | Wires the canonical hook registry and SessionStart dispatcher into the right event matchers |
 | `.claude/rules/git-workflow.md` | Branch / worktree / PR conventions |
 | `tests/test_worktree_guard.py` | Regression tests for the 4 rule hooks + hooks.json wiring |
 

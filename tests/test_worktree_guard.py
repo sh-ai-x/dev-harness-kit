@@ -3,7 +3,7 @@
 
 Verifies the bash-level behavior of:
   - hooks/worktree-guard.sh       (PreToolUse Edit|Write|MultiEdit — hard block)
-  - hooks/session-start-check.sh  (SessionStart — advisory additionalContext)
+  - hooks/session-start.sh       (SessionStart dispatcher — advisory context)
 
 The hard rule under test (.claude/rules/git-workflow.md):
   "Every task = new worktree + client handoff + new branch."

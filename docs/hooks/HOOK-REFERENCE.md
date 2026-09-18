@@ -46,6 +46,11 @@ per-runtime wiring differences), see
 The same hooks, indexed by the Claude Code / Codex event that fires them —
 useful when you're debugging *why* a hook did or didn't run:
 
+The manifests register 27 command entries per runtime. SessionStart has one
+registered command, `session-start.sh`; it fans out to independently testable
+child modules and returns one combined advisory envelope. This trims
+registration overhead without removing any retained SessionStart behavior.
+
 | Hook | Event | Purpose | Mode |
 |---|---|---|---|
 | `tdd-guard.sh` | PreToolUse (Write\|Edit\|MultiEdit) | TDD test-first enforcement | advisory / `--strict` |
@@ -57,10 +62,12 @@ useful when you're debugging *why* a hook did or didn't run:
 | [`linear-autosync.sh`](linear-autosync.md) | PreToolUse (Write\|Edit\|MultiEdit) | Auto-sync every Edit into the user's Linear workspace via `tools/linear_sync.py` (silent-bail on non-dev-kit project dirs) | advisory (silent exit 0) |
 | `review-yml-isolation.sh` | PreToolUse (Bash) | Force `review.yml` changes into their own commit/PR | hard-block |
 | `worktree-auto-cut.sh` | UserPromptSubmit | Auto-cut a worktree for a new-task prompt in main | advisory (fails open) |
-| `session-start-check.sh` | SessionStart | Remind about the worktree rule | advisory |
-| `log-on-session-start.sh` | SessionStart | Auto-install loghooks each session (idempotent) | advisory |
-| `provider-divergence-check.sh` | SessionStart | Nudge when `.env:CI_REVIEW_PROVIDER` is off-list, diverges, or missing | advisory |
-| `worktree-janitor-session-start.sh` | SessionStart | Nudge when merged-into-main or stale `fix/classify-request-*` worktrees are present; opt-out via `DEV_KIT_JANITOR_OFF=1` (issue #717). Optional auto-apply when `DEV_KIT_JANITOR_AUTO_PRUNE=1` *and* `DEV_KIT_JANITOR_AUTO_PRUNE_YES=1` are exported (capped at `DEV_KIT_JANITOR_AUTO_PRUNE_MAX`, default 50/session) — restricted to stale-classify predicate only, skips current + main worktree, requires clean `git status`, drops `--force`. Audit log at `.dev-kit/janitor-audit.log`. | advisory |
+| `session-start.sh` | SessionStart | Dispatch the lifecycle bundle and combine child context | advisory / fail-open |
+| `session-start-check.sh` (child) | SessionStart via `session-start.sh` | Remind about the worktree rule and regenerate active-hook state | advisory |
+| `log-on-session-start.sh` (child) | SessionStart via `session-start.sh` | Auto-install loghooks each session (idempotent) | advisory |
+| `provider-divergence-check.sh` (child) | SessionStart via `session-start.sh` | Nudge when `.env:CI_REVIEW_PROVIDER` is off-list, diverges, or missing | advisory |
+| `linear-session-start.sh` (child) | SessionStart via `session-start.sh` | Sync a Linear-configured worktree at session start | advisory |
+| `worktree-janitor-session-start.sh` (child) | SessionStart via `session-start.sh` | Nudge when merged-into-main or stale `fix/classify-request-*` worktrees are present; opt-out via `DEV_KIT_JANITOR_OFF=1` (issue #717). Optional auto-apply when `DEV_KIT_JANITOR_AUTO_PRUNE=1` *and* `DEV_KIT_JANITOR_AUTO_PRUNE_YES=1` are exported (capped at `DEV_KIT_JANITOR_AUTO_PRUNE_MAX`, default 50/session) — restricted to stale-classify predicate only, skips current + main worktree, requires clean `git status`, drops `--force`. Audit log at `.dev-kit/janitor-audit.log`. | advisory |
 | `secret-scan.sh` | PostToolUse (Write\|Edit) | Detect credentials in edits | hard-block |
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
 | `l4-todo-scan.sh` | PostToolUse (Write\|Edit) | Fail-closed scan for TODO/FIXME deferred-work markers in `Write`/`Edit`/`MultiEdit` payloads; strict-mode via `L4_STRICT=1` (MUST-4) | hard-block (advisory under allowed-path exemption) |
@@ -179,32 +186,14 @@ every transition.
 
 ## Timeout policy
 
-UserPromptSubmit hooks (specifically `tdd-scope-judge.sh` and
-`worktree-auto-cut.sh`) carry an explicit `timeout: 120` in
-`hooks.json`. The 30s default is insufficient for these because:
+The `worktree-auto-cut.sh` UserPromptSubmit hook carries an explicit
+`timeout: 120` in `hooks.json`. The 30s default is insufficient because it
+performs remote and worktree operations:
 
 - `worktree-auto-cut.sh` runs `git fetch origin main` + `git worktree add`,
   both of which can exceed 30s on slow origin or large HEAD.
-- `tdd-scope-judge.sh` runs an LLM judge (`lib.tdd_scope_judge`) as
-  fallback for path-rule misses. The judge honors
-  `DEV_KIT_BUILD_AGENT` (default `claude`; `codex` routes through
-  `codex exec`) and `DEV_KIT_SKIP_TDD=1` (escape hatch that bypasses
-  the judge entirely — issue #647). It resolves its state-file root via
-  `${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel)}` — the same
-  fallback `tdd-guard.sh` uses to read `.tdd-scope.json` — so the two
-  hooks agree on where state lives even when `DEV_KIT_TDD_ROOT` points
-  outside the git toplevel.
-
-Both hooks are advisory (exit 0 on failure per the script-level
-contract), so a timeout silently discards the nudge rather than
-breaking correctness — but the user loses the suggestion.
-`tdd-scope-judge.sh` declares `fail_closed: true` and exits non-zero on
-judge-rejected scopes; the timeout fallback only kicks in when the
-process itself stalls, which is distinct from a judge verdict. The
-raised 120s budget sits well above the typical case (<10s) and well
-below the 600s default hook ceiling. `tests/test_worktree_auto_cut.py`
-pins a floor of `>= 60s` for both hooks (timeout assertions at
-`tests/test_worktree_auto_cut.py:398,446`), so 120s stays well above
-the floor. Other hook groups (PreToolUse, SessionStart, PostToolUse,
-Stop) inherit the 30s default; none currently run heavy paths so
-defaults are fine.
+The hook is advisory (exit 0 on failure per the script-level contract), so a
+timeout silently discards the routing hint rather than breaking correctness.
+The 120s budget sits above the typical case and below the platform ceiling.
+Other hook groups (PreToolUse, SessionStart, PostToolUse, Stop) inherit the
+30s default; none currently run heavy paths.

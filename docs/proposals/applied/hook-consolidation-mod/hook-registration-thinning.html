@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hook thinning — one SessionStart dispatcher and no redundant TDD judge</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1d1d1f;
+  --bg: #fbfbfd;
+  --muted: #5b5b62;
+  --border: #d2d2d7;
+  --card-bg: #ffffff;
+  --th-bg: #f5f5f7;
+  --row-alt: #fafafa;
+  --code-bg: #f5f5f7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.08);
+  --ok: #1f8a3b;
+  --warn: #a06400;
+  --bad: #b03030;
+  --callout-bg: rgba(10, 132, 255, 0.06);
+  --callout-border: #0a84ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f5f5f7;
+    --bg: #1c1c1e;
+    --muted: #aeaeb2;
+    --border: #38383a;
+    --card-bg: #2c2c2e;
+    --th-bg: #3a3a3c;
+    --row-alt: #232325;
+    --code-bg: #2c2c2e;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd964;
+    --warn: #ff9f0a;
+    --bad: #ff453a;
+    --callout-bg: rgba(10, 132, 255, 0.14);
+    --callout-border: #0a84ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+  line-height: 1.6;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 2rem 0 0.6rem; }
+p { margin: 0.7rem 0; }
+.meta { color: var(--muted); font-size: 0.92rem; margin: 0 0 2.5rem; }
+.tags { margin: 0 0 1.5rem; }
+.tag {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-right: 0.4rem;
+}
+.tag-ok { background: rgba(31, 138, 59, 0.12); color: var(--ok); }
+.tag-warn { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.tag-bad { background: rgba(176, 48, 48, 0.12); color: var(--bad); }
+.tag-info { background: var(--accent-soft); color: var(--accent); }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--th-bg); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+tr:nth-child(even) td { background: var(--row-alt); }
+td code, th code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.88em; }
+.callout {
+  background: var(--callout-bg);
+  border-left: 4px solid var(--callout-border);
+  border-radius: 6px;
+  padding: 0.9rem 1.2rem;
+  margin: 1.5rem 0;
+}
+.callout .label { font-weight: 600; margin-bottom: 0.3rem; display: block; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+li > strong { color: var(--accent); }
+code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 0.9rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: 0.88em; line-height: 1.5; }
+pre code { background: transparent; padding: 0; }
+blockquote {
+  border-left: 3px solid var(--border);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  color: var(--muted);
+}
+.section-divider { border: 0; border-top: 1px solid var(--border); margin: 3rem 0; }
+.back-link {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.back-link a { color: var(--accent); }
+.back-link a:hover { text-decoration: underline; }
+.toc {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.5rem;
+  margin: 0 0 3rem;
+  font-size: 0.95rem;
+}
+.toc strong { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 0; padding-left: 1.2rem; }
+footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* ----- Before / After + Pros / Cons / Limitations ---------------------------
+ * Structured sections emitted when the YAML declares
+ * `before:`, `after:`, `pros:`, `cons:`, `limitations:`. See
+ * `skills/proposal/SKILL.md` §Workflow and `lib/render_proposal_html.py`
+ * `_render_before_after` / `_render_pros_cons_limitations`. Color cues
+ * reuse the existing --ok / --warn / --bad tokens so dark-mode parity
+ * is automatic. */
+.ba-section { margin: 2.5rem 0 1rem; }
+.ba-section h2 { margin-top: 0; }
+.ba-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+@media (min-width: 880px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; }
+}
+.ba-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+.ba-card h3 {
+  margin: 0 0 0.7rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.before-card { border-left: 4px solid var(--muted); }
+.after-card  { border-left: 4px solid var(--accent); }
+.before-card h3 { color: var(--muted); }
+.after-card h3  { color: var(--accent); }
+.evidence-list, .files-list { padding-left: 1.2rem; margin: 0.4rem 0 0.7rem; }
+.evidence-list li { margin: 0.25rem 0; }
+.files-list li { margin: 0.5rem 0; }
+.file-path {
+  display: inline-block;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+.pcl-section { margin: 2rem 0 1rem; }
+.pcl-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pros-list, .cons-list, .limitations-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0 0.6rem;
+}
+.pros-list li, .cons-list li, .limitations-list li {
+  position: relative;
+  padding: 0.35rem 0 0.35rem 1.6rem;
+  margin: 0.2rem 0;
+}
+.pros-list li::before {
+  content: "✓"; /* check */
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.cons-list li::before {
+  content: "✗"; /* ballot x */
+  position: absolute; left: 0;
+  color: var(--bad); font-weight: 700;
+}
+.limitations-list li::before {
+  content: "!";      /* warn glyph */
+  position: absolute; left: 0;
+  width: 1.1rem; height: 1.1rem;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg);
+  font-weight: 700; font-size: 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pcl-pros h3    { color: var(--ok); }
+.pcl-cons h3    { color: var(--bad); }
+.pcl-limit h3   { color: var(--warn); }
+/* ----- Ralph-style structured sections (ambiguity / scope / gate_contract) ---
+ * Emitted when the YAML declares `ambiguity:`, `scope:`,
+ * `gate_contract:`. Color cues reuse the existing tokens so
+ * dark-mode parity is automatic. */
+.amb-section, .scope-section, .gate-section { margin: 2rem 0 1rem; }
+.amb-section h3, .scope-section h3, .gate-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.amb-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.amb-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  box-shadow: var(--shadow);
+}
+.amb-header { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.amb-id {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+.amb-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+.amb-badge-blocking { background: rgba(176, 48, 48, 0.15); color: var(--bad); }
+.amb-badge-default  { background: rgba(91, 91, 98, 0.15); color: var(--muted); }
+.amb-question { margin: 0.3rem 0; }
+.amb-default {
+  margin-top: 0.4rem;
+  font-size: 0.92em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+  padding-left: 0.7rem;
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 720px) {
+  .scope-grid { grid-template-columns: 1fr 1fr; }
+}
+.scope-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+.scope-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.scope-in-card { border-left: 4px solid var(--ok); }
+.scope-out-card { border-left: 4px solid var(--muted); }
+.scope-in-card h4  { color: var(--ok); }
+.scope-out-card h4 { color: var(--muted); }
+.scope-list { list-style: none; padding-left: 0; margin: 0; }
+.scope-list li {
+  position: relative;
+  padding: 0.25rem 0 0.25rem 1.3rem;
+  margin: 0.2rem 0;
+}
+.scope-in-card .scope-list li::before {
+  content: "✓";
+  position: absolute; left: 0;
+  color: var(--ok); font-weight: 700;
+}
+.scope-out-card .scope-list li::before {
+  content: "✗";
+  position: absolute; left: 0;
+  color: var(--muted); font-weight: 700;
+}
+.gate-table { font-size: 0.92em; }
+.gate-table th { background: var(--th-bg); }
+.gate-table td { vertical-align: top; }
+.gate-row-attended td { opacity: 0.7; font-style: italic; }
+.muted { color: var(--muted); }
+/* ----- Timeline chips -------------------------------------------------------
+ * Emitted by `_meta_line` when the proposal YAML declares
+ * `started:` or `shipped:` (both YYYY-MM-DD). Visual cue mirrors the
+ * existing --ok / --warn tokens so dark-mode parity is automatic. */
+.timeline-chip {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.timeline-started { background: rgba(160, 100, 0, 0.12); color: var(--warn); }
+.timeline-shipped { background: rgba(31, 138, 59, 0.12);  color: var(--ok);  }
+</style>
+</head>
+<body>
+
+<h1>Hook thinning — one SessionStart dispatcher and no redundant TDD judge</h1>
+<p class="meta">2026-09-18 · <span class="tag tag-info">applied-with-changes</span> · <span class="timeline-chip timeline-started">started 2026-09-18</span> · <span class="timeline-chip timeline-shipped">shipped 2026-09-18</span></p>
+<div class="tags"><span class="tag tag-info">hooks</span><span class="tag tag-info">session-start</span><span class="tag tag-info">token-efficiency</span><span class="tag tag-info">runtime-parity</span><span class="tag tag-info">thin-harness</span></div>
+<div class="toc"><strong>Contents</strong><ol><li><a href="#sec-0">Decision</a></li><li><a href="#sec-1">Verification</a></li><li><a href="#sec-2">Future reduction rule</a></li><li><a href="#ba-section">Before / After</a></li><li><a href="#pcl-pros">Pros</a></li><li><a href="#pcl-cons">Cons</a></li><li><a href="#pcl-limit">Limitations</a></li></ol></div>
+<h2 id="sec-0">Decision</h2>
+<p>Adopt the dispatcher only at the event-registration boundary. The SessionStart children continue to own their behavior and can still be executed and tested independently. The dispatcher is a thin adapter: it reads the runtime payload once, fans it out, ignores unavailable or malformed child output, and always returns a valid SessionStart envelope.</p>
+<p>Merge matcher groups only where the matcher semantics are identical.</p>
+<p>The combined <code>Write|Edit|MultiEdit|Bash</code> ask group preserves the</p>
+<p>existing destructive-confirm decisions. Keep the <code>Agent</code> and <code>WebFetch</code> injection groups separate: <code>sub-agent-handoff</code> is intentionally limited to Agent responses.</p>
+<hr class="section-divider">
+
+<h2 id="sec-1">Verification</h2>
+<p>The reduced manifests are valid JSON and remain parity-compatible. The focused hook suite covers the dispatcher, registry counts, matcher wiring, guard defaults, active-hook regeneration, and retained guard behavior.</p>
+<p><code>203 passed, 66 subtests passed in 137.67s</code> across the focused hook, guard-mode, harness-mode, executor, and wiring suites.</p>
+<p>The measured result is 27 registered command entries per runtime, down from the 36-entry baseline.</p>
+<hr class="section-divider">
+
+<h2 id="sec-2">Future reduction rule</h2>
+<p>A later reduction should first prove that two hooks have identical event, input, output, failure, and state contracts. If they do not, keep them as separate child modules and reduce only their registration boundary. Any process-level merge must add an isolated failure test before it replaces a child script.</p>
+<hr class="section-divider">
+
+<section id="ba-section" class="ba-section"><h2>Before / After</h2><div class="ba-grid"><div class="ba-card before-card"><h3>Before (current state)</h3><p>The two runtime manifests registered the same lifecycle behavior through eight independent SessionStart commands. One matcher repeated the same <code>destructive-confirm</code> registration for Write-family tools and Bash. This made the manifest larger, increased registration bookkeeping, and made runtime parity harder to audit even though the underlying contracts were already shared. A prompt-time LLM TDD judge also duplicated the deterministic edit guard and added a model/network path to every prompt.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--muted);">Evidence</h4><ul class="evidence-list"><li><code>hooks/hooks.json</code> at baseline registered 36 command entries, including 8 SessionStart entries and one prompt-time TDD judge.</li><li><code>.codex-plugin/hooks/hooks.json</code> carried the same 36-entry shape for the Codex runtime.</li><li><code>tests/test_hooks_json_parity.py</code> treats both manifests as a parity pair, so registration drift is a cross-runtime risk.</li></ul></div><div class="ba-card after-card"><h3>After (proposed state)</h3><p>Reduce registration surface without removing retained safety or lifecycle behavior. A single SessionStart dispatcher reads the payload once, invokes the existing child modules, and combines valid advisory context. The duplicate destructive-confirm matcher registration is represented once; channel-specific injection matchers remain separate to preserve behavior. The redundant prompt-time TDD judge is removed; unknown code paths require RED evidence unless <code>.dev-kit/.tdd-scope.json</code> explicitly opts them out. Both manifests stay aligned, and child scripts remain directly testable.</p><h4 style="font-size:0.85rem;margin:0.8rem 0 0.3rem;color:var(--accent);">Files</h4><ul class="files-list"><li><span class="file-path">hooks/session-start.sh</span><p>Add one fail-open SessionStart dispatcher with payload fan-out and context merging.</p></li><li><span class="file-path">hooks/hooks.json</span><p>Register the dispatcher, merge the duplicate destructive-confirm matcher, and remove the TDD judge entry.</p></li><li><span class="file-path">.codex-plugin/hooks/hooks.json</span><p>Mirror the same reduced registry for Codex.</p></li><li><span class="file-path">tests/test_session_start_dispatch.py</span><p>Verify one registration, payload delivery to every child, and merged SessionStart context.</p></li><li><span class="file-path">tests/test_hooks_status.py</span><p>Update the direct SessionStart inventory to the dispatcher.</p></li><li><span class="file-path">tests/test_hook_wiring.py</span><p>Pin the separate Agent and WebFetch injection matchers.</p></li><li><span class="file-path">tests/test_destructive_confirm.py</span><p>Pin the merged destructive-confirm matcher.</p></li><li><span class="file-path">tests/test_linear_trigger_hooks_wiring.py</span><p>Recognize Linear SessionStart as a dispatcher child.</p></li><li><span class="file-path">tests/test_provider_divergence_wiring.py</span><p>Assert provider divergence is present in the shared dispatcher for both runtimes.</p></li><li><span class="file-path">hooks/tdd-guard.sh</span><p>Keep TDD enforcement deterministic and conservative for unknown code paths.</p></li><li><span class="file-path">hooks/tdd-scope-judge.sh</span><p>Delete the redundant prompt-time LLM guard hook.</p></li><li><span class="file-path">lib/tdd_scope_judge.py</span><p>Delete the unused model-backed judge implementation.</p></li><li><span class="file-path">tests/test_tdd_scope_judge.py</span><p>Delete tests for the removed judge surface.</p></li><li><span class="file-path">lib/tdd_scope_policy.py</span><p>Delete the now-unreferenced policy wrapper; the shell guard owns the small deterministic allowlist.</p></li><li><span class="file-path">tests/test_tdd_scope_policy.py</span><p>Delete tests for the removed policy wrapper.</p></li><li><span class="file-path">hooks/index.md</span><p>Document registration counts, dispatcher ownership, and child-module boundaries.</p></li><li><span class="file-path">docs/hooks/HOOK-REFERENCE.md</span><p>Document the single SessionStart registration and child modules.</p></li><li><span class="file-path">docs/hooks/HOOK-REFERENCE.ko.md</span><p>Keep the Korean hook reference aligned.</p></li><li><span class="file-path">docs/hooks/linear-triggers.md</span><p>Describe Linear SessionStart as a dispatcher child module.</p></li><li><span class="file-path">docs/skills/ci-setup.md</span><p>Describe the canonical registry and dispatcher in installed output.</p></li><li><span class="file-path">docs/skills/ci-setup.ko.md</span><p>Keep the Korean CI setup output aligned.</p></li></ul></div></div></section><section id="pcl-pros" class="pcl-section pcl-pros"><h3>Pros</h3><ul class="pros-list"><li>Cuts registered command entries from 36 to 27 per runtime and SessionStart registrations from 8 to 1.</li><li>Preserves child behavior, fail-open boundaries, Claude/Codex parity, and focused test seams.</li><li>Removes duplicate destructive-confirm matcher bookkeeping without adding a new policy or recurring prompt.</li><li>Removes the prompt-time LLM TDD judge and keeps the RED-evidence rule local and deterministic.</li><li>Keeps the default-off guard policy and prior thin-harness deletions intact.</li></ul></section><section id="pcl-cons" class="pcl-section pcl-cons"><h3>Cons</h3><ul class="cons-list"><li>Child checks still run inside the dispatcher, so registration count falls without removing their per-session work.</li></ul></section><section id="pcl-limit" class="pcl-section pcl-limit"><h3>Limitations</h3><ul class="limitations-list"><li>Further process-level consolidation is deferred to avoid coupling independent fail-closed contracts.</li></ul></section>
+
+<hr class="section-divider">
+
+<footer>Generated 2026-09-18 · render via <code>/dev-kit:proposal</code></footer>
+</body>
+</html>

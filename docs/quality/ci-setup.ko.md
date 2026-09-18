@@ -77,7 +77,8 @@ gh secret   list --repo <owner>/<repo> | grep -E '(MINIMAX|ANTHROPIC|DEEPSEEK)_A
 짝이 맞는 로컬 선택자는 `.env:CI_REVIEW_PROVIDER`다
 (`bin/set-provider.sh <provider>`로 관리). 로컬 측은 `.gitignore` 처리되어
 사용자별이며, GitHub 변수는 저장소별이다. `provider-divergence-check.sh`
-SessionStart 훅이 두 값이 어긋날 때 알린다.
+공유 `hooks/session-start.sh` dispatcher가 호출하는 SessionStart child 훅이
+두 값이 어긋날 때 알린다.
 
 > `/dev-kit:ci-setup`의 `--setup-secrets` 플래그는 `CI_REVIEW_PROVIDER`를
 > 읽고, `required_secrets_for_provider()`로 필요한 시크릿을 열거한 뒤,

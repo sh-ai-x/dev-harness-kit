@@ -22,22 +22,20 @@ if [ "$(dev_kit_guard_state tdd_guard "$GUARD_ROOT")" = "off" ]; then
 fi
 case "$FILE" in
   *.md|*.mdx|*.txt|*.rst|*.adoc|*.html|*.json|*.yaml|*.yml|*.toml|*.cfg|*.ini|*.sh) exit 0 ;;
-  */docs/*|*/tools/*|*/scripts/*|*/bin/*|*/hooks/*|*/fixtures/*|*/eval/*) exit 0 ;;
+  */docs/*|*/tools/*|*/scripts/*|*/bin/*|*/hooks/*|*/fixtures/*|*/eval/*|*/tests/*) exit 0 ;;
 esac
 
-# Enforce paths
-case "$FILE" in
-  *)
-    DECISION=$(python3 -m lib.tdd_scope_policy "$FILE" 2>/dev/null || echo judge)
-    [ "$DECISION" = "exempt" ] && exit 0
-    if [ "$DECISION" = "judge" ] && [ -f "${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.dev-kit/.tdd-scope.json" ] && jq -e '.tdd_required == false' "${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.dev-kit/.tdd-scope.json" >/dev/null 2>&1; then exit 0; fi
-    ROOT="${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-    STATE="${ROOT}/.dev-kit/.tdd-cycle.json"
-    if [ "$DECISION" = "required" ] || [ "$DECISION" = "judge" ]; then
-      if [ ! -f "$STATE" ] || ! jq -e '.phase == "red" and (.exit_code | numbers) != 0' "$STATE" >/dev/null 2>&1; then
-        deny "TDD GUARD" "RED evidence is required before this code edit. Run: python3 -m lib.tdd_cycle red -- <test command>"
-      fi
-    fi
-    exit 0
-esac
+# Unknown code paths are conservative by default. The old prompt-time LLM
+# judge was removed: an explicit build decision may still mark an ambiguous
+# path as exempt in `.dev-kit/.tdd-scope.json`, while normal code edits require
+# the same RED evidence as known core paths.
+ROOT="${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+SCOPE_STATE="${ROOT}/.dev-kit/.tdd-scope.json"
+if [ -f "$SCOPE_STATE" ] && jq -e '.tdd_required == false' "$SCOPE_STATE" >/dev/null 2>&1; then
+  exit 0
+fi
+STATE="${ROOT}/.dev-kit/.tdd-cycle.json"
+if [ ! -f "$STATE" ] || ! jq -e '.phase == "red" and (.exit_code | numbers) != 0' "$STATE" >/dev/null 2>&1; then
+  deny "TDD GUARD" "RED evidence is required before this code edit. Run: python3 -m lib.tdd_cycle red -- <test command>"
+fi
 exit 0
