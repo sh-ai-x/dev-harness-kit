@@ -1,6 +1,9 @@
 ---
 paths:
   - "**/*"
+description: Session hygiene, model stability, prompt-cache, and tool-economy rules.
+globs:
+  - "**/*"
 stale_after: 2027-05-31
 ---
 

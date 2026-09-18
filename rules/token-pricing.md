@@ -3,6 +3,11 @@ paths:
   - "tools/token_efficiency_analyzer.py"
   - "tools/**/pricing*.py"
   - "tools/**/*pricing*.json"
+description: Source, citation, and update rules for token-pricing data.
+globs:
+  - "tools/token_efficiency_analyzer.py"
+  - "tools/**/pricing*.py"
+  - "tools/**/*pricing*.json"
 stale_after: 2026-11-30
 ---
 
