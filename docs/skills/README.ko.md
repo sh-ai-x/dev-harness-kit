@@ -60,7 +60,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`security`](security.md) | `enforcement` | 검증 패스가 있는 OWASP Top 10 2025 (A01–A10) 전체 팬아웃. |
 | [`security-metrics`](security-metrics.md) | `enforcement` | 결정론적 OWASP Top 10 0–100 스코어카드와 Markdown 증거 표. `/dev-kit:security`는 심층 리뷰, 이 스킬은 반복 가능한 트리아지 지표. |
 | [`inspect`](inspect.md) | `analysis` | 8차원 읽기 전용 코드 건강 감사. |
-| [`refactor`](refactor.md) | `analysis` | 3단계 정리 체인: `inspect → build-refactor → review`. |
+| [`refactor`](refactor.md) | `analysis` | 3단계 정리 체인: `inspect → cleanup → review`. |
 | [`prune`](prune.md) | `analysis` | 4단계 삭제 스윕: sweep → dependents → report → verify. |
 | [`babysit-pr`](babysit-pr.md) | `state` | PR 베이비시터 루프: CI 폴링, 수정, 커밋, 그린 Approve까지 반복. |
 | [`pr-verify`](pr-verify.md) | `enforcement` | 결정론적 5-게이트 PR 검증기 — 게이트마다 신선한 `gh` 조회, 구조화된 판정, "오래된 CI" 오탐 없음. |
@@ -80,7 +80,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`code-viz`](code-viz.md) | `state` | 범용 플러그인-아키텍처 시각화기 — 다단계 뷰 + 도메인 필러 맵 + 스킬별 워크플로를 하나의 자체 완결 HTML 페이지로. |
 | [`docs-maintenance`](docs-maintenance.md) | `analysis` | README를 최우선 문서로 저장소 문서를 감사; 항상 README를 감사하고 검증하며 필요 시 업데이트. |
 | [`prune-propose`](prune-propose.md) | `state` | 사용량 원격 측정 덤프 + 스킬별 삭제 제안, 사용자 승인. |
-| [`learn`](learn.md) | `state` | 원본 텍스트(파일 경로, URL, 산문, 또는 세션 트랜스크립트)를 후보 `skills/<name>/SKILL.md`로 증류, 결정론적 G1–G5 점검 + 후보별 승인 단계로 게이트됨. |
 
 ### 단축 명령 / 유지보수
 
@@ -109,9 +108,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 
 | 스킬 | Alpha | 부모 | 요약 |
 |---|---|---|---|
-| [`build-tdd`](build-tdd.md) | `enforcement` | `/dev-kit:build` | Red-Green-Refactor 사이클; `tdd-guard` 훅이 실패하는 테스트 없이는 프로덕션 코드를 막는다. |
-| [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | 완료 전 검증; 인용된 종료 코드 + 테스트 수 없이는 "완료"라고 하지 않는다. |
-| [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4단계 정리(dead → dup → naming → coverage); 회귀 테스트 없이는 정리하지 않는다. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | 자동 (훅 실패가 보일 때) | 실패한 Claude Code / Codex 훅을 진단하고 안전한 캐시 + 등록 드리프트를 복구한다. |
 | [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` 등 다른 계획 단계 | 계획을 6개 축으로 채점하고 proceed/revise/hold/kill을 반환하는 plan-value 게이트. 권고용 — 운영자가 수동으로 non-`proceed` 판정을 플래그하지 않는 한 빌드 단계는 계속 진행된다. |
 
@@ -126,9 +122,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`bootstrap`](bootstrap.ko.md) | `bootstrap` | `state` | 사용자 |
 | [`build`](build.ko.md) | `build` | `state` | 사용자 |
 | [`build-debug`](build-debug.md) | `build` | `enforcement` | 사용자 |
-| [`build-refactor`](build-refactor.md) | `build` | `enforcement` | 모델 |
-| [`build-tdd`](build-tdd.md) | `build` | `enforcement` | 모델 |
-| [`build-verify`](build-verify.md) | `build` | `enforcement` | 모델 |
 | [`bump`](bump.md) | `ship` | `state` | 사용자 |
 | [`ci-doctor`](ci-doctor.md) | `audit` | `enforcement` | 사용자 |
 | [`ci-setup`](ci-setup.ko.md) | `bootstrap` | `enforcement` | 사용자 |
@@ -145,7 +138,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # 모델 호출 �
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | 모델 |
 | [`inspect`](inspect.md) | `audit` | `analysis` | 사용자 |
 | [`interview`](interview.md) | `design` | `enforcement` | 사용자 |
-| [`learn`](learn.md) | `audit` | `state` | 사용자 |
 | [`linear`](linear.md) | `config` | `state` | 사용자 |
 | [`llm-refresh`](llm-refresh.md) | `shortcuts` | `analysis` | 사용자 |
 | [`log`](log.md) | `shortcuts` | `state` | 사용자 |

@@ -75,7 +75,8 @@ class TestRefactorSchema(unittest.TestCase):
 
     def test_no_edit_tool_allowed(self):
         # refactor is an orchestrator; source edits belong to phase 2
-        # (build-refactor). The refactor skill itself must not have Edit.
+        # The cleanup pass mutates source; the refactor orchestrator itself
+        # must not have Edit.
         m = re.search(r"^disallowed-tools:\s*(.+)$", self.text, re.MULTILINE)
         self.assertIsNotNone(m, "disallowed-tools: frontmatter missing")
         tools = m.group(1).split()

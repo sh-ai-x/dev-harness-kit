@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 # session-start-guard-mode-reset.sh — SessionStart hook.
 #
-# Unconditionally resets .dev-kit/guard-mode.session.json to both guards
-# "on" at the start of every session. Mirrors
-# session-start-harness-mode-reset.sh's "new window = strict by default"
-# design: /dev-kit:guard-mode off must be chosen explicitly every session,
-# it never carries over from a previous one. Best-effort: a missing
-# python3 or unwritable .dev-kit/ is not a hard failure (guard_mode_state's
-# read_state() already treats a missing/corrupt file as all-"on", so
-# silently skipping here is still safe).
+# Applies the scoped DEV_KIT_GUARDS policy to the session state. Every
+# checkout starts with the thin default (all repository guards off) until
+# project/local bootstrap configuration explicitly opts in. This hook never
+# prompts and never treats main differently from a worktree.
 
 set -eo pipefail
 ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+HOOK_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 if command -v python3 >/dev/null 2>&1; then
-  (cd "$ROOT" && python3 -m lib.guard_mode_state reset) 2>/dev/null || true
+  POLICY_LIB="$HOOK_DIR/lib/guard-policy.sh"
+  (
+    cd "$ROOT" || exit 0
+    # shellcheck source=lib/guard-policy.sh
+    source "$POLICY_LIB"
+    DEV_KIT_GUARD_ROOT="$ROOT" dev_kit_guards_resolve
+    DEV_KIT_GUARD_ROOT="$ROOT" \
+      python3 -m lib.guard_mode_state reset \
+        --policy "${DEV_KIT_GUARDS:-off}" \
+        --source "${DEV_KIT_GUARDS_SOURCE:-default}" \
+        --branch-class "$(DEV_KIT_GUARD_ROOT="$ROOT" dev_kit_guards_branch_class)"
+  ) 2>/dev/null || true
 fi
 exit 0

@@ -279,14 +279,14 @@ class TestCatalogSeeding(unittest.TestCase):
             skills_dir = root_p / "skills"
             skills_dir.mkdir()
             self._write_skill(skills_dir, "totally-idle", user_invocable=True)
-            self._write_skill(skills_dir, "build-tdd", user_invocable=False)
+            self._write_skill(skills_dir, "internal-helper", user_invocable=False)
             self._write_skill(skills_dir, "implicit-default")  # no key -> true
 
             names = skill_usage._discover_catalog_skills(root_p)
 
         self.assertIn("dev-kit:totally-idle", names)
         self.assertIn("dev-kit:implicit-default", names)
-        self.assertNotIn("dev-kit:build-tdd", names)
+        self.assertNotIn("dev-kit:internal-helper", names)
 
     def test_discover_catalog_skills_missing_dir_returns_empty(self):
         """No ``skills/`` directory (e.g. a non-plugin checkout) is a
@@ -305,7 +305,7 @@ class TestCatalogSeeding(unittest.TestCase):
             skills_dir = root_p / "skills"
             skills_dir.mkdir()
             self._write_skill(skills_dir, "totally-idle", user_invocable=True)
-            self._write_skill(skills_dir, "build-tdd", user_invocable=False)
+            self._write_skill(skills_dir, "internal-helper", user_invocable=False)
 
             dump_dst = skills_dir / "prune-propose" / "scripts"
             dump_dst.mkdir(parents=True)
@@ -324,7 +324,7 @@ class TestCatalogSeeding(unittest.TestCase):
         self.assertEqual(rc, 0)
         out = buf.getvalue()
         self.assertIn("dev-kit:totally-idle", out)
-        self.assertNotIn("dev-kit:build-tdd", out)
+        self.assertNotIn("dev-kit:internal-helper", out)
 
 
 class TestSkillFrontmatter(unittest.TestCase):

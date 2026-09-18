@@ -34,5 +34,4 @@ skills/secret-scan/                        @sh-ai-x
 
 # Hand-off / dispatch tools — the routing layer between agents and CLI.
 tools/parallel_dispatch.py                 @sh-ai-x
-tools/session_monitor.py                   @sh-ai-x
 tools/token_efficiency_analyzer.py         @sh-ai-x

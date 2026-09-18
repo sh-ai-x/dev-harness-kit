@@ -23,7 +23,7 @@ Executes `phases/<name>/step{1..N}.md` end-to-end by spawning one non-interactiv
 Run `/dev-kit:harness-mode fast|full|custom` before (or during) a build to
 control which optional local gates run this session — `full` (the default,
 reset every session by a SessionStart hook) runs everything; `fast` skips
-`tdd_scope_judge` and `slop_detector`; `custom` picks each gate individually.
+`slop_detector`; `custom` picks each gate individually.
 Correctness gates (`stop_verify`, `secret_scan`, `intent_integrity`-high) never
 turn off, regardless of mode — see `skills/harness-mode/SKILL.md`. Every step
 preamble is appended with a one-line gate summary

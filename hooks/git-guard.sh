@@ -14,6 +14,13 @@
 # Allows everything else. See .claude/rules/git-workflow.md for rationale.
 
 set -uo pipefail
+# Repository branch protection is opt-in at project/local scope. The
+# ask-tier push confirmation remains independent in guard_mode_state.
+# shellcheck source=lib/guard-policy.sh
+source "${BASH_SOURCE[0]%/*}/lib/guard-policy.sh"
+dev_kit_guards_active
+[ "${DEV_KIT_GUARDS:-off}" = "on" ] || exit 0
+
 # Use %/* parameter expansion (POSIX, no external `dirname` required) so
 # the source line still works when PATH is broken (jq-less test envs
 # strip dirname along with jq — see TestGitGuardRefactor.fails_closed).

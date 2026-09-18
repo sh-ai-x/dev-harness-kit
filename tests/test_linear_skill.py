@@ -49,7 +49,7 @@ class TestLinearSkill(unittest.TestCase):
         self.assertIn("scope and intended outcome match", text)
 
     def test_workflow_callers_use_single_optional_preflight(self):
-        for name in ("plan", "build", "build-debug", "build-refactor", "refactor"):
+        for name in ("plan", "build", "build-debug", "refactor"):
             text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
             self.assertIn("Optional Linear preflight", text, name)
             self.assertIn("LINEAR_SKIP", text, name)

@@ -42,7 +42,7 @@ The skill runs four phases as separate cycles, never bundled into one:
        standalone:  Skill("plan", <bug summary + root cause>) — no code written here
 ```
 
-Rules enforced throughout: the 4 phases must not be bundled into one cycle (MUST-NO-LOOP); the user confirms after each phase, or the 4 phases run as separate calls; asserting "probably X" without a quoted root cause is disallowed; only one change is made at a time. The standalone Phase 4 additionally refuses to write a regression test, patch source, or invoke `/dev-kit:build`/`/dev-kit:build-tdd` directly — that work is scoped and reviewed by `/dev-kit:plan` first.
+Rules enforced throughout: the 4 phases must not be bundled into one cycle (MUST-NO-LOOP); the user confirms after each phase, or the 4 phases run as separate calls; asserting "probably X" without a quoted root cause is disallowed; only one change is made at a time. The standalone Phase 4 additionally refuses to write a regression test, patch source, or invoke `/dev-kit:build` directly — that work is scoped and reviewed by `/dev-kit:plan` first.
 
 The `tdd-guard` hook is ON during the build stage, so writing a fix during the in-build Phase 4 forces a regression test to accompany it — the skill cannot silently skip that requirement even if it wanted to. The standalone Phase 4 never reaches `tdd-guard` — it writes no code.
 
@@ -67,8 +67,7 @@ The `tdd-guard` hook is ON during the build stage, so writing a fix during the i
 ## Related
 
 - [build](build.md) — the parent skill whose per-step harness runner (`lib/execute.py`) the in-build self-fix loop loops back into; also the separate, explicit command the user invokes after `/dev-kit:plan`'s proposal is reviewed on the standalone path.
-- [build-tdd](build-tdd.md) — supplies the regression-test discipline that the in-build Phase 4 fix relies on.
-- [build-verify](build-verify.md) — the evidence-before-done gate that governs completion claims elsewhere in the build stage.
+- [build](build.md) — owns the regression-test discipline and evidence-before-done gate for the build stage.
 - [plan](plan.md) — emits `PRD.md` + `phases/<name>/index.json` + `step<N>.md`, auto-renders the proposal, and owns everything past the standalone Phase 4 hand-off.
 
 ---

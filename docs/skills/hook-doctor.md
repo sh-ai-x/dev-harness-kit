@@ -31,7 +31,8 @@ The model invokes this skill the moment the conversation contains hook failure t
 
    Do not run both unless both providers are reported stale.
 
-   > Both updaters are now also wired as SessionStart hooks
+   > Both updaters are now also wired as SessionStart child hooks through the
+   > shared `hooks/session-start.sh` dispatcher
    > (`hooks/plugin-cache-refresh.sh` and `.codex-plugin/hooks/plugin-cache-refresh.sh`)
    > that detect marketplace → cache drift via short-SHA marker comparison
    > and rsync only when the SHA differs. Manual invocation is only
