@@ -87,11 +87,31 @@ class TestEnableDisable(unittest.TestCase):
             payload = json.loads(out)
             self.assertTrue(payload["gates"]["security"]["enabled"])
 
-    def test_disable_unknown_gate_exits_2(self) -> None:
+    def test_disable_invalid_gate_exits_2(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            with self.assertRaises(SystemExit) as cm:
-                _run_cli(["disable", "lint", "--root", td])
-            self.assertEqual(cm.exception.code, 2)
+            rc, _, err = _run_cli(["disable", "ci", "--root", td])
+            self.assertEqual(rc, 2)
+            self.assertIn("gate name", err)
+
+    def test_disable_custom_gate_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            gates_state.write_state(
+                {
+                    "schema_version": "1.1.0",
+                    "gates": {
+                        "perf-smoke": {
+                            "enabled": True,
+                            "workflow": "perf-smoke.yml",
+                            "var": "GATES_PERF_SMOKE_ENABLED",
+                        }
+                    },
+                },
+                target,
+            )
+            rc, out, err = _run_cli(["disable", "perf-smoke", "--root", td])
+            self.assertEqual(rc, 0, err)
+            self.assertIn("perf-smoke: enabled=False", out)
 
 
 class TestSet(unittest.TestCase):
