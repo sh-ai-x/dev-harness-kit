@@ -45,6 +45,29 @@ fi
 
 # Common lib path so the python helpers can be invoked.
 LIB_DIR="${BASH_SOURCE[0]%/*}/../lib"
+HOOK_ROOT="$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)"
+
+# RALPH has a separate worker/session boundary. Stop has already recorded the
+# checkpoint in stop-verify.sh; SessionEnd records only worker closure and
+# explicitly carries workflow_completed=false. Do not feed a RALPH worker
+# boundary into the normal session-lifecycle completed denominator.
+RALPH_SESSION="${RALPH_SESSION:-default}"
+RALPH_ACTIVE="${RALPH_MODE:-0}"
+if [ "$RALPH_ACTIVE" != "1" ] && command -v jq >/dev/null 2>&1; then
+  RALPH_STATE="$EFFECTIVE_CWD/.dev-kit/ralph/${RALPH_SESSION}.json"
+  if [ -f "$RALPH_STATE" ] && jq -e '.attended_lock == true and .current_stage == "ATTENDED_RUN"' "$RALPH_STATE" >/dev/null 2>&1; then
+    RALPH_ACTIVE=1
+  fi
+fi
+if [ "$RALPH_ACTIVE" = "1" ]; then
+  if [ "$HOOK_EVENT_NAME" != "Stop" ]; then
+    PYTHONPATH="$HOOK_ROOT:$EFFECTIVE_CWD" python3 -m lib.ralph_controller \
+      --project-root "$EFFECTIVE_CWD" --session "$RALPH_SESSION" session-closed \
+      --reason "worker_session_end" --hook-event "$HOOK_EVENT_NAME" \
+      --outcome cancelled >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
 
 # 1) Idempotent enroll + observed_start (best-effort, never blocks).
 #    The existing legacy `events.jsonl` emission at the bottom of this

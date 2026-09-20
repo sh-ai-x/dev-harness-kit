@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import abc
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -192,16 +193,24 @@ class RealDispatch(ChainDispatch):
         operator: str = "ralph",
         timeout_seconds: int = 6 * 3600,
         project_root: Optional[Path] = None,
+        session: str = "default",
     ) -> None:
         self.cli = cli
         self.operator = operator
         self.timeout_seconds = timeout_seconds
         self.project_root = project_root or Path.cwd()
+        self.session = session
 
     # -- helpers ---------------------------------------------------------
 
     def _run(self, slash: str, *extra: str) -> DispatchResult:
         argv = [self.cli, "--print", slash, *extra]
+        env = os.environ.copy()
+        # Child Claude/Codex worker sessions must know that their Stop is a
+        # turn boundary. The state-machine lock remains the authority; this
+        # environment flag is only the thin hook adapter signal.
+        env["RALPH_MODE"] = "1"
+        env["RALPH_SESSION"] = self.session
         try:
             proc = subprocess.run(
                 argv,
@@ -210,6 +219,7 @@ class RealDispatch(ChainDispatch):
                 timeout=self.timeout_seconds,
                 check=False,
                 cwd=str(self.project_root),
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             return DispatchResult(
@@ -563,7 +573,7 @@ def _default_dispatch_for_session(
     a non-repo directory (e.g. a script wrapper) would otherwise land
     ``git push`` / ``gh pr merge`` against the wrong remote.
     """
-    return RealDispatch(project_root=project_root)
+    return RealDispatch(project_root=project_root, session=state.session)
 
 
 def _cli(argv: List[str]) -> int:

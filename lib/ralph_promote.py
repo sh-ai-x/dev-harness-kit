@@ -8,6 +8,7 @@ executor lifecycle.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -384,6 +385,63 @@ def _expected_files(
     return expected
 
 
+def _artifact_hash(files: dict[str, bytes]) -> str:
+    """Hash the deterministic evidence inputs, excluding the receipt itself."""
+    digest = hashlib.sha256()
+    for relative, data in sorted(files.items()):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(data)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _completion_receipt(
+    *,
+    plan_id: str,
+    session: str,
+    phase: str,
+    state: dict[str, Any],
+    steps: tuple[_StepEvidence, ...],
+    files: dict[str, bytes],
+    harness_candidate: str,
+) -> bytes:
+    """Build a bounded, honest completion receipt from source artifacts."""
+    all_exit_zero = all(step.output["exit_code"] == 0 for step in steps)
+    all_completed = all(step.status == "completed" for step in steps)
+    blockers = _text_lines(state.get("blockers"))
+    created_at = str(state.get("started_at") or "")
+    if not created_at and steps:
+        created_at = str(steps[0].output.get("timestamp") or "")
+    created_at = created_at or "not-recorded"
+    independent = bool(steps) and all(
+        step.output.get("independent") is True for step in steps
+    )
+    receipt = {
+        "schema_version": 1,
+        "certificate_type": "ralph.completion-receipt",
+        "created_at": created_at,
+        "plan_id": plan_id,
+        "session": session,
+        "phase": phase,
+        "terminal_state": state["current_stage"],
+        "harness_candidate": harness_candidate,
+        "artifact_hash": _artifact_hash(files),
+        "evidence_refs": sorted(files),
+        "verifier_kind": "independent" if independent else "declared",
+        "completion_status": "verified" if all_exit_zero and all_completed else "unverified",
+        "unresolved_risk": bool(blockers) or not all_completed,
+        "acceptance_checks": {
+            "terminal_state": state["current_stage"] in TERMINAL_STAGES,
+            "all_steps_exit_zero": all_exit_zero,
+            "all_steps_completed": all_completed,
+            "blockers_empty": not blockers,
+        },
+        "blockers": blockers,
+    }
+    return (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _existing_files(destination: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for path in destination.rglob("*"):
@@ -432,6 +490,7 @@ def promote(
     phase: str | None = None,
     session: str = "default",
     round_name: str = DEFAULT_ROUND,
+    harness_candidate: str = "working-tree",
     dry_run: bool = False,
 ) -> PromotionResult:
     """Validate and optionally publish one completed runtime phase bundle."""
@@ -439,6 +498,7 @@ def promote(
     plan_id = _validate_identifier(plan_id, "plan_id")
     session = _validate_identifier(session, "session")
     round_name = _validate_identifier(round_name, "round")
+    harness_candidate = _validate_identifier(harness_candidate, "harness_candidate")
     runtime = _safe_runtime_path(project_root, round_name)
     resolved_phase = _discover_phase(runtime, phase)
     prd_path = runtime / "PRD.md"
@@ -455,7 +515,17 @@ def promote(
         state=state,
         steps=steps,
     )
-    expected = _expected_files(prd_path, index_path, steps, resolved_phase, summary)
+    base_expected = _expected_files(prd_path, index_path, steps, resolved_phase, summary)
+    expected = dict(base_expected)
+    expected["COMPLETION_RECEIPT.json"] = _completion_receipt(
+        plan_id=plan_id,
+        session=session,
+        phase=resolved_phase,
+        state=state,
+        steps=steps,
+        files=base_expected,
+        harness_candidate=harness_candidate,
+    )
     destination = project_root / DEFAULT_EVIDENCE_DIR / plan_id
     planned_paths = tuple(expected)
     if not dry_run:
@@ -471,6 +541,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan-id", required=True, help="safe destination identity under docs/build-evidence/")
     parser.add_argument("--phase", help="phase name; inferred only when exactly one phase exists")
     parser.add_argument("--session", default="default", help="Ralph session state name (default: default)")
+    parser.add_argument(
+        "--harness-candidate",
+        default="working-tree",
+        help="candidate id recorded in COMPLETION_RECEIPT.json",
+    )
     parser.add_argument("--dry-run", action="store_true", help="validate and list files without writing")
     return parser
 
@@ -484,6 +559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase=args.phase,
             session=args.session,
             round_name=args.round_name,
+            harness_candidate=args.harness_candidate,
             dry_run=args.dry_run,
         )
     except InvalidIdentifierError as exc:

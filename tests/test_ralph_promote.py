@@ -96,6 +96,15 @@ def test_promote_copies_bundle_and_renders_auditable_summary(tmp_path: Path) -> 
     assert "0.42" in summary
     assert "pytest tests/test_feature.py -q" in summary
     assert "src/feature.py" in summary
+    receipt = json.loads(
+        (destination / "COMPLETION_RECEIPT.json").read_text(encoding="utf-8")
+    )
+    assert receipt["certificate_type"] == "ralph.completion-receipt"
+    assert receipt["completion_status"] == "verified"
+    assert receipt["verifier_kind"] == "independent"
+    assert receipt["harness_candidate"] == "working-tree"
+    assert receipt["acceptance_checks"]["terminal_state"] is True
+    assert len(receipt["artifact_hash"]) == 64
 
 
 def test_promote_is_idempotent(tmp_path: Path) -> None:
@@ -183,6 +192,30 @@ def test_shell_entrypoint_supports_dry_run(tmp_path: Path) -> None:
     assert completed.returncode == 0
     assert "would promote" in completed.stdout
     assert not (tmp_path / "docs" / "build-evidence").exists()
+
+
+def test_completion_receipt_candidate_is_validated(tmp_path: Path) -> None:
+    _write_runtime(tmp_path)
+    result = promote.promote(
+        tmp_path,
+        plan_id="demo-plan",
+        phase="0-mvp",
+        session="run-1",
+        harness_candidate="candidate-v1",
+    )
+    receipt = json.loads(
+        (result.destination / "COMPLETION_RECEIPT.json").read_text(encoding="utf-8")
+    )
+    assert receipt["harness_candidate"] == "candidate-v1"
+
+    with pytest.raises(promote.InvalidIdentifierError):
+        promote.promote(
+            tmp_path,
+            plan_id="other-plan",
+            phase="0-mvp",
+            session="run-1",
+            harness_candidate="../escape",
+        )
 
 
 def test_differing_existing_destination_is_not_overwritten(tmp_path: Path) -> None:
