@@ -5,6 +5,13 @@ paths:
   - "docs/adr/ADR-00**-*.md"
   - "tests/test_git_workflow.py"
   - "tests/test_worktree_guard.py"
+description: Worktree, branch, commit, push, and PR rules for dev-harness-kit tasks.
+globs:
+  - ".claude/**"
+  - "hooks/**"
+  - "docs/adr/ADR-00**-*.md"
+  - "tests/test_git_workflow.py"
+  - "tests/test_worktree_guard.py"
 stale_after: 2027-05-31
 ---
 
