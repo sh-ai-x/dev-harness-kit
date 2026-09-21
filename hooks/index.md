@@ -74,8 +74,9 @@ the terminal trace record before `save_log.py` runs with
 | `secret-scan` | build / review / security | PostToolUse credential-pattern grep. |
 | `slop-detector` | build / review / security | KO+EN banned-phrase scan. |
 | `stop-verify` | plan / design / build / review / security / ship | Stop hook: AC claim verification. |
-| `worktree-guard` | n/a | PreToolUse Edit/Write block on main checkout (this repo). Enabled only when `DEV_KIT_GUARDS=on`; session override: `/dev-kit:guard-mode off worktree`. |
-| `git-guard` | n/a | PreToolUse Bash block on `git commit`/`push` to main. Enabled only when `DEV_KIT_GUARDS=on`. |
+| `worktree-session-cleanup` | all (Stop advisory) | After a completion-shaped response in a clean task worktree, asks the user to keep it or explicitly archive logs and remove it. Never deletes from the hook itself. |
+| `worktree-guard` | n/a | PreToolUse Edit/Write block on main checkout (this repo). Session-scoped bypass: `/dev-kit:guard-mode off worktree` (see `session-start-guard-mode-reset` below). |
+| `git-guard` | n/a | PreToolUse Bash block on `git commit`/`push` to main. |
 | `linear-autosync` | always (gated) | PreToolUse Edit/Write block (gated) that calls `tools/linear_sync.py auto-sync`. No-op when `LINEAR_API_KEY` and `.dev-kit/.enabled.json:mcp.linear` are both absent. Always exit 0 (non-blocking per #539). The `auto-sync` entry point applies the **repo-owner gate** — non-owners bail silently so contributors never leak their work into the owner's Linear workspace. |
 | `linear-session-start` (child) | all (gated, worktree-only) | SessionStart child module, invoked by `session-start.sh`. Fires once at every session start inside a Linear-configured worktree and triggers one auto-sync round so a fresh session is reflected in Linear immediately, without waiting for the first Edit/Write. Same owner-gate contract as `linear-autosync`. |
 | `linear-worktree-create` | all (gated) | PostToolUse:Bash hook. Catches a `git worktree add` after the Bash tool returns and runs an auto-sync from inside the new worktree, so the handoff is registered before the first Edit/Write or SessionStart in the new path. Falls back to `git worktree list --porcelain` when the bash command cannot be parsed (e.g. multi-line commands). |

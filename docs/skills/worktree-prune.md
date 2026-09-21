@@ -31,10 +31,23 @@ newest) after a y/N gate.
   map, table sort, `--exclude` filtering).
 - `bin/worktree-remove-safe.sh` — per-row safe-removal wrapper that
   archives each worktree's `logs/` to `logs/.archive/<branch>/<ts>/`
-  before invoking `git worktree remove` (issue #689 Phase 2).
+  before invoking `git worktree remove`.
+- `bin/worktree-session-cleanup.sh` — single-worktree KEEP/REMOVE decision
+  used by the completion-time cleanup advisory.
+- `hooks/worktree-session-cleanup.sh` — Stop-stage advisory; it never removes
+  a worktree without an explicit user decision.
 - `tests/test_worktree_prune.py` — 21 hermetic tests covering Row age
   math, table rendering, end-to-end `collect`, and all CLI modes
   (JSON / `--table` / `--count` / `--exclude`).
+
+## Completion-time cleanup
+
+Task auto-cut intentionally has no active-worktree generation cap and never
+reuses an existing worktree. After a completion-shaped response in a clean
+task worktree, the Stop hook asks whether to keep the worktree or remove it.
+Only an explicit `--decision remove` archives `logs/` and removes that one
+worktree; the local branch remains. Dirty, detached, main-checkout, and
+`babysit-pr` retained worktrees are kept.
 
 ## Known quirks (macOS bash 3.2)
 

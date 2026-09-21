@@ -202,6 +202,15 @@
             "fail_closed": true
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/worktree-session-cleanup.sh",
+            "fail_closed": false
+          }
+        ]
       }
     ],
     "SessionEnd": [

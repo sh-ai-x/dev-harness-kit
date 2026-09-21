@@ -86,4 +86,12 @@ table warrants action. For read-only classification (`safe-to-remove` vs
 - `bin/worktree-prune.sh` — CLI parsing, interactive prompts, dispatch contract
 - `lib/worktree_prune.py` — deterministic half (porcelain parse, epoch map, table sort)
 - `bin/worktree-remove-safe.sh` — per-worktree safe-removal wrapper (log archive runs first)
+- `bin/worktree-session-cleanup.sh` — explicit KEEP/REMOVE decision for the current completed worktree
+- `hooks/worktree-session-cleanup.sh` — completion-time Stop advisory; it never removes without explicit user choice
 - `tests/test_worktree_prune.py` — 14 hermetic tests covering Row age math, table rendering, end-to-end `collect`, and all three CLI modes (JSON / `--table` / `--count`)
+
+Auto-cut intentionally has no active-worktree generation cap and never reuses
+an existing worktree. The completion-time advisory offers KEEP or REMOVE for
+a clean task worktree; REMOVE archives `logs/` first, removes only that
+worktree, and retains the local branch. Dirty, main, detached, and
+`babysit-pr` retained worktrees are not removed.
