@@ -1,7 +1,11 @@
-# ignore captured transcripts
-*.jsonl
+# ignore all captured log content by default
+*
 
-# keep these subdirs present
+# keep meta files tracked
+!.gitignore
 !.gitkeep
+!README.md
+
+# keep these subdirs present (empty placeholders for hooks to land in)
 !claude-code/
 !codex/
