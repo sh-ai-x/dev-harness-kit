@@ -408,6 +408,16 @@ class TestWorktreeAutoCutWiring(unittest.TestCase):
         )
 
 
+class TestWorktreeAutoCutHasNoGenerationCap(unittest.TestCase):
+    """Auto-cut must keep creating fresh worktrees; cleanup is separate."""
+
+    def test_no_active_limit_or_suffix_cap(self):
+        source = (HOOKS / "worktree-auto-cut.sh").read_text(encoding="utf-8")
+        self.assertNotIn("DEV_KIT_AUTO_CUT_MAX", source)
+        self.assertNotIn("count_active_auto_cut_worktrees", source)
+        self.assertNotIn('"$n" -gt 99', source)
+
+
 if __name__ == "__main__":
     unittest.main()
 
