@@ -8,8 +8,6 @@
 
 ---
 
-
-
 ## What is this?
 
 `dev-harness-kit` installs one plugin — called `dev-kit` — into your project. Once
