@@ -67,6 +67,21 @@ Decision table (read `.dev-kit/hand-off/<step>.md` frontmatter):
 Defence-in-depth: if the hand-off file is missing or frontmatter is
 malformed, treat as `held`.
 
+## Ouroboros bridge consume gate
+
+When `.dev-kit/hand-off/ooo-dev-kit-context.md` exists, read it before Gate 1.
+If the bridge created `.dev-kit/hand-off/interview-ooo-<session-id>.md`, use
+the matching file as the interview hand-off and treat its `status: ok` as a
+validated Seed projection. The bridge record is the source of truth for the
+Ouroboros goal, constraints, acceptance criteria, non-goals, generation,
+lineage id, and execution-session id.
+
+Do not silently rewrite Seed acceptance criteria during planning. Map every
+criterion to explicit step acceptance checks and record any dev-kit-specific
+decision in the normal plan decision log. If the bridge context is stale or
+the shared contract must change, stop and ask the operator to update the Seed
+and re-run `/dev-kit:ooo-bridge --update` before emitting a new plan.
+
 ## Core goal
 
 Planning artifacts only. No code, build, or deploy. Take a 1-line idea → run 5

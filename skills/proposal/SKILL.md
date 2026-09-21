@@ -109,6 +109,16 @@ is the entrypoint; the YAML→HTML render is the work.
 4. Stop. The skill does not edit the YAML -- the user authors the proposal;
    this skill renders.
 
+## Ouroboros bridge input
+
+When `.dev-kit/hand-off/ooo-dev-kit-context.md` exists, read it before
+rendering or authoring the proposal that surrounds this render. Treat the
+Seed's goal, constraints, acceptance criteria, and non-goals as the shared
+contract. The proposal may explain or refine the design, but it must not
+silently change that contract. If the proposal intentionally changes it, the
+operator must update the Seed and re-run `/dev-kit:ooo-bridge --update` before
+planning.
+
 The render logic lives in `lib/render_proposal_html.py` (pure function) plus a
 `__main__` CLI entry (`python3 -m lib.render_proposal_html`). No separate
 `bin/dev-kit-proposal.py` -- see the "Architecture" section below.
