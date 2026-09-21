@@ -33,7 +33,7 @@ per-runtime wiring differences), see
 | `l4-todo-scan` | PostToolUse deferred-work marker scan (Iron Law L4): fails closed on TODO/FIXME/'we'll extend later'/starting-point/placeholder markers in `Write`/`Edit`/`MultiEdit` payloads outside allowed paths (`*.md`, `tests/fixtures/**`, `docs/adoption/**`). Strict mode via `L4_STRICT=1`. Marker bank SSOT: `hooks/references/l4/markers.md` | Build + Review + Security |
 | `loop-detect` | Warns after three consecutive identical Bash calls using per-session fingerprints | All |
 | `worktree-guard` | Hard-blocks Edit/Write in the main checkout; on deny, prints the live worktree list via `git worktree list --porcelain` | All |
-| `git-guard` | Enforces branch strategy: blocks commit/push to main, force-push, `gh pr merge`; verifies `plugin.json` slot on `git push` to a feature branch (slot check extracted to `hooks/lib/slot-check.sh` for unit-testable truth table — see *Shared helpers* below) | All |
+| `git-guard` | Enforces branch strategy: blocks commit/push to main, force-push, `gh pr merge`; verifies `plugin.json` slot on `git push` to a feature branch (slot check extracted to `hooks/lib/slot-check.sh` for unit-testable truth table — see *Shared helpers* below). Prefers the PreToolUse payload's `.cwd` over the hook process cwd so hook runners whose process cwd is in a worktree still target the parent session checkout | All |
 | `worktree-auto-cut` | Creates the per-task worktree + branch | All |
 | `stop-verify` | Quoted exit codes / test counts + 5-item intent checklist (`lib/pre_completion_checklist.py`) before session end | Plan + Design + Build + Review + Security + Ship |
 | `review-yml-isolation` | Forces `review.yml` PRs to be `review.yml`-only | All |

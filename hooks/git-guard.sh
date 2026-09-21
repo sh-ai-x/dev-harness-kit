@@ -40,6 +40,15 @@ CMD="$(printf '%s' "$INPUT_JSON" | jq -r '.tool_input.command // ""' 2>/dev/null
 # not mistaken for commits on the parent's main branch.
 GIT_CWD="${PWD}"
 
+# Hook runners may keep their process cwd at the parent session checkout while
+# exposing the command's effective working directory in the payload. Prefer
+# that directory when it exists; command-level `cd` / `git -C` parsing below
+# remains authoritative for commands that explicitly retarget the repository.
+PAYLOAD_CWD="$(printf '%s' "$INPUT_JSON" | jq -r '.cwd // ""' 2>/dev/null)"
+if [ -n "$PAYLOAD_CWD" ] && [ -d "$PAYLOAD_CWD" ]; then
+  GIT_CWD="$PAYLOAD_CWD"
+fi
+
 # A leading `cd <path> &&` / `cd <path>;` prefix changes the directory the
 # rest of the command actually runs in — resolve GIT_CWD relative to it
 # before the branch check, otherwise `cd <main-checkout> && git commit ...`

@@ -38,9 +38,16 @@ FORBIDDEN_RE = re.compile(
 )
 
 
-def _run_hook(command: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+def _run_hook(
+    command: str,
+    cwd: Path | None = None,
+    payload_cwd: Path | None = None,
+) -> subprocess.CompletedProcess:
     """Invoke git-guard.sh with a JSON payload simulating a Bash PreToolUse call."""
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+    payload_doc = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if payload_cwd is not None:
+        payload_doc["cwd"] = str(payload_cwd)
+    payload = json.dumps(payload_doc)
     env = os.environ.copy()
     # The production default is thin/off; this legacy hook contract suite
     # explicitly opts into the branch guard so its assertions remain focused
@@ -68,6 +75,19 @@ def _init_tmp_git_repo() -> tempfile.TemporaryDirectory:
     subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "init"], check=True, capture_output=True)
     return tmp
+
+
+def _init_tmp_git_repo_with_worktree() -> tuple:
+    """Create a main checkout and a linked feature worktree for cwd tests."""
+    main_tmp = _init_tmp_git_repo()
+    wt_parent = tempfile.TemporaryDirectory()
+    wt_path = Path(wt_parent.name) / "wt"
+    subprocess.run(
+        ["git", "-C", str(main_tmp.name), "worktree", "add", "-q", "-b", "fix/example", str(wt_path)],
+        check=True,
+        capture_output=True,
+    )
+    return main_tmp, wt_parent, wt_path
 
 
 class TestGitGuardBlocks(unittest.TestCase):
@@ -237,6 +257,20 @@ class TestGitGuardAllows(unittest.TestCase):
             # must use the explicit -C repository for the branch decision.
             r = _run_hook(f"git -C {tmp} commit -m 'legit fix'")
             self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
+
+    def test_allows_plain_commit_when_payload_cwd_is_feature_worktree(self):
+        """A runner cwd in the payload must override the parent session cwd."""
+        main_tmp, wt_parent, wt_path = _init_tmp_git_repo_with_worktree()
+        try:
+            r = _run_hook(
+                "git commit -m 'legit fix'",
+                cwd=Path(main_tmp.name),
+                payload_cwd=wt_path,
+            )
+            self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
+        finally:
+            wt_parent.cleanup()
+            main_tmp.cleanup()
 
     def test_allows_push_to_feature_branch(self):
         r = _run_hook("git push -u origin fix/review-findings")
