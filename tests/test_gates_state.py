@@ -49,6 +49,7 @@ class TestConstants(unittest.TestCase):
         self.assertEqual(
             gates_state.VALID_GATE_KEYS, frozenset({"review", "security", "maintenance"})
         )
+        self.assertEqual(gates_state.BUILTIN_GATE_KEYS, gates_state.VALID_GATE_KEYS)
 
     def test_default_gates_shape(self) -> None:
         for gate in ("review", "security", "maintenance"):
@@ -63,6 +64,12 @@ class TestConstants(unittest.TestCase):
             gates_state.GATE_ORDER,
             ("review", "security", "maintenance"),
         )
+
+    def test_custom_gate_mapping(self) -> None:
+        self.assertTrue(gates_state.is_valid_gate_name("perf-smoke"))
+        self.assertEqual(gates_state.workflow_for("perf-smoke"), "perf-smoke.yml")
+        self.assertEqual(gates_state.var_for("perf-smoke"), "GATES_PERF_SMOKE_ENABLED")
+        self.assertFalse(gates_state.is_valid_gate_name("ci"))
 
 
 class TestApplyDefaults(unittest.TestCase):
@@ -140,16 +147,30 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(gates_state.ValidationError):
             gates_state.validate({"schema_version": "1.1.0", "gates": "nope"})
 
-    def test_unknown_gate_key_raises_with_field_path(self) -> None:
+    def test_invalid_custom_gate_key_raises_with_field_path(self) -> None:
         with self.assertRaises(gates_state.ValidationError) as cm:
             gates_state.validate(
                 {
                     "schema_version": "1.1.0",
-                    "gates": {"lint": {"enabled": True, "workflow": "lint.yml", "var": "GATES_LINT_ENABLED"}},
+                    "gates": {"ci": {"enabled": True, "workflow": "ci.yml", "var": "GATES_CI_ENABLED"}},
                 }
             )
-        self.assertIn("gates:", str(cm.exception))
-        self.assertIn("lint", str(cm.exception))
+        self.assertIn("gate name", str(cm.exception))
+        self.assertIn("ci", str(cm.exception))
+
+    def test_custom_gate_key_passes(self) -> None:
+        gates_state.validate(
+            {
+                "schema_version": "1.1.0",
+                "gates": {
+                    "perf-smoke": {
+                        "enabled": True,
+                        "workflow": "perf-smoke.yml",
+                        "var": "GATES_PERF_SMOKE_ENABLED",
+                    }
+                },
+            }
+        )
 
     def test_gate_not_a_dict_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError) as cm:
@@ -290,12 +311,12 @@ class TestReadState(unittest.TestCase):
             with self.assertRaises(gates_state.ValidationError):
                 gates_state.read_state(target)
 
-    def test_unknown_gate_key_raises_validation(self) -> None:
+    def test_invalid_gate_key_raises_validation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             target = Path(td)
             (target / ".dev-kit").mkdir()
             (target / ".dev-kit" / "gates.json").write_text(
-                json.dumps({"schema_version": "1.0.0", "gates": {"lint": {"enabled": True}}})
+                json.dumps({"schema_version": "1.0.0", "gates": {"ci": {"enabled": True}}})
             )
             with self.assertRaises(gates_state.ValidationError):
                 gates_state.read_state(target)
@@ -453,7 +474,25 @@ class TestIsEnabled(unittest.TestCase):
     def test_unknown_gate_returns_true_fail_open(self) -> None:
         # A typo in a workflow's `vars.GATES_<NAME>_ENABLED != 'false'` must
         # never silently disable a gate the operator intended to keep on.
-        self.assertTrue(gates_state.is_enabled("lint"))
+        self.assertTrue(gates_state.is_enabled("unknown-gate"))
+
+    def test_custom_gate_returns_stored_value(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            gates_state.write_state(
+                {
+                    "schema_version": "1.1.0",
+                    "gates": {
+                        "perf-smoke": {
+                            "enabled": False,
+                            "workflow": "perf-smoke.yml",
+                            "var": "GATES_PERF_SMOKE_ENABLED",
+                        }
+                    },
+                },
+                target,
+            )
+            self.assertFalse(gates_state.is_enabled("perf-smoke", target))
 
 
 class TestWorkflowForVarFor(unittest.TestCase):
@@ -464,18 +503,16 @@ class TestWorkflowForVarFor(unittest.TestCase):
         self.assertEqual(gates_state.workflow_for("security"), "security.yml")
         self.assertEqual(gates_state.workflow_for("maintenance"), "maintenance.yml")
 
-    def test_workflow_for_unknown_raises(self) -> None:
-        with self.assertRaises(gates_state.ValidationError):
-            gates_state.workflow_for("lint")
+    def test_workflow_for_custom_gate(self) -> None:
+        self.assertEqual(gates_state.workflow_for("perf-smoke"), "perf-smoke.yml")
 
     def test_var_for_each_gate(self) -> None:
         self.assertEqual(gates_state.var_for("review"), "GATES_REVIEW_ENABLED")
         self.assertEqual(gates_state.var_for("security"), "GATES_SECURITY_ENABLED")
         self.assertEqual(gates_state.var_for("maintenance"), "GATES_MAINTENANCE_ENABLED")
 
-    def test_var_for_unknown_raises(self) -> None:
-        with self.assertRaises(gates_state.ValidationError):
-            gates_state.var_for("lint")
+    def test_var_for_custom_gate(self) -> None:
+        self.assertEqual(gates_state.var_for("perf-smoke"), "GATES_PERF_SMOKE_ENABLED")
 
 
 class TestRunnersFromGates(unittest.TestCase):
@@ -520,6 +557,27 @@ class TestRunnersFromGates(unittest.TestCase):
             )
             self.assertEqual(gates_state.runners_from_gates(target), [])
 
+    def test_custom_gate_runner_after_builtins(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            gates_state.write_state(
+                {
+                    "schema_version": "1.1.0",
+                    "gates": {
+                        "perf-smoke": {
+                            "enabled": True,
+                            "workflow": "perf-smoke.yml",
+                            "var": "GATES_PERF_SMOKE_ENABLED",
+                        }
+                    },
+                },
+                target,
+            )
+            self.assertEqual(
+                gates_state.runners_from_gates(target),
+                ["review.yml", "security.yml", "maintenance.yml", "perf-smoke.yml"],
+            )
+
 
 class TestSetField(unittest.TestCase):
     """`_set_field` is the inner-state mutator for the `set` CLI sub-command."""
@@ -557,11 +615,25 @@ class TestSetField(unittest.TestCase):
                 "review", "enabled", "maybe",
             )
 
-    def test_unknown_gate_raises(self) -> None:
+    def test_invalid_gate_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError):
             gates_state._set_field(
-                {"schema_version": "1.0.0", "gates": {}}, "lint", "enabled", "true"
+                {"schema_version": "1.0.0", "gates": {}}, "ci", "enabled", "true"
             )
+
+    def test_custom_gate_enabled(self) -> None:
+        state = {
+            "schema_version": "1.1.0",
+            "gates": {
+                "perf-smoke": {
+                    "enabled": False,
+                    "workflow": "perf-smoke.yml",
+                    "var": "GATES_PERF_SMOKE_ENABLED",
+                }
+            },
+        }
+        new = gates_state._set_field(state, "perf-smoke", "enabled", "true")
+        self.assertTrue(new["gates"]["perf-smoke"]["enabled"])
 
     def test_unknown_field_raises(self) -> None:
         with self.assertRaises(gates_state.ValidationError):
