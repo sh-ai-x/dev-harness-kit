@@ -363,12 +363,17 @@ class TestDecisionIO(unittest.TestCase):
 
     def test_load_legacy_cache_without_risk_level_fails_closed(self) -> None:
         """Cached decisions written before the v1.1 `risk_level` field
-        must load without raising and apply the fail-closed veto
-        (`MISSING_RISK_LEVEL_SENTINEL > RISK_FLOOR` → skip=False via
-        rule #6). Reproduces the MAJOR review finding: prior to the
-        default-value fix, `GateDecision(**d)` raised TypeError on
-        legacy cache entries and crashed every babysit-pr cache-hit
-        path.
+        must load without raising AND, after passing through
+        `apply_hard_rules`, end up with `skip=False` (the security
+        invariant rule #6 enforces). Reproduces the MAJOR review
+        finding: prior to the default-value fix, `GateDecision(**d)`
+        raised TypeError on legacy cache entries and crashed every
+        babysit-pr cache-hit path. The earlier version of this test
+        only asserted the dataclass property (`risk_level ==
+        MISSING_RISK_LEVEL_SENTINEL`); the security judge flagged
+        that this passes while the security property it claims to
+        verify does not hold, so the post-`apply_hard_rules` invariant
+        is now pinned explicitly.
         """
         import json
 
@@ -396,12 +401,21 @@ class TestDecisionIO(unittest.TestCase):
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
         dec = loaded.decisions[0]
-        # Legacy entry gets the sentinel default — fail-closed posture
-        # means this is above RISK_FLOOR, so rule #6 vetoes skip=True.
+        # Dataclass property: legacy entry gets the sentinel default.
         self.assertEqual(dec.risk_level, gate_dynamic.MISSING_RISK_LEVEL_SENTINEL)
         self.assertGreater(dec.risk_level, gate_dynamic.RISK_FLOOR)
-
-
+        # Security invariant: after apply_hard_rules, the rule #6 veto
+        # must override the cached `skip=True` to `skip=False`. This is
+        # what `select_gates` now relies on when it re-applies hard
+        # rules on cache hits (closes the A01/A06 short-circuit path).
+        ctx = _make_ctx(head_sha="abc", iteration=2)
+        applied = gate_dynamic.apply_hard_rules(ctx, list(loaded.decisions))
+        self.assertFalse(
+            applied[0].skip,
+            "legacy cache entry must fail closed after apply_hard_rules "
+            "(rule #6 veto); this is the security invariant the previous "
+            "test version failed to pin.",
+        )
 
 class TestPruneStale(unittest.TestCase):
     def test_prunes_files_older_than_ttl(self) -> None:
@@ -497,6 +511,193 @@ class TestSelectGates(unittest.TestCase):
                 [d.gate_name for d in decision.decisions if d.skip],
                 [],
             )
+
+    def test_cache_hit_reapplies_hard_rules(self) -> None:
+        """A cache hit must be re-filtered through `apply_hard_rules`
+        before returning. Closes the A01/A06 short-circuit finding:
+        previously `select_gates` returned the cached
+        `GateSkipDecision` verbatim, letting a pre-rule-#6 entry
+        (cached with risk_level above RISK_FLOOR + skip=True) bypass
+        the v1.1 risk veto.
+
+        Invariant: `select_gates(..., cache-hit)` decisions must equal
+        `apply_hard_rules(ctx, cached.decisions)` — not the raw cached
+        tuple. The cached entry uses `risk_level=11.0` (the sentinel),
+        so rule #6 must fire and `skip=True` must be vetoed to `False`.
+        Pre-fix: cache returns skip=True unchanged → assertion fails.
+        Post-fix: cache re-applies → skip=False → assertion passes.
+        """
+        cached_payload = {
+            "head_sha": "abc",
+            "gates_hash": "",
+            "decisions": [
+                {
+                    # risk_level=11.0 (> RISK_FLOOR=3.0). The cached
+                    # skip=True must be vetoed by rule #6 after
+                    # re-applying hard rules. Pre-fix code returns
+                    # the cached tuple verbatim, so skip=True leaks.
+                    "gate_name": "maintenance",
+                    "skip": True,
+                    "reasoning": "cached pre-v1.1 with sentinel risk",
+                    "confidence": 0.9,
+                    "risk_level": gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
+                    "raw_score": {},
+                }
+            ],
+            "llm_raw": {},
+            "decided_at_iso": "2026-09-15T00:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / ".dev-kit" / "gate-dynamic").mkdir(parents=True)
+            (target / ".dev-kit" / "gate-dynamic" / "abc.json").write_text(
+                json.dumps(cached_payload)
+            )
+            ctx = _make_ctx(head_sha="abc", iteration=2)
+            # Compute the expected result from the RAW cached decisions
+            # (loaded directly, NOT via select_gates — that would
+            # re-invoke the fix).
+            raw_cached = gate_dynamic.load_decision("abc", target)
+            self.assertIsNotNone(raw_cached)
+            expected = gate_dynamic.apply_hard_rules(
+                ctx, list(raw_cached.decisions),
+            )
+            # Pre-compute the raw cached skips — used as a sanity
+            # check that the test scenario actually distinguishes
+            # pre-fix from post-fix behavior.
+            raw_skips = [d.skip for d in raw_cached.decisions]
+            # Patch the LLM seam — cache hit path must NOT invoke the
+            # judge (this also pins that the fix doesn't accidentally
+            # re-run the judge on cache hits).
+            from unittest.mock import patch
+            with patch.object(
+                gate_dynamic.llm_judge, "_http_post"
+            ) as mock_call, patch.object(
+                gate_dynamic.llm_judge, "load_config",
+                return_value={"provider": "x", "api_key": "x",
+                              "model": "x", "base_url": "x"},
+            ), patch.object(
+                gate_dynamic.llm_judge, "format_prompt",
+                return_value="t",
+            ):
+                decision = gate_dynamic.select_gates(ctx, target)
+            # Cache hit path: judge must not be invoked.
+            self.assertFalse(
+                mock_call.called,
+                "cache hit must not re-invoke the LLM judge",
+            )
+            # Sanity: the raw cached entry has skip=True, but rule #6
+            # would force skip=False on re-application. If raw skips
+            # already match expected, this test cannot distinguish
+            # pre-fix from post-fix — fail loud so the test author
+            # picks a different cached payload.
+            self.assertNotEqual(
+                raw_skips,
+                [d.skip for d in expected],
+                "test scenario invariant: raw cached skip must differ "
+                "from apply_hard_rules result, else the test cannot "
+                "distinguish pre-fix from post-fix behavior",
+            )
+            # Security invariant: cache hit decisions must equal
+            # `apply_hard_rules(ctx, cached.decisions)`, NOT the raw
+            # cached tuple.
+            self.assertEqual(
+                [d.skip for d in decision.decisions],
+                [d.skip for d in expected],
+                "cache-hit decisions must equal apply_hard_rules(...) "
+                "of the raw cached decisions (re-application invariant)",
+            )
+
+    def test_coerced_response_sanity_check_fails_closed(self) -> None:
+        """The 'perfect triple' (gate_skippable at the ceiling and
+        risk_level at the floor) is the signature of a PR-body
+        prompt-injected judge response. The fix forces `risk_level`
+        to the sentinel so rule #6 vetoes the skip. Closes the A08
+        finding: an attacker who reaches iteration >= 2 with a
+        coerced judge response could previously skip every gate by
+        emitting max skip + min risk.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            ctx = _make_ctx(iteration=2)
+            # Mock the LLM seam end-to-end so the response is actually
+            # used (load_config/format_prompt/call_judge).
+            from unittest.mock import patch
+            with patch.object(
+                gate_dynamic.llm_judge, "load_config",
+                return_value={"provider": "x", "api_key": "x",
+                              "model": "x", "base_url": "x"},
+            ), patch.object(
+                gate_dynamic.llm_judge, "format_prompt",
+                return_value="t",
+            ), patch.object(
+                gate_dynamic.llm_judge, "_http_post",
+                return_value=self._mock_http_response({
+                    # Coerced triple — gate_skippable=10 AND risk=0.
+                    # Only a coerced judge emits this exact pair.
+                    "gate_skippable": 10,
+                    "confidence": 8,
+                    "risk_level": 0.0,
+                }),
+            ):
+                decision = gate_dynamic.select_gates(ctx, target)
+            # No gate may be skipped on a coerced response.
+            self.assertEqual(
+                [d.gate_name for d in decision.decisions if d.skip],
+                [],
+                "coerced-response triple (skip=10, risk=0) must fail "
+                "closed — no gate skipped",
+            )
+            # The sanity check must upgrade risk_level to the sentinel
+            # so rule #6 fires (not some other silent gate).
+            maint = next(d for d in decision.decisions
+                         if d.gate_name == "maintenance")
+            self.assertEqual(
+                maint.risk_level,
+                gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
+                "coerced-response triple must upgrade risk_level to "
+                "the sentinel so rule #6 fires",
+            )
+
+    def test_non_coerced_high_skip_low_risk_still_skips(self) -> None:
+        """The sanity check must NOT over-trigger on a legitimate
+        response that is below the coercion threshold. A real LLM
+        judge returning skip=8 + risk=2 is below the threshold on
+        both axes (skip < 9 OR risk > 1), so the check must not fire
+        and the skip must survive. This pins the threshold semantics
+        so the fix does not regress the legitimate-skip path.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            ctx = _make_ctx(iteration=2)
+            from unittest.mock import patch
+            with patch.object(
+                gate_dynamic.llm_judge, "load_config",
+                return_value={"provider": "x", "api_key": "x",
+                              "model": "x", "base_url": "x"},
+            ), patch.object(
+                gate_dynamic.llm_judge, "format_prompt",
+                return_value="t",
+            ), patch.object(
+                gate_dynamic.llm_judge, "_http_post",
+                return_value=self._mock_http_response({
+                    # Below the coercion thresholds on both axes:
+                    # skip=8 (< 9), risk=2 (> 1). Modest conf=7 →
+                    # normalized=0.7 (right at the floor).
+                    "gate_skippable": 8,
+                    "confidence": 7,
+                    "risk_level": 2.0,
+                }),
+            ):
+                decision = gate_dynamic.select_gates(ctx, target)
+            maint = next(d for d in decision.decisions
+                         if d.gate_name == "maintenance")
+            self.assertTrue(
+                maint.skip,
+                "non-coerced moderate skip (skip=8 risk=2 conf=7) "
+                "must skip — sanity check is not allowed to over-trigger",
+            )
+
 
 
 class TestCliSelect(unittest.TestCase):

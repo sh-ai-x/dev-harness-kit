@@ -87,6 +87,20 @@ RISK_FLOOR = 3.0
 # fail-closed veto intact for those entries.
 MISSING_RISK_LEVEL_SENTINEL = 11.0
 
+# Coerced-response sanity-check thresholds. A genuine judge response
+# on a real diff almost never emits the maximum on the skip axis
+# together with the minimum on the risk axis: that pair is the
+# signature of a PR-body prompt-injected judge response (the attacker
+# steers the LLM toward "every gate is skippable, nothing is risky").
+# When both thresholds trip together, force `risk_level` to the
+# sentinel so rule #6 vetoes the skip — same fail-closed posture as
+# the missing-key path. The check is intentionally 2-axis (skip +
+# risk), per the security judge's recommendation; adding a
+# confidence axis would over-trigger on legitimate high-confidence
+# responses and is not warranted by the threat model.
+COERCED_RESPONSE_SKIP_FLOOR = 9.0
+COERCED_RESPONSE_RISK_CEILING = 1.0
+
 # Body truncation budget for `diff_sample` in the LLM prompt.
 # ~2 KB is enough for the judge to ground its scope-discipline
 # judgment without blowing the input-token budget on long diffs.
@@ -517,7 +531,19 @@ def select_gates(
     # 2. Cache hit?
     cached = load_decision(context.head_sha, root)
     if cached is not None:
-        return cached
+        # Re-apply hard rules on cached decisions. Without this, a
+        # cached `skip=True` from a pre-rule-#6 entry would survive
+        # a rule upgrade and bypass the new veto — the v1.0 cache
+        # short-circuit was the A01/A06 attack path the security
+        # judge flagged. The judge is NOT re-invoked (no network);
+        # the hard rules are deterministic and pure.
+        return GateSkipDecision(
+            head_sha=cached.head_sha,
+            decisions=tuple(apply_hard_rules(context, list(cached.decisions))),
+            llm_raw=cached.llm_raw,
+            gates_hash=cached.gates_hash,
+            decided_at_iso=cached.decided_at_iso,
+        )
 
     # 3. Invoke LLM.
     raw = invoke_judge(context, root)
@@ -550,6 +576,24 @@ def select_gates(
         # skip via rule #6, same fail-closed posture as the other two
         # axes' floors.
         risk_level = float(scores.get("risk_level", MISSING_RISK_LEVEL_SENTINEL))
+        # Coerced-response sanity check. A genuine judge response on a
+        # real diff almost never emits the maximum on the skip axis
+        # together with the minimum on the risk axis — that pair is
+        # the signature of a PR-body prompt-injected judge response.
+        # Force `risk_level` to the sentinel so rule #6 vetoes the
+        # skip, same fail-closed posture as the missing-key path.
+        # Closes the A08 finding (an attacker reaching iteration >= 2
+        # could previously skip every gate by emitting max skip +
+        # min risk). The check is intentionally 2-axis (skip + risk)
+        # per the security judge's recommendation — adding a
+        # confidence axis would over-trigger on legitimate
+        # high-confidence responses and is not warranted by the
+        # threat model.
+        if (
+            skip_score >= COERCED_RESPONSE_SKIP_FLOOR
+            and risk_level <= COERCED_RESPONSE_RISK_CEILING
+        ):
+            risk_level = MISSING_RISK_LEVEL_SENTINEL
         # Skip iff all three: skip_score >= SKIP_THRESHOLD AND
         # confidence >= CONFIDENCE_FLOOR AND risk_level <= RISK_FLOOR.
         skip = (

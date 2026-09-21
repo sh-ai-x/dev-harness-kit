@@ -24,6 +24,8 @@ deterministic rules AFTER the LLM call. The LLM cannot overrule them.
 | 4. Low-confidence veto | `LLM confidence < 0.7` | `skip=False`. The LLM is a recommender; low confidence means "I don't know — run the gate". |
 | 5. Opt-in required | `gates.<name>.dynamic_eligible != true` | `skip=False`. Default is `False` for every gate — an operator must explicitly opt a gate into LLM-driven skip (see "Per-gate opt-in" below). |
 | 6. High-risk veto | `risk_level > RISK_FLOOR` (default 3.0) | `skip=False`. `risk_level` is a 3rd judge axis (0-10, lower_is_better) alongside `gate_skippable` and `confidence`. A missing key in a partial LLM response fails closed (defaults to a sentinel above the floor, not to 0.0), so an incomplete judge response can never bypass this veto. |
+| (pre-rule) Coerced-response sanity check | `gate_skippable >= 9 ∧ risk_level <= 1` (same LLM response) | Upgrades `risk_level` to `MISSING_RISK_LEVEL_SENTINEL` before rule #6 runs, so the skip is vetoed. Closes the A08 prompt-injection path: a coerced judge returning max skip + min risk would otherwise pass rule #6. |
+| (cache) Hard-rule re-application | `select_gates` cache hit | The cached `GateSkipDecision.decisions` are re-filtered through `apply_hard_rules` before returning. Closes the A01/A06 short-circuit: a pre-rule-#6 cached `skip=True` cannot survive a rule upgrade. |
 
 When the orchestrator is invoked from a standalone
 `bin/review-local.sh --dynamic-skip` call (no prior
@@ -137,6 +139,20 @@ All three live under `/dev-kit:gate-select`. The implementation is
   to `lib/gate_dynamic.MISSING_RISK_LEVEL_SENTINEL` (11.0, above the
   0-10 scale) so an incomplete response fails closed instead of
   bypassing the veto.
+- **Coerced-response sanity check** (A08 fix): when
+  `gate_skippable >= 9 AND risk_level <= 1` in the same LLM response,
+  treat `risk_level` as missing — upgrade to
+  `MISSING_RISK_LEVEL_SENTINEL` so rule #6 vetoes the skip. This pair
+  is the signature of a PR-body prompt-injected judge response (a
+  genuine judge almost never emits maximum skip + minimum risk
+  together); without the check an attacker reaching iteration ≥ 2
+  could skip every gate. Thresholds:
+  `lib/gate_dynamic.COERCED_RESPONSE_SKIP_FLOOR` (default 9.0) and
+  `lib/gate_dynamic.COERCED_RESPONSE_RISK_CEILING` (default 1.0).
+- **Cache-hit re-application** (A01/A06 fix): `select_gates` re-runs
+  `apply_hard_rules` on a cached decision before returning, so a
+  pre-rule-#6 cached `skip=True` cannot survive a rule upgrade. The
+  judge is NOT re-invoked (no network); the rule pass is pure.
 - **TTL (default 7 days)**: `lib/gate_dynamic.DYNAMIC_AUDIT_TTL_DAYS`.
 - **Temperature (default 0)**: `lib/llm_judge.call_judge(temperature=0)`
   is hard-coded in `lib/gate_dynamic.invoke_judge`. Do NOT raise it —
