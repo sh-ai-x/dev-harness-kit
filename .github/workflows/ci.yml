@@ -59,6 +59,15 @@ jobs:
           python-version: "3.12"
       - name: Install pytest + PyYAML
         run: pip install --quiet -r requirements.lock
+      - name: Install Bun
+        # tests/test_gjc_bridge.py::TestGjcHookAdapter invokes the GJC
+        # hook adapter via `bun -e`; the adapter is ES-module JavaScript
+        # and bun is the only runtime the project standardizes on for
+        # the GJC bridge. Pin to the version used locally so CI and dev
+        # produce byte-identical adapter output.
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1.42"
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
         env:

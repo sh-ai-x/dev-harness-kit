@@ -7,6 +7,15 @@ paths:
   - "**/tests/**/*.test.tsx"
   - "**/__tests__/**/*.test.ts"
   - "**/__tests__/**/*.test.tsx"
+description: Test file authoring rules for unit, integration, and e2e tests.
+globs:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/tests/**/*.test.ts"
+  - "**/tests/**/*.test.tsx"
+  - "**/__tests__/**/*.test.ts"
+  - "**/__tests__/**/*.test.tsx"
 stale_after: 2027-08-19
 ---
 
