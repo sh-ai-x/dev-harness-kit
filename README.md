@@ -185,6 +185,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). The single switch that gates which hooks and skills run. |
 | [`/dev-kit:team`](skills/team/SKILL.md) | Toggle team collaboration (`DEV_KIT_TEAM` on / off): operator roles, dependency-aware plans, and whether `.dev-kit/` is tracked. Orthogonal to `DEV_KIT_MODE`. |
 | [`/dev-kit:gate-select`](skills/gate-select/SKILL.md) | One picker for all three gate dimensions — project (CI workflows), session (local hooks), AI-judge. `show` reads current state; `pick` dispatches to the right installer. |
+| [`/dev-kit:gate-artifacts`](skills/gate-artifacts/SKILL.md) | Create/delete managed custom GitHub Actions gate artifacts backed by `.dev-kit/gates.json`. |
 | [`/dev-kit:harness-mode`](skills/harness-mode/SKILL.md) | Session-scoped local-hook mode — `fast` (optional hooks off), `full` (default), or `custom` per-hook picker. |
 | [`/dev-kit:guard-mode`](skills/guard-mode/SKILL.md) | Session-scoped on/off switch for the two hard-block hooks (`tdd-guard`, `worktree-guard`). |
 | [`/dev-kit:linear`](docs/skills/linear.md) | Optional Linear tracker sync — reconciles the current task with a canonical project + non-duplicate issue. |
