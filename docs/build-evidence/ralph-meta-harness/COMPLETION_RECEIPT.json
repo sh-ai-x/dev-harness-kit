@@ -5,7 +5,7 @@
     "blockers_empty": true,
     "terminal_state": true
   },
-  "artifact_hash": "f29adabb216dc169d4dbaf2e6bd0580e076f7a24490dcd3cea1f7023928e9114",
+  "artifact_hash": "9c1ccf62450eab57ceadaa95b3fbbbc20ead86e6d9a587911517dbd278685718",
   "blockers": [],
   "certificate_type": "ralph.completion-receipt",
   "completion_status": "verified",
@@ -22,11 +22,12 @@
     "phases/ralph-meta-harness/step3.md"
   ],
   "harness_candidate": "working-tree",
+  "manifest_file": "RECEIPT_MANIFEST.json",
   "phase": "ralph-meta-harness",
   "plan_id": "ralph-meta-harness",
   "schema_version": 1,
   "session": "ralph-meta-harness",
   "terminal_state": "USER_MERGE_REQUIRED",
   "unresolved_risk": false,
-  "verifier_kind": "independent"
+  "verifier_kind": "declared"
 }

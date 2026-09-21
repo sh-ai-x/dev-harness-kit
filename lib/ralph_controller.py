@@ -113,13 +113,14 @@ def record_checkpoint(
     candidate_id: str = "",
 ) -> Dict[str, Any]:
     """Record a resumable worker checkpoint without closing the workflow."""
+    session = _safe_session(session)
     snapshot = _state_snapshot(project_root, session)
     record = {
         "schema_version": SCHEMA_VERSION,
         "event_type": "ralph.worker.checkpointed",
         "event_id": new_event_id(),
         "ts": _now(),
-        "session": _safe_session(session),
+        "session": session,
         "reason": reason[:200],
         "next_action": next_action[:500],
         "hook_event": hook_event[:80],
@@ -156,13 +157,14 @@ def record_session_closed(
     """Record worker closure; deliberately never marks the workflow complete."""
     if outcome not in {"cancelled", "failed", "exception"}:
         raise RalphControllerError("worker session outcome must be cancelled, failed, or exception")
+    session = _safe_session(session)
     snapshot = _state_snapshot(project_root, session)
     record = {
         "schema_version": SCHEMA_VERSION,
         "event_type": "ralph.worker.session_closed",
         "event_id": new_event_id(),
         "ts": _now(),
-        "session": _safe_session(session),
+        "session": session,
         "reason": reason[:200],
         "hook_event": hook_event[:80],
         "outcome": outcome,

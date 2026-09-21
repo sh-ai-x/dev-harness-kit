@@ -385,8 +385,12 @@ def _expected_files(
     return expected
 
 
+RECEIPT_MANIFEST_FILENAME = "RECEIPT_MANIFEST.json"
+RECEIPT_MANIFEST_SCHEMA_VERSION = 1
+
+
 def _artifact_hash(files: dict[str, bytes]) -> str:
-    """Hash the deterministic evidence inputs, excluding the receipt itself."""
+    """Hash the deterministic evidence inputs (including the receipt manifest)."""
     digest = hashlib.sha256()
     for relative, data in sorted(files.items()):
         digest.update(relative.encode("utf-8"))
@@ -405,8 +409,26 @@ def _completion_receipt(
     steps: tuple[_StepEvidence, ...],
     files: dict[str, bytes],
     harness_candidate: str,
-) -> bytes:
-    """Build a bounded, honest completion receipt from source artifacts."""
+    verifier_kind: str,
+) -> tuple[bytes, bytes, str]:
+    """Build a bounded, honest completion receipt + manifest.
+
+    The integrity-bearing identity fields (``harness_candidate``,
+    ``verifier_kind``, ``terminal_state``, ``completion_status``) live in
+    ``RECEIPT_MANIFEST.json`` so they fall inside ``artifact_hash``.  The
+    receipt itself references the manifest by filename so downstream
+    consumers can verify the identity even though the receipt is
+    technically outside the hash (chicken-and-egg: the receipt must
+    contain ``artifact_hash`` to be self-describing, but the hash covers
+    the receipt only if the manifest is treated as the integrity
+    boundary).
+
+    Returns ``(receipt_bytes, manifest_bytes, artifact_hash)``.
+    """
+    if verifier_kind not in {"declared", "independent"}:
+        raise PromotionError(
+            f"verifier_kind must be 'declared' or 'independent'; got {verifier_kind!r}"
+        )
     all_exit_zero = all(step.output["exit_code"] == 0 for step in steps)
     all_completed = all(step.status == "completed" for step in steps)
     blockers = _text_lines(state.get("blockers"))
@@ -414,9 +436,27 @@ def _completion_receipt(
     if not created_at and steps:
         created_at = str(steps[0].output.get("timestamp") or "")
     created_at = created_at or "not-recorded"
-    independent = bool(steps) and all(
-        step.output.get("independent") is True for step in steps
-    )
+    completion_status = "verified" if all_exit_zero and all_completed else "unverified"
+    manifest_fields: dict[str, Any] = {
+        "schema_version": RECEIPT_MANIFEST_SCHEMA_VERSION,
+        "certificate_type": "ralph.receipt-manifest",
+        "created_at": created_at,
+        "plan_id": plan_id,
+        "session": session,
+        "phase": phase,
+        "terminal_state": state["current_stage"],
+        "harness_candidate": harness_candidate,
+        "verifier_kind": verifier_kind,
+        "completion_status": completion_status,
+    }
+    manifest_bytes = (
+        json.dumps(manifest_fields, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    # Build the hash over evidence + manifest so the manifest identity is
+    # inside the integrity boundary; the receipt itself is excluded.
+    hashed_files = dict(files)
+    hashed_files[RECEIPT_MANIFEST_FILENAME] = manifest_bytes
+    artifact_hash = _artifact_hash(hashed_files)
     receipt = {
         "schema_version": 1,
         "certificate_type": "ralph.completion-receipt",
@@ -426,10 +466,11 @@ def _completion_receipt(
         "phase": phase,
         "terminal_state": state["current_stage"],
         "harness_candidate": harness_candidate,
-        "artifact_hash": _artifact_hash(files),
+        "artifact_hash": artifact_hash,
+        "manifest_file": RECEIPT_MANIFEST_FILENAME,
         "evidence_refs": sorted(files),
-        "verifier_kind": "independent" if independent else "declared",
-        "completion_status": "verified" if all_exit_zero and all_completed else "unverified",
+        "verifier_kind": verifier_kind,
+        "completion_status": completion_status,
         "unresolved_risk": bool(blockers) or not all_completed,
         "acceptance_checks": {
             "terminal_state": state["current_stage"] in TERMINAL_STAGES,
@@ -439,7 +480,8 @@ def _completion_receipt(
         },
         "blockers": blockers,
     }
-    return (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    receipt_bytes = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return receipt_bytes, manifest_bytes, artifact_hash
 
 
 def _existing_files(destination: Path) -> dict[str, bytes]:
@@ -491,14 +533,25 @@ def promote(
     session: str = "default",
     round_name: str = DEFAULT_ROUND,
     harness_candidate: str = "working-tree",
+    verifier_kind: str = "declared",
     dry_run: bool = False,
 ) -> PromotionResult:
-    """Validate and optionally publish one completed runtime phase bundle."""
+    """Validate and optionally publish one completed runtime phase bundle.
+
+    ``verifier_kind`` defaults to ``"declared"``: this module never
+    re-runs verification, so flipping to ``"independent"`` requires an
+    explicit operator opt-in (and, in production, an independent
+    re-verification pass that this module cannot perform).
+    """
     project_root = project_root.resolve()
     plan_id = _validate_identifier(plan_id, "plan_id")
     session = _validate_identifier(session, "session")
     round_name = _validate_identifier(round_name, "round")
     harness_candidate = _validate_identifier(harness_candidate, "harness_candidate")
+    if verifier_kind not in {"declared", "independent"}:
+        raise PromotionError(
+            f"verifier_kind must be 'declared' or 'independent'; got {verifier_kind!r}"
+        )
     runtime = _safe_runtime_path(project_root, round_name)
     resolved_phase = _discover_phase(runtime, phase)
     prd_path = runtime / "PRD.md"
@@ -517,7 +570,7 @@ def promote(
     )
     base_expected = _expected_files(prd_path, index_path, steps, resolved_phase, summary)
     expected = dict(base_expected)
-    expected["COMPLETION_RECEIPT.json"] = _completion_receipt(
+    receipt_bytes, manifest_bytes, _artifact_hash_value = _completion_receipt(
         plan_id=plan_id,
         session=session,
         phase=resolved_phase,
@@ -525,7 +578,10 @@ def promote(
         steps=steps,
         files=base_expected,
         harness_candidate=harness_candidate,
+        verifier_kind=verifier_kind,
     )
+    expected["RECEIPT_MANIFEST.json"] = manifest_bytes
+    expected["COMPLETION_RECEIPT.json"] = receipt_bytes
     destination = project_root / DEFAULT_EVIDENCE_DIR / plan_id
     planned_paths = tuple(expected)
     if not dry_run:
@@ -546,6 +602,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="working-tree",
         help="candidate id recorded in COMPLETION_RECEIPT.json",
     )
+    parser.add_argument(
+        "--verifier-kind",
+        default="declared",
+        choices=["declared", "independent"],
+        help=(
+            "integrity provenance recorded in the receipt manifest "
+            "(default: declared — this module never re-runs verification, "
+            "so 'independent' requires an explicit operator opt-in)"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="validate and list files without writing")
     return parser
 
@@ -560,6 +626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             session=args.session,
             round_name=args.round_name,
             harness_candidate=args.harness_candidate,
+            verifier_kind=args.verifier_kind,
             dry_run=args.dry_run,
         )
     except InvalidIdentifierError as exc:

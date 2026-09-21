@@ -1,10 +1,15 @@
 """Tests for the thin RALPH worker/session boundary adapter."""
 
+# ruff: noqa: I001  # isort's first-party detection breaks under pre-commit's
+# staged-checkout (skills.ralph.lib gets mis-classified as third-party). The
+# import order below is correct in the project root where both lib/ and
+# skills/ are first-party siblings.
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
+import pytest
 from lib import ralph_controller
 from skills.ralph.lib import ralph_state
 
@@ -62,9 +67,19 @@ def test_session_close_cannot_claim_workflow_completion(tmp_path: Path) -> None:
 
 
 def test_unsafe_session_is_rejected(tmp_path: Path) -> None:
-    try:
+    with pytest.raises(ralph_controller.RalphControllerError):
         ralph_controller.record_checkpoint(tmp_path, session="../escape")
-    except ralph_controller.RalphControllerError:
-        pass
-    else:  # pragma: no cover - assertion branch
-        raise AssertionError("unsafe session must be rejected")
+
+    # Defense-in-depth: rejection must fire BEFORE any filesystem side effect.
+    # If _state_snapshot() had been called, RalphState.load would have created
+    # .dev-kit/ralph/ or a state file. The checkpoint JSONL and the trace
+    # events.jsonl are owned by record_checkpoint; neither must exist.
+    assert not (tmp_path / ".dev-kit" / "ralph").exists()
+    assert not (tmp_path / ".dev-kit" / "trace").exists()
+
+
+def test_unsafe_session_close_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ralph_controller.RalphControllerError):
+        ralph_controller.record_session_closed(tmp_path, session="../escape")
+    assert not (tmp_path / ".dev-kit" / "ralph").exists()
+    assert not (tmp_path / ".dev-kit" / "trace").exists()

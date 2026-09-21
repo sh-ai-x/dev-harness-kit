@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -101,10 +102,103 @@ def test_promote_copies_bundle_and_renders_auditable_summary(tmp_path: Path) -> 
     )
     assert receipt["certificate_type"] == "ralph.completion-receipt"
     assert receipt["completion_status"] == "verified"
-    assert receipt["verifier_kind"] == "independent"
+    assert receipt["verifier_kind"] == "declared"
     assert receipt["harness_candidate"] == "working-tree"
     assert receipt["acceptance_checks"]["terminal_state"] is True
     assert len(receipt["artifact_hash"]) == 64
+    # The receipt references a manifest that carries the identity fields
+    # (harness_candidate, verifier_kind, terminal_state, completion_status)
+    # inside the integrity boundary.
+    assert receipt["manifest_file"] == "RECEIPT_MANIFEST.json"
+    manifest = json.loads(
+        (destination / "RECEIPT_MANIFEST.json").read_text(encoding="utf-8")
+    )
+    assert manifest["certificate_type"] == "ralph.receipt-manifest"
+    assert manifest["harness_candidate"] == "working-tree"
+    assert manifest["verifier_kind"] == "declared"
+    assert manifest["terminal_state"] == "USER_MERGE_REQUIRED"
+    assert manifest["completion_status"] == "verified"
+
+
+def test_promote_artifact_hash_covers_receipt_manifest(tmp_path: Path) -> None:
+    _write_runtime(tmp_path)
+
+    result = promote.promote(
+        tmp_path, plan_id="demo-plan", phase="0-mvp", session="run-1"
+    )
+    destination = result.destination
+    artifact_hash = json.loads(
+        (destination / "COMPLETION_RECEIPT.json").read_text(encoding="utf-8")
+    )["artifact_hash"]
+
+    # Recompute the hash independently over the published files. The
+    # manifest is inside the boundary; the receipt itself is excluded.
+    files: dict[str, bytes] = {}
+    for path in destination.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(destination))
+        if rel == "COMPLETION_RECEIPT.json":
+            continue
+        files[rel] = path.read_bytes()
+    digest = hashlib.sha256()
+    for rel in sorted(files):
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(files[rel])
+        digest.update(b"\0")
+    assert digest.hexdigest() == artifact_hash
+
+
+def test_promote_verifier_kind_requires_explicit_opt_in(tmp_path: Path) -> None:
+    # Default: declared, never inferred from step output.
+    default_root = tmp_path / "default"
+    default_root.mkdir()
+    _write_runtime(default_root)
+    result = promote.promote(
+        default_root, plan_id="demo-plan", phase="0-mvp", session="run-1"
+    )
+    receipt = json.loads(
+        (result.destination / "COMPLETION_RECEIPT.json").read_text(encoding="utf-8")
+    )
+    assert receipt["verifier_kind"] == "declared"
+    manifest = json.loads(
+        (result.destination / "RECEIPT_MANIFEST.json").read_text(encoding="utf-8")
+    )
+    assert manifest["verifier_kind"] == "declared"
+
+    # Explicit opt-in to independent is honored.
+    independent_root = tmp_path / "independent"
+    independent_root.mkdir()
+    _write_runtime(independent_root)
+    result = promote.promote(
+        independent_root,
+        plan_id="demo-plan",
+        phase="0-mvp",
+        session="run-1",
+        verifier_kind="independent",
+    )
+    receipt = json.loads(
+        (result.destination / "COMPLETION_RECEIPT.json").read_text(encoding="utf-8")
+    )
+    assert receipt["verifier_kind"] == "independent"
+    manifest = json.loads(
+        (result.destination / "RECEIPT_MANIFEST.json").read_text(encoding="utf-8")
+    )
+    assert manifest["verifier_kind"] == "independent"
+
+    # Bogus value is rejected.
+    bogus_root = tmp_path / "bogus"
+    bogus_root.mkdir()
+    _write_runtime(bogus_root)
+    with pytest.raises(promote.PromotionError, match="verifier_kind"):
+        promote.promote(
+            bogus_root,
+            plan_id="demo-plan",
+            phase="0-mvp",
+            session="run-1",
+            verifier_kind="bogus",
+        )
 
 
 def test_promote_is_idempotent(tmp_path: Path) -> None:
