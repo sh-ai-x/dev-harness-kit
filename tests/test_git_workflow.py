@@ -106,14 +106,6 @@ class TestGitGuardBlocks(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("force-push", r.stderr)
 
-    def test_blocks_checkout_main(self):
-        with _init_tmp_git_repo() as tmp:
-            # First create a feature branch so we can check out from it.
-            subprocess.run(["git", "-C", tmp, "checkout", "-q", "-b", "fix/example"], check=True)
-            r = _run_hook("git checkout main", cwd=Path(tmp))
-            self.assertEqual(r.returncode, 2, f"expected block, got rc={r.returncode}\nstderr={r.stderr}")
-            self.assertIn("switching to main", r.stderr)
-
     def test_blocks_branch_D_main(self):
         r = _run_hook("git branch -D main")
         self.assertEqual(r.returncode, 2)
@@ -141,13 +133,11 @@ class TestGitGuardBlocks(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("gh pr merge is forbidden", r.stderr)
 
-    def test_blocks_combined_main_checkout_then_commit(self):
+    def test_blocks_commit_after_main_checkout_command(self):
         with _init_tmp_git_repo() as tmp:
-            subprocess.run(["git", "-C", tmp, "checkout", "-q", "-b", "fix/example"], check=True)
             r = _run_hook("git checkout main && git commit -m 'evil'", cwd=Path(tmp))
-            # checkout-main is caught first (exit 2).
             self.assertEqual(r.returncode, 2)
-            self.assertIn("switching to main", r.stderr)
+            self.assertIn("direct commit to 'main'", r.stderr)
 
     # === M1: global git flag bypass ===
     # These all slipped through the previous (literal-pattern) matcher because
@@ -228,7 +218,7 @@ class TestGitGuardBlocks(unittest.TestCase):
 
 
 class TestGitGuardAllows(unittest.TestCase):
-    """git-guard.sh must ALLOW (exit 0) normal feature-branch operations."""
+    """git-guard.sh allows synchronization but blocks main mutations."""
 
     def setUp(self):
         if not HOOK.exists():
@@ -257,6 +247,22 @@ class TestGitGuardAllows(unittest.TestCase):
             r = _run_hook("git checkout -b fix/new-thing", cwd=Path(tmp))
             self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
 
+    def test_allows_checkout_main(self):
+        with _init_tmp_git_repo() as tmp:
+            subprocess.run(["git", "-C", tmp, "checkout", "-q", "-b", "fix/example"], check=True)
+            r = _run_hook("git checkout main", cwd=Path(tmp))
+            self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
+
+    def test_allows_switch_main(self):
+        with _init_tmp_git_repo() as tmp:
+            subprocess.run(["git", "-C", tmp, "checkout", "-q", "-b", "fix/example"], check=True)
+            r = _run_hook("git switch main", cwd=Path(tmp))
+            self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
+
+    def test_allows_pull_origin_main(self):
+        r = _run_hook("git pull --ff-only origin main")
+        self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
+
     def test_allows_force_with_lease_on_own_branch(self):
         r = _run_hook("git push --force-with-lease origin fix/review-findings")
         self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
@@ -275,6 +281,7 @@ class TestGitGuardAllows(unittest.TestCase):
 
     def test_allows_read_only_git_commands(self):
         for cmd in ["git status", "git log --oneline -5", "git diff HEAD~1",
+                    "git pull --ff-only origin main",
                     "git rev-parse HEAD", "git branch --show-current", "git show --stat"]:
             with self.subTest(cmd=cmd):
                 r = _run_hook(cmd)
