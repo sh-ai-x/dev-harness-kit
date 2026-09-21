@@ -48,7 +48,10 @@ FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/n
 
 # Session state is reset from DEV_KIT_GUARDS at SessionStart. The thin
 # default is off; guard-mode can still change this session explicitly.
-GUARD_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+# Standardize root-resolution on DEV_KIT_GUARD_ROOT so this hook and the
+# other guard-policy consumers (tdd-guard, session-start-check) read the
+# same override key the library honors. (CC-1 finding for PR #881.)
+GUARD_ROOT="${DEV_KIT_GUARD_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 if [ "$(dev_kit_guard_state worktree_guard "$GUARD_ROOT")" = "off" ]; then
   exit 0
 fi

@@ -16,7 +16,10 @@ hook_stage_active tdd-guard || exit 0
 
 # Session state is reset from DEV_KIT_GUARDS at SessionStart. The thin
 # default is off; guard-mode can still change this session explicitly.
-GUARD_ROOT="${DEV_KIT_TDD_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+# Standardize root-resolution on DEV_KIT_GUARD_ROOT so this hook and the
+# other guard-policy consumers (worktree-guard, session-start-check) read
+# the same override key the library honors. (CC-1 finding for PR #881.)
+GUARD_ROOT="${DEV_KIT_GUARD_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 if [ "$(dev_kit_guard_state tdd_guard "$GUARD_ROOT")" = "off" ]; then
   exit 0
 fi
@@ -30,8 +33,8 @@ case "$FILE" in
   *)
     DECISION=$(python3 -m lib.tdd_scope_policy "$FILE" 2>/dev/null || echo judge)
     [ "$DECISION" = "exempt" ] && exit 0
-    if [ "$DECISION" = "judge" ] && [ -f "${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.dev-kit/.tdd-scope.json" ] && jq -e '.tdd_required == false' "${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.dev-kit/.tdd-scope.json" >/dev/null 2>&1; then exit 0; fi
-    ROOT="${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+    if [ "$DECISION" = "judge" ] && [ -f "${GUARD_ROOT}/.dev-kit/.tdd-scope.json" ] && jq -e '.tdd_required == false' "${GUARD_ROOT}/.dev-kit/.tdd-scope.json" >/dev/null 2>&1; then exit 0; fi
+    ROOT="${GUARD_ROOT}"
     STATE="${ROOT}/.dev-kit/.tdd-cycle.json"
     if [ "$DECISION" = "required" ] || [ "$DECISION" = "judge" ]; then
       if [ ! -f "$STATE" ] || ! jq -e '.phase == "red" and (.exit_code | numbers) != 0' "$STATE" >/dev/null 2>&1; then
