@@ -5,7 +5,6 @@
 > Hooks, agents, and operators share one Python codebase via direct subprocess
 > calls (no shared in-process state substrate).
 
-**Language:** English · [한국어](00-index.ko.md)
 
 ---
 
@@ -145,7 +144,7 @@ That is the entire surface. Anything more specific is in the docs.
 The root [`README.md` → Doc map](../../README.md#doc-map) is
 the single categorized index of every topic doc, ADR, and skill reference
 in the repo (architecture, naming, CI setup, cost/risk, team adoption, hook
-coverage, and the skill index) — with its HTML/Markdown/Korean siblings
+coverage, and the skill index) — with HTML/Markdown siblings
 linked per row. This page stays a Markdown-only landing page and does not
 duplicate that table; follow the link above for the full map.
 

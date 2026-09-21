@@ -91,7 +91,7 @@ def text_files(root: Path) -> list[tuple[Path, str]]:
 def assessed_files(root: Path) -> list[tuple[Path, str]]:
     """Return shipped implementation/config files, not examples, tests, or fixtures."""
     excluded_components = {"docs", "tests", "eval"}
-    excluded_filenames = {"README.md", "README.ko.md"}
+    excluded_filenames = {"README.md"}
     # Path-prefix exclusions — matched against the repo-relative POSIX
     # path, so multi-segment dirs like `skills/review/fixtures` work
     # without flattening every `skills/*` file into an exclusion.

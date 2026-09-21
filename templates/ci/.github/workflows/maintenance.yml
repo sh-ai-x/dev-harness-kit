@@ -224,7 +224,7 @@ jobs:
             registry doc — the front door operators read first — and it
             is MANDATORY, not one option among several. These are
             good practice but do NOT substitute for it:
-              - docs/skills/README.md or docs/skills/README.ko.md
+              - docs/skills/README.md
               - (commands/ removed in fix/commands-prefix-only)
             The only exemption is `docs-not-required:` in the PR body.
             The auto-generated `skills/README.md` does NOT count (it's
@@ -267,7 +267,7 @@ jobs:
             touch the ROOT `README.md` and register the skill there as a
             table row naming `/dev-kit:<name>`. The root README is the
             primary registry doc and is MANDATORY; docs/skills/README.md,
-            docs/skills/README.ko.md are good
+            docs/skills/README.md is good
             practice but do NOT substitute for it. Only
             `docs-not-required:` in the PR body exempts. Auto-generated
             `skills/README.md` does NOT count. Deduct from
@@ -306,8 +306,8 @@ jobs:
             `skills/<name>/SKILL.md` (status `added`), the PR MUST also
             touch the ROOT `README.md` and register the skill there as a
             table row naming `/dev-kit:<name>`. The root README is
-            MANDATORY; docs/skills/README.md, docs/skills/README.ko.md,
-            do NOT substitute for it. Only
+            MANDATORY; docs/skills/README.md does NOT substitute for it.
+            Only
             `docs-not-required:` in the PR body exempts. Auto-generated
             `skills/README.md` does NOT count. Deduct from
             `docs_coverage_score` if missing.

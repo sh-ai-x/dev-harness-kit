@@ -13,7 +13,7 @@ or troubleshooting a flapping judge.
 
 ## Hard rules (bypass the LLM)
 
-The orchestrator (`lib/gate_dynamic.apply_hard_rules`) applies 4
+The orchestrator (`lib/gate_dynamic.apply_hard_rules`) applies 6
 deterministic rules AFTER the LLM call. The LLM cannot overrule them.
 
 | Rule | Condition | Effect |
@@ -22,6 +22,12 @@ deterministic rules AFTER the LLM call. The LLM cannot overrule them.
 | 2. Operator override | `forced_run: true` on the gate | `skip=False`. The field is documented as "never SKIP this gate" — it does NOT mean "force the gate to RUN". |
 | 3. Critical gate in scope | `gate_name in {review, security}` AND `scope_globs` matches a diff file | `skip=False`. Critical gates are LLM-skipped only when the diff doesn't touch their scope. |
 | 4. Low-confidence veto | `LLM confidence < 0.7` | `skip=False`. The LLM is a recommender; low confidence means "I don't know — run the gate". |
+| 5. Opt-in required | `gates.<name>.dynamic_eligible != true` | `skip=False`. Default is `False` for every gate — an operator must explicitly opt a gate into LLM-driven skip (see "Per-gate opt-in" below). |
+| 6. High-risk veto | `risk_level > RISK_CEILING` (default 3.0) | `skip=False`. `risk_level` is a 3rd judge axis (0-10, lower_is_better) alongside `gate_skippable` and `confidence`. A missing key in a partial LLM response fails closed (defaults to a sentinel above the floor, not to 0.0), so an incomplete judge response can never bypass this veto. |
+| (pre-rule) Coerced-response sanity check | `gate_skippable >= 9 ∧ risk_level <= 1` (same LLM response) | Upgrades `risk_level` to `MISSING_RISK_LEVEL_SENTINEL` before rule #6 runs, so the skip is vetoed. Closes the A08 prompt-injection path: a coerced judge returning max skip + min risk would otherwise pass rule #6. |
+| (pre-rule) Combined-score coerced-response check | `gate_skippable + (10 - risk_level) >= 17` (LLM response) | v1.1.1 follow-up: replaces the AND-only check above to catch the sub-extreme `(skip=8.5, risk=1.5)` attack triple where the AND missed. |
+| (pre-rule) Near-max-skip coerced-response check | `gate_skippable >= 9.0 ∧ risk_level >= RISK_CEILING` (LLM response) | v1.1.3 follow-up: closes the LLM01 high finding where the combined-score check still let through `(skip=9.99, risk=3.0)` (combined-score=16.99 < 17). Legitimate borderline-low skips have moderate `gate_skippable` (typically 7-8, well below 9.0), so the new check does not over-trigger. |
+| (cache) Hard-rule re-application | `select_gates` cache hit | The cached `GateSkipDecision.decisions` are re-filtered through `apply_hard_rules` before returning. Closes the A01/A06 short-circuit: a pre-rule-#6 cached `skip=True` cannot survive a rule upgrade. |
 
 When the orchestrator is invoked from a standalone
 `bin/review-local.sh --dynamic-skip` call (no prior
@@ -78,7 +84,7 @@ Shape:
   "head_sha": "abc123def",
   "decisions": [
     {"gate_name": "review", "skip": false, "reasoning": "...",
-     "confidence": 0.0, "raw_score": {}}
+     "confidence": 0.0, "risk_level": 0.0, "raw_score": {}}
   ],
   "llm_raw": {"scores": {...}, "raw": "..."},
   "gates_hash": "<sha256 of gates.json>",
@@ -127,6 +133,57 @@ All three live under `/dev-kit:gate-select`. The implementation is
 
 - **Confidence floor (default 0.7)**: `lib/gate_dynamic.CONFIDENCE_FLOOR`.
   Lower = more aggressive skips; higher = more conservative.
+- **Risk ceiling (default 3.0)**: `lib/gate_dynamic.RISK_CEILING`. A gate
+  with `risk_level > RISK_CEILING` is never skipped (hard rule #6),
+  regardless of how high `gate_skippable` or `confidence` score.
+  Lower = more conservative (fewer skips allowed); higher = more
+  aggressive. A missing `risk_level` key in the LLM response defaults
+  to `lib/gate_dynamic.MISSING_RISK_LEVEL_SENTINEL` (11.0, above the
+  0-10 scale) so an incomplete response fails closed instead of
+  bypassing the veto.
+- **Coerced-response sanity check** (A08 + LLM01 follow-up): when
+  `skip_score + (10 - risk_level) >= 17` in the same LLM response
+  (combined-score check), treat `risk_level` as missing — upgrade to
+  `MISSING_RISK_LEVEL_SENTINEL` so rule #6 vetoes the skip. The
+  combined-score formulation closes the sub-extreme attack triple
+  `(skip=8.5, risk=1.5)` that the original v1.1 AND-only check
+  (`skip>=9 AND risk<=1`) missed. Threshold:
+  `lib/gate_dynamic.COERCED_RESPONSE_COMBINED_FLOOR` (default 17.0).
+  An attacker must push BOTH axes toward extremes; lowering one
+  alone is insufficient.
+- **Cache-hit re-application** (A01/A06 fix): `select_gates` re-runs
+  `apply_hard_rules` on a cached decision before returning, so a
+  pre-rule-#6 cached `skip=True` cannot survive a rule upgrade. The
+  judge is NOT re-invoked (no network); the rule pass is pure.
+- **Cache-load range validation** (S-1 fix): `load_decision` clamps
+  out-of-range cached `risk_level` values (e.g. `-1.0`, `99.0`,
+  `"high"`) to `MISSING_RISK_LEVEL_SENTINEL`. A poisoned cache file
+  with a negative value would otherwise survive rule #6 unchanged
+  (rule #6 checks `risk > CEILING`, so a negative value doesn't
+  trigger the veto). The clamped decision is tagged
+  `audit_reason="legacy_cache"` so operators can distinguish this
+  path from missing_key / coerced_response in the audit JSON.
+- **Self-fail-closed wrapper** (A10 fix): `select_gates` body is
+  wrapped in `try/except Exception: return _no_skip_decision(...)`.
+  Any exception in prune_stale / load_decision / apply_hard_rules /
+  save_decision falls back to the safe "every gate runs" decision
+  so a crash in the gate-dynamic layer cannot crash the babysit-pr
+  loop.
+- **Audit-reason tagging** (A09 fix): every `GateDecision` carries
+  an `audit_reason` field that records how the `risk_level` value
+  was derived: `"ok"` (LLM in [0, 10]), `"missing_key"` (LLM
+  response omitted the key), `"coerced_response"` (combined-score
+  OR near-max-skip sanity check fired at parse time),
+  `"coerced_response_cache"` (combined-score OR near-max-skip
+  check fired at cache-load time), `"legacy_cache"` (load-time
+  range clamp OR empty-`raw_score` defense-in-depth),
+  `"llm_unavailable"` (LLM seam unreachable; emitted by
+  `_no_skip_decision`'s default when `invoke_judge` returns empty),
+  `"exception_fail_closed"` (exception in `select_gates` top-level
+  wrapper). Operators reviewing `.dev-kit/gate-dynamic/<sha>.json`
+  after a babysit-pr cycle can tell prompt-injection from
+  partial-LLM-response from stale-cache from poisoned-cache from
+  exception by reading this field.
 - **TTL (default 7 days)**: `lib/gate_dynamic.DYNAMIC_AUDIT_TTL_DAYS`.
 - **Temperature (default 0)**: `lib/llm_judge.call_judge(temperature=0)`
   is hard-coded in `lib/gate_dynamic.invoke_judge`. Do NOT raise it —

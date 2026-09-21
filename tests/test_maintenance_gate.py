@@ -564,17 +564,6 @@ class TestRegistryIndexCheck(unittest.TestCase):
         self.assertIn("README.md", reason)
         self.assertIn("skills/foo/SKILL.md", reason)
 
-    def test_fails_when_only_docs_skills_readme_ko_updated(self):
-        ok, reason = maintenance_gate.registry_index_updated_ok(
-            changed_files=[
-                "skills/foo/SKILL.md:added",
-                "docs/skills/README.ko.md:modified",
-            ],
-            pr_body="",
-        )
-        self.assertFalse(ok, reason)
-        self.assertIn("README.md", reason)
-
     def test_passes_when_root_readme_and_secondary_both_updated(self):
         # The recommended shape: root README (mandatory) plus the
         # per-category index (good practice).

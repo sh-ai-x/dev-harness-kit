@@ -9,7 +9,7 @@ paths:
 
 # ACP — Agent Coordination Protocol (dev-harness-kit)
 
-**Language:** English · [한국어](acp-harness.ko.md)
+
 
 The ACP is the deterministic contract between the orchestrator (M), task
 sub-agents (T), and leaf sub-agents (L). It encodes the coordination rules

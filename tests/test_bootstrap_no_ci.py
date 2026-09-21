@@ -23,13 +23,14 @@ def test_bootstrap_no_ci_prompt_documented():
 
 
 def test_bootstrap_docs_mirror_yN_default():
-    """docs/skills/bootstrap.md and bootstrap.ko.md must mirror the [y/N] flip.
+    """docs/skills/bootstrap.md must mirror the [y/N] flip.
 
-    PR #786 flipped ci-setup from default Y to default N. Three locations in
-    the consumer docs missed the update and still claimed "default is Y" /
-    "기본은 Y" — Korean-reading operators got contradictory defaults between
-    the prompt literal (`[y/N]`) and the Usage table ("기본은 Y"). This test
-    catches a re-flip or a re-merge that reintroduces the drift.
+    PR #786 flipped ci-setup from default Y to default N. Two locations in
+    the English consumer doc missed the update and still claimed "default is Y"
+    — operators got contradictory defaults between the prompt literal (`[y/N]`)
+    and the Usage table ("default is Y"). This test catches a re-flip or a
+    re-merge that reintroduces the drift. (Korean .ko.md translation was
+    retired 2026-09 — see PR 895.)
     """
     from pathlib import Path
     repo = Path(__file__).parent.parent
@@ -48,17 +49,3 @@ def test_bootstrap_docs_mirror_yN_default():
     en_intro = en.split("## When to use it", 1)[0]
     assert "With Y (default)" not in en_intro and "Y (default), end state" not in en_intro, \
         "docs/skills/bootstrap.md intro must drop 'With Y (default)' claim"
-
-    # Korean doc: line 10 (intro), line 72 (Usage table) -- forbid 기본은 Y / Y(기본).
-    ko = (repo / "docs/skills/bootstrap.ko.md").read_text()
-    assert "[y/N]" in ko, "docs/skills/bootstrap.ko.md must mention the [y/N] literal"
-    ko_intro = ko.split("## 사용 시점", 1)[0]
-    assert "Y(기본)일 경우" not in ko_intro and "Y(기본)" not in ko_intro, \
-        "docs/skills/bootstrap.ko.md intro must drop 'Y(기본)' claim (PR #786 flipped to N)"
-    if "## " in ko.split("## 사용 시점", 1)[1]:
-        ko_usage_block = ko.split("## 사용 시점", 1)[1]
-        ko_usage_block = ko_usage_block.split("## ", 1)[1] if "## " in ko_usage_block else ko_usage_block
-    else:
-        ko_usage_block = ""
-    assert "기본은 Y" not in ko_usage_block, \
-        "docs/skills/bootstrap.ko.md Usage table must drop '기본은 Y' (PR #786 flipped to N)"
