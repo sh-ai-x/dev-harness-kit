@@ -8,9 +8,9 @@ audits it; ``gate-select sync`` pushes per-gate flags to
 ``gh variable set GATES_<NAME>_ENABLED`` so the workflow ``if:`` conditions
 read ``vars.GATES_<NAME>_ENABLED``.
 
-Three gates are first-class today (``review``, ``security``, ``maintenance``);
-a fourth gate may be added as an additive bump without a schema version
-change because the validator only allows the pinned keys.
+Three gates are built in today (``review``, ``security``, ``maintenance``).
+Custom GitHub Actions gates are also allowed when their key, workflow basename,
+and GitHub variable name derive from the same safe kebab-case gate name.
 
 Schema v1.1.0 (additive, forward-compat from v1.0.0):
 - Each gate may additionally carry optional dynamic-skip fields
@@ -71,19 +71,28 @@ DYNAMIC_FIELDS_DEFAULT: dict = {
     "forced_run": False,         # operator override — never SKIP this gate
 }
 
-# The 3 first-class gate keys. The validator rejects any other top-level
-# `gates.<key>` to keep the schema tight; adding a fourth gate is a
-# coordinated bump (extend this frozenset + DEFAULT_GATES + the
-# `lib/gates_state.<gate>.workflow` comment in templates/ci).
-VALID_GATE_KEYS: frozenset[str] = frozenset({"review", "security", "maintenance"})
+# Built-in gate keys shipped by dev-kit templates. Custom gates are accepted
+# by `validate_gate_name()` and are persisted in `.dev-kit/gates.json`; this
+# constant remains the built-in/default inventory for callers that need the
+# shipped template set.
+BUILTIN_GATE_KEYS: frozenset[str] = frozenset({"review", "security", "maintenance"})
+VALID_GATE_KEYS: frozenset[str] = BUILTIN_GATE_KEYS
+
+RESERVED_GATE_KEYS: frozenset[str] = frozenset({
+    "auto-fix-pr",
+    "branch-policy",
+    "ci",
+    "test",
+    "validate",
+})
+CUSTOM_GATE_RE = re.compile(r"^[a-z][a-z0-9-]{1,38}[a-z0-9]$")
 
 # The single source of truth for the per-gate inventory. Each gate is
 # `{enabled: bool, workflow: str, var: str}` — `workflow` is the file on
 # disk in `.github/workflows/`, `var` is the GH repo variable name that
 # the workflow's `if:` reads and `sync` pushes via `gh variable set`.
-# Adding a gate requires: extend `VALID_GATE_KEYS` + `DEFAULT_GATES`,
-# ship a template + add it to `_CI_PATHS_BEFORE_HOOKS`, add the
-# `if: vars.<gate.var> != 'false'` line on the gate job.
+# Built-ins live here. Custom gate entries are derived by helper functions and
+# persisted by `/dev-kit:gate-artifacts` without changing this default set.
 DEFAULT_GATES: dict = {
     "review": {
         "enabled": True,
@@ -114,6 +123,61 @@ class ValidationError(ValueError):
     `gates.security.var: must equal 'GATES_SECURITY_ENABLED'`) so callers
     can surface a precise remediation message.
     """
+
+
+def is_valid_gate_name(gate: str, *, allow_builtin: bool = True) -> bool:
+    """Return True when ``gate`` is a supported gates.json key."""
+    if not isinstance(gate, str):
+        return False
+    if gate in BUILTIN_GATE_KEYS:
+        return allow_builtin
+    if gate in RESERVED_GATE_KEYS:
+        return False
+    if "--" in gate:
+        return False
+    return bool(CUSTOM_GATE_RE.fullmatch(gate))
+
+
+def validate_gate_name(gate: str, *, allow_builtin: bool = True) -> None:
+    """Raise ``ValidationError`` unless ``gate`` is a supported gate name."""
+    if is_valid_gate_name(gate, allow_builtin=allow_builtin):
+        return
+    reserved = sorted(RESERVED_GATE_KEYS | (BUILTIN_GATE_KEYS if not allow_builtin else frozenset()))
+    raise ValidationError(
+        f"gate name {gate!r}: must be lowercase kebab-case, 3-40 chars, "
+        "start with a letter, end with a letter/digit, contain no '--', "
+        f"and avoid reserved names {reserved}"
+    )
+
+
+def workflow_for(gate: str) -> str:
+    """Return the workflow basename for ``gate``."""
+    validate_gate_name(gate)
+    if gate in DEFAULT_GATES:
+        return DEFAULT_GATES[gate]["workflow"]
+    return f"{gate}.yml"
+
+
+def var_for(gate: str) -> str:
+    """Return the GH repo variable name for ``gate``."""
+    validate_gate_name(gate)
+    return f"GATES_{gate.replace('-', '_').upper()}_ENABLED"
+
+
+def default_gate_entry(gate: str, *, enabled: bool = True) -> dict:
+    """Build the canonical gates.json entry for a built-in or custom gate."""
+    validate_gate_name(gate)
+    if gate in DEFAULT_GATES:
+        entry = dict(DEFAULT_GATES[gate])
+        entry["enabled"] = enabled
+        return entry
+    return {"enabled": enabled, "workflow": workflow_for(gate), "var": var_for(gate)}
+
+
+def gate_order(gates: dict) -> tuple[str, ...]:
+    """Return stable built-ins-first ordering for a gates mapping."""
+    custom = tuple(sorted(k for k in gates if k not in GATE_ORDER))
+    return GATE_ORDER + custom
 
 
 def _state_path(root: Optional[Path] = None) -> Path:
@@ -171,8 +235,8 @@ def apply_defaults(state: dict) -> dict:
     Pure transform: never writes through. Idempotent. Used by `read_state`
     so a partial-state `gates.json` (only `{"review": ...}`) still
     resolves cleanly with `security` + `maintenance` defaulted on. A
-    hand-edited extra key that is NOT in `VALID_GATE_KEYS` is left
-    alone here — `validate()` rejects it; `read_state` raises.
+    hand-edited custom key is left alone here — `validate()` accepts it only
+    when the name/workflow/var mapping is canonical.
 
     v1.1.0: also backfills DYNAMIC_FIELDS_DEFAULT on every gate entry so
     callers can `entry["dynamic_eligible"]` without a guard. Operator-set
@@ -202,7 +266,7 @@ def validate(state: object) -> None:
       1. `state` is a dict.
       2. `schema_version == "1.1.0"`. (Older 1.0.0 files are auto-migrated
          in-memory by `read_state` before reaching here.)
-      3. `gates.keys() ⊆ VALID_GATE_KEYS` (no extra keys).
+      3. `gates.keys()` are built-in keys or valid custom gate names.
       4. Each gate value is a dict whose keys are a subset of
          `{enabled, workflow, var} ∪ DYNAMIC_FIELDS_DEFAULT`. The required
          `{enabled, workflow, var}` keys must be present. Unknown keys raise.
@@ -223,15 +287,10 @@ def validate(state: object) -> None:
     gates = state.get("gates")
     if not isinstance(gates, dict):
         raise ValidationError("gates: must be a dict")
-    extra = set(gates.keys()) - VALID_GATE_KEYS
-    if extra:
-        raise ValidationError(
-            f"gates: unknown key(s) {sorted(extra)} — "
-            f"allowed: {sorted(VALID_GATE_KEYS)}"
-        )
     required_keys = frozenset({"enabled", "workflow", "var"})
     allowed_keys = required_keys | frozenset(DYNAMIC_FIELDS_DEFAULT)
-    for key in VALID_GATE_KEYS:
+    for key in gate_order(gates):
+        validate_gate_name(key)
         # Only validate keys that are PRESENT (apply_defaults synthesizes
         # missing keys before validation in the write path). This lets
         # `read_state` of a partial file succeed without forcing the
@@ -268,7 +327,7 @@ def validate(state: object) -> None:
                 f"(got {workflow!r})"
             )
         var = gate.get("var")
-        expected_var = f"GATES_{key.upper()}_ENABLED"
+        expected_var = var_for(key)
         if not isinstance(var, str) or var != expected_var:
             raise ValidationError(
                 f"gates.{key}.var: must equal {expected_var!r} (got {var!r})"
@@ -362,38 +421,24 @@ def is_enabled(gate: str, root: Optional[Path] = None) -> bool:
     disable a gate the operator intended to keep on. Mirrors the
     "correctness = always on" design in `lib/harness_mode_state.py`.
     """
-    if gate not in VALID_GATE_KEYS:
+    if not is_valid_gate_name(gate):
         return True
-    return bool(read_state(root)["gates"][gate]["enabled"])
-
-
-def workflow_for(gate: str) -> str:
-    """Return the workflow basename for `gate` (e.g. ``review.yml``)."""
-    if gate not in VALID_GATE_KEYS:
-        raise ValidationError(f"unknown gate: {gate!r}")
-    return DEFAULT_GATES[gate]["workflow"]
-
-
-def var_for(gate: str) -> str:
-    """Return the GH repo variable name for `gate` (e.g. ``GATES_REVIEW_ENABLED``)."""
-    if gate not in VALID_GATE_KEYS:
-        raise ValidationError(f"unknown gate: {gate!r}")
-    return DEFAULT_GATES[gate]["var"]
+    return bool(read_state(root)["gates"].get(gate, {"enabled": True})["enabled"])
 
 
 def runners_from_gates(root: Optional[Path] = None) -> list:
     """Return the per-judge workflow basenames that are enabled.
 
-    Output is in stable GATE_ORDER — `review`, `security`, `maintenance`
-    filtered to those with `enabled=True`. Used by `lib/ci_setup` to
+    Output is in stable built-ins-first order, with custom gates sorted after
+    shipped gates and filtered to those with `enabled=True`. Used by `lib/ci_setup` to
     derive the `runners` field of the marker when `gates.json` is
     present (replaces the legacy `exclude=` argument as the SSOT for
     what gets installed).
     """
     state = read_state(root)
     return [
-        DEFAULT_GATES[key]["workflow"]
-        for key in GATE_ORDER
+        state["gates"][key]["workflow"]
+        for key in gate_order(state["gates"])
         if state["gates"][key]["enabled"]
     ]
 
@@ -504,7 +549,7 @@ def sync(
         return out
     out["repo"] = detected
     state = read_state(root)
-    for gate in GATE_ORDER:
+    for gate in gate_order(state["gates"]):
         body = "true" if state["gates"][gate]["enabled"] else "false"
         ok, stderr = _sync_one(gh_path, detected, gate, body)
         out["results"][gate] = {"ok": ok, "stderr": stderr}
@@ -550,11 +595,20 @@ def _init_synthesize(root: Optional[Path]) -> dict:
     # Build per-gate enabled flags. When no marker is present (fresh
     # install OR corrupt marker), default everything to enabled; the
     # operator can `disable` after init.
+    workflow_to_gate = {entry["workflow"]: key for key, entry in DEFAULT_GATES.items()}
+    for runner in sorted(installed):
+        if runner in ("ci.yml", "auto-fix-pr.yml"):
+            continue
+        gate_key = workflow_to_gate.get(runner, runner[:-4] if runner.endswith(".yml") else "")
+        if gate_key and is_valid_gate_name(gate_key):
+            workflow_to_gate.setdefault(runner, gate_key)
     gates = {}
-    for key, default in DEFAULT_GATES.items():
-        workflow = default["workflow"]
+    for workflow, key in sorted(
+        workflow_to_gate.items(),
+        key=lambda item: (item[1] not in GATE_ORDER, item[1]),
+    ):
         enabled = True if no_marker else (workflow in installed)
-        gates[key] = dict(default, enabled=enabled)
+        gates[key] = default_gate_entry(key, enabled=enabled)
     synthesized = {
         "schema_version": SCHEMA_VERSION,
         "installed_by": "dev-kit:gate-select",
@@ -581,8 +635,7 @@ def _set_field(state: dict, gate: str, key: str, value: str) -> dict:
     `dynamic_eligible`/`forced_run` accept the same bool aliases;
     `scope_globs` accepts comma-separated strings OR a JSON list.
     """
-    if gate not in VALID_GATE_KEYS:
-        raise ValidationError(f"unknown gate: {gate!r}")
+    validate_gate_name(gate)
     allowed_keys = {"enabled", "workflow", "var"} | set(DYNAMIC_FIELDS_DEFAULT)
     if key not in allowed_keys:
         raise ValidationError(
@@ -653,13 +706,13 @@ def main(argv=None) -> int:
 
     for action in ("enable", "disable"):
         sp = sub.add_parser(action, help=f"{action} one gate's `enabled` flag")
-        sp.add_argument("gate", choices=GATE_ORDER)
+        sp.add_argument("gate")
         sp.add_argument("--root", default=None)
 
     set_p = sub.add_parser(
         "set", help="set one nested field on a gate entry (JSON-escapable)"
     )
-    set_p.add_argument("gate", choices=GATE_ORDER)
+    set_p.add_argument("gate")
     set_p.add_argument(
         "key",
         choices=("enabled", "workflow", "var") + tuple(DYNAMIC_FIELDS_DEFAULT),
@@ -702,7 +755,7 @@ def _dispatch(args) -> int:
         root = Path(args.root) if args.root else None
         state = read_state(root)
         gates_out = {}
-        for k in GATE_ORDER:
+        for k in gate_order(state["gates"]):
             entry = state["gates"][k]
             gates_out[k] = {
                 "enabled": entry["enabled"],
@@ -750,10 +803,11 @@ def _dispatch(args) -> int:
             )
             return 3
         failed = [g for g, r in result["results"].items() if not r["ok"]]
-        for gate in GATE_ORDER:
+        current = read_state(root)
+        for gate in gate_order(current["gates"]):
             r = result["results"][gate]
             mark = "✓" if r["ok"] else "✗"
-            body = "true" if read_state(root)["gates"][gate]["enabled"] else "false"
+            body = "true" if current["gates"][gate]["enabled"] else "false"
             print(f"{mark} {gate}: var={var_for(gate)} body={body}")
         if failed:
             print(
