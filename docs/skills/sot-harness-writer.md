@@ -29,7 +29,10 @@ explanation). The output is a SOT document with traceability.
 
 ## Output
 
-- `.dev-kit/hand-off/sot-harness-<session>.md` — the SOT document
+- `.dev-kit/hand-off/sot-harness-<session>.md` — the SOT document,
+  always preceded by a YAML frontmatter that marks it as a SOT
+  hand-off (`handoff_kind: sot`, `status: locked | held`) so the
+  plan skill's consume gate routes it via `--from-sot` (issue #898).
 - `.dev-kit/decision-log-sot-harness/<session>.md` — per-round Q+A
 
 ## Iron Laws (MUST-19)
