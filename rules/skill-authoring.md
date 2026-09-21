@@ -1,9 +1,6 @@
 ---
 paths:
   - "skills/**/SKILL.md"
-description: Authoring, frontmatter, layout, and governance rules for dev-kit skills.
-globs:
-  - "skills/**/SKILL.md"
 stale_after: 2027-05-31
 ---
 

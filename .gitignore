@@ -14,11 +14,7 @@ __pycache__/
 # Local env / runtime
 .env
 .claude-plugin/plugin/hooks/.strict
-.gjc/*
-!.gjc/skills
-!.gjc/rules
-!.gjc/extensions
-!.gjc/extensions/**
+.gjc/
 .worktrees/
 
 # Plugin test artifacts (NOT shipped)
