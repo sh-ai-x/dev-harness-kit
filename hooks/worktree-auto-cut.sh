@@ -5,6 +5,8 @@
 # the worktree (with preconditions), and bootstraps log-on. Falls back
 # to a manual-cut nudge on any failure. Slug derivation details are
 # in the design doc at docs/designs/worktree-auto-cut.md (PR #320).
+# Every accepted task gets a fresh worktree. Existing branch names receive
+# numeric suffixes without an active-worktree cap or a reuse path.
 #
 # Source the shared preamble (set -uo pipefail, INPUT=$(cat),
 # worktree_detect, jq-missing warning).
@@ -144,7 +146,6 @@ unique_branch_name() {
   while git show-ref --verify --quiet "refs/heads/${candidate}" 2>/dev/null; do
     candidate="${base}-${n}"
     n=$((n + 1))
-    [ "$n" -gt 99 ] && return 1
   done
   printf '%s\n' "$candidate"
 }
