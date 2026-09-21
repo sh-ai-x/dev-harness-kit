@@ -1,0 +1,19 @@
+{
+  "id": 20232367,
+  "name": "protect main",
+  "target": "branch",
+  "enforcement": "active",
+  "rules": [],
+  "bypass_actors": [
+    {
+      "actor_type": "User",
+      "actor_id": 12345,
+      "bypass_mode": "always"
+    },
+    {
+      "actor_type": "Team",
+      "actor_id": 67890,
+      "bypass_mode": "pull_request"
+    }
+  ]
+}

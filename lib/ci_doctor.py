@@ -39,6 +39,7 @@ from pathlib import Path
 # instead of N hand-copied try/except blocks across ci_setup / ci_doctor
 # / ci_update.
 from lib.ci_ruleset import check_ruleset_contract as _ci_ruleset_check
+from lib.ci_ruleset import check_ruleset_bypass_actors as _ci_ruleset_bypass_check
 from lib.dual_import import from_dual, from_dual_optional
 from lib.gh_cli import gh_available
 
@@ -1247,6 +1248,13 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
     # row stay in lock-step. The wrapper maps the helper's
     # `_CheckRow` dataclass into the ci-doctor `Check` row shape.
     report.checks.extend(_check_ruleset_workflow_contract(target, source_repo))
+    # Ruleset bypass-actors contract (issue: restore the GitHub UI
+    # "Allow specified actors to bypass required pull requests"
+    # checkbox as a local SSOT at .github/rulesets/protect-main.json).
+    # Common-impl helper lives in lib/ci_ruleset.py so the regression
+    # test (`tests/test_ruleset_bypass_actors.py`) and the ci-doctor
+    # row stay in lock-step.
+    report.checks.extend(_check_ruleset_bypass_actors(target, source_repo))
     return report
 
 
@@ -1377,6 +1385,25 @@ def _check_ruleset_workflow_contract(
     target: Path, source_repo: bool = False,
 ) -> list[Check]:
     rows = _ci_ruleset_check(target, source_repo=source_repo)
+    out: list[Check] = []
+    for r in rows:
+        out.append(Check(label=r.label, state=r.state, detail=r.detail))
+    return out
+
+
+# ---- Ruleset bypass-actors contract (admin PAT bypass SSOT) ------
+# Mirrors the wrapper pattern of `_check_ruleset_workflow_contract`
+# above: the shared helper in `lib/ci_ruleset.py` emits
+# `_CheckRow` dataclasses; the wrapper maps them into the
+# ci-doctor `Check` row shape. Two helpers kept behind separate
+# wrappers so a future ci-doctor row-format change (new state values,
+# new check label) doesn't have to touch the shared helper or the
+# regression test.
+
+def _check_ruleset_bypass_actors(
+    target: Path, source_repo: bool = False,
+) -> list[Check]:
+    rows = _ci_ruleset_bypass_check(target, source_repo=source_repo)
     out: list[Check] = []
     for r in rows:
         out.append(Check(label=r.label, state=r.state, detail=r.detail))
