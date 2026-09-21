@@ -6,9 +6,8 @@
 #      --work-tree, --no-pager, --bare)
 #   2. `git push` to main / origin main / HEAD:main / +main
 #   3. `git push --force` (-f / --force). `--force-with-lease` allowed.
-#   4. `git checkout main` / `git switch main` (primes a direct commit)
-#   5. `git branch -D main|master` (deleting the protection itself)
-#   6. `gh pr merge` (any invocation) — merging into main is always a
+#   4. `git branch -D main|master` (deleting the protection itself)
+#   5. `gh pr merge` (any invocation) — merging into main is always a
 #      human action, run outside automation.
 #
 # Allows everything else. See .claude/rules/git-workflow.md for rationale.
@@ -33,6 +32,15 @@ CMD="$(printf '%s' "$INPUT_JSON" | jq -r '.tool_input.command // ""' 2>/dev/null
 # explicit repository path for branch checks so valid worktree commits are
 # not mistaken for commits on the parent's main branch.
 GIT_CWD="${PWD}"
+
+# Hook runners may keep their process cwd at the parent session checkout while
+# exposing the command's effective working directory in the payload. Prefer
+# that directory when it exists; command-level `cd` / `git -C` parsing below
+# remains authoritative for commands that explicitly retarget the repository.
+PAYLOAD_CWD="$(printf '%s' "$INPUT_JSON" | jq -r '.cwd // ""' 2>/dev/null)"
+if [ -n "$PAYLOAD_CWD" ] && [ -d "$PAYLOAD_CWD" ]; then
+  GIT_CWD="$PAYLOAD_CWD"
+fi
 
 # A leading `cd <path> &&` / `cd <path>;` prefix changes the directory the
 # rest of the command actually runs in — resolve GIT_CWD relative to it
@@ -137,7 +145,7 @@ strip_git_globals() {
 CMD="$(strip_git_globals "$CMD")"
 
 # m1: dropped the dead `branch -d` arm — only `-D` has a denial check below.
-write_pattern='(git[[:space:]]+commit|git[[:space:]]+push|git[[:space:]]+checkout|git[[:space:]]+switch|git[[:space:]]+branch[[:space:]]+-D)'
+write_pattern='(git[[:space:]]+commit|git[[:space:]]+push|git[[:space:]]+branch[[:space:]]+-D)'
 if ! printf '%s' "$CMD" | grep -qE "$write_pattern"; then
   exit 0
 fi
@@ -173,29 +181,20 @@ if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+push'; then
   fi
 fi
 
-# 3. Block `git checkout main` (or `git switch main`) — it primes a direct
-#    commit to main in the next command. Allow `git checkout -b ...` (new branch).
-if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(checkout|switch)[[:space:]]'; then
-  # Allow `git checkout -b`, `git checkout <commit>`, `git checkout <file>`,
-  # and the file-restore form `git checkout <ref> -- <path>` (a `--` token
-  # appearing anywhere after the ref never changes HEAD, so it must not be
-  # treated as a branch switch — issue #471).
-  if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(checkout|switch)[[:space:]]+(-b|-c|-[0-9]+[[:space:]]|[a-f0-9]{7,}[[:space:]]|--)' \
-     || printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(checkout|switch)[[:space:]]+[^[:space:]]+[[:space:]]+--([[:space:]]|$)'; then
-    :
-  elif printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(checkout|switch)[[:space:]]+(main|master)([[:space:]]|$)'; then
-    deny "GIT GUARD" "switching to main in this checkout is forbidden. Use a worktree instead: \`git worktree add -b <type>/<slug> .worktrees/<slug> origin/main\`."
-  fi
-fi
+# Branch movement and synchronization are intentionally allowed. The safety
+# boundary is mutation: the commit check above rejects commits when the
+# current branch is main/master, and the push check rejects pushes targeting
+# main/master. This lets operators run the documented base-branch refresh:
+# `git checkout main && git pull --ff-only origin main`.
 
-# 4. Block `git branch -D` on main (deleting the protection itself).
+# 3. Block `git branch -D` on main (deleting the protection itself).
 if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+branch[[:space:]]+-D'; then
   if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+branch[[:space:]]+-D[[:space:]]+(main|master)([[:space:]]|$)'; then
     deny "GIT GUARD" "deleting main/master with -D is forbidden."
   fi
 fi
 
-# 5. Slot freshness check on `git push` to a feature branch.
+# 4. Slot freshness check on `git push` to a feature branch.
 #    Slot = origin/main's plugin.json version. For parallel PRs, add
 #    PR_index; the parallel-PR variant lives in worktree-guard.sh.
 _verify_slot() {

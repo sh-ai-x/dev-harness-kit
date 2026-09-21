@@ -125,6 +125,16 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("conflict marker", result.stderr.lower())
             self.assertIn("notes.txt", result.stderr)
 
+    def test_allows_restructuredtext_heading_underline(self):
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text("Architecture\n============\n\nBody\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_blocks_diff3_merge_base_marker(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
@@ -151,7 +161,7 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("conflict marker", result.stderr.lower())
             self.assertIn("notes.txt", result.stderr)
 
-    def test_allows_rst_heading_underlines(self):
+    def test_allows_long_rst_heading_underlines(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
             (root / "notes.txt").write_text("Architecture\n============\n")
