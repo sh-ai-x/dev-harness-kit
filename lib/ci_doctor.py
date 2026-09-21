@@ -29,6 +29,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lib.ci_ruleset import check_ruleset_bypass_actors as _ci_ruleset_bypass_check
+
 # Dual-mode import for sibling ci_setup.py:
 #   * Source repo (this module loaded as `lib.ci_doctor`): the relative
 #     `from .ci_setup import` resolves inside the `lib` package.
@@ -39,7 +41,6 @@ from pathlib import Path
 # instead of N hand-copied try/except blocks across ci_setup / ci_doctor
 # / ci_update.
 from lib.ci_ruleset import check_ruleset_contract as _ci_ruleset_check
-from lib.ci_ruleset import check_ruleset_bypass_actors as _ci_ruleset_bypass_check
 from lib.dual_import import from_dual, from_dual_optional
 from lib.gh_cli import gh_available
 
@@ -1247,14 +1248,14 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
     # test (`tests/test_ci_ruleset_contract.py`) and the ci-doctor
     # row stay in lock-step. The wrapper maps the helper's
     # `_CheckRow` dataclass into the ci-doctor `Check` row shape.
-    report.checks.extend(_check_ruleset_workflow_contract(target, source_repo))
+    report.checks.extend(_check_ruleset_workflow_contract(target))
     # Ruleset bypass-actors contract (issue: restore the GitHub UI
     # "Allow specified actors to bypass required pull requests"
     # checkbox as a local SSOT at .github/rulesets/protect-main.json).
     # Common-impl helper lives in lib/ci_ruleset.py so the regression
     # test (`tests/test_ruleset_bypass_actors.py`) and the ci-doctor
     # row stay in lock-step.
-    report.checks.extend(_check_ruleset_bypass_actors(target, source_repo))
+    report.checks.extend(_check_ruleset_bypass_actors(target))
     return report
 
 
@@ -1382,9 +1383,9 @@ def _check_open_pr(target: Path) -> list[Check]:
 # shared helper or the regression test.
 
 def _check_ruleset_workflow_contract(
-    target: Path, source_repo: bool = False,
+    target: Path,
 ) -> list[Check]:
-    rows = _ci_ruleset_check(target, source_repo=source_repo)
+    rows = _ci_ruleset_check(target)
     out: list[Check] = []
     for r in rows:
         out.append(Check(label=r.label, state=r.state, detail=r.detail))
@@ -1401,9 +1402,9 @@ def _check_ruleset_workflow_contract(
 # regression test.
 
 def _check_ruleset_bypass_actors(
-    target: Path, source_repo: bool = False,
+    target: Path,
 ) -> list[Check]:
-    rows = _ci_ruleset_bypass_check(target, source_repo=source_repo)
+    rows = _ci_ruleset_bypass_check(target)
     out: list[Check] = []
     for r in rows:
         out.append(Check(label=r.label, state=r.state, detail=r.detail))

@@ -30,9 +30,9 @@ Public surface:
     BypassActor          # namedtuple of (file, actor_type, repository_role, actor_id, bypass_mode)
     load_ruleset_contexts(target_dir) -> list[RulesetContext]
     load_workflow_job_names(target_dir) -> tuple[set[str], set[str], list[str]]
-    check_ruleset_contract(target_dir, *, source_repo=False) -> list[_CheckRow]
+    check_ruleset_contract(target_dir) -> list[_CheckRow]
     load_ruleset_bypass_actors(target_dir) -> list[BypassActor]
-    check_ruleset_bypass_actors(target_dir, *, source_repo=False) -> list[_CheckRow]
+    check_ruleset_bypass_actors(target_dir) -> list[_CheckRow]
 """
 from __future__ import annotations
 
@@ -230,7 +230,12 @@ def load_ruleset_bypass_actors(target_dir: Path) -> list[BypassActor]:
         if payload is None:
             continue
         rel = json_path.relative_to(target_dir).as_posix()
-        actors = payload.get("bypass_actors") if isinstance(payload, dict) else None
+        # `payload` is guaranteed to be a dict here: `_read_json`
+        # returned `None` for anything else (line 230-231 above), and
+        # `payload is None` short-circuited this iteration. The
+        # previous `isinstance(payload, dict)` ternary was redundant
+        # dead code.
+        actors = payload.get("bypass_actors")
         if not isinstance(actors, list):
             continue
         for entry in actors:
@@ -249,7 +254,18 @@ def load_ruleset_bypass_actors(target_dir: Path) -> list[BypassActor]:
                 else ""
             )
             actor_id_raw = entry.get("actor_id")
-            actor_id = int(actor_id_raw) if isinstance(actor_id_raw, int) else 0
+            # Accept either JSON int or a digit-string (e.g. `"12345"`
+            # from a hand-edited SSOT). Other shapes (None, dict, list,
+            # non-digit string) silently coerce to 0 instead of raising
+            # — the SSOT may be partially-populated by GitHub's export
+            # for actor types where actor_id is meaningless (Team /
+            # RepositoryRole entries carry no actor_id).
+            if isinstance(actor_id_raw, int) and not isinstance(actor_id_raw, bool):
+                actor_id = actor_id_raw
+            elif isinstance(actor_id_raw, str) and actor_id_raw.lstrip("-").isdigit():
+                actor_id = int(actor_id_raw)
+            else:
+                actor_id = 0
             out.append(BypassActor(
                 file=rel,
                 actor_type=actor_type,
@@ -262,8 +278,6 @@ def load_ruleset_bypass_actors(target_dir: Path) -> list[BypassActor]:
 
 def check_ruleset_bypass_actors(
     target_dir: Path,
-    *,
-    source_repo: bool = False,
 ) -> list[_CheckRow]:
     """Cross-check the local ruleset `bypass_actors[]` against the
     admin-bypass SSOT contract.
@@ -288,10 +302,12 @@ def check_ruleset_bypass_actors(
         `docs/quality/ci-ruleset-contract.md`.
       - WARN rows per unparseable ruleset file.
 
-    The `source_repo` flag is honored for symmetry with the
-    `check_ruleset_contract` contract; today it has no effect.
+    The `source_repo` flag was previously honored for symmetry with the
+    `check_ruleset_contract` contract but had no effect, so the
+    keyword was dropped from both helpers (issue: dead-weight API
+    surface kept "for symmetry" — better to drop and reintroduce when
+    a real consumer-vs-source-repo distinction materializes).
     """
-    _ = source_repo
     ruleset_dir = Path(target_dir) / ".github" / "rulesets"
     if not ruleset_dir.is_dir():
         return [_CheckRow(
@@ -432,8 +448,6 @@ class _CheckRow:
 
 def check_ruleset_contract(
     target_dir: Path,
-    *,
-    source_repo: bool = False,
 ) -> list[_CheckRow]:
     """Cross-check every required-status-check context in any local
     ruleset file against the workflow job names under
@@ -450,10 +464,10 @@ def check_ruleset_contract(
       - One FAIL row listing every ruleset context with no matching
         job name (plus a remediation hint).
 
-    The `source_repo` flag is honored for symmetry with ci-doctor;
-    today it has no effect.
+    The `source_repo` flag was previously honored for symmetry with
+    ci-doctor but had no effect, so the keyword was dropped. See
+    `check_ruleset_bypass_actors` docstring for the rationale.
     """
-    _ = source_repo
     ruleset_dir = Path(target_dir) / ".github" / "rulesets"
     if not ruleset_dir.is_dir():
         return [_CheckRow(

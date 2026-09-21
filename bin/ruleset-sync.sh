@@ -36,7 +36,8 @@
 #   1   runtime error (gh missing/unauth, jq missing, JSON parse error,
 #       GitHub API failure, drift detected under --check)
 #   2   invalid CLI / unknown flag
-#   3   degraded (gh not on PATH / not authed) — operator-visible
+# (Previously: exit 3 for degraded mode. Collapsed to 1 with the
+# degraded message preserved on stderr; CI treats 1 and 3 identically.)
 
 set -euo pipefail
 
@@ -52,7 +53,11 @@ usage() {
 
 die_runtime() { echo "error: $*" >&2; exit 1; }
 die_cli()     { echo "error: $*" >&2; exit 2; }
-die_degraded(){ echo "error: $*" >&2; exit 3; }
+# `die_degraded` used to exit 3 (gh missing / unauth). Most CI treats
+# exit 3 the same as exit 1, so the special code added noise without
+# information. Collapsed to exit 1 with the degraded message preserved
+# on stderr so the operator still sees the cause.
+die_degraded(){ echo "error: $*" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -146,11 +151,16 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-# Apply the PATCH.
+# Apply the PATCH. Per-run response body lives in a `mktemp` file so
+# concurrent runs cannot clobber each other on a hardcoded path; the
+# EXIT trap cleans up on success, failure, or signal.
+TMP_RESPONSE="$(mktemp)"
+trap 'rm -f "$TMP_RESPONSE"' EXIT
+
 HTTP="$(gh api --method PATCH "/repos/${REPO}/rulesets/${RULESET_ID}" \
   --input - <<<"$RULESET_PAYLOAD" \
   --include -H "Accept: application/vnd.github+json" \
-  -o /tmp/ruleset-sync-response.json -w '%{http_code}' 2>&1)" \
+  -o "$TMP_RESPONSE" -w '%{http_code}' 2>&1)" \
   || die_runtime "gh api PATCH /repos/${REPO}/rulesets/${RULESET_ID} failed: $HTTP"
 
 # 200 (updated) and 422 (validation error from server) are the
@@ -162,12 +172,12 @@ case "$HTTP" in
   200) echo "  ✓ PATCH applied (HTTP 200)" ;;
   422)
     echo "  ✗ GitHub rejected the payload (HTTP 422):" >&2
-    jq -r '.message // .errors // .' /tmp/ruleset-sync-response.json 2>/dev/null >&2 || true
+    jq -r '.message // .errors // .' "$TMP_RESPONSE" 2>/dev/null >&2 || true
     exit 1
     ;;
   *)
     echo "  ✗ unexpected HTTP $HTTP from PATCH:" >&2
-    head -c 500 /tmp/ruleset-sync-response.json 2>/dev/null >&2 || true
+    head -c 500 "$TMP_RESPONSE" 2>/dev/null >&2 || true
     exit 1
     ;;
 esac

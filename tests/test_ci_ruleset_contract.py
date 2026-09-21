@@ -226,7 +226,7 @@ class TestCiRulesetContract(unittest.TestCase):
 
     # ---- repos-real: contract surface against the live worktree -------
 
-    def test_real_repo_with_no_ruleset_files_does_not_fail(self):
+    def test_real_repo_with_local_ruleset_files_passes(self):
         """The source repo at HEAD now authors
         `.github/rulesets/protect-main.json` (the bypass-actor SSOT
         added alongside the admin-bypass checkbox restoration; see
