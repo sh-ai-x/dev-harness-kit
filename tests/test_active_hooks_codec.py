@@ -34,6 +34,21 @@ REGEN_TOOL = REPO_ROOT / "tools" / "regenerate_active_hooks.py"
 FIXTURE_HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
 
 
+class _FrozenStat:
+    """Minimal stat result carrying only `st_mtime`.
+
+    Used by the regression tests for the cache-invalidation contract
+    (see `TestActiveHooksCodec.test_set_stage_invalidates_cache_even_when_mtime_unchanged`).
+    `_invalidate_cache` reads `st_mtime`; that's the only field the
+    regression scenario needs. The mock constructed at the test
+    boundary routes other paths through `os.stat` so `mkdir` and
+    friends see real filesystem metadata.
+    """
+
+    def __init__(self, mtime: float) -> None:
+        self.st_mtime = mtime
+
+
 class TestActiveHooksCodec(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -124,6 +139,83 @@ class TestActiveHooksCodec(unittest.TestCase):
         self.assertEqual(result["matrix"], active_hooks_codec.DEFAULT_MATRIX)
         # No side effect: file still absent.
         self.assertFalse(matrix_path.exists())
+
+    def test_set_stage_invalidates_cache_even_when_mtime_unchanged(self):
+        """Regression: cache key is `(path, mtime)`, but mutating writers
+        must evict the cache so the next read is forced against disk.
+
+        On filesystems where `os.replace` does not bump `st_mtime` to a
+        new value (NFS, some Docker overlay layers, coarse-mtime
+        filesystems), the `(path, mtime)` key would otherwise still
+        match and serve the pre-write payload. The fix
+        (`lib/active_hooks_codec.py::_invalidate_cache`) drops every
+        cache entry for `project_root` after `atomic_write_json` so the
+        next `load_matrix` reads from disk regardless of mtime drift.
+
+        The test pins the contract by mocking the matrix path's
+        `Path.stat()` to return the same `st_mtime` for every call —
+        simulating a coarse-mtime filesystem — then asserting that the
+        post-mutation read picks up the new value. Without the fix, the
+        `(path, fake_mtime)` cache entry populated by the priming read
+        would survive `set_stage`'s write and serve the stale
+        pre-mutation payload.
+        """
+        active_hooks_codec.init_matrix(self.root)
+
+        fake_mtime = 1_700_000_000.0
+
+        def _frozen_stat(self_path, **kwargs):
+            # patch.object(Path, "stat", ...) replaces the unbound
+            # method; the first arg is the Path instance. Compare by
+            # resolved string form.
+            target = str(self.root / ".dev-kit" / ".active-hooks.json")
+            if str(self_path) == target:
+                return _FrozenStat(fake_mtime)
+            return os.stat(self_path, **kwargs)
+
+        with patch.object(Path, "stat", _frozen_stat):
+            # Prime the cache with a stale (path, fake_mtime) entry —
+            # simulates the long-running session that has been reading
+            # the matrix for the entire lifetime of the process.
+            self.assertFalse(
+                active_hooks_codec.is_hook_active(self.root, "plan", "tdd-guard"),
+                "precondition: plan/tdd-guard must default to False",
+            )
+
+            active_hooks_codec.set_stage(self.root, "plan", "tdd-guard", True)
+            # If `_invalidate_cache` did NOT run, the cached entry from
+            # the priming read above would still be served and this
+            # assertion would fail.
+            self.assertTrue(
+                active_hooks_codec.is_hook_active(self.root, "plan", "tdd-guard"),
+                "set_stage did not invalidate cache; stale (path, mtime) entry served",
+            )
+
+    def test_disable_override_invalidates_cache_even_when_mtime_unchanged(self):
+        """Same contract as set_stage: post-write invalidation must
+        drop the prior cache entry so disable_override is observable
+        on the very next is_hook_active call under a frozen mtime."""
+        active_hooks_codec.init_matrix(self.root)
+
+        fake_mtime = 1_700_000_001.0
+
+        def _frozen_stat(self_path, **kwargs):
+            target = str(self.root / ".dev-kit" / ".active-hooks.json")
+            if str(self_path) == target:
+                return _FrozenStat(fake_mtime)
+            return os.stat(self_path, **kwargs)
+
+        with patch.object(Path, "stat", _frozen_stat):
+            # Prime the cache.
+            self.assertTrue(
+                active_hooks_codec.is_hook_active(self.root, "build", "bash-guard"),
+                "precondition: build/bash-guard must default to True",
+            )
+            active_hooks_codec.disable_override(self.root, "bash-guard")
+            self.assertFalse(
+                active_hooks_codec.is_hook_active(self.root, "build", "bash-guard"),
+                "disable_override did not invalidate cache; stale (path, mtime) entry served",
+            )
 
     def test_set_stage_on_fileless_root_does_not_leak_into_other_fileless_root(self):
         """Regression for issue #480.

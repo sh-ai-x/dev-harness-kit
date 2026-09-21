@@ -423,6 +423,7 @@ class TestSelectGatesDynamic(unittest.TestCase):
                 skip=(n in skip_names),
                 reasoning=f"fake:{n}",
                 confidence=0.9,
+                risk_level=0.0,
                 raw_score={},
             )
             for n in ("review", "security", "maintenance")
