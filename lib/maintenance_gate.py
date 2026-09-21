@@ -71,7 +71,6 @@ _PRIMARY_REGISTRY_DOC = "README.md"
 # run the regen tool).
 _SECONDARY_REGISTRY_DOCS: frozenset = frozenset({
     "docs/skills/README.md",           # manual English
-    "docs/skills/README.ko.md",        # manual Korean
 })
 
 # File-status values that indicate a brand-new path. ``renamed`` is

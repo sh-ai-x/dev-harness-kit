@@ -2,7 +2,7 @@
 
 > Single source of truth: this file + `tests/test_naming.py` regression tests.
 
-**Language:** English · [한국어](NAMING.ko.md)
+
 
 ## Skill directory / file
 

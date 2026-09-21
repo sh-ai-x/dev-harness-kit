@@ -1,6 +1,6 @@
 # STAGES — dev-harness-kit per-stage harness spec
 
-**Language:** English · [한국어](STAGES.ko.md)
+
 
 > Reference: ADR-0011, ADR-0020. 7 stages (B / B.5 / 1 / 2 / 3 / 5a / 5b / 6 / 7) × must/must-not/AC unified.
 

@@ -20,7 +20,6 @@ rules on every PR:
    |---|---|
    | `README.md` (top level) | **MANDATORY** — the check passes on this file alone |
    | `docs/skills/README.md` (English) | good practice, not a substitute |
-   | `docs/skills/README.ko.md` (Korean) | good practice, not a substitute |
    | n/a (commands/ removed) | n/a |
    | `skills/README.md` | never counts — auto-generated |
 

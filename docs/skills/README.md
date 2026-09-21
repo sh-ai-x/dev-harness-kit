@@ -1,6 +1,6 @@
 # Skills documentation index
 
-**Language:** English · [한국어](README.ko.md)
+
 
 This is the detailed, human-readable documentation layer for every skill
 shipped by the `dev-kit` plugin — one page per skill under `docs/skills/`,
