@@ -24,6 +24,13 @@ from typing import Literal
 
 DecisionType = Literal["accept", "reject", "customize"]
 
+# Hand-off frontmatter — single source of truth for the discriminator
+# the plan-skill consume gate uses (issue #898).
+SOT_HANDOFF_KIND = "sot"
+SOT_HANDOFF_STATUS_LOCKED = "locked"
+SOT_HANDOFF_STATUS_HELD = "held"
+SOT_HANDOFF_GENERATED_BY = "sot-harness-writer"
+
 
 @dataclass(frozen=True)
 class Recommendation:
@@ -583,12 +590,39 @@ def _incomplete_doc(decisions: SOTDecisionSet, errs: list[str]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def _sot_frontmatter(decisions: SOTDecisionSet, status: str) -> str:
+    """Render the YAML frontmatter that marks this file as a SOT handoff.
+
+    The discriminator (``handoff_kind: sot``) and ``status`` field let
+    the plan skill's consume gate route the file through `--from-sot`
+    instead of misinterpreting it as an interview handoff (issue #898).
+    """
+    lines = [
+        "---",
+        f"handoff_kind: {SOT_HANDOFF_KIND}",
+        f"status: {status}",
+        f"session_id: {_safe_session_id(decisions.session_id)}",
+        f"generated_by: {SOT_HANDOFF_GENERATED_BY}",
+        "---",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def write_sot_handout(decisions: SOTDecisionSet, root: Path) -> Path:
-    """Write the SOT doc to .dev-kit/hand-off/sot-harness-<session>.md."""
+    """Write the SOT doc to .dev-kit/hand-off/sot-harness-<session>.md.
+
+    Always carries the typed YAML frontmatter
+    (``handoff_kind: sot`` + ``status: locked | held``) so the plan
+    skill's consume gate can route it correctly. See issue #898.
+    """
+    errs = decisions.validate()
     safe = _safe_session_id(decisions.session_id)
     target = root / ".dev-kit" / "hand-off" / f"sot-harness-{safe}.md"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(synthesize_sot(decisions))
+    status = SOT_HANDOFF_STATUS_HELD if errs else SOT_HANDOFF_STATUS_LOCKED
+    body = synthesize_sot(decisions)
+    target.write_text(_sot_frontmatter(decisions, status) + body)
     return target
 
 

@@ -82,9 +82,34 @@ the user to the failing dimension.
   prompt) + session id (default = "default").
 - **Output**:
   - `.dev-kit/hand-off/sot-harness-<session>.md` — the SOT document
-    with all 5 dimensions, traceability, implementation phases.
+    with all 5 dimensions, traceability, implementation phases. The
+    file ALWAYS carries a YAML frontmatter (see "Output frontmatter"
+    below) so the plan-skill hand-off consume gate can route it via
+    `--from-sot` (issue #898).
   - `.dev-kit/decision-log-sot-harness/<session>.md` — every Q+A in
     order, including rejected recommendations and the user's reason.
+
+### Output frontmatter
+
+The SOT hand-off frontmatter is the typed discriminator
+`lib.hand_off_consume.SOT_HANDOFF_KIND = "sot"`. The plan skill
+MUST NOT consume a `sot-harness-*.md` file through the generic
+interview path; it only accepts one via `--from-sot <path>`.
+
+```yaml
+---
+handoff_kind: sot
+status: locked          # locked = all 5 rounds accepted; held = validation failed
+session_id: <sanitized session id>
+generated_by: sot-harness-writer
+---
+```
+
+` `status: held` is emitted when the decision set fails
+`SOTDecisionSet.validate()` (e.g. a round was skipped, a `reject`
+came without a reason, or a `customize` came without
+`customize_text`). Re-run `/dev-kit:sot-harness-writer` to complete
+the missing rounds.
 
 ## Post-interview handoff
 
