@@ -237,6 +237,26 @@ blockers, operator-readable one-liner.
 | MAX_ITERS=1000 | `skills/babysit-pr/SKILL.md` | babysit-pr hits watchdog cap → RECOVERY_REQUIRED |
 | same-stage-repeat=2 | ralph itself | same sub-stage re-enters twice → RECOVERY_REQUIRED |
 
+## Thin meta-harness integration
+
+The runtime contract is intentionally smaller than the surrounding proposal:
+
+- In `ATTENDED_RUN`, a normal worker Stop is a checkpoint and successful return
+  to the next RALPH cycle; it is not workflow completion.
+- `SessionEnd`, exit 0, and assistant prose cannot create `COMPLETED`; the
+  existing `ralph-promote` boundary must publish a validated completion receipt.
+- Harness improvement runs offline through the existing evaluate/meta-eval
+  path: `observe → diagnose → propose → replay → holdout → canary → rollback`.
+- Safety, kernel, metric, protected-holdout, retry, and product-code changes
+  are never self-promoted. Normal model reasoning, Tool choice, and delegation
+  remain unconstrained.
+
+The formulas and thresholds live in
+`docs/observability/meta-harness-metrics.md`; fault classification lives in
+`docs/observability/meta-harness-fault-triage.md`. The state machine in
+`skills/ralph/lib/ralph_state.py` remains the authority for attended lock and
+terminal transitions.
+
 ## What this skill does NOT do
 
 - ❌ Auto-merge to `main` (MUST-NO-SKIP from babysit-pr)
