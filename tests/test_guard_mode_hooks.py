@@ -174,5 +174,113 @@ class TestSessionStartGuardModeReset(unittest.TestCase):
             tmp.cleanup()
 
 
+class TestGuardFailOpenShortCircuit(unittest.TestCase):
+    """Pins the silent-bypass contract: when DEV_KIT_GUARDS=off, each guard
+    hook MUST exit 0 silently and MUST NOT emit any `guard.blocked` event
+    into `.dev-kit/trace/events.jsonl`.
+
+    The committed `.claude/settings.json` ships `env.DEV_KIT_GUARDS=on`, so
+    the normal CI run never exercises this branch — a future contributor
+    adding audit emissions inside the fail-open short-circuit would
+    silently inflate the prevention_quality metric. This test catches
+    that regression by exercising every guard with the policy explicitly
+    forced off and asserting no blocked event lands on disk.
+    """
+
+    def _events_path(self, root: Path) -> Path:
+        return root / ".dev-kit" / "trace" / "events.jsonl"
+
+    def _read_blocked_events(self, root: Path) -> list:
+        path = self._events_path(root)
+        if not path.exists():
+            return []
+        events = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue
+        return events
+
+    def test_worktree_guard_fail_open_silent(self):
+        """With DEV_KIT_GUARDS=off, worktree-guard.sh must exit 0 on a
+        main-checkout Edit AND must not emit guard.blocked."""
+        tmp = _init_main_repo()
+        try:
+            r = subprocess.run(
+                ["bash", str(HOOKS / "worktree-guard.sh")],
+                input=json.dumps(_edit_payload(str(Path(tmp.name) / "foo.py"))),
+                capture_output=True, text=True, timeout=10, cwd=tmp.name,
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
+                     "DEV_KIT_GUARD_ROOT": tmp.name},
+            )
+            self.assertEqual(r.returncode, 0,
+                             f"worktree-guard failed open: stderr={r.stderr!r}")
+            blocked = [e for e in self._read_blocked_events(Path(tmp.name))
+                       if e.get("event_type") == "guard.blocked"]
+            self.assertEqual(
+                blocked, [],
+                f"worktree-guard emitted guard.blocked on fail-open: {blocked!r}",
+            )
+        finally:
+            tmp.cleanup()
+
+    def test_tdd_guard_fail_open_silent(self):
+        """With DEV_KIT_GUARDS=off, tdd-guard.sh must exit 0 on a core
+        Edit AND must not emit guard.blocked."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            r = subprocess.run(
+                ["bash", str(HOOKS / "tdd-guard.sh")],
+                input=json.dumps(_edit_payload(str(root / "lib" / "core.py"))),
+                capture_output=True, text=True, timeout=10, cwd=root,
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
+                     "DEV_KIT_TDD_ROOT": str(root)},
+            )
+            self.assertEqual(r.returncode, 0,
+                             f"tdd-guard failed open: stderr={r.stderr!r}")
+            blocked = [e for e in self._read_blocked_events(root)
+                       if e.get("event_type") == "guard.blocked"]
+            self.assertEqual(
+                blocked, [],
+                f"tdd-guard emitted guard.blocked on fail-open: {blocked!r}",
+            )
+
+    def test_git_guard_fail_open_silent(self):
+        """With DEV_KIT_GUARDS=off, git-guard.sh must exit 0 on a direct
+        `git commit` on main AND must not emit guard.blocked.
+
+        The fail-open short-circuit fires BEFORE the command-parsing
+        pipeline runs, so the input payload is structurally complete
+        (a real `git commit` on main would normally deny).
+        """
+        tmp = _init_main_repo()
+        try:
+            payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git commit -m test"},
+            }
+            r = subprocess.run(
+                ["bash", str(HOOKS / "git-guard.sh")],
+                input=json.dumps(payload),
+                capture_output=True, text=True, timeout=10, cwd=tmp.name,
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
+                     "DEV_KIT_GUARD_ROOT": tmp.name},
+            )
+            self.assertEqual(r.returncode, 0,
+                             f"git-guard failed open: stderr={r.stderr!r}")
+            blocked = [e for e in self._read_blocked_events(Path(tmp.name))
+                       if e.get("event_type") == "guard.blocked"]
+            self.assertEqual(
+                blocked, [],
+                f"git-guard emitted guard.blocked on fail-open: {blocked!r}",
+            )
+        finally:
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
