@@ -41,8 +41,7 @@ Before this directory existed, the analyzer's default output was
 still visually polluting the top of `ls`. Moving the default here makes
 "where do dashboards live?" answerable from `docs/` alone — the
 `docs/observability/` family already hosts the long-form prose for
-`token-efficiency.md` and `session-monitor.md`, so dashboards belong
-in the same neighborhood.
+`token-efficiency.md`, so dashboards belong in the same neighborhood.
 
 ## Performance
 

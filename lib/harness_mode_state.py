@@ -11,8 +11,8 @@ or not, can disable them.
 Terminology (issue #775):
 - **Local hook** = the harness-mode-controlled switches below. Fires on the
   developer's machine during a session via PreToolUse/PostToolUse/UserPromptSubmit
-  hooks (`hooks/*.sh`) or Python consumers (`lib/tdd_scope_judge.py`,
-  `lib/execute.py`). Read by `resolved_gate()` at each invocation.
+  hooks (`hooks/*.sh`) or Python consumers (`lib/execute.py`). Read by
+  `resolved_gate()` at each invocation.
 - **CI workflow gate** (NOT controlled here) = the GH-Actions jobs in
   `.github/workflows/*.yml` (review/security/maintenance/lint/test/validate/
   severity-gate/...). They run on every push regardless of harness-mode and
@@ -49,7 +49,6 @@ CORRECTNESS_GATES = frozenset({
 # one of these to its "off" value in one shot; `full` (the default) leaves
 # them all at their "on" value.
 OPTIONAL_GATE_DEFAULTS = {
-    "tdd_scope_judge": {"full": "on", "fast": "off"},
     "slop_detector": {"full": "on", "fast": "off"},
     "pre_commit_review": {"full": "on", "fast": "off"},
     "maintenance": {"full": "on", "fast": "off"},
@@ -86,11 +85,6 @@ GATE_CATEGORIES = {
         "description": "refuse local edits that would break GH-Actions (e.g. stale plugin.json version)",
     },
     # quality (picker-offered)
-    "tdd_scope_judge": {
-        "type": "local_hook",
-        "category": "quality",
-        "description": "TDD scope judge before each build step (skipping defers to CI test gate)",
-    },
     "security_owasp": {
         "type": "local_hook",
         "category": "quality",

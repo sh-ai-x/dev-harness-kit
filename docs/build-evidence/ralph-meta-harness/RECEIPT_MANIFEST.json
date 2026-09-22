@@ -1,0 +1,12 @@
+{
+  "certificate_type": "ralph.receipt-manifest",
+  "completion_status": "verified",
+  "created_at": "2026-09-20T16:04:34+00:00",
+  "harness_candidate": "working-tree",
+  "phase": "ralph-meta-harness",
+  "plan_id": "ralph-meta-harness",
+  "schema_version": 1,
+  "session": "ralph-meta-harness",
+  "terminal_state": "USER_MERGE_REQUIRED",
+  "verifier_kind": "declared"
+}

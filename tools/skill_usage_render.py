@@ -110,7 +110,7 @@ def _discover_catalog_skills(repo_root: Path) -> list[str]:
     and is invisible to the 0/0 filter in :func:`_run_propose_delete`. This
     walks the catalog directly so those skills get a zero-default row too.
 
-    Model-use sub-skills (``user-invocable: false``, e.g. ``build-tdd``)
+    Model-use sub-skills (``user-invocable: false``, e.g. ``valuate``)
     are excluded: they are dispatched implicitly by a sub-agent rather
     than via an explicit ``Skill`` tool_use, so a 0/0 telemetry reading
     for them reflects a dispatch gap, not disuse -- surfacing them here

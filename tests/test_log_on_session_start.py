@@ -392,7 +392,7 @@ class TestLogOnSessionStartEmptyPayload(unittest.TestCase):
 
 
 class TestLogOnSessionStartWiring(unittest.TestCase):
-    """hooks.json must register log-on-session-start.sh under SessionStart."""
+    """The SessionStart dispatcher must retain the log child module."""
 
     def setUp(self):
         path = HOOKS / "hooks.json"
@@ -409,25 +409,22 @@ class TestLogOnSessionStartWiring(unittest.TestCase):
 
     def test_log_on_session_start_wired_into_sessionstart(self):
         hooks = self._hooks_under("SessionStart")
-        match = [h for h in hooks if "log-on-session-start.sh" in h.get("command", "")]
-        self.assertTrue(
-            match,
-            f"log-on-session-start.sh not wired into SessionStart. Got: {hooks}",
-        )
-        for h in match:
-            self.assertNotIn("timeout", h, f"hook timeout must be unset: {h}")
+        match = [h for h in hooks if "session-start.sh" in h.get("command", "")]
+        self.assertEqual(len(match), 1, f"dispatcher missing or duplicated: {hooks}")
+        self.assertNotIn("timeout", match[0], f"hook timeout must be unset: {match[0]}")
+        dispatcher = (HOOKS / "session-start.sh").read_text(encoding="utf-8")
+        self.assertIn("log-on-session-start.sh", dispatcher)
 
     def test_session_start_check_still_wired(self):
-        """Regression: existing nudge hook must remain alongside the new one."""
+        """Regression: existing child modules remain under the dispatcher."""
         hooks = self._hooks_under("SessionStart")
         self.assertTrue(
-            any("session-start-check.sh" in h.get("command", "") for h in hooks),
-            f"session-start-check.sh missing from SessionStart: {hooks}",
+            any("session-start.sh" in h.get("command", "") for h in hooks),
+            f"session-start dispatcher missing from SessionStart: {hooks}",
         )
-        self.assertTrue(
-            any("log-on-session-start.sh" in h.get("command", "") for h in hooks),
-            f"log-on-session-start.sh missing from SessionStart: {hooks}",
-        )
+        dispatcher = (HOOKS / "session-start.sh").read_text(encoding="utf-8")
+        self.assertIn("session-start-check.sh", dispatcher)
+        self.assertIn("log-on-session-start.sh", dispatcher)
 
 
 if __name__ == "__main__":

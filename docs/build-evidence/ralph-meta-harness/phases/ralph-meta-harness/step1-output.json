@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase": "ralph-meta-harness",
+  "step": 1,
+  "exit_code": 0,
+  "stdout": "................................ [100%]\\n32 passed in 11.68s\\n",
+  "stderr": "",
+  "duration_seconds": 11.68,
+  "timestamp": "2026-09-21T00:00:01Z",
+  "checks_run": [
+    "pytest: tests/test_ralph_controller.py",
+    "pytest: tests/test_trace_session_end.py",
+    "pytest: tests/test_trace_session_end_hook.py",
+    "pytest: tests/test_ralph_chain.py"
+  ],
+  "independent": true,
+  "changed_files": [
+    "lib/ralph_controller.py",
+    "hooks/stop-verify.sh",
+    "hooks/trace-session-end.sh",
+    "skills/ralph/lib/ralph_chain.py"
+  ]
+}

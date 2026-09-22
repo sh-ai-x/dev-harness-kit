@@ -17,8 +17,8 @@ def _resolve_root(explicit: Path | None) -> Path:
     """Resolve the TDD state root the same way the shell hooks do.
 
     Mirrors ``${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}``
-    used by hooks/tdd-guard.sh:26 and hooks/tdd-scope-judge.sh:14, so the
-    CLI records RED/GREEN evidence where the guard reads it. Without this,
+    used by hooks/tdd-guard.sh, so the CLI records RED/GREEN evidence where
+    the guard reads it. Without this,
     ``python3 -m lib.tdd_cycle red`` (the command tdd-guard.sh itself
     suggests, with no ``--root``) wrote the state under cwd — when
     ``DEV_KIT_TDD_ROOT`` pointed elsewhere, the guard never saw the RED

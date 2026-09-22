@@ -1,10 +1,11 @@
 # Linear auto-trigger hooks
 
-> SessionStart / PostToolUse:Bash / UserPromptSubmit hooks that fire
+> SessionStart / PostToolUse:Bash / UserPromptSubmit child modules that fire
 > `tools/linear_sync.py auto-sync` from the right cwd so a worktree
 > creation, a fresh session, or a plan/task shift is reflected in
 > Linear immediately, without the user typing anything. All three
-> are owner-gated; non-owners bail silently.
+> are owner-gated; non-owners bail silently. The SessionStart module is
+> invoked by the single `hooks/session-start.sh` dispatcher.
 
 ## Why three hooks, not one
 
@@ -18,7 +19,7 @@ workflow events where there is no edit yet:
 | New session in a worktree | the user often starts with a question, not a save | the first Edit can be many turns in; a session-start sync removes the latency |
 | Plan / task change mid-session | the user often says "actually, let me switch to X" before saving | the next Edit can be 5+ minutes away if the user is still planning |
 
-Each hook is a thin shell wrapper that calls `auto-sync` from the
+Each module is a thin shell wrapper that calls `auto-sync` from the
 correct cwd. They share the same owner gate (see
 [`is_repo_owner`](#owner-gate) below) so a contributor who clones
 the repo never has their work silently registered in the owner's
@@ -95,9 +96,9 @@ refusing to ever touch the API.
 ## Wiring
 
 Both `hooks/hooks.json` (Claude Code) and
-`.codex-plugin/hooks/hooks.json` (Codex) register the three hooks
-in the same event matchers, so behavior is identical across
-runtimes. The parity is asserted by two regression tests:
+`.codex-plugin/hooks/hooks.json` (Codex) register the three modules
+in the same event matchers, with the SessionStart module reached through
+`session-start.sh`, so behavior is identical across runtimes. The parity is asserted by two regression tests:
 `tests/test_linear_trigger_hooks_wiring.py` (loops over BOTH
 JSONs and asserts every hook is wired under the expected
 event + matcher in each runtime) and

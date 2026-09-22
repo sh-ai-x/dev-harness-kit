@@ -12,6 +12,7 @@
 
 - **This project's plugin choice** — `enabledPlugins` reflects the team's choice
 - **Mode** — `env.DEV_KIT_MODE` is `full`, `lite`, or `undev`
+- **Guard policy** — `env.DEV_KIT_GUARDS` is explicitly `on` only after bootstrap opt-in; absent means `off`
 - **Hooks the team agreed on** — SessionStart, PreToolUse, etc.
 - **Team-shared `allow` permissions** — `.worktrees/**`, etc.
 - **`.gitignore` line**: `.claude/settings.local.json`
@@ -43,6 +44,7 @@
 |---|---|---|
 | Forgot `.gitignore` line for `.claude/settings.local.json` | Local settings file accidentally committed | Add the line from [`templates/.gitignore-snippet`](templates/.gitignore-snippet) |
 | Mode set to `full` on a 4-hour sprint | Too much gate overhead, slow iteration | Switch to `lite` or use `DEV_KIT_MODE=lite claude` per session |
+| Guards unexpectedly active | A committed `DEV_KIT_GUARDS=on` is present | Remove the key or set `DEV_KIT_GUARDS=off` for this checkout |
 | Mode unset on a consumer project | Defaults to `full`; works but you may want `lite` | Add `"env": { "DEV_KIT_MODE": "lite" }` |
 | Multiple `enabledPlugins` for the same kit at different scopes | Duplicate hook firing | Pick one scope; user-scope should be `{}` |
 
@@ -54,6 +56,9 @@ jq '.enabledPlugins // {}' .claude/settings.json
 
 # What's the mode?
 jq -r '.env.DEV_KIT_MODE // "full (default)"' .claude/settings.json
+
+# Are repository guards enabled?
+jq -r '.env.DEV_KIT_GUARDS // "off (default)"' .claude/settings.json
 
 # Is the local settings file gitignored?
 git check-ignore .claude/settings.local.json && echo "OK"

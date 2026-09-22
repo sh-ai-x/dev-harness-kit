@@ -53,13 +53,13 @@ Skills that actually loop get a **dotted, labeled back-edge** on their per-skill
 1. **Explicit** — a step's own untruncated text contains `goto N` (e.g. babysit-pr's step 13: "otherwise `goto 1`") → back-edge to the exact referenced step, labeled `retry -> step N`.
 2. **Implicit fallback** — no explicit `goto`, but the body uses recognized loop language (`3-cycle self-fix`, `ambiguity loop`, `retry loop`, `repeat until`, `safety_valve` cap) → generic last-step-loops-to-first-step edge (e.g. plan's ambiguity loop, build's self-fix guard).
 
-`` ```python `` fenced code blocks are stripped before the implicit-keyword scan — otherwise a skill's own embedded source (including this skill analyzing its own SKILL.md) can self-match the detector's pattern-string literals. Bare/pseudocode ` ``` ` fences (e.g. babysit-pr's Algorithm block, which IS the loop description) are deliberately left in place.
+`` ```python `` fenced code blocks are stripped before the implicit-keyword scan so source literals do not look like workflow prose. Bare/pseudocode ` ``` ` fences (e.g. babysit-pr's Algorithm block, which IS the loop description) are deliberately left in place.
 
 ## Generic by design (not repo-specific)
 
 - **All classification is filename/path heuristic** via the embedded `PILLAR_PATTERNS` dict. No hardcoded skill names, pipeline stages, or module roles. Works on any plugin/repo.
 - **Surfaces are optional**. Missing `skills/`, `hooks/`, `.github/`, `lib/`, etc. → section gracefully omitted, not crashed.
-- **IMPORTANT_SKILLS priority list** — `plan`, `build`, `review`, `security`, `eval`, `inspect`, `prune`, `refactor`, `ci-setup`, `babysit-pr`, `ship`, `bootstrap`, `code-viz`, `report`, `token-analyzer` — always fill first, before alphabetical selection, up to `--top-skills`. The canonical list lives in `skills/code-viz/SKILL.md` (`IMPORTANT_SKILLS` constant); this doc mirrors it for reading convenience.
+- **IMPORTANT_SKILLS priority list** — `plan`, `build`, `review`, `security`, `eval`, `inspect`, `prune`, `refactor`, `ci-setup`, `babysit-pr`, `ship`, `bootstrap`, `code-viz`, `report`, `token-analyzer` — always fill first, before alphabetical selection, up to `--top-skills`. The canonical list lives in `tools/code_viz.py`; this doc mirrors it for reading convenience.
 - **Domain pillars are keyword-matched** against each discovered path. A file matches DB if its name contains `db|sql|mongo|redis|postgres|sqlite|orm`; matches Cloud if it contains `aws|gcp|azure|k8s|docker|lambda|s3`; etc.
 - **5-strategy per-skill cycle extraction** (in priority order):
   1. **F** — `## Categories` / `## Dimensions` / `## Audit areas` / `## Checks` bullet lists (security's OWASP A01–A10, inspect's 8 dims).
@@ -86,7 +86,8 @@ open /tmp/code-viz.html
 
 ## How it works
 
-A single `python3 << 'PY' ... PY` heredoc embedded in `SKILL.md` (no `bin/`, `tools/`, or `lib/` companion needed):
+The executable `tools/code_viz.py` is the implementation SSOT; `SKILL.md` is
+the compact operator contract:
 
 1. **Walk** target recursively — collect all files, classify by directory + extension.
 2. **Map** every discovered path to domain pillars via `PILLAR_PATTERNS`.

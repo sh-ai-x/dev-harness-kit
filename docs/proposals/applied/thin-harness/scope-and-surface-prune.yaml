@@ -1,0 +1,359 @@
+title: Scoped guard defaults and thin-harness surface prune
+status: applied-with-changes
+date: 2026-09-17
+started: 2026-09-17
+shipped: 2026-09-18
+modifications: |
+  Implemented in the thin-harness worktree on 2026-09-18. The guard policy
+  is now default-off for every checkout, with shell > local > project
+  precedence and a prompt-free SessionStart state record. Bootstrap owns the
+  one-time project/local opt-in question. The session-monitor surface and its
+  references are deleted. The three duplicate model-only build skills, their
+  docs, and their trigger eval fixtures are deleted; active parent skills and
+  indexes were rewritten to retain only the deterministic contracts. The
+  dated full-architecture export and screenshot were also removed because
+  they described the deleted skill graph. The executable code-viz
+  implementation moved out of the active skill into `tools/code_viz.py`;
+  bootstrap, proposal, and babysit-pr skill bodies were reduced to contracts
+  with detailed references lazy-loaded from `docs/skills/`. The
+  `learn` generator was subsequently removed after the user explicitly
+  confirmed it is not needed; its historical proposal is marked superseded
+  and retained under the rejected lifecycle bucket. The main-branch-specific
+  prompt is intentionally still deferred.
+tags: [scope, hooks, worktree, token-efficiency, dead-code, skills, installation]
+
+before:
+  summary: |
+    Plugin loading and guard activation are coupled too loosely. A user-scope
+    plugin can be present before a project has made a guard decision, while
+    SessionStart resets the session guard file to on. The current resolver
+    has mode precedence but no equivalent project/local guard policy, and
+    git-guard has no session policy check. The repository also ships a
+    standalone session-monitor surface and several model-only skills whose
+    rules duplicate deterministic hooks or the parent stage skills.
+  evidence:
+    - '`hooks/lib/mode-resolve.sh:8-13,78-142` resolves shell/project/local mode but has no guard-policy layer and defaults an enabled project to full.'
+    - '`hooks/session-start-guard-mode-reset.sh:4-17` resets the session guards at every SessionStart; `lib/guard_mode_state.py:54-63` defaults tdd/worktree to on.'
+    - '`hooks/worktree-guard.sh:46-49` and `hooks/tdd-guard.sh:10-11` already contain deterministic enforcement; `hooks/git-guard.sh:1-8` has no equivalent session-policy read.'
+    - '`hooks/session-start-check.sh:123-128` emits a main-checkout reminder but does not record an explicit on/off decision for the guards.'
+    - '`tools/session_monitor.py` plus six split helpers, fixtures, `tests/test_session_monitor.py`, and two observability docs form a standalone cross-terminal session picker.'
+    - '`skills/build-tdd`, `skills/build-verify`, and `skills/build-refactor` are model-only sub-skills while `tdd-guard`, `stop-verify`, `prune`, and the parent `build`/`refactor` skills carry the executable contracts.'
+
+after:
+  summary: |
+    Separate plugin discovery from guard activation. A compact project/local
+    setting controls guards; user-scope plugin installation never enables
+    repository safety policy by itself. SessionStart resolves the policy,
+    detects main versus worktree, writes the effective decision to the
+    session state, and emits one short context line. The default is off for
+    every checkout, including main. SessionStart does not ask guard-by-guard
+    questions and does not auto-enable a main-branch exception. During the
+    first `/dev-kit:bootstrap`, the operator is asked once whether guards
+    should be enabled and whether the choice belongs to shared project scope
+    or this checkout's local scope.
+
+    Remove session-monitor and other proven-dead or duplicate surfaces, then
+    trim surviving skill prose to invocation, inputs/outputs, invariants, and
+    links to the SSOT. Keep deterministic safety, secret, injection,
+    verification, review, and security hooks.
+  files:
+    - path: hooks/session-start-check.sh
+      change: Resolve and persist the scoped guard policy and compact main/worktree context.
+    - path: hooks/session-start-guard-mode-reset.sh
+      change: Reset from the resolved policy rather than unconditional all-on state.
+    - path: hooks/lib/guard-policy.sh
+      change: New shell resolver with shell > local > project > default-off precedence; user scope is intentionally ignored.
+    - path: lib/guard_mode_state.py
+      change: Store policy source, branch class, and effective tdd/worktree/git values in the session file.
+    - path: hooks/worktree-guard.sh
+      change: Honor the resolved session policy while retaining fail-closed payload parsing.
+    - path: hooks/git-guard.sh
+      change: Add the same policy check before branch protection checks.
+    - path: hooks/tdd-guard.sh
+      change: Use the policy state; keep its deterministic RED evidence check when enabled.
+    - path: docs/scopes/README.md
+      change: Make guard activation a separate project/local decision from plugin discovery.
+    - path: docs/scopes/modes.md
+      change: Document guard precedence, the all-off default, bootstrap choice, and explicit off.
+    - path: docs/scopes/user-scope.md
+      change: State that user-scope plugin enablement does not activate repository guards.
+    - path: docs/scopes/project-scope.md
+      change: Add the committed guard-policy setting and bootstrap choice.
+    - path: docs/scopes/local-scope.md
+      change: Add the checkout-only guard override and its precedence.
+    - path: docs/scopes/templates/settings.project.full.json
+      change: Include the explicit off default used before bootstrap opt-in.
+    - path: docs/scopes/templates/settings.project.lite.json
+      change: Emit the same guard key for lite projects.
+    - path: docs/scopes/templates/settings.local.json
+      change: Show the local override without enabling it by default.
+    - path: skills/bootstrap/SKILL.md
+      change: Ask once during first bootstrap whether to enable guards and write the choice to project or local scope; keep the active body thin.
+    - path: skills/learn/SKILL.md
+      change: Delete the unused transcript-to-skill generator.
+    - path: skills/learn/scripts/validate_skill.py
+      change: Delete the validator used only by the removed learn generator.
+    - path: docs/skills/learn.md
+      change: Delete the operator documentation for the removed learn skill.
+    - path: tests/test_learn_skill.py
+      change: Delete tests for the removed learn skill and validator.
+    - path: docs/skills/bootstrap.md
+      change: Mirror the guard policy and retain the detailed bootstrap reference.
+    - path: docs/skills/bootstrap.ko.md
+      change: Keep the Korean bootstrap reference aligned with the guard policy.
+    - path: skills/proposal/SKILL.md
+      change: Keep only the renderer contract, schema, lifecycle, and safety invariants; lazy-load detailed reference docs.
+    - path: docs/skills/proposal.md
+      change: Retain the detailed proposal renderer and schema reference.
+    - path: skills/babysit-pr/SKILL.md
+      change: Keep target evidence and safety gates in the active contract; lazy-load the full repair-loop reference.
+    - path: docs/skills/babysit-pr.md
+      change: Retain the detailed babysit algorithm, state, and bypass reference.
+    - path: skills/code-viz/SKILL.md
+      change: Keep only the operator contract and delegate implementation to the executable tool.
+    - path: tools/code_viz.py
+      change: New executable implementation SSOT extracted from the oversized skill heredoc.
+    - path: docs/skills/code-viz.md
+      change: Point the canonical visualizer list and implementation reference to tools/code_viz.py.
+    - path: tests/test_code_viz_skill.py
+      change: Compile and execute the extracted visualizer tool instead of parsing an embedded heredoc.
+    - path: tests/test_bootstrap_guard_policy.py
+      change: Cover prompt defaults, project/local writes, and explicit off.
+    - path: tests/test_guard_policy.py
+      change: Add the scope/branch truth table and SessionStart state contract.
+    - path: tests/test_guard_mode_state.py
+      change: Cover policy metadata and git-guard state resolution.
+    - path: tests/test_worktree_guard.py
+      change: Opt enforcement regression tests into explicit guard-on policy; default-off behavior is covered separately.
+    - path: .githooks/pre-commit
+      change: Stop treating long Markdown setext underlines as staged Git conflict markers.
+    - path: tests/test_pre_commit_lint.py
+      change: Pin the conflict-marker boundary and Markdown-heading regression contract.
+    - path: tools/session_monitor.py
+      change: Delete the obsolete session picker.
+    - path: tools/session_monitor_*.py
+      change: Delete the split monitor helpers and renderer.
+    - path: tools/render_session_monitor.py
+      change: Delete the obsolete screenshot renderer with the monitor feature.
+    - path: tests/test_session_monitor.py
+      change: Delete tests for the removed feature; preserve eval-session tests that do not depend on it.
+    - path: tests/test_eval_session.py
+      change: Remove only monitor-handshake assertions; keep the session-judge and golden-diff tests.
+    - path: tests/fixtures/session_monitor/
+      change: Delete monitor-only fixtures.
+    - path: docs/observability/session-monitor*.md
+      change: Delete legacy monitor documentation and links.
+    - path: docs/screenshots/session-monitor.png
+      change: Delete the obsolete monitor screenshot.
+    - path: README.md
+      change: Remove session-monitor instructions and update the minimal install/scope guidance.
+    - path: README.ko.md
+      change: Keep Korean parity while removing the deleted monitor surface.
+    - path: docs/home/DOC-MAP.md
+      change: Remove the deleted observability entry.
+    - path: docs/workflow/WORKFLOW-SCENARIOS.md
+      change: Replace the monitor resume scenario with the supported session hand-off path or remove it.
+    - path: docs/workflow/WORKFLOW-SCENARIOS.ko.md
+      change: Keep Korean workflow parity.
+    - path: docs/observability/dashboards.md
+      change: Remove monitor references; retain token-efficiency documentation only.
+    - path: logs/README.md
+      change: Remove the monitor integration section.
+    - path: .github/CODEOWNERS
+      change: Remove ownership for deleted monitor files.
+    - path: skills/README.md
+      change: Regenerate the skill registry after pruning model-only duplicates.
+    - path: docs/skills/README.md
+      change: Regenerate the English skill index without removed skills.
+    - path: docs/skills/README.ko.md
+      change: Regenerate the Korean skill index without removed skills.
+    - path: skills/build/SKILL.md
+      change: Absorb only the useful build contract from deleted sub-skills; point to deterministic hooks for enforcement.
+    - path: skills/refactor/SKILL.md
+      change: Collapse the redundant build-refactor hand-off into the parent cleanup contract.
+    - path: skills/inspect/SKILL.md
+      change: Remove references to the deleted build-refactor phase while preserving audit dimensions.
+    - path: skills/build-debug/SKILL.md
+      change: Remove stale build-tdd/build-verify references and preserve reproduce-first behavior.
+    - path: docs/skills/build*.md
+      change: Delete or rewrite legacy pages only when their source skill is removed; do not duplicate active contracts.
+    - path: skills/build-tdd/SKILL.md
+      change: Delete redundant model-only TDD layer; retain tdd-guard and build-stage contract.
+    - path: skills/build-verify/SKILL.md
+      change: Delete redundant model-only completion layer; retain stop-verify and build-stage contract.
+    - path: skills/build-refactor/SKILL.md
+      change: Delete redundant model-only cleanup layer; retain the refactor orchestrator cleanup pass.
+    - path: docs/skills/build-tdd.md
+      change: Delete documentation for the removed model-only skill.
+    - path: docs/skills/build-verify.md
+      change: Delete documentation for the removed model-only skill.
+    - path: docs/skills/build-refactor.md
+      change: Delete documentation for the removed model-only skill.
+    - path: evals/build-tdd-triggers/
+      change: Delete trigger fixtures for the removed skill.
+    - path: evals/refactor-triggers/
+      change: Delete trigger fixtures for the removed model-only chain.
+    - path: docs/architecture/2026-08-23/overall-skill-architecture.json
+      change: Delete stale generated architecture data that listed removed skills.
+    - path: docs/screenshots/architecture/overall-skill-architecture.png
+      change: Delete stale generated architecture image paired with the removed graph.
+    - path: docs/proposals/applied/thin-harness/scope-and-surface-prune.yaml
+      change: This proposal SSOT; update status/started/shipped as implementation progresses.
+    - path: docs/proposals/rejected/learn-skill-mod/main.yaml
+      change: Mark the shipped learn proposal superseded while preserving its historical record.
+    - path: docs/proposals/rejected/learn-skill-mod/main.html
+      change: Re-render the superseded learn proposal in the rejected lifecycle bucket.
+
+pros:
+  - 'A user-scope plugin can be installed without silently imposing repository-specific edit or branch policy on every project.'
+  - 'Every unconfigured checkout starts with the same thin, predictable guard state instead of a hidden main-branch exception.'
+  - 'SessionStart records the effective decision, making on/off behavior inspectable and reproducible instead of implicit.'
+  - 'Deleting the session monitor and duplicate model-only layers reduces install surface, prompt tokens, tests, and documentation drift.'
+  - 'The retained safety and verification behavior remains deterministic and testable at the hook layer.'
+
+cons:
+  - 'Unconfigured checkouts remain permissive until the one-time bootstrap opt-in; this is the deliberate safety/usability trade-off for zero recurring prompts.'
+
+limitations:
+  - 'Removing `/dev-kit:learn` leaves skill authoring manual; a replacement is deferred until usage evidence justifies another surface.'
+
+sections:
+  - title: Decision and scope
+    body: |
+      Adopt this as a two-phase cleanup. Phase 1 changes guard activation and
+      removes the session-monitor feature. Phase 2 removes only skills,
+      docs, and tests that meet the deletion rubric below. The implementation
+      must not weaken catastrophic command blocking, secret scanning, prompt
+      injection scanning, review/security checks, or completion verification.
+
+      The proposal is intentionally about policy and surface area. It does
+      not add a replacement dashboard, background monitor, MCP layer, or a
+      new model orchestration protocol.
+
+  - title: Guard policy and scope precedence
+    body: |
+      Add one setting: `DEV_KIT_GUARDS=on|off`.
+
+      Resolution order is:
+
+      ```text
+      shell DEV_KIT_GUARDS
+        > .claude/settings.local.json env.DEV_KIT_GUARDS
+        > .claude/settings.json env.DEV_KIT_GUARDS
+        > default: off
+      ```
+
+      User-scope settings are not read for this key. They may enable the
+      plugin so commands resolve, but they cannot activate repository guards.
+      Invalid values are ignored with one compact diagnostic and resolve to
+      the next layer. Plugin installation never writes this key. On the first
+      `/dev-kit:bootstrap`, ask once:
+
+      ```text
+      Enable worktree, git, and TDD guards for this repo? [y/N]
+      If yes, save it to project scope or local scope? [project/local]
+      ```
+
+      `N` leaves the effective default `off`. `Y + project` writes
+      `DEV_KIT_GUARDS=on` to `.claude/settings.json`; `Y + local` writes it
+      to `.claude/settings.local.json`. Existing settings are not silently
+      overwritten. Re-running bootstrap reports the current value and keeps
+      SessionStart prompt-free.
+
+      `on` enables worktree, git, and tdd guards in every session. `off`
+      disables those three session-policy checks. Existing catastrophic and
+      ask-tier hooks keep their own contracts and are not silently disabled by
+      this setting.
+
+  - title: SessionStart records policy only
+    body: |
+      `session-start-check.sh` classifies the checkout before emitting its
+      context. The state writer records `policy`, `policy_source`,
+      `branch_class`, and the effective guard map in
+      `.dev-kit/guard-mode.session.json`.
+
+      With no explicit project/local/shell policy, every checkout resolves to
+      `off`:
+
+      | Checkout | worktree guard | git guard | tdd guard | reason |
+      |---|---:|---:|---:|---|
+      | `main` | off | off | off | bootstrap-only choice; SessionStart stays prompt-free |
+      | feature worktree | off | off | off | default thin session |
+      | detached/outside project | off | off | off | no repository policy |
+
+      An explicit `DEV_KIT_GUARDS=on` changes every row to on. An explicit
+      `off` keeps every row off. The one-line SessionStart context reports
+      the resolved policy and branch class. The hook never asks a question or
+      blocks SessionStart; it writes the decision and leaves enforcement to
+      the individual PreToolUse hooks. Bootstrap owns the one-time setup
+      question and the project/local write.
+
+  - title: Deletion rubric and candidates
+    body: |
+      A surface is removable only when all four checks pass:
+
+      1. no runtime/import/manifest consumer remains;
+      2. its behavior is either duplicated by a deterministic hook or has no
+         current product value;
+      3. a replacement command/path is documented when users need continuity;
+      4. focused tests prove the absence or the retained contract.
+
+      First-wave deletion: the session-monitor code, its fixtures, tests,
+      screenshot, ownership entry, and observability/workflow references.
+      The eval-session judge remains; only the monitor handshake assertions
+      are removed or rewritten.
+
+      Second-wave deletion: model-only `build-tdd`, `build-verify`, and
+      `build-refactor` skills, plus `learn` and its validator/test/docs. The
+      three build skills duplicate deterministic hooks/parent stages; `learn`
+      has no runtime consumer and its generator workflow is not needed. Keep
+      `valuate`, `interview`, `status`, and `prune-propose`: each still owns a
+      distinct artifact or operator workflow and was not proven dead.
+
+  - title: Context and token budget
+    body: |
+      Active SKILL.md files should contain only: trigger, inputs, outputs,
+      state transition, hard invariant, and next hand-off. Detailed rationale
+      belongs in the linked SSOT docs and proposal, not in every skill.
+
+      Measure before and after with the existing token analyzer and a stable
+      file list. Acceptance target: at least 20% fewer instruction tokens in
+      active skill files plus zero loss of command names, required files,
+      hook names, or verification commands. Hook output is capped at one
+      compact SessionStart context line; verbose diagnostics remain on disk
+      or behind explicit status commands.
+
+  - title: Implementation and verification order
+    body: |
+      1. Add the resolver/state truth table and bootstrap prompt tests first;
+         the no-prompt SessionStart and all-off default are part of the
+         contract.
+      2. Wire the policy into worktree/git/tdd guards; run their focused hook
+         suites.
+      3. Remove session-monitor files and references; run import, README,
+         documentation, and eval-session tests.
+      4. Run the skill usage/import scan, delete only approved duplicate
+         skills, and regenerate both skill indexes.
+      5. Render this proposal, run the full test suite, and update this YAML's
+         `status`, `started`, `shipped`, and `modifications` only from the
+         resulting diff and evidence.
+
+      Required checks include `pytest tests/test_guard_policy.py`, the guard
+      hook suites, a repository-wide `git grep` proving no live
+      `session_monitor` reference remains, the skill registry audit, and a
+      token analyzer report with the before/after file set.
+
+  - title: Proposal lifecycle updates
+    body: |
+      Existing proposal records should be updated only when their design is
+      demonstrably shipped. In particular, an implemented skill or hook must
+      move from `reviewing/` or `pending/` to `applied/` with `started` and
+      `shipped` dates and a short `modifications` block when the code differs
+      from the design. Removing a feature also updates its proposal to
+      `superseded` or `applied-with-changes`; leaving stale `draft` text that
+      describes shipped behavior is not acceptable.
+
+      The user accepted the thin default. The implementation is applied with
+      the deletions and documentation substitutions recorded in
+      `modifications`; only a main-branch-specific default or recurring
+      SessionStart question remains deferred.

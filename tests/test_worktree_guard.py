@@ -3,7 +3,7 @@
 
 Verifies the bash-level behavior of:
   - hooks/worktree-guard.sh       (PreToolUse Edit|Write|MultiEdit — hard block)
-  - hooks/session-start-check.sh  (SessionStart — advisory additionalContext)
+  - hooks/session-start.sh       (SessionStart dispatcher — advisory context)
 
 The hard rule under test (.claude/rules/git-workflow.md):
   "Every task = new worktree + client handoff + new branch."
@@ -35,6 +35,11 @@ def _run_hook(script: str, payload: dict, cwd: Path | None = None) -> subprocess
         text=True,
         timeout=10,
         cwd=str(cwd) if cwd else None,
+        # These tests exercise the enforcement behavior itself. The product
+        # default is now off; opt in explicitly so the legacy deny assertions
+        # remain meaningful and a separate policy suite owns the default-off
+        # contract.
+        env={**os.environ, "DEV_KIT_GUARDS": "on"},
     )
 
 

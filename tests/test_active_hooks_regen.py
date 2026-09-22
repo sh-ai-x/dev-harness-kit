@@ -3,7 +3,8 @@ test_active_hooks_regen.py — RED-first regression for issue #664.
 
 `hooks/index.md` line 3 documents `.dev-kit/.active-hooks.json` as the
 MUST-13 hook-matrix SSOT. The file MUST be regenerated on every
-SessionStart by `hooks/session-start-check.sh` so any check downstream
+SessionStart by the `hooks/session-start.sh` dispatcher, through its
+`session-start-check.sh` child, so any check downstream
 that consumes the matrix sees a fresh snapshot.
 
 This test pins:

@@ -113,8 +113,9 @@ class TestPreCommitLint(unittest.TestCase):
     def test_blocks_indented_conflict_markers_in_staged_blob(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
+            # 8+ char markers (PR #881 regex tightened to `{8,}`).
             (root / "notes.txt").write_text(
-                "def render():\n    <<<<<<< HEAD\n    =======\n    >>>>>>> branch\n"
+                "def render():\n    <<<<<<< HEAD\n    ========\n    >>>>>>> branch\n"
             )
             subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
             (root / "notes.txt").write_text("clean\n")
@@ -128,7 +129,7 @@ class TestPreCommitLint(unittest.TestCase):
     def test_allows_restructuredtext_heading_underline(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
-            (root / "notes.txt").write_text("Architecture\n============\n\nBody\n")
+            (root / "notes.txt").write_text("Architecture\n=======\n\nBody\n")
             subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
 
             result = _run_hook(root, env=_path_without_ruff(root))
@@ -138,7 +139,7 @@ class TestPreCommitLint(unittest.TestCase):
     def test_blocks_diff3_merge_base_marker(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
-            (root / "notes.txt").write_text("ours\n||||||| merge base\nbase\n")
+            (root / "notes.txt").write_text("ours\n|||||||| merge base\nbase\n")
             subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
             (root / "notes.txt").write_text("clean\n")
 
@@ -151,7 +152,7 @@ class TestPreCommitLint(unittest.TestCase):
     def test_blocks_conflict_markers_in_any_staged_blob(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
-            (root / "notes.txt").write_text("<<<<<<< HEAD\nconflict\n=======\nother\n>>>>>>> branch\n")
+            (root / "notes.txt").write_text("<<<<<<<< HEAD\nconflict\n========\nother\n>>>>>>>> branch\n")
             subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
             (root / "notes.txt").write_text("clean\n")
 
@@ -161,15 +162,61 @@ class TestPreCommitLint(unittest.TestCase):
             self.assertIn("conflict marker", result.stderr.lower())
             self.assertIn("notes.txt", result.stderr)
 
+    def test_allows_markdown_setext_heading(self):
+        """A 7-char Markdown underline is not a Git conflict marker.
+        The regex threshold was tightened from `{7}` to `{8,}` (PR #881
+        remediation) so a bare 7-char `=======` line no longer matches —
+        use 7 chars here to exercise the still-allowed path."""
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.md").write_text("Architecture\n=======\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.md"], check=True)
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("conflict marker", result.stderr.lower())
+
     def test_allows_long_rst_heading_underlines(self):
         with _init_tmp_git_repo() as directory:
             root = Path(directory)
-            (root / "notes.txt").write_text("Architecture\n============\n")
+            (root / "notes.txt").write_text("Architecture\n=======\n")
             subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
 
             result = _run_hook(root, env=_path_without_ruff(root))
 
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("conflict marker", result.stderr.lower())
+
+    def test_seven_char_boundary_does_not_match_eight_plus_does(self):
+        """The pre-commit conflict-marker regex was tightened to require
+        8+ marker chars (PR #881 remediation). Pin the boundary:
+          - a bare 7-char `=======` line MUST be allowed (no false positive)
+          - an 8-char `========` line MUST be blocked (still detected)
+        """
+        # Bare 7-char `=======` should NOT be flagged as a conflict marker.
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text("Divider\n=======\nMore\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("conflict marker", result.stderr.lower())
+
+        # 8-char `========` MUST still be flagged as a conflict marker.
+        with _init_tmp_git_repo() as directory:
+            root = Path(directory)
+            (root / "notes.txt").write_text("========\nblock\n========\n")
+            subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+            (root / "notes.txt").write_text("clean\n")
+
+            result = _run_hook(root, env=_path_without_ruff(root))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("conflict marker", result.stderr.lower())
+            self.assertIn("notes.txt", result.stderr)
 
     def test_fails_closed_when_index_is_invalid(self):
         with _init_tmp_git_repo() as directory:

@@ -2,6 +2,10 @@
 
 Set `DEV_KIT_MODE` in `<proj>/.claude/settings.json` `env` block, or via `/dev-kit:mode`, or as a per-session env var.
 
+Guard activation is independent from mode. Set `DEV_KIT_GUARDS=on` only after
+the first bootstrap decision; the default is `off` in every checkout,
+including main.
+
 | Mode    | When                                          | Skills          | Hooks          | Iron Laws       |
 |---------|-----------------------------------------------|-----------------|----------------|-----------------|
 | `full`  | Multi-session, multi-agent, autonomous        | All 30+         | All 30+        | L1–L9           |
@@ -131,3 +135,18 @@ DEV_KIT_TEAM=on claude --plugin-dir <dev-harness-kit-repo>
 See [`skills/team/SKILL.md`](../../skills/team/SKILL.md) and
 [`hooks/lib/team-resolve.sh`](../../hooks/lib/team-resolve.sh) for the
 implementation.
+
+### Guard resolution
+
+| Source | Effective value | Scope |
+|---|---|---|
+| `$DEV_KIT_GUARDS` | wins | current session |
+| `.claude/settings.local.json` | next | current checkout |
+| `.claude/settings.json` | next | committed project |
+| not set | `off` | all checkouts |
+
+The user settings file is never read for this key. `on` enables
+`worktree-guard`, `git-guard`, and `tdd-guard`; it does not disable the
+catastrophic, secret, injection, or completion hooks. SessionStart is
+prompt-free and writes the resolved policy metadata to
+`.dev-kit/guard-mode.session.json`.

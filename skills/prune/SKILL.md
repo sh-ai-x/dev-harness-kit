@@ -41,7 +41,7 @@ re-runs one phase. `--dry-run` defaults ON for first pass.
 
 ## Phase 1 — 3-pass deletion sweep
 
-Sibling of `build-refactor` (rewrites). `prune` *deletes*. **Iron Law.** No
+Sibling of the refactor cleanup pass (rewrites). `prune` *deletes*. **Iron Law.** No
 deletion without reproducible signal + regression test.
 
 ```

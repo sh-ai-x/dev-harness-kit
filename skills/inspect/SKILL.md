@@ -48,13 +48,13 @@ and output path. No PR comments, no source edits. Verdict: `Critical` (>=1 HIGH)
 ## Hand-off
 | Dim | Target | Pass |
 |---|---|---|
-| dead | build-refactor | [1/4] |
-| dup | build-refactor | [2/4] |
-| smell | build-refactor | [3/4] |
-| overeng | build-refactor | [3/4] |
+| dead | refactor cleanup pass | [1/4] |
+| dup | refactor cleanup pass | [2/4] |
+| smell | refactor cleanup pass | [3/4] |
+| overeng | refactor cleanup pass | [3/4] |
 | overarch | /dev-kit:plan -> build | full cycle |
-| cleancode | build-refactor | [3/4] |
-| tokenbudget | build-refactor | [1/4]+[3/4] |
+| cleancode | refactor cleanup pass | [3/4] |
+| tokenbudget | refactor cleanup pass | [1/4]+[3/4] |
 | slop | /dev-kit:prune | deletion sweep |
 
 Next: `/dev-kit:refactor` (rewrite), `/dev-kit:prune` (delete), `/dev-kit:plan` (HIGH > 0), `/dev-kit:review` (per-PR).
