@@ -45,13 +45,17 @@ class TestLinearTriggerHooksWiring(unittest.TestCase):
         return json.loads(path.read_text(encoding="utf-8")).get("hooks", {})
 
     def _find(self, hooks_cfg: dict, hook_name: str):
-        """Return (event, matcher) where the hook is wired, or None."""
+        """Return (event, matcher), including SessionStart dispatch children."""
         for event, entries in hooks_cfg.items():
             for entry in entries:
                 matcher = entry.get("matcher")
                 for h in entry.get("hooks", []):
                     if hook_name in h.get("command", ""):
                         return (event, matcher)
+        if hook_name == "linear-session-start":
+            dispatcher = ROOT / "hooks" / "session-start.sh"
+            if dispatcher.is_file() and "linear-session-start.sh" in dispatcher.read_text(encoding="utf-8"):
+                return ("SessionStart", None)
         return None
 
     def test_all_four_hooks_are_wired_in_both_runtimes(self):

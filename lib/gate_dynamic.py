@@ -38,6 +38,7 @@ import datetime as _dt
 import fnmatch
 import hashlib
 import json
+import logging
 import sys
 import time
 from pathlib import Path
@@ -48,6 +49,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gates_state  # noqa: E402
 import llm_judge  # noqa: E402
 from atomic import atomic_write_json  # noqa: E402
+
+# Module-level logger for S1 (silent-exception fix). The wrapper
+# `select_gates` body must `logger.exception(...)` on any failure
+# so a silent fail-open is debuggable from logs; this logger is the
+# single sink for the gate-dynamic layer's runtime errors.
+logger = logging.getLogger(__name__)
 
 # Audit-trail location, sibling of `.dev-kit/gates.json`.
 DYNAMIC_AUDIT_DIR = Path(".dev-kit") / "gate-dynamic"
@@ -60,6 +67,67 @@ CONFIDENCE_FLOOR = 0.7
 # together gate the skip. 7/10 maps to "pretty clearly safe to skip"
 # without being too aggressive on marginal scores.
 SKIP_THRESHOLD = 7.0
+
+# Risk ceiling for `risk_level`. The LLM judge emits 0-10; a gate
+# with risk_level > RISK_CEILING is never skipped regardless of how
+# high gate_skippable or confidence scores are. Default 3.0 keeps
+# "zero risk" (0-2 per the judge rubric) plus the borderline-low edge
+# eligible for skip — a relaxed-but-bounded ceiling for a v1.1
+# feature (per OE-1 philosophy). A MISSING `risk_level` key (partial
+# LLM response) is handled separately at the call site via
+# `MISSING_RISK_LEVEL_SENTINEL`, not via a 0.0 default — 0.0 is the
+# safest possible score and would incorrectly PASS this rule, letting
+# an incomplete judge response bypass the risk veto instead of
+# failing closed.
+#
+# Named RISK_CEILING (was RISK_FLOOR pre-v1.1.1) because the value
+# is an UPPER bound on risk: rule #6 fires when risk EXCEEDS it.
+# The previous name invited future contributors to invert the
+# comparison to `<` (parallel to `CONFIDENCE_FLOOR`, where the
+# constant is genuinely a floor — confidence below the floor vetoes).
+# Polarity-pinning test: `tests/test_gate_dynamic.py::TestHardRules
+# ::test_risk_ceiling_polarity_pinned`.
+RISK_CEILING = 3.0
+
+# Sentinel used for `risk_level` when the LLM response omits the key
+# entirely (as opposed to explicitly scoring it 0.0). Chosen above the
+# judge's 0-10 scale so a missing key always fails `risk_level <=
+# RISK_CEILING` and forces skip=False — fail-closed on incomplete LLM
+# output, matching the CONFIDENCE_FLOOR / SKIP_THRESHOLD posture for
+# the other two axes.
+#
+# Doubles as the dataclass default for `GateDecision.risk_level` so
+# legacy cache entries written before v1.1 (no `risk_level` field) load
+# without raising TypeError, and the sentinel value keeps rule #6's
+# fail-closed veto intact for those entries.
+MISSING_RISK_LEVEL_SENTINEL = 11.0
+
+# Coerced-response sanity-check constants. A genuine judge response
+# on a real diff almost never emits a high skip-score together with a
+# low risk-level — that pair is the signature of a PR-body
+# prompt-injected judge response (the attacker steers the LLM toward
+# "every gate is skippable, nothing is risky"). The original v1.1
+# check used an AND of the two thresholds; the v1.1.1 follow-up
+# replaces it with a combined-score: `skip_score + (10 - risk_level)
+# >= COERCED_RESPONSE_COMBINED_FLOOR`. An attacker must push BOTH
+# axes to the extremes; lowering one alone is insufficient (closes
+# the LLM01 follow-up finding where the AND check missed the
+# sub-extreme `(skip=8.5, risk=1.5)` attack triple).
+COERCED_RESPONSE_COMBINED_FLOOR = 17.0
+
+# Near-max-skip coerced-response sanity check (v1.1.3 follow-up).
+# Closes the LLM01 high finding where the combined-score check still
+# let through the `(skip=9.99, risk=3.0)` attack triple: 9.99 + (10 - 3.0)
+# = 16.99 < 17.0, so the combined-score check did NOT fire, and the
+# skip predicate (`skip_score >= 7`, `confidence >= 0.7`,
+# `risk_level <= RISK_CEILING`) all passed — SKIP granted on a coerced
+# response. The signature of this attack is "skip_score pushed to
+# near-max AND risk_level at the documented borderline-low edge".
+# If skip_score is near max (>= 9.0) AND risk_level is at the ceiling
+# (>= RISK_CEILING), force risk_level to the sentinel so rule #6 vetoes.
+# Legitimate borderline-low skips have moderate skip_score (typically
+# 7-8, well below 9.0) so the new check does not over-trigger.
+COERCED_RESPONSE_NEAR_MAX_SKIP = 9.0
 
 # Body truncation budget for `diff_sample` in the LLM prompt.
 # ~2 KB is enough for the judge to ground its scope-discipline
@@ -98,7 +166,35 @@ class GateDecision:
     skip: bool
     reasoning: str
     confidence: float                 # 0.0-1.0
-    raw_score: dict
+    # Default sentinel keeps v1.0 cache entries loadable: when a legacy
+    # JSON payload omits `risk_level`, `GateDecision(**payload)` succeeds
+    # and rule #6 still vetoes (sentinel > RISK_CEILING → skip=False).
+    risk_level: float = MISSING_RISK_LEVEL_SENTINEL  # 0.0-10.0, lower_is_better
+    raw_score: dict = dataclasses.field(default_factory=dict)
+    # A09 audit trail. Distinguishes the seven paths that can land
+    # `risk_level` on the fail-closed sentinel:
+    #   - "ok"                    — LLM returned a value in [0.0, 10.0].
+    #   - "missing_key"           — LLM response omitted `risk_level`.
+    #                               Sentinel applied at parse time.
+    #   - "coerced_response"      — combined-score OR near-max-skip
+    #                               sanity check fired; sentinel applied
+    #                               as the fail-closed reaction.
+    #   - "legacy_cache"          — `load_decision` clamped an out-of-
+    #                               range cached value, OR an empty
+    #                               `raw_score` paired with a skip-range
+    #                               `risk_level` (cache-poisoning
+    #                               signature), to the sentinel.
+    #   - "coerced_response_cache" — cache-load combined-score OR near-
+    #                               max-skip check fired; sentinel
+    #                               applied at load time.
+    #   - "llm_unavailable"       — LLM seam unreachable; emitted by
+    #                               `_no_skip_decision`'s default when
+    #                               `invoke_judge` returns empty.
+    #   - "exception_fail_closed" — exception in `select_gates`; sentinel
+    #                               applied by the top-level wrapper.
+    # Empty string is treated as "ok" (backward compat with v1.1
+    # audit JSON that did not record the field).
+    audit_reason: str = "ok"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,7 +247,7 @@ def apply_hard_rules(
     context: GateContext,
     llm_decisions: list,
 ) -> list:
-    """Pure: apply 5 bypass rules on top of LLM output.
+    """Pure: apply 6 bypass rules on top of LLM output.
 
     Returns a new list with `skip=False` overrides where hard rules fire.
     Hard rules (in order of precedence):
@@ -160,6 +256,7 @@ def apply_hard_rules(
       3. gate_name in {review, security} AND scope matches → skip=False
       4. confidence < CONFIDENCE_FLOOR → skip=False (low-confidence veto)
       5. `dynamic_eligible: false` (default) → skip=False (LLM-seam closed)
+      6. risk_level > RISK_CEILING → skip=False (high-risk veto; lower_is_better)
     """
     out = []
     for dec in llm_decisions:
@@ -197,6 +294,11 @@ def apply_hard_rules(
         # operator who leaves it at the default expects the gate to be
         # immune to LLM-driven skips.
         if not gate_entry.get("dynamic_eligible", False):
+            new_skip = False
+        # Rule 6 — high-risk veto. risk_level is lower_is_better (0=safe,
+        # 10=dangerous); a gate with risk above the ceiling is never
+        # skipped regardless of how good the other scores look.
+        if dec.risk_level > RISK_CEILING:
             new_skip = False
         if new_skip != dec.skip:
             out.append(dataclasses.replace(dec, skip=False))
@@ -273,6 +375,98 @@ def save_decision(decision: GateSkipDecision, root: Optional[Path] = None) -> Pa
     return path
 
 
+def _clamp_risk_level_for_load(d: dict) -> dict:
+    """S-1 + S-2 fix: validate + clamp `risk_level` on cache load.
+
+    S-1 (range validation): a poisoned cache file with an
+    out-of-range value (`risk_level=-1`, `risk_level=99`,
+    `risk_level="high"`) would otherwise survive `GateDecision(**d)`
+    and bypass rule #6: rule #6 checks `risk > RISK_CEILING`, so a
+    negative value does not trigger the veto, and the cached
+    `skip=True` survives the cache-hit re-application. Clamp any
+    value outside `[0.0, 10.0]` (or non-numeric) to
+    `MISSING_RISK_LEVEL_SENTINEL` so rule #6 fires and the gate
+    fails closed. Tag the audit reason so operators can distinguish
+    the legacy_cache path from missing_key / coerced_response /
+    coerced_response_cache.
+
+    S-2 (combined-score re-application): a poisoned cache entry with
+    in-range but coerced values (`skip=True, gate_skippable=9,
+    risk_level=0.5`) bypasses rule #6 but should have been caught
+    by the LLM-parse-time combined-score check. An attacker who
+    hand-crafts the cache JSON can skip that check entirely.
+    Re-apply the combined-score check at load time using
+    `raw_score["gate_skippable"]` + `risk_level`; if the combined-
+    score trips, upgrade `risk_level` to the sentinel and tag
+    `audit_reason="coerced_response_cache"` so operators can
+    distinguish this path.
+    """
+    out = dict(d)  # do not mutate caller's dict
+    rl_raw = out.get("risk_level")
+    rl = None
+    try:
+        rl = float(rl_raw) if rl_raw is not None else MISSING_RISK_LEVEL_SENTINEL
+        if not (0.0 <= rl <= 10.0):
+            out["risk_level"] = MISSING_RISK_LEVEL_SENTINEL
+            out["audit_reason"] = "legacy_cache"
+        else:
+            out["risk_level"] = rl
+    except (TypeError, ValueError):
+        out["risk_level"] = MISSING_RISK_LEVEL_SENTINEL
+        out["audit_reason"] = "legacy_cache"
+
+    # S-2: re-apply the combined-score coerced-response check at
+    # load time. A legitimate cache entry where the original
+    # LLM-parse-time check fired would have `risk_level ==
+    # MISSING_RISK_LEVEL_SENTINEL`; if we see a cache entry with
+    # in-range `risk_level` AND combined-score >= threshold,
+    # the parse-time check was bypassed — clamp to sentinel.
+    # Only re-apply when `raw_score["gate_skippable"]` is present
+    # (legacy v1.1 cache entries may lack it).
+    rs = out.get("raw_score") or {}
+    try:
+        gs = float(rs.get("gate_skippable", 0.0))
+    except (TypeError, ValueError):
+        gs = 0.0
+    cur_rl = out.get("risk_level", MISSING_RISK_LEVEL_SENTINEL)
+    if isinstance(cur_rl, (int, float)) and gs + (10.0 - cur_rl) >= COERCED_RESPONSE_COMBINED_FLOOR:
+        out["risk_level"] = MISSING_RISK_LEVEL_SENTINEL
+        out["audit_reason"] = "coerced_response_cache"
+    # S-3 (v1.1.3 follow-up): re-apply the near-max-skip check at
+    # load time. Mirrors the parse-time check above — closes the LLM01
+    # high finding for cache-poisoned entries with `raw_score` empty
+    # (which makes `gs=0.0` in the S-2 check above, so combined-score
+    # never trips even when risk_level is at the borderline-low edge).
+    # Only fires when gs is itself at the near-max threshold (defense-
+    # in-depth: requires an attacker who both poisoned gs to >= 9 AND
+    # chose a coerced risk_level).
+    elif (
+        isinstance(cur_rl, (int, float))
+        and gs >= COERCED_RESPONSE_NEAR_MAX_SKIP
+        and cur_rl >= RISK_CEILING
+    ):
+        out["risk_level"] = MISSING_RISK_LEVEL_SENTINEL
+        out["audit_reason"] = "coerced_response_cache"
+    # S-4 (v1.1.3 follow-up): empty raw_score + risk in skip range is
+    # anomalous. A legitimate cache entry always writes
+    # `raw_score={"gate_skippable": X, ...}`; an empty `raw_score`
+    # paired with `risk_level <= RISK_CEILING` is the A06/A08 cache-
+    # poisoning signature (attacker chose risk_level at the borderline-
+    # low edge AND omitted `gate_skippable` to make the combined-score
+    # check fall through with `gs=0.0`). Clamp to sentinel so rule #6
+    # vetoes; legitimate v1.1 cache entries with `gate_skippable=7+
+    # risk_level=3` always have a populated `raw_score` so they are
+    # unaffected.
+    elif (
+        isinstance(cur_rl, (int, float))
+        and not rs
+        and cur_rl <= RISK_CEILING
+    ):
+        out["risk_level"] = MISSING_RISK_LEVEL_SENTINEL
+        out["audit_reason"] = "legacy_cache"
+    return out
+
+
 def load_decision(
     head_sha: str,
     root: Optional[Path] = None,
@@ -282,6 +476,10 @@ def load_decision(
     Invalidation: if the on-disk `gates_hash` doesn't match the
     current `.dev-kit/gates.json` hash, return None so callers
     re-run `select_gates`.
+
+    Out-of-range `risk_level` values are clamped to
+    `MISSING_RISK_LEVEL_SENTINEL` (S-1 fix) so a poisoned cache file
+    cannot bypass rule #6 on cache-hit re-application.
     """
     root = root or Path(".")
     path = _audit_path(root, head_sha)
@@ -294,7 +492,8 @@ def load_decision(
     if payload.get("gates_hash") != hash_gates_state(root):
         return None
     decisions = tuple(
-        GateDecision(**d) for d in payload.get("decisions", [])
+        GateDecision(**_clamp_risk_level_for_load(d))
+        for d in payload.get("decisions", [])
     )
     return GateSkipDecision(
         head_sha=payload["head_sha"],
@@ -462,6 +661,7 @@ def select_gates(
                 skip=False,
                 reasoning="local mode: judge skipped, no LLM call",
                 confidence=0.0,
+                risk_level=0.0,
                 raw_score={},
             )
             for g in VALID_GATE_KEYS
@@ -477,81 +677,191 @@ def select_gates(
     # 1. Prune stale audit files.
     prune_stale(root)
 
-    # 2. Cache hit?
-    cached = load_decision(context.head_sha, root)
-    if cached is not None:
-        return cached
-
-    # 3. Invoke LLM.
-    raw = invoke_judge(context, root)
-    if not raw:
-        # Graceful degradation — empty decision, no gates skipped.
-        return _no_skip_decision(context, root)
-
-    scores = raw.get("scores") or {}
-
-    # Build per-gate LLM decisions. Each gate in VALID_GATE_KEYS gets a
-    # decision; missing confidence defaults to 0.0 (fails the floor).
-    from gates_state import VALID_GATE_KEYS  # local import to avoid cycle
-    llm_decisions = []
-    for gate_name in VALID_GATE_KEYS:
-        # gate_skippable maps to skip; confidence is its own field.
-        # Judge rubric (eval/prompts/judge-gate-dynamic.md): both axes are
-        # raw 0-10. Normalize confidence to 0-1 so the CONFIDENCE_FLOOR
-        # (= 0.7) comparison is on the same scale; otherwise the floor
-        # is effectively unreachable and rule #4 (low-confidence veto)
-        # never fires.
-        skip_score = float(scores.get("gate_skippable", 0.0))
-        confidence_raw = float(scores.get("confidence", 0.0))
-        confidence = confidence_raw / 10.0
-        # Skip iff both: skip_score >= SKIP_THRESHOLD AND confidence >= CONFIDENCE_FLOOR
-        skip = skip_score >= SKIP_THRESHOLD and confidence >= CONFIDENCE_FLOOR
-        llm_decisions.append(
-            GateDecision(
-                gate_name=gate_name,
-                skip=skip,
-                reasoning=f"llm: gate_skippable={skip_score:.1f} confidence_raw={confidence_raw:.1f} (normalized={confidence:.2f})",
-                confidence=confidence,
-                raw_score=scores,
+    # A10 fix: wrap the body in a top-level fail-closed barrier.
+    # Any exception in prune_stale / load_decision / apply_hard_rules /
+    # save_decision falls back to `_no_skip_decision` so a crash in
+    # the gate-dynamic layer cannot crash the babysit-pr loop.
+    try:
+        # 2. Cache hit?
+        cached = load_decision(context.head_sha, root)
+        if cached is not None:
+            # Re-apply hard rules on cached decisions. Without this, a
+            # cached `skip=True` from a pre-rule-#6 entry would survive
+            # a rule upgrade and bypass the new veto — the v1.0 cache
+            # short-circuit was the A01/A06 attack path the security
+            # judge flagged. The judge is NOT re-invoked (no network);
+            # the hard rules are deterministic and pure.
+            return GateSkipDecision(
+                head_sha=cached.head_sha,
+                decisions=tuple(apply_hard_rules(context, list(cached.decisions))),
+                llm_raw=cached.llm_raw,
+                gates_hash=cached.gates_hash,
+                decided_at_iso=cached.decided_at_iso,
             )
+
+        # 3. Invoke LLM.
+        raw = invoke_judge(context, root)
+        if not raw:
+            # Graceful degradation — empty decision, no gates skipped.
+            return _no_skip_decision(context, root)
+
+        scores = raw.get("scores") or {}
+
+        # Build per-gate LLM decisions. Each gate in VALID_GATE_KEYS gets a
+        # decision; missing confidence defaults to 0.0 (fails the floor).
+        from gates_state import VALID_GATE_KEYS  # local import to avoid cycle
+        llm_decisions = []
+        for gate_name in VALID_GATE_KEYS:
+            # gate_skippable maps to skip; confidence is its own field.
+            # Judge rubric (eval/prompts/judge-gate-dynamic.md): both axes are
+            # raw 0-10. Normalize confidence to 0-1 so the CONFIDENCE_FLOOR
+            # (= 0.7) comparison is on the same scale; otherwise the floor
+            # is effectively unreachable and rule #4 (low-confidence veto)
+            # never fires.
+            skip_score = float(scores.get("gate_skippable", 0.0))
+            confidence_raw = float(scores.get("confidence", 0.0))
+            confidence = confidence_raw / 10.0
+            # A missing `risk_level` key (partial LLM response) must
+            # fail closed: defaulting to 0.0 would be the SAFEST possible
+            # score and would incorrectly PASS the risk_level <=
+            # RISK_CEILING check below, letting an incomplete judge
+            # response bypass the risk veto. Use
+            # MISSING_RISK_LEVEL_SENTINEL (11.0, above the judge's 0-10
+            # scale) so a missing key always vetoes the skip via rule
+            # #6, same fail-closed posture as the other two axes' floors.
+            risk_level_raw = scores.get("risk_level")
+            if risk_level_raw is None:
+                risk_level = MISSING_RISK_LEVEL_SENTINEL
+                audit_reason = "missing_key"
+            else:
+                risk_level = float(risk_level_raw)
+                audit_reason = "ok"
+            # LLM01 follow-up: combined-score coerced-response sanity
+            # check. A genuine judge response on a real diff almost
+            # never emits a high skip-score together with a low
+            # risk-level — that pair is the signature of a PR-body
+            # prompt-injected judge response. The v1.1 AND-only check
+            # missed the sub-extreme `(skip=8.5, risk=1.5)` attack
+            # triple; the v1.1.1 combined-score check requires BOTH
+            # axes to be pushed toward extremes simultaneously. An
+            # attacker must push `skip + (10 - risk)` above
+            # `COERCED_RESPONSE_COMBINED_FLOOR`; lowering either axis
+            # alone is insufficient. Force `risk_level` to the
+            # sentinel so rule #6 vetoes the skip and tag the audit
+            # reason so operators can distinguish the
+            # coerced-response path from missing_key / legacy_cache.
+            if (
+                skip_score + (10.0 - risk_level)
+                >= COERCED_RESPONSE_COMBINED_FLOOR
+            ):
+                risk_level = MISSING_RISK_LEVEL_SENTINEL
+                audit_reason = "coerced_response"
+            # v1.1.3 follow-up: near-max-skip coerced-response sanity
+            # check. Closes the LLM01 high finding where the combined-
+            # score check missed the `(skip=9.99, risk=3.0)` attack
+            # triple. A genuine judge response on a clean diff lands
+            # skip_score in the 7-8 range (the SKIP_THRESHOLD zone);
+            # an attacker driving skip_score to >= 9.0 AND keeping
+            # risk_level at the documented borderline-low edge is the
+            # signature of a coerced response. Force risk_level to the
+            # sentinel so rule #6 vetoes.
+            elif (
+                skip_score >= COERCED_RESPONSE_NEAR_MAX_SKIP
+                and risk_level >= RISK_CEILING
+            ):
+                risk_level = MISSING_RISK_LEVEL_SENTINEL
+                audit_reason = "coerced_response"
+            # Skip iff all three: skip_score >= SKIP_THRESHOLD AND
+            # confidence >= CONFIDENCE_FLOOR AND risk_level <= RISK_CEILING.
+            skip = (
+                skip_score >= SKIP_THRESHOLD
+                and confidence >= CONFIDENCE_FLOOR
+                and risk_level <= RISK_CEILING
+            )
+            llm_decisions.append(
+                GateDecision(
+                    gate_name=gate_name,
+                    skip=skip,
+                    reasoning=f"llm: gate_skippable={skip_score:.1f} confidence_raw={confidence_raw:.1f} (normalized={confidence:.2f}) risk_level={risk_level:.1f}",
+                    confidence=confidence,
+                    risk_level=risk_level,
+                    raw_score=scores,
+                    audit_reason=audit_reason,
+                )
+            )
+
+        # 4. Apply hard rules.
+        final = apply_hard_rules(context, llm_decisions)
+
+        # 5. Build decision payload.
+        decision = GateSkipDecision(
+            head_sha=context.head_sha,
+            decisions=tuple(final),
+            llm_raw={"scores": scores, "raw": raw.get("raw", "")},
+            gates_hash=hash_gates_state(root),
+            decided_at_iso=_now_utc_iso(),
         )
 
-    # 4. Apply hard rules.
-    final = apply_hard_rules(context, llm_decisions)
+        # 6. Save (unless dry-run).
+        if not dry_run:
+            save_decision(decision, root)
 
-    # 5. Build decision payload.
-    decision = GateSkipDecision(
-        head_sha=context.head_sha,
-        decisions=tuple(final),
-        llm_raw={"scores": scores, "raw": raw.get("raw", "")},
-        gates_hash=hash_gates_state(root),
-        decided_at_iso=_now_utc_iso(),
-    )
+        return decision
+    except Exception:
+        # A10 fix + S-1 fix: any exception in the gate-dynamic body
+        # must fail closed, not propagate. `select_gates` is called
+        # from babysit-pr / bin/review-local.sh / interactive flows;
+        # a crash here would crash the calling loop. The no-skip
+        # decision preserves all six hard rules (every gate runs)
+        # — the safest possible default. S-1 fix: log the exception
+        # via `logger.exception(...)` so a silent fail-open is
+        # debuggable from logs, and tag the decision's audit_reason
+        # as `exception_fail_closed` so operators can distinguish
+        # this path from a healthy llm-unavailable decision.
+        logger.exception(
+            "select_gates body raised; failing closed to no-skip decision"
+        )
+        return _no_skip_decision(
+            context, root,
+            reason="select_gates exception",
+            audit_reason="exception_fail_closed",
+        )
 
-    # 6. Save (unless dry-run).
-    if not dry_run:
-        save_decision(decision, root)
 
-    return decision
+def _no_skip_decision(
+    context: GateContext,
+    root: Path,
+    *,
+    reason: str = "llm unavailable",
+    audit_reason: str = "llm_unavailable",
+) -> GateSkipDecision:
+    """Build a deterministic no-skip decision.
 
-
-def _no_skip_decision(context: GateContext, root: Path) -> GateSkipDecision:
-    """Build a deterministic no-skip decision (LLM unavailable path)."""
+    `reason` controls the per-decision reasoning string; `audit_reason`
+    is the `GateDecision.audit_reason` value, distinct from the
+    reasoning string. The default (`"llm unavailable"`) is the
+    graceful-degradation path when the LLM is unreachable. The
+    exception-fail-closed path passes `audit_reason="exception_fail_closed"`
+    so operators can tell a crashed gate-dynamic call apart from a
+    healthy no-skip path (S-1 fix).
+    """
     from gates_state import VALID_GATE_KEYS
     decisions = tuple(
         GateDecision(
             gate_name=g,
             skip=False,
-            reasoning="llm unavailable; defaulting to no-skip",
+            reasoning=f"{reason}; defaulting to no-skip",
             confidence=0.0,
+            risk_level=0.0,
             raw_score={},
+            audit_reason=audit_reason,
         )
         for g in VALID_GATE_KEYS
     )
     return GateSkipDecision(
         head_sha=context.head_sha,
         decisions=decisions,
-        llm_raw={"scores": {}, "raw": "", "note": "llm_unavailable"},
+        llm_raw={"scores": {}, "raw": "", "note": audit_reason},
         gates_hash=hash_gates_state(root),
         decided_at_iso=_now_utc_iso(),
     )

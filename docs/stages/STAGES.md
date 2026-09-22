@@ -1,6 +1,6 @@
 # STAGES — dev-harness-kit per-stage harness spec
 
-**Language:** English · [한국어](STAGES.ko.md)
+
 
 > Reference: ADR-0011, ADR-0020. 7 stages (B / B.5 / 1 / 2 / 3 / 5a / 5b / 6 / 7) × must/must-not/AC unified.
 
@@ -50,7 +50,7 @@
 - **Must**: (a) Follow `phases/<name>/step<N>.md` exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via `build-debug`). (d) 2-commit protocol (feat + chore). Note: a Phase 4 auto-gate that read `.dev-kit/valuations/<plan-id>.json` and refused non-PROCEED verdicts lived here until #463; the gate was tied to a URI substrate that has since been dropped, so the auto-gate went with it. As of PR #589 `valuate` is model-invocable only and the verdict envelope is purely advisory; the build proceeds regardless of any verdict.
 - **Must-Not**: Speculate on AC ("should work", "probably fine"). Delete `output.json`. Batch multiple changes.
 - **AC**: All steps `status=completed`. `pytest` exit code 0 + count quoted. 2-commit protocol followed.
-- **Active Skills**: `build-tdd`, `build-debug`, `build-verify`, `build-refactor` (the per-step harness runner + methodology selector live in `lib/execute.py` + `lib/methodology/`; prune's 3-pass sweep is inlined into `prune`)
+- **Active Skills**: `build`, `build-debug` (the per-step harness runner, test-first discipline, and completion evidence live in `lib/execute.py`, `lib/methodology/`, and the active hooks; prune's 3-pass sweep is inlined into `prune`)
 - **Active Hooks**: `tdd-guard`, `bash-guard`, `secret-scan`, `slop-detector`, `stop-verify` — all ON
 - **Sub-agent**: Phase 3 (planned). Currently sequential-only.
 - **Hand-off out**: `build→review.md`

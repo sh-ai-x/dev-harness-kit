@@ -1,6 +1,6 @@
 # Skills documentation index
 
-**Language:** English · [한국어](README.ko.md)
+
 
 This is the detailed, human-readable documentation layer for every skill
 shipped by the `dev-kit` plugin — one page per skill under `docs/skills/`,
@@ -63,7 +63,7 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`security`](security.md) | `enforcement` | Full OWASP Top 10 2025 (A01–A10) fan-out with a verifier pass. |
 | [`security-metrics`](security-metrics.md) | `enforcement` | Deterministic 0–100 OWASP Top 10 scorecard with Markdown evidence table. |
 | [`inspect`](inspect.md) | `analysis` | 8-dimension read-only code-health audit. |
-| [`refactor`](refactor.md) | `analysis` | 3-phase cleanup chain: `inspect → build-refactor → review`. |
+| [`refactor`](refactor.md) | `analysis` | 3-phase cleanup chain: `inspect → cleanup → review`. |
 | [`prune`](prune.md) | `analysis` | 4-phase deletion sweep: sweep → dependents → report → verify. |
 | [`babysit-pr`](babysit-pr.md) | `state` | PR babysitter loop: poll CI, fix, commit, re-iterate to a green Approve. |
 | [`pr-verify`](pr-verify.md) | `enforcement` | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, structured verdict, no "stale CI" false positive. |
@@ -86,7 +86,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 | [`docs-maintenance`](docs-maintenance.md) | `analysis` | Audits repository docs with the README as the highest-priority document; always audits and verifies the README, updates when needed. |
 | [`prune-propose`](prune-propose.md) | `state` | Usage-telemetry dump + per-skill delete proposal, user-approved. |
 | [`ralph`](ralph.md) | `state` | End-to-end autonomous loop with 4 user gates + unattended build/babysit/ship. Once SHIP_CONFIRM_GATE approves, attended_lock is set and AskUserQuestion is invariant-forbidden during ATTENDED_RUN. Linear is OUT OF SCOPE. |
-| [`learn`](learn.md) | `state` | Distill source text (file path, URL, prose, or session transcript) into a candidate `skills/<name>/SKILL.md`, gated by deterministic G1–G5 checks + a per-candidate approval step. |
 
 ### Shortcuts / maintenance
 
@@ -117,9 +116,6 @@ step inside their parent skill's flow; you never type them directly.
 
 | Skill | Alpha | Parent | Summary |
 |---|---|---|---|
-| [`build-tdd`](build-tdd.md) | `enforcement` | `/dev-kit:build` | Red-Green-Refactor cycle; `tdd-guard` hook enforces no production code without a failing test. |
-| [`build-verify`](build-verify.md) | `enforcement` | `/dev-kit:build` | Verification-before-completion; no "done" without a quoted exit code + test count. |
-| [`build-refactor`](build-refactor.md) | `enforcement` | `/dev-kit:refactor`, `/dev-kit:prune` | 4-pass cleanup (dead → dup → naming → coverage); no cleanup without a regression test. |
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | auto (visible hook failure) | Diagnose failed Claude Code / Codex hooks and repair safe cache + registration drift. |
 | [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` and other planning stages | Plan-value gate; scores a plan on 6 axes and returns proceed/revise/hold/kill. Advisory — the build stage proceeds unless the operator flags a non-`proceed` verdict manually. |
 
@@ -134,9 +130,6 @@ step inside their parent skill's flow; you never type them directly.
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
 | [`build`](build.md) | `build` | `state` | human |
 | [`build-debug`](build-debug.md) | `build` | `enforcement` | human |
-| [`build-refactor`](build-refactor.md) | `build` | `enforcement` | model |
-| [`build-tdd`](build-tdd.md) | `build` | `enforcement` | model |
-| [`build-verify`](build-verify.md) | `build` | `enforcement` | model |
 | [`bump`](bump.md) | `ship` | `state` | human |
 | [`ci-doctor`](ci-doctor.md) | `audit` | `enforcement` | human |
 | [`ci-setup`](ci-setup.md) | `bootstrap` | `enforcement` | human |
@@ -153,7 +146,6 @@ step inside their parent skill's flow; you never type them directly.
 | [`hook-doctor`](hook-doctor.md) | `audit` | `enforcement` | model |
 | [`inspect`](inspect.md) | `audit` | `analysis` | human |
 | [`interview`](interview.md) | `design` | `enforcement` | human |
-| [`learn`](learn.md) | `audit` | `state` | human |
 | [`linear`](linear.md) | `config` | `state` | human |
 | [`llm-refresh`](llm-refresh.md) | `shortcuts` | `analysis` | human |
 | [`log`](log.md) | `shortcuts` | `state` | human |

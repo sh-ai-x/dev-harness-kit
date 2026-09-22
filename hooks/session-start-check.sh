@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 # session-start-check.sh — SessionStart hook.
 #
-# Gentle reminder layer for the "every task = new worktree" rule.
-#
-# Fires once at session start. If the session cwd is the MAIN repo
-# checkout (not a worktree), emit an additionalContext reminder so
-# Claude remembers the rule from the very first turn. Claude can then
-# either nudge the user to cut a worktree, or — if the session is
-# legitimately a read-only investigation in the main checkout — proceed
-# carefully knowing that worktree-guard.sh will block any Edit/Write.
+# Compact SessionStart context for the checkout and resolved guard policy.
 #
 # This hook never blocks. The hard block is worktree-guard.sh.
 #
-# Discriminator: --git-dir == --git-common-dir ⇒ main checkout.
+# The hard edit/branch guards remain independent PreToolUse hooks.
 #
 # Fails open (with stderr warning) when `jq` is missing — the rule is
 # advisory in this hook. worktree-guard.sh is the hard-block layer.
 
 # Source the shared preamble (set -uo pipefail, INPUT=$(cat),
 # worktree_detect, jq-missing warning).
+HOOK_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 # shellcheck source=lib/hook-preamble.sh
-source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+source "$HOOK_DIR/lib/hook-preamble.sh"
 
 # Warn (not fail) if jq is missing. The preamble already ran
 # worktree_detect, which leaves $WORKTREE_DETECT="" when jq is absent;
@@ -58,9 +52,9 @@ if command -v python3 >/dev/null 2>&1; then
     mkdir -p "$DEV_KIT_LOGS" 2>/dev/null || DEV_KIT_LOGS=""
   fi
   if [ -d "$DEV_KIT_LOGS" ]; then
-    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>>"$DEV_KIT_LOGS/session-start-check.log" || true
+    python3 "$HOOK_DIR/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>>"$DEV_KIT_LOGS/session-start-check.log" || true
   else
-    python3 "${BASH_SOURCE[0]%/*}/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>/dev/null || true
+    python3 "$HOOK_DIR/../tools/regenerate_active_hooks.py" --root "$EFFECTIVE_CWD" --quiet 2>/dev/null || true
   fi
 fi
 
@@ -88,7 +82,7 @@ if [ -n "$SESSION_ID" ] && [ -n "$EFFECTIVE_CWD" ]; then
   # perspective. Single-quoted heredoc + os.environ avoids any
   # string-literal injection via the payload (see also
   # trace-session-end.sh for the matching pattern).
-  LIB_DIR="${BASH_SOURCE[0]%/*}/../lib"
+  LIB_DIR="$HOOK_DIR/../lib"
   EFFECTIVE_CWD="$EFFECTIVE_CWD" \
     SESSION_ID="$SESSION_ID" \
     LIB_DIR="$LIB_DIR" \
@@ -114,16 +108,20 @@ except Exception:
 PY
 fi
 
-case "$WORKTREE_DETECT" in
-  worktree|outside|"") exit 0 ;;
-  main) ;;
-  *) exit 0 ;;
-esac
-
-# In main checkout → emit nudge.
 BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)"
-NUDGE="GIT-WORKFLOW REMINDER (rules/git-workflow.md): this session started in the main repo checkout (branch='$BRANCH'). For any new implementation task, the rule requires a new worktree + client handoff + new branch. The hard edit-block is hooks/worktree-guard.sh (PreToolUse). If the user is just investigating or asking questions, proceed; before any Edit/Write, cut a worktree with: git fetch origin main && git worktree add -b <type>/<slug> .worktrees/<slug> origin/main. Claude Code then opens a new session in that path; Codex spawns/hand-offs a subagent with that path as its working directory."
+GUARD_LIB="$HOOK_DIR/lib/guard-policy.sh"
+# shellcheck source=lib/guard-policy.sh
+source "$GUARD_LIB"
+DEV_KIT_GUARD_ROOT="$EFFECTIVE_CWD" dev_kit_guards_resolve
+CHECKOUT="$(DEV_KIT_GUARD_ROOT="$EFFECTIVE_CWD" dev_kit_guards_branch_class)"
+if [ "$CHECKOUT" = "main" ]; then
+  CONTEXT="dev-kit guards=${DEV_KIT_GUARDS:-off} source=${DEV_KIT_GUARDS_SOURCE:-default} checkout=main branch=${BRANCH}; use a worktree for edits"
+else
+  CONTEXT="dev-kit guards=${DEV_KIT_GUARDS:-off} source=${DEV_KIT_GUARDS_SOURCE:-default} checkout=${CHECKOUT}"
+fi
 
-jq -nc --arg ctx "$NUDGE" --arg ev "SessionStart" \
+# One compact, prompt-free context line. Guard activation is decided by
+# bootstrap/project-local settings; SessionStart only reports the result.
+jq -nc --arg ctx "$CONTEXT" --arg ev "SessionStart" \
   '{hookSpecificOutput:{hookEventName:$ev,additionalContext:$ctx}}'
 exit 0

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""test_code_viz_skill.py — regression test for skills/code-viz/SKILL.md.
+"""test_code_viz_skill.py — regression test for tools/code_viz.py.
 
 Validates the skill workflow end-to-end against a synthetic sandbox:
 
-1. The Python heredoc embedded in SKILL.md compiles standalone (catches the
-   \"open\") escape bug that silently crashes the validator subprocess).
+1. The executable tool compiles standalone and remains the visualizer SSOT.
 2. The skill runs to completion: exits 0, prints all 5 validator labels
    on stdout (catches silent validator failures and NameError-on-`svgs` in
    the parent scope after my fix to the cosmetic glitch).
@@ -18,7 +17,6 @@ Validates the skill workflow end-to-end against a synthetic sandbox:
 """
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
@@ -32,29 +30,17 @@ import pytest
 # Playwright-driven tests (skill validator + meta-test) require the
 # playwright Python package AND the headless chromium binary. Skip the
 # whole module when either is missing so CI without browser tooling still
-# runs the heredoc-compile + structural assertions; the validator
+# runs the tool-compile + structural assertions; the validator
 # subprocess and the modal-click meta-test are local-environment concerns.
 pytest.importorskip("playwright", reason="playwright not installed; skipping Playwright-dependent tests")
 
 PROJECT_ROOT = Path(__file__).parent.parent
-SKILL_FILE = PROJECT_ROOT / "skills" / "code-viz" / "SKILL.md"
+TOOL_FILE = PROJECT_ROOT / "tools" / "code_viz.py"
 
 
-def _extract_heredoc() -> str:
-    """Pull the python heredoc body out of SKILL.md (between `python3 << 'PY'`
-    and the closing `PY`).
-
-    The closing `PY` is the shell heredoc terminator — bash strips it at
-    runtime, but our regex captures it as part of the body. Strip it before
-    passing to `exec()`, otherwise exec() reaches `PY` as a name lookup."""
-    src = SKILL_FILE.read_text()
-    m = re.search(r"```python\npython3 << 'PY'\n(.*?)\n```", src, re.S)
-    if not m:
-        raise AssertionError(f"could not extract heredoc from {SKILL_FILE}")
-    body = m.group(1)
-    # Trim trailing `PY` line (the heredoc terminator that bash strips at runtime)
-    body = re.sub(r"\nPY\s*$", "", body)
-    return body
+def _extract_tool() -> str:
+    """Read the executable visualizer source of truth."""
+    return TOOL_FILE.read_text(encoding="utf-8")
 
 
 def _build_sandbox(tmpdir: Path) -> Path:
@@ -70,21 +56,12 @@ def _build_sandbox(tmpdir: Path) -> Path:
 
 
 def _run_skill(sandbox: Path, out_html: Path) -> subprocess.CompletedProcess:
-    """Run the skill's heredoc body in a fresh python subprocess, with
+    """Run the visualizer tool in a fresh python subprocess, with
     --target and --out wired to the test fixtures."""
-    body = _extract_heredoc()
-    # Write the heredoc body to a temp .py file so we can run it as a script.
-    # The heredoc itself uses the variables `target`, `out` etc. internally;
-    # we override `sys.argv` so its argparse picks up our flags.
-    script = out_html.parent / f"_code_viz_runner_{os.getpid()}.py"
-    script.write_text(body)
-    try:
-        return subprocess.run(
-            [sys.executable, str(script), f"--target={sandbox}", f"--out={out_html}"],
-            capture_output=True, text=True, timeout=120,
-        )
-    finally:
-        script.unlink(missing_ok=True)
+    return subprocess.run(
+        [sys.executable, str(TOOL_FILE), f"--target={sandbox}", f"--out={out_html}"],
+        capture_output=True, text=True, timeout=120,
+    )
 
 
 def _strip_timestamp_meta(text: str) -> str:
@@ -99,7 +76,7 @@ def _strip_timestamp_meta(text: str) -> str:
 
 
 class CodeVizSkillTests(unittest.TestCase):
-    """Regression tests for skills/code-viz/SKILL.md."""
+    """Regression tests for the code-viz tool contract."""
 
     def setUp(self):
         self.sandbox = _build_sandbox(Path(tempfile.mkdtemp(prefix="code_viz_test_")))
@@ -109,15 +86,13 @@ class CodeVizSkillTests(unittest.TestCase):
         shutil.rmtree(self.sandbox, ignore_errors=True)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_heredoc_compiles(self):
-        """The Python heredoc body in SKILL.md must parse cleanly. Regression
-        for the \"open\") inner-subprocess escape bug — when the inner Python
-        string terminated early the validator subprocess crashed silently."""
-        body = _extract_heredoc()
+    def test_tool_compiles(self):
+        """The executable tool must parse cleanly before it is invoked."""
+        body = _extract_tool()
         try:
-            compile(body, "<code-viz-heredoc>", "exec")
+            compile(body, "<code-viz-tool>", "exec")
         except SyntaxError as e:
-            self.fail(f"heredoc in SKILL.md has a SyntaxError: {e}\n\nbody:\n{body}")
+            self.fail(f"code_viz.py has a SyntaxError: {e}\n\nbody:\n{body}")
 
     def test_skill_runs_to_completion(self):
         """The skill exits 0 with all 5 validator labels on stdout and emits

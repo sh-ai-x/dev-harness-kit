@@ -59,7 +59,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
 # feat/team-toggle: +1 for the `team` skill (DEV_KIT_TEAM toggle, orthogonal
 # to DEV_KIT_MODE). Mirrors `mode` shape; see skills/team/SKILL.md.
-SKILL_COUNT = 56  # +1: gate-artifacts (managed custom GitHub Actions gate lifecycle, PR #883)
+SKILL_COUNT = 52  # 56 (+gate-artifacts, PR #883) minus three redundant model-only build skills + learn removed
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

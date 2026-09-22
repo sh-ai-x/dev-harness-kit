@@ -109,6 +109,15 @@ def load_matrix(project_root: Path) -> Dict:
     `is_hook_active` once per PreToolUse event) pays one disk read per
     `mtime` change instead of one read per invocation. Cache is
     invalidated when the file's `st_mtime` changes.
+
+    In addition, mutating writers (`set_stage`, `disable_override`)
+    explicitly evict every cache entry whose path matches the write's
+    `project_root` after `atomic_write_json` returns, so the next read
+    is forced against disk even on filesystems where `os.replace`
+    leaves `st_mtime` unchanged (NFS, some Docker overlay layers,
+    coarse-mtime mounts). This explicit-invalidate contract is what
+    `test_set_stage_invalidates_cache_even_when_mtime_unchanged`
+    pins — see that test for the regression scenario.
     """
     path = project_root / ".dev-kit" / ".active-hooks.json"
     try:
@@ -195,11 +204,24 @@ def is_hook_active(project_root: Path, stage: str, hook_name: str) -> bool:
     return bool(state)
 
 
+def _matrix_path(project_root: Path) -> Path:
+    return project_root / ".dev-kit" / ".active-hooks.json"
+
+
+def _invalidate_cache(project_root: Path) -> None:
+    """Drop every cache entry whose path matches project_root."""
+    path_str = str(_matrix_path(project_root).resolve())
+    keys_to_evict = [k for k in _MATRIX_CACHE if k[0] == path_str]
+    for k in keys_to_evict:
+        del _MATRIX_CACHE[k]
+
+
 def set_stage(project_root: Path, stage: str, hook: str, value: object) -> None:
     """Update a single cell in the matrix."""
     data = read_matrix(project_root)
     data.setdefault("matrix", {}).setdefault(stage, {})[hook] = value
-    atomic_write_json(project_root / ".dev-kit" / ".active-hooks.json", data)
+    atomic_write_json(_matrix_path(project_root), data)
+    _invalidate_cache(project_root)
 
 
 def disable_override(project_root: Path, hook_name: str) -> None:
@@ -208,7 +230,8 @@ def disable_override(project_root: Path, hook_name: str) -> None:
     data.setdefault("override", {}).setdefault("disabled_hooks", [])
     if hook_name not in data["override"]["disabled_hooks"]:
         data["override"]["disabled_hooks"].append(hook_name)
-    atomic_write_json(project_root / ".dev-kit" / ".active-hooks.json", data)
+    atomic_write_json(_matrix_path(project_root), data)
+    _invalidate_cache(project_root)
 
 
 if __name__ == "__main__":

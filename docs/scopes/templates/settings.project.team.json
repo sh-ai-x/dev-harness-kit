@@ -4,7 +4,8 @@
   },
   "env": {
     "DEV_KIT_MODE": "full",
-    "DEV_KIT_TEAM": "on"
+    "DEV_KIT_TEAM": "on",
+    "DEV_KIT_GUARDS": "off"
   },
   "roles": {
     "active": "",

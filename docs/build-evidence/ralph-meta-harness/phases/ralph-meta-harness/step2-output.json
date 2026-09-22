@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "ralph-meta-harness",
+  "step": 2,
+  "exit_code": 0,
+  "stdout": "......... [100%]\\n9 passed in 1.17s\\n",
+  "stderr": "",
+  "duration_seconds": 1.17,
+  "timestamp": "2026-09-21T00:00:02Z",
+  "checks_run": [
+    "pytest: tests/test_ralph_promote.py"
+  ],
+  "independent": true,
+  "changed_files": [
+    "lib/ralph_promote.py",
+    "tests/test_ralph_promote.py"
+  ]
+}

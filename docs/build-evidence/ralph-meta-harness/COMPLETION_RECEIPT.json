@@ -1,0 +1,33 @@
+{
+  "acceptance_checks": {
+    "all_steps_completed": true,
+    "all_steps_exit_zero": true,
+    "blockers_empty": true,
+    "terminal_state": true
+  },
+  "artifact_hash": "9c1ccf62450eab57ceadaa95b3fbbbc20ead86e6d9a587911517dbd278685718",
+  "blockers": [],
+  "certificate_type": "ralph.completion-receipt",
+  "completion_status": "verified",
+  "created_at": "2026-09-20T16:04:34+00:00",
+  "evidence_refs": [
+    "PRD.md",
+    "SUMMARY.md",
+    "phases/ralph-meta-harness/index.json",
+    "phases/ralph-meta-harness/step1-output.json",
+    "phases/ralph-meta-harness/step1.md",
+    "phases/ralph-meta-harness/step2-output.json",
+    "phases/ralph-meta-harness/step2.md",
+    "phases/ralph-meta-harness/step3-output.json",
+    "phases/ralph-meta-harness/step3.md"
+  ],
+  "harness_candidate": "working-tree",
+  "manifest_file": "RECEIPT_MANIFEST.json",
+  "phase": "ralph-meta-harness",
+  "plan_id": "ralph-meta-harness",
+  "schema_version": 1,
+  "session": "ralph-meta-harness",
+  "terminal_state": "USER_MERGE_REQUIRED",
+  "unresolved_risk": false,
+  "verifier_kind": "declared"
+}

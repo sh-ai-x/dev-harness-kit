@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {},
   "env": {
-    "DEV_KIT_MODE": "undev"
+    "DEV_KIT_MODE": "undev",
+    "DEV_KIT_GUARDS": "off"
   }
 }

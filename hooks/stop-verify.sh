@@ -5,6 +5,41 @@
 set -eo pipefail
 source "${BASH_SOURCE[0]%/*}/lib/stage-gate.sh"
 INPUT=$(cat)
+
+# RALPH owns workflow continuity. A normal worker Stop is a checkpoint, not a
+# completion gate. The dispatcher exports RALPH_MODE/RALPH_SESSION; the small
+# state-file fallback keeps direct local hook invocations safe for the default
+# session. Checkpoint telemetry is best-effort and must never block the worker.
+PAYLOAD_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || true)
+if [ -n "$PAYLOAD_CWD" ] && [ -d "$PAYLOAD_CWD" ]; then
+  ROOT="$PAYLOAD_CWD"
+else
+  ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+fi
+HOOK_ROOT="$(cd "${BASH_SOURCE[0]%/*}/.." && pwd)"
+RALPH_SESSION="${RALPH_SESSION:-default}"
+RALPH_ACTIVE="${RALPH_MODE:-0}"
+if [ "$RALPH_ACTIVE" != "1" ] && command -v jq >/dev/null 2>&1; then
+  RALPH_STATE="$ROOT/.dev-kit/ralph/${RALPH_SESSION}.json"
+  if [ -f "$RALPH_STATE" ] && jq -e '.attended_lock == true and .current_stage == "ATTENDED_RUN"' "$RALPH_STATE" >/dev/null 2>&1; then
+    RALPH_ACTIVE=1
+  fi
+fi
+if [ "$RALPH_ACTIVE" = "1" ]; then
+  HOOK_EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // .hookEventName // "Stop"' 2>/dev/null || echo Stop)"
+  if command -v shasum >/dev/null 2>&1; then
+    PAYLOAD_DIGEST="$(printf '%s' "$INPUT" | shasum -a 256 | awk '{print $1}')"
+  else
+    PAYLOAD_DIGEST=""
+  fi
+  PYTHONPATH="$HOOK_ROOT:$ROOT" python3 -m lib.ralph_controller \
+    --project-root "$ROOT" --session "$RALPH_SESSION" checkpoint \
+    --reason "worker_stop" --next-action "resume next RALPH cycle" \
+    --payload-digest "$PAYLOAD_DIGEST" --hook-event "$HOOK_EVENT" \
+    >/dev/null 2>&1 || true
+  exit 0
+fi
+
 LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null)
 [ -z "$LAST_MSG" ] && exit 0
 hook_stage_active stop-verify || exit 0
@@ -16,7 +51,6 @@ EVIDENCE_RE='(exit code|passed [0-9]+|failed [0-9]+|tests:|Traceback|AssertionEr
 if echo "$LAST_MSG" | grep -qE "$CLAIM_RE"; then
   pre_completion_checklist_active || exit 0
 
-  ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   CHECK_RESULT=$(cd "$ROOT" && PYTHONPATH="$ROOT" python3 -c '
 import json
 import subprocess

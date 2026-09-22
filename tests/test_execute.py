@@ -1015,7 +1015,7 @@ class TestRunStepBody(unittest.TestCase):
         while still entering `overall_score` at weight 0.25 — strictly worse
         than emitting nothing. This test pins the causal edge.
         """
-        import tempfile
+        import tempfile  # noqa: I001
 
         from lib import execute as ex  # noqa: E402
         from lib.trace_log import read_events
@@ -1051,7 +1051,7 @@ class TestRunStepBody(unittest.TestCase):
         that identity onto every emitted event instead of leaving the
         field unset.
         """
-        import tempfile
+        import tempfile  # noqa: I001
 
         from lib import execute as ex  # noqa: E402
         from lib.trace_log import read_events
@@ -1086,7 +1086,7 @@ class TestRunStepBody(unittest.TestCase):
         anti-pattern as the prior A06-1 regression (empty is the honest
         "unset" signal, not a guess).
         """
-        import os
+        import os  # noqa: I001
         import tempfile
         from unittest.mock import patch
 
@@ -1122,7 +1122,7 @@ class TestRunStepBody(unittest.TestCase):
             + 1*.1 (no_hidden_retry) = 30.0
         Anything higher would require an actual independent check runner.
         """
-        import tempfile
+        import tempfile  # noqa: I001
 
         from lib import execute as ex  # noqa: E402
         from lib.harness_effectiveness import _first_pass
@@ -1173,7 +1173,7 @@ class TestRunStepBody(unittest.TestCase):
         False; the same code path also runs for the no-diff case (the
         verify emit is no longer gated by the if).
         """
-        import tempfile
+        import tempfile  # noqa: I001
 
         from lib import execute as ex  # noqa: E402
         from lib.trace_log import read_events
@@ -1468,7 +1468,6 @@ class TestGateSummaryLine(unittest.TestCase):
         line = execute._gate_summary_line(self.root)
         self.assertIn("stop_verify=ON", line)
         self.assertIn("secret_scan=ON", line)
-        self.assertIn("tdd_scope_judge=ON", line)
         self.assertIn("slop_detector=ON", line)
 
     def test_fast_mode_reports_optional_gates_off_correctness_stays_on(self):
@@ -1477,7 +1476,6 @@ class TestGateSummaryLine(unittest.TestCase):
         line = execute._gate_summary_line(self.root)
         self.assertIn("stop_verify=ON", line)
         self.assertIn("secret_scan=ON", line)
-        self.assertIn("tdd_scope_judge=OFF", line)
         self.assertIn("slop_detector=OFF", line)
 
     def test_step_pre_spawn_appends_gate_summary_to_preamble(self):

@@ -3,14 +3,13 @@
 session bypass wired into hooks/tdd-guard.sh and hooks/worktree-guard.sh.
 
 Verifies:
-  - Default (no state file): both guards still enforce (parity with the
-    pre-existing test_worktree_guard.py / test_tdd_guard.py behavior).
+  - Explicit policy `on` keeps both guards enforcing.
   - guard_mode_state "off" makes tdd-guard.sh allow a core-code edit with
     no RED evidence, and worktree-guard.sh allow an Edit in the main
     checkout.
   - Each guard's "off" state is independent of the other.
-  - hooks/session-start-guard-mode-reset.sh resets a previously-"off"
-    state back to "on" (the "new window = enforced by default" contract).
+  - hooks/session-start-guard-mode-reset.sh applies the resolved policy and
+    keeps the unconfigured default off.
 """
 from __future__ import annotations
 
@@ -57,9 +56,24 @@ def _init_main_repo() -> tempfile.TemporaryDirectory:
 
 
 class TestWorktreeGuardBypass(unittest.TestCase):
+    def test_unconfigured_main_is_off(self):
+        tmp = _init_main_repo()
+        try:
+            r = subprocess.run(
+                ["bash", str(HOOKS / "worktree-guard.sh")],
+                input=json.dumps(_edit_payload(str(Path(tmp.name) / "foo.py"))),
+                capture_output=True, text=True, timeout=10, cwd=tmp.name,
+                env=_ENV_WITH_LIB,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+        finally:
+            tmp.cleanup()
+
     def test_default_still_denies_in_main_checkout(self):
         tmp = _init_main_repo()
         try:
+            gms.reset_state(Path(tmp.name), policy="on", policy_source="project",
+                            branch_class="main")
             r = subprocess.run(
                 ["bash", str(HOOKS / "worktree-guard.sh")],
                 input=json.dumps(_edit_payload(str(Path(tmp.name) / "foo.py"))),
@@ -86,12 +100,14 @@ class TestWorktreeGuardBypass(unittest.TestCase):
     def test_off_worktree_guard_does_not_disable_tdd_guard(self):
         tmp = _init_main_repo()
         try:
+            gms.reset_state(Path(tmp.name), policy="on", policy_source="project",
+                            branch_class="main")
             gms.write_state({"worktree_guard": "off"}, root=Path(tmp.name))
             r = subprocess.run(
                 ["bash", str(HOOKS / "tdd-guard.sh")],
                 input=json.dumps(_edit_payload(str(Path(tmp.name) / "lib" / "core.py"))),
                 capture_output=True, text=True, timeout=10, cwd=tmp.name,
-                env={**_ENV_WITH_LIB, "DEV_KIT_TDD_ROOT": tmp.name},
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARD_ROOT": tmp.name},
             )
             self.assertEqual(r.returncode, 2, r.stderr)
         finally:
@@ -108,15 +124,13 @@ class TestTddGuardBypass(unittest.TestCase):
                 ["bash", str(HOOKS / "tdd-guard.sh")],
                 input=json.dumps(_edit_payload(str(root / "lib" / "core.py"))),
                 capture_output=True, text=True, timeout=10, cwd=root,
-                env={**_ENV_WITH_LIB, "DEV_KIT_TDD_ROOT": str(root)},
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARD_ROOT": str(root)},
             )
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class TestSessionStartGuardModeReset(unittest.TestCase):
-    def test_reset_hook_restores_every_guard_to_default(self):
-        # The three always-on guards → "on"; the opt-in guard
-        # ``fork_pr_confirm`` → "off" (see OPT_IN_GUARDS).
+    def test_reset_hook_applies_default_off_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             gms.write_state(
@@ -133,8 +147,139 @@ class TestSessionStartGuardModeReset(unittest.TestCase):
             state = gms.read_state(root)
             self.assertEqual(
                 state,
-                {"tdd_guard": "on", "worktree_guard": "on", "push_confirm": "on", "fork_pr_confirm": "off"},
+                {"tdd_guard": "off", "worktree_guard": "off", "git_guard": "off",
+                 "push_confirm": "on", "fork_pr_confirm": "off", "policy": "off",
+                 "policy_source": "outside-git", "branch_class": "outside"},
             )
+
+    def test_reset_hook_applies_project_on_policy(self):
+        tmp = _init_main_repo()
+        try:
+            (Path(tmp.name) / ".claude").mkdir()
+            (Path(tmp.name) / ".claude" / "settings.json").write_text(
+                json.dumps({"env": {"DEV_KIT_GUARDS": "on"}})
+            )
+            r = subprocess.run(
+                ["bash", str(HOOKS / "session-start-guard-mode-reset.sh")],
+                capture_output=True, text=True, timeout=10, cwd=tmp.name,
+                env={**_ENV_WITH_LIB, "CLAUDE_PROJECT_DIR": str(Path(tmp.name))},
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state = gms.read_state(Path(tmp.name))
+            for guard in gms.POLICY_GUARDS:
+                self.assertEqual(state[guard], "on")
+            self.assertEqual(state["policy_source"], "project")
+            self.assertEqual(state["branch_class"], "main")
+        finally:
+            tmp.cleanup()
+
+
+class TestGuardFailOpenShortCircuit(unittest.TestCase):
+    """Pins the silent-bypass contract: when DEV_KIT_GUARDS=off, each guard
+    hook MUST exit 0 silently and MUST NOT emit any `guard.blocked` event
+    into `.dev-kit/trace/events.jsonl`.
+
+    The committed `.claude/settings.json` ships `env.DEV_KIT_GUARDS=on`, so
+    the normal CI run never exercises this branch — a future contributor
+    adding audit emissions inside the fail-open short-circuit would
+    silently inflate the prevention_quality metric. This test catches
+    that regression by exercising every guard with the policy explicitly
+    forced off and asserting no blocked event lands on disk.
+    """
+
+    def _events_path(self, root: Path) -> Path:
+        return root / ".dev-kit" / "trace" / "events.jsonl"
+
+    def _read_blocked_events(self, root: Path) -> list:
+        path = self._events_path(root)
+        if not path.exists():
+            return []
+        events = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue
+        return events
+
+    def test_worktree_guard_fail_open_silent(self):
+        """With DEV_KIT_GUARDS=off, worktree-guard.sh must exit 0 on a
+        main-checkout Edit AND must not emit guard.blocked."""
+        tmp = _init_main_repo()
+        try:
+            r = subprocess.run(
+                ["bash", str(HOOKS / "worktree-guard.sh")],
+                input=json.dumps(_edit_payload(str(Path(tmp.name) / "foo.py"))),
+                capture_output=True, text=True, timeout=10, cwd=tmp.name,
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
+                     "DEV_KIT_GUARD_ROOT": tmp.name},
+            )
+            self.assertEqual(r.returncode, 0,
+                             f"worktree-guard failed open: stderr={r.stderr!r}")
+            blocked = [e for e in self._read_blocked_events(Path(tmp.name))
+                       if e.get("event_type") == "guard.blocked"]
+            self.assertEqual(
+                blocked, [],
+                f"worktree-guard emitted guard.blocked on fail-open: {blocked!r}",
+            )
+        finally:
+            tmp.cleanup()
+
+    def test_tdd_guard_fail_open_silent(self):
+        """With DEV_KIT_GUARDS=off, tdd-guard.sh must exit 0 on a core
+        Edit AND must not emit guard.blocked."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            r = subprocess.run(
+                ["bash", str(HOOKS / "tdd-guard.sh")],
+                input=json.dumps(_edit_payload(str(root / "lib" / "core.py"))),
+                capture_output=True, text=True, timeout=10, cwd=root,
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
+                     "DEV_KIT_GUARD_ROOT": str(root)},
+            )
+            self.assertEqual(r.returncode, 0,
+                             f"tdd-guard failed open: stderr={r.stderr!r}")
+            blocked = [e for e in self._read_blocked_events(root)
+                       if e.get("event_type") == "guard.blocked"]
+            self.assertEqual(
+                blocked, [],
+                f"tdd-guard emitted guard.blocked on fail-open: {blocked!r}",
+            )
+
+    def test_git_guard_fail_open_silent(self):
+        """With DEV_KIT_GUARDS=off, git-guard.sh must exit 0 on a direct
+        `git commit` on main AND must not emit guard.blocked.
+
+        The fail-open short-circuit fires BEFORE the command-parsing
+        pipeline runs, so the input payload is structurally complete
+        (a real `git commit` on main would normally deny).
+        """
+        tmp = _init_main_repo()
+        try:
+            payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git commit -m test"},
+            }
+            r = subprocess.run(
+                ["bash", str(HOOKS / "git-guard.sh")],
+                input=json.dumps(payload),
+                capture_output=True, text=True, timeout=10, cwd=tmp.name,
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
+                     "DEV_KIT_GUARD_ROOT": tmp.name},
+            )
+            self.assertEqual(r.returncode, 0,
+                             f"git-guard failed open: stderr={r.stderr!r}")
+            blocked = [e for e in self._read_blocked_events(Path(tmp.name))
+                       if e.get("event_type") == "guard.blocked"]
+            self.assertEqual(
+                blocked, [],
+                f"git-guard emitted guard.blocked on fail-open: {blocked!r}",
+            )
+        finally:
+            tmp.cleanup()
 
 
 if __name__ == "__main__":

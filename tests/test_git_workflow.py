@@ -48,6 +48,11 @@ def _run_hook(
     if payload_cwd is not None:
         payload_doc["cwd"] = str(payload_cwd)
     payload = json.dumps(payload_doc)
+    env = os.environ.copy()
+    # The production default is thin/off; this legacy hook contract suite
+    # explicitly opts into the branch guard so its assertions remain focused
+    # on git-guard behavior.
+    env["DEV_KIT_GUARDS"] = "on"
     return subprocess.run(
         ["bash", str(HOOK)],
         input=payload,
@@ -55,6 +60,7 @@ def _run_hook(
         text=True,
         timeout=5,
         cwd=str(cwd) if cwd else None,
+        env=env,
     )
 
 
@@ -224,7 +230,7 @@ class TestGitGuardBlocks(unittest.TestCase):
         r = subprocess.run(
             [bash_real, str(HOOK)],
             input=payload, capture_output=True, text=True, timeout=5,
-            env={**os.environ, "PATH": minimal_path},
+            env={**os.environ, "PATH": minimal_path, "DEV_KIT_GUARDS": "on"},
         )
         self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
         self.assertIn("jq is required", r.stderr)
