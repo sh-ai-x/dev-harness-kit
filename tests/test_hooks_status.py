@@ -113,7 +113,7 @@ class TestHooksStatus(unittest.TestCase):
                 "secret-scan.sh", "slop-detector.sh",
                 "worktree-log-auto-install.sh",
             },
-            "Stop": {"stop-verify.sh"},
+            "Stop": {"stop-verify.sh", "worktree-session-cleanup.sh"},
         }
         actual = {
             event: {

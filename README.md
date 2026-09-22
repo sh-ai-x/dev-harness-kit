@@ -6,8 +6,6 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Language:** English · [한국어](README.ko.md)
-
 ---
 
 ## What is this?
@@ -355,7 +353,7 @@ or untracked files can be deleted; always review the `-n` output first.
 ## Doc map
 
 The repo ships ~20 topic docs across `docs/<topic>/`. The full categorized
-table — HTML / MD / 한국어 sibling / what each doc gives you — lives in
+table — HTML / MD / what each doc gives you — lives in
 [`docs/home/DOC-MAP.md`](docs/home/DOC-MAP.md).
 
 **Start here:**
@@ -371,7 +369,7 @@ table — HTML / MD / 한국어 sibling / what each doc gives you — lives in
 | Resume interrupted work | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | See what custom subagents this repo ships | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
 
-Everything else — HTML siblings, Korean docs, deep reference — is in
+Everything else — HTML siblings, deep reference — is in
 [`docs/home/DOC-MAP.md`](docs/home/DOC-MAP.md). If you have five minutes, open
 [`docs/home/00-index.md`](docs/home/00-index.md) and read sections 1–3 (why,
 quickstart, value). Everything else can wait.
