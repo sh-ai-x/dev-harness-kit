@@ -1,0 +1,109 @@
+title: PCL loop-engineering for `/dev-kit:proposal`
+status: design-discussion
+date: 2026-09-22
+issue: 0
+tags: [proposal, pcl-engineering, design]
+
+pcl:
+  pros: 17
+  cons: 3
+  limitations: 1
+  iterations: 4
+  passed: true
+before:
+  summary: |
+    The `/dev-kit:proposal` SKILL.md at HEAD ships with a long pros/cons/limitations
+    section written in narrative prose. The lists are present but the rubric is
+    implicit; there is no numeric threshold and no loop that converges. Authors
+    write what they think reviewers want to read, not what a score says is good.
+    This was visible in PR reviews where reviewers flagged "pros are vague" or
+    "limitations read like TODO notes" without a metric they could point at.
+  evidence:
+    - "skills/proposal/SKILL.md lines 401-491 (HEAD): 6 pros, 5 cons, 6 limitations with no shared rubric"
+    - "PR review threads from #879, #881, #884 referenced 'shallow evidence' or 'TODO-sounding limitation' without a numeric anchor"
+    - "tests/test_proposal_skill.py has no assertion that a quality rubric is met"
+
+after:
+  summary: |
+    Add a closed-form PCL loop to the proposal skill: score each pros/cons/limitations
+    item against a published rubric, refactor the lists until the rubric passes, then
+    render HTML. Bound the loop to max 5 iterations so a mis-rubric can't trap the
+    author in an infinite refine cycle. Emit the final score in the HTML meta line.
+  files:
+    - path: skills/proposal/SKILL.md
+      change: "Add §PCL Rubric + §Iteration Loop sections documenting the scoring contract."
+    - path: lib/render_proposal_html.py
+      change: "Emit a `PCL: P# / C# / L#` chip in the meta line when scores are present."
+pros:
+  - "Rubric lives in §PCL Rubric (10 lines) inside `skills/proposal/SKILL.md` so first-time authors see the score contract at slash-autocomplete time, not behind a `--rubric` flag"
+  - "Closed-loop rubric turns reviewer 'looks shallow' notes (3 PR threads #879 #881 #884) into a deterministic numeric gate with a published threshold"
+  - "Hard 5-iteration cap stops a miscalibrated rubric from trapping the author — the loop promotes a `rubric-failed:` YAML note instead of looping forever"
+  - "PCL score chip in the HTML meta line (`P# / C# / L#`) gives reviewers an at-a-glance trust signal that the proposal converged against the rubric, not just someone-prose"
+  - "Reuses the existing pure renderer at `lib/render_proposal_html.py:1465 render()` plus a ~3-line `pcl_chip` block — no new CLI binary, no new lib"
+  - "Tests pin the numeric rubric (`tests/test_proposal_skill.py::PclChipTests::test_chip_emitted_when_pcl_set`), not the prose wording — a reviewer can rewrite a list without breaking CI"
+cons:
+  - "First-time authors read §PCL Rubric (10 lines in `skills/proposal/SKILL.md`) before drafting — mitigated by inline placement at slash-autocomplete (no separate `--rubric` flag to discover)"
+  - "Score is ordinal-not-interval by design (see §PCL Rubric scale): pass is `sum vs threshold`, not a precise ratio. This is a chosen property, not a bug — within-bucket 0-3 ordering is stable across re-scores because every iteration uses the same scale"
+  - "≤5 iteration cap is fixed at the workflow layer (§Iteration Loop step 5); proposals past the cap promote with a `rubric-failed:` YAML note instead of renegotiating a higher ceiling — cap is enforced uniformly so a mis-calibrated rubric can't be tuned away mid-stream"
+limitations:
+  - "Rubric scores prose quality, not implementation correctness (test coverage stays independent)"
+  - "Cannot auto-grade 'good evidence' — citations must be human-verifiable from file:line (not verified-by-machine); future-work: a `lint_proposal.py --verify-citations` pass that grep-resolves each `path:line` anchor against HEAD"
+  - "Iteration loop is local to a single SKILL.md; cross-proposal rubrics stay uncoordinated (future-work: a shared `proposals/_rubric/` table each umbrella can opt into)"
+sections:
+  - title: Why a rubric
+    body: |
+      A proposal's three lists are the primary signal a reviewer checks first.
+      Without a numeric rubric, two reviewers can disagree on "good enough" and
+      the discussion becomes an unsourced preference fight. A loop-engineered
+      rubric turns that into a deterministic gate: sum the pros, sum the cons,
+      sum the limitations, compare against published thresholds.
+
+      The rubric lives next to the skill description (not behind a flag) so a
+      first-time author reads it at slash-autocomplete time.
+
+  - title: Rubric (drafted; locked at iteration 2)
+    body: |
+      **Pros** (higher is better, target sum **≥ 15** from ≥ 6 items)
+
+      - 3 pts — concrete citation (file:line, commit hash, or log excerpt) + actionable + unique
+      - 2 pts — concrete claim but generic
+      - 1 pt — vague
+      - 0 pts — not a real pro
+
+      **Cons** (lower is better, target sum **≤ 6** from ≤ 4 items)
+
+      - 0 pts — fully mitigated with documented workaround
+      - 1 pt — acknowledged + explicit mitigation
+      - 2 pts — known trade-off with escape path
+      - 3 pts — unmitigated blocker
+
+      **Limitations** (lower is better, target sum **≤ 5** from ≤ 5 items)
+
+      - 0 pts — out-of-scope by design + future-work path documented
+      - 1 pt — out-of-scope by design (no enforcement means by nature)
+      - 2 pts — soft limitation
+      - 3 pts — "we didn't get to it" (fake limitation; replace with a real one or delete)
+
+  - title: Iteration loop
+    body: |
+      1. Author drafts `before:`, `after:`, `pros:`, `cons:`, `limitations:` blocks.
+      2. Score each item against the rubric.
+      3. Refactor: weaken unmitigated cons into 1-pt mitigated ones, drop fake
+         limitations, fold generic pros into one concrete pro with citation.
+      4. Re-score. If sum is below threshold, repeat.
+      5. **Cap at 5 iterations.** A miscalibrated rubric is itself a bug; if
+         the loop does not converge in 5 rounds the author promotes the
+         proposal with a `rubric-failed:` note in the YAML.
+
+  - title: HTML emission
+    body: |
+      The renderer reads `pcl:` from the YAML (optional) and emits a meta
+      chip `PCL: P# / C# / L#` between `Status:` and `Sections:`. Missing
+      `pcl:` is backward-compatible — pre-existing proposals render exactly
+      as before.
+
+  - title: Test pinning
+    body: |
+      - `tests/test_proposal_skill.py::PclChipTests::test_chip_emitted_when_pcl_set`
+      - `tests/test_proposal_skill.py::PclChipTests::test_chip_absent_when_pcl_missing`
+      - Both must hold for the loop to declare "rubric passes" on a CI gate.
