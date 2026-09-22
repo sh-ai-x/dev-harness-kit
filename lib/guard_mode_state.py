@@ -52,20 +52,29 @@ def _state_path(root: Optional[Path] = None) -> Path:
     return (root or Path(".")) / STATE_REL_PATH
 
 
-def _default_state(policy: str = "off", source: str = "default",
+def _default_state(policy: str = "on", source: str = "default",
                    branch_class: str = "unknown") -> dict:
-    """Synthesise a fresh state payload for a scoped policy."""
-    state = {g: ("on" if g == "push_confirm" else "off") for g in GUARDS}
+    """Synthesise a fresh state payload for a scoped policy.
+
+    Defaults to Iron Law enforcement ON. The previous `off` default was
+    the source of the C7 finding in the LLM-judge verdict for PR #881:
+    silent fail-open without audit. The fail-closed default matches
+    `rules/git-workflow.md` (Iron Law L1 + worktree-isolation rule) — a
+    caller that genuinely wants guards off must set them explicitly via
+    `DEV_KIT_GUARDS=off` (shell scope) or the audit trail loses its
+    meaning.
+    """
+    state = {g: ("on" if g in POLICY_GUARDS or g == "push_confirm" else "off") for g in GUARDS}
     for guard in POLICY_GUARDS:
-        state[guard] = policy if policy in ("on", "off") else "off"
-    state["policy"] = policy if policy in ("on", "off") else "off"
+        state[guard] = policy if policy in ("on", "off") else "on"
+    state["policy"] = policy if policy in ("on", "off") else "on"
     state["policy_source"] = source or "default"
     state["branch_class"] = branch_class or "unknown"
     return state
 
 
 def read_state(root: Optional[Path] = None) -> dict:
-    """Read state. Missing/corrupt/invalid guard values use the thin default."""
+    """Read state. Missing/corrupt/invalid guard values use the fail-closed default."""
     path = _state_path(root)
     if not path.exists():
         return _default_state()
@@ -75,8 +84,14 @@ def read_state(root: Optional[Path] = None) -> dict:
         return _default_state()
     if not isinstance(data, dict):
         return _default_state()
+    # Default the resolved policy to "on" so the contract is fail-closed
+    # (PR #881 verdict remediation, C7/C8). A legacy state file with no
+    # policy field therefore reads as Iron Law enforcement ON, which is
+    # the safe direction for the new contract.
+    raw_policy = data.get("policy")
+    policy = raw_policy if isinstance(raw_policy, str) and raw_policy in ("on", "off") else "on"
     state = _default_state(
-        data.get("policy", "off") if isinstance(data.get("policy", "off"), str) else "off",
+        policy,
         data.get("policy_source", "default") if isinstance(data.get("policy_source", "default"), str) else "default",
         data.get("branch_class", "unknown") if isinstance(data.get("branch_class", "unknown"), str) else "unknown",
     )
@@ -101,10 +116,16 @@ def write_state(overrides: dict, root: Optional[Path] = None) -> dict:
     return state
 
 
-def reset_state(root: Optional[Path] = None, *, policy: str = "off",
+def reset_state(root: Optional[Path] = None, *, policy: str = "on",
                 policy_source: str = "default",
                 branch_class: str = "unknown") -> dict:
-    """Apply the scoped policy. Used by the SessionStart hook."""
+    """Apply the scoped policy. Used by the SessionStart hook.
+
+    Default ``policy="on"`` closes the C8 finding (fail-open default
+    kwarg). A caller that genuinely wants guards off must pass
+    ``policy="off"`` explicitly; otherwise the audit trail records the
+    off-state as the deliberate choice rather than a forgotten kwarg.
+    """
     state = _default_state(policy, policy_source, branch_class)
     atomic_write_json(_state_path(root), state)
     return state
@@ -131,7 +152,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     set_p.add_argument("value", choices=["on", "off"])
 
     reset_p = sub.add_parser("reset", help="apply the scoped guard policy")
-    reset_p.add_argument("--policy", choices=["on", "off"], default="off")
+    reset_p.add_argument("--policy", choices=["on", "off"], default="on")
     reset_p.add_argument("--source", default="default")
     reset_p.add_argument("--branch-class", default="unknown")
 

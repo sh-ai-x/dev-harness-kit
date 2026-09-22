@@ -1,6 +1,6 @@
 # `/dev-kit:ci-setup` — Install Dev-Kit's CI Templates
 
-**Language:** English · [한국어](ci-setup.ko.md)
+
 
 The `/dev-kit:ci-setup` skill installs dev-kit's reusable CI workflow templates, Git hooks, and local-runner scripts into any project that has already been bootstrapped via `/dev-kit:bootstrap`. It exists so the same CI shape — branch-policy guards, three-job validate/test/auto-fix, severity-gated review — can be replicated across every repo in your fleet with one command.
 

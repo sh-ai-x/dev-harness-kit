@@ -1,10 +1,10 @@
 # Runtime Portability
 
-**Language:** English · [한국어](RUNTIME-PORTABILITY.ko.md)
+
 
 # Runtime Portability
 
-**Language:** English · [한국어](RUNTIME-PORTABILITY.ko.md)
+
 
 > **Status: ARCHIVAL — substrate deleted in PR-G (commit `6a00288`).**
 >

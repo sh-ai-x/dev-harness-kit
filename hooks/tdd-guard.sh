@@ -16,7 +16,10 @@ hook_stage_active tdd-guard || exit 0
 
 # Session state is reset from DEV_KIT_GUARDS at SessionStart. The thin
 # default is off; guard-mode can still change this session explicitly.
-GUARD_ROOT="${DEV_KIT_TDD_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+# Standardize root-resolution on DEV_KIT_GUARD_ROOT so this hook and the
+# other guard-policy consumers (worktree-guard, session-start-check) read
+# the same override key the library honors. (CC-1 finding for PR #881.)
+GUARD_ROOT="${DEV_KIT_GUARD_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 if [ "$(dev_kit_guard_state tdd_guard "$GUARD_ROOT")" = "off" ]; then
   exit 0
 fi
@@ -29,7 +32,7 @@ esac
 # judge was removed: an explicit build decision may still mark an ambiguous
 # path as exempt in `.dev-kit/.tdd-scope.json`, while normal code edits require
 # the same RED evidence as known core paths.
-ROOT="${DEV_KIT_TDD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+ROOT="${GUARD_ROOT}"
 SCOPE_STATE="${ROOT}/.dev-kit/.tdd-scope.json"
 if [ -f "$SCOPE_STATE" ] && jq -e '.tdd_required == false' "$SCOPE_STATE" >/dev/null 2>&1; then
   exit 0
