@@ -3,6 +3,20 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **chore(prune):** maintenance cleanup sweep — close 3 already-merged
+  issues, drop 3 legacy token-dashboard HTML files (~1 MB) +
+  `token-dashboard-dev-harness-kit-3650d.assets/`, remove empty
+  `docs/analysis/`, prune 68 stale `add-classify-request-*` worktrees
+  from the 2026-09-16 classify-request loop, remove 3 untracked
+  scratch dirs (`impl-cwd-skill`, `impl-hook-stable-prefix`,
+  `impl-tdd-classify-move`) and `.worktrees/.stale-wip/`. Issues
+  closed: #898 (resolved by `8e88bdb5`), #859 (resolved by `28ddc9b8`),
+  #858 (resolved by `90f582c4`). All HTML files were already
+  matched by `token-dashboard-*.html` in `.gitignore`; this PR does
+  not change any tracked content for the HTML deletions. Worktrees
+  were verified clean (`git status --porcelain` empty) and merged
+  into `main` (HEAD at `a474f59a`, ancestor of `main`) before
+  removal. No code, hook, skill, or test changes.
 - **fix(scope):** `team` is fully independent from `DEV_KIT_MODE`. The
   mode selector now accepts only `full`, `lite`, and `undev`; existing
   `DEV_KIT_MODE=team` settings must migrate to `DEV_KIT_MODE=full` (or
