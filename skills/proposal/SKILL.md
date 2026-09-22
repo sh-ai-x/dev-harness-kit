@@ -155,11 +155,11 @@ Score each item per the rubric in § PCL Rubric (sum **17 / target ≥ 15**, 7 i
 - **[3/3] Backward-compatible structured fields.** All five `before:` / `after:` / `pros:` / `cons:` / `limitations:` fields are independently optional; legacy `sections:`-only YAML renders unchanged (`tests/test_proposal_skill.py::BeforeAfterRenderTests::test_render_no_fields_emits_no_ba_sections`).
 - **[3/3] Status-routed filesystem layout.** YAML `status:` auto-routes to `reviewing|pending|applied|rejected`; unknown statuses fall back to `reviewing` so a typo still produces a routable path (`lib/render_proposal_html.py:108 STATUS_TO_BUCKET` table + `:124 route_for_status()` function).
 - **[2/3] Idempotent migration.** `python3 -m lib.render_proposal_html --migrate` is safe to re-run after adding new proposals; legacy flat files stay read-only compatible.
-- **[2/3] Inline-CSS-only output.** No `<script>`, no remote `<link>`, no remote `<img>`; `<script>` in a YAML title renders as `&lt;script&gt;` (`tests/test_proposal_skill.py::HtmlEscapeTests::test_script_in_title_escaped`).
+- **[3/3] Inline-CSS-only output.** No `<script>`, no remote `<link>`, no remote `<img>`; `<script>` in a YAML title renders as `&lt;script&gt;` (`tests/test_proposal_skill.py::HtmlEscapeTests::test_script_in_title_escaped` at L301).
 - **[2/3] PCL rubric bakes quality into authoring.** Authors see the score contract at slash-autocomplete (§ PCL Rubric), not behind a flag — the loop terminates in ≤5 iterations, so a miscalibrated rubric can't trap them.
 - **[2/3] Files-list is a reviewer commitment.** Anything not in `after.files` MUST NOT change in the implementation PR; the hand-off contract is the PR body citing the proposal's `issue:`.
 
-**Sum: 3+3+3+2+2+2+2 = 17** (target ≥ 15, ✓)
+**Sum: 3+3+3+2+3+2+2 = 18** (target ≥ 15, ✓)
 
 ## Cons
 
