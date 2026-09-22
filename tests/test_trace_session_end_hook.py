@@ -103,6 +103,69 @@ class TestTraceSessionEndHookEvent(unittest.TestCase):
             event = _last_event(root)
             self.assertEqual(event.get("agent"), "claude-code")
 
+    def test_ralph_session_end_is_worker_closure_not_completed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_dir = root / ".dev-kit" / "ralph"
+            state_dir.mkdir(parents=True)
+            (state_dir / "ralph.json").write_text(
+                json.dumps({
+                    "session": "ralph",
+                    "current_stage": "ATTENDED_RUN",
+                    "attended_lock": True,
+                }),
+                encoding="utf-8",
+            )
+            payload = {
+                "session_id": "runtime-session",
+                "cwd": str(root),
+                "hook_event_name": "SessionEnd",
+            }
+            proc = _run_hook(
+                payload,
+                env_extra={"RALPH_MODE": "1", "RALPH_SESSION": "ralph"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            checkpoints = root / ".dev-kit" / "ralph" / "ralph.checkpoints.jsonl"
+            record = json.loads(checkpoints.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(record["event_type"], "ralph.worker.session_closed")
+            self.assertEqual(record["outcome"], "cancelled")
+            events = root / ".dev-kit" / "trace" / "events.jsonl"
+            event = json.loads(events.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertFalse(event["evidence_ref"]["workflow_completed"])
+
+    def test_ralph_stop_verify_records_checkpoint_and_returns_zero(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_dir = root / ".dev-kit" / "ralph"
+            state_dir.mkdir(parents=True)
+            (state_dir / "ralph.json").write_text(
+                json.dumps({
+                    "session": "ralph",
+                    "current_stage": "ATTENDED_RUN",
+                    "attended_lock": True,
+                }),
+                encoding="utf-8",
+            )
+            payload = {
+                "cwd": str(root),
+                "hook_event_name": "Stop",
+                "last_assistant_message": "done",
+            }
+            proc = subprocess.run(
+                ["bash", str(HOOKS / "stop-verify.sh")],
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(REPO_ROOT),
+                env={**__import__("os").environ, "RALPH_MODE": "1", "RALPH_SESSION": "ralph"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            checkpoints = root / ".dev-kit" / "ralph" / "ralph.checkpoints.jsonl"
+            record = json.loads(checkpoints.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(record["event_type"], "ralph.worker.checkpointed")
+
 
 if __name__ == "__main__":
     unittest.main()

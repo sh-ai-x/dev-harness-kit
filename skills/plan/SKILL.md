@@ -46,23 +46,64 @@ plan's `disallowed-tools: Bash` blocks the shell form.
 Self-contained. The earlier `plan-ralph` dispatch was absorbed (issue #58). No
 sub-skill invocation; everything below runs inside this single skill invocation.
 
-## Interview consume gate (REQUIRED unless `--skip-interview`)
+## Hand-off consume gate (REQUIRED unless `--skip-interview`)
 
-Before Gate 1, consume the Phase 6 5-field safety contract from the
-interview hand-off at `.dev-kit/hand-off/<step>.md`. Read it with the
-`Read` tool (the LCS viewer was on `allowed-tools: ... Skill ...`
-but the LCS substrate was dropped in #463; the contract now lives in
-plain markdown that any consumer can read with `Read`).
+The plan skill reads ONE of two kinds of hand-off from
+`.dev-kit/hand-off/`. The discriminator is the SSOT in
+`lib/hand_off_consume.py` (issue #898 — `sot-harness-writer` and
+`interview` share the hand-off directory; before this fix the plan
+skill could pick up a SOT handoff whose `status: locked` looked like
+an "interview held" event and refuse to plan):
 
-Decision table (read `.dev-kit/hand-off/<step>.md` frontmatter):
+1. **Interview hand-off** — `.dev-kit/hand-off/interview-<session>.md`,
+   frontmatter `handoff_kind: interview`. The 5-field safety contract
+   that gates PRD emission. Read with the `Read` tool.
+2. **SOT hand-off** — `.dev-kit/hand-off/sot-harness-<session>.md`,
+   frontmatter `handoff_kind: sot`. The 5-dimension harness design
+   doc emitted by `/dev-kit:sot-harness-writer`. **Only consumed via
+   `--from-sot <path>`** — never through the generic plan path.
 
-| `status` (hand-off frontmatter) | Plan action |
+**Routing rule** (deterministic, see `lib/hand_off_consume.py:routing_decision`):
+
+- `--skip-interview` present → skip the gate entirely (backward compat).
+- `--from-sot <path>` present → load that SOT handoff via
+  `validate_sot_handoff(path)`. Refuse on any validation failure
+  with the actionable reason verbatim.
+- Otherwise → discover the unique `interview-*.md` and
+  `validate_interview_handoff(path)`. The discovery glob is
+  `interview-*.md`; a SOT handoff sitting next to it does NOT enter
+  this branch.
+
+Decision table for the interview path (read frontmatter from
+`.dev-kit/hand-off/interview-<session>.md`):
+
+| `status` (frontmatter) | Plan action |
 |---|---|
 | `ok` | Proceed to Gate 1; treat interview answers as canonical PRD §1 inputs. |
 | `best-effort` | Proceed with a 1-line WARN to `.dev-kit/decision-log.md`; Gate 2 evidence-gate still applies. |
 | `user-acknowledged` | Proceed; treat as `best-effort` for downstream gating. |
-| `held` (or missing file / no `status` field) | **STOP.** Do NOT ask Gate 1. Tell the user: "Interview contract not clear. Per Phase 6 (issue #385), plan refuses to emit PRD while the interview hand-off is `held`. Run `/dev-kit:interview <plan-file>` first, then re-invoke `/dev-kit:plan`." |
-| `--skip-interview` flag present | Skip the consume entirely (backward compat). Write a SKIPPED line to `.dev-kit/decision-log.md` so the audit trail is honest. |
+| `held` (or missing `status`, or wrong `handoff_kind`) | **STOP.** Do NOT ask Gate 1. Tell the user: "Interview contract not clear. Per Phase 6 (issue #385), plan refuses to emit PRD while the interview hand-off is `held`. Run `/dev-kit:interview <plan-file>` first, then re-invoke `/dev-kit:plan`." |
+
+Decision table for the SOT path (`--from-sot`):
+
+| SOT frontmatter | Plan action |
+|---|---|
+| `status: locked` + `handoff_kind: sot` | Proceed to Gate 1; the SOT doc's "Selected Patterns" table becomes the canonical PRD §1 input set. |
+| `status: held` | **STOP.** Tell the user to re-run `/dev-kit:sot-harness-writer` and complete the missing rounds. |
+| missing file / wrong `handoff_kind` / no frontmatter | **STOP.** Tell the user the `--from-sot` path is invalid and re-invoke with the correct path. |
+
+**Routing errors** (when neither gate accepts the on-disk state):
+
+- No interview hand-off AND no `--from-sot` AND no SOT file → "no
+  interview handoff at .dev-kit/hand-off/interview-*.md. Run
+  `/dev-kit:interview <plan-file>` first, then re-invoke `/dev-kit:plan`."
+- SOT hand-off exists but `--from-sot` not passed → "found SOT
+  handoff at <path> but the plan skill was invoked without
+  `--from-sot`. Re-invoke with `/dev-kit:plan --from-sot <path>` to
+  consume it, or run `/dev-kit:interview` first to produce an
+  interview handoff for the generic plan path." (issue #898 — this
+  is the discriminator; without it the previous code surface
+  "interview held" and plan failed closed on a successful SOT lock.)
 
 Defence-in-depth: if the hand-off file is missing or frontmatter is
 malformed, treat as `held`.
@@ -83,8 +124,12 @@ enabled or available. Continue normally on `LINEAR_SKIP` or an implicit
 ## Inputs / outputs
 
 - **Input**: 1-line idea (from user prompt) + 1-5 AC + 1-3 non-goals.
-- **Flag**: `--skip-interview` bypasses the interview consume gate
-  below (Phase 6 backward compat).
+- **Flags**:
+  - `--skip-interview` bypasses the hand-off consume gate (Phase 6
+    backward compat).
+  - `--from-sot <path>` routes the SOT hand-off at `<path>` through
+    the consume gate. When set, the interview path is skipped
+    entirely (issue #898).
 - **Output**:
   - `PRD.md` — 6-section plan
   - `phases/<name>/index.json` — phase state machine (see "Phase JSON schema")
@@ -433,11 +478,19 @@ only from the skill chain.
 
 - 5-field loop declared (MUST-15): `safety_valve=8`, composite convergence,
   `narrowed_delta`, `dedup_metric`, `user_interrupt`.
-- **Interview consume gate (Phase 6)**: plan MUST read
-  `.dev-kit/hand-off/<step>.md` frontmatter via `Read` before Gate 1.
-  `status: held` → refuse to plan; `ok | best-effort | user-acknowledged`
-  → proceed. The `--skip-interview` flag bypasses the gate for backward
-  compat only and MUST be logged to `.dev-kit/decision-log.md`.
+- **Hand-off consume gate (Phase 6, issue #898)**: plan MUST route
+  the hand-off through `lib.hand_off_consume.routing_decision()` before
+  Gate 1. The helper restricts discovery to `interview-*.md` for the
+  generic path; SOT hand-offs (`sot-harness-*.md`) only enter via
+  `--from-sot <path>`. Routing outputs `path in {interview, from_sot,
+  skip, error}`; on `error` the helper's `reason` is the actionable
+  message surfaced verbatim. The four regression scenarios (SOT via
+  `--from-sot` proceeds; SOT without `--from-sot` is misroute, not
+  "interview held"; interview `ok | best-effort | user-acknowledged`
+  proceed; missing / held interview fails closed) are pinned in
+  `tests/test_hand_off_consume.py`. The `--skip-interview` flag
+  bypasses the gate for backward compat only and MUST be logged to
+  `.dev-kit/decision-log.md`.
 - No artifacts other than PRD.md, phases/<name>/, .dev-kit/decision-log.md, .dev-kit/hand-off/.
 - No code, no `package.json`, no `Dockerfile`, no test code.
 - "Just write the code" before PRD.md is complete → still no code.

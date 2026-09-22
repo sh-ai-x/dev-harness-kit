@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from lib.behavior_scorers import (
     BehaviorReport,
@@ -160,6 +160,97 @@ class MetaEvalReport:
             "all_passed": self.all_passed,
             "cases": [c.to_dict() for c in self.cases],
         }
+
+
+@dataclass(frozen=True)
+class CandidateGate:
+    """Deterministic replay/holdout decision for one harness candidate."""
+
+    candidate_id: str
+    replay_case_ids: Tuple[str, ...]
+    holdout_case_ids: Tuple[str, ...]
+    replay_failures: Tuple[str, ...] = ()
+    holdout_failures: Tuple[str, ...] = ()
+    holdout_regressions: Tuple[str, ...] = ()
+    hard_gate_failures: Tuple[str, ...] = ()
+    promote: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "replay_case_ids": list(self.replay_case_ids),
+            "holdout_case_ids": list(self.holdout_case_ids),
+            "replay_failures": list(self.replay_failures),
+            "holdout_failures": list(self.holdout_failures),
+            "holdout_regressions": list(self.holdout_regressions),
+            "hard_gate_failures": list(self.hard_gate_failures),
+            "promote": self.promote,
+        }
+
+
+def evaluate_candidate(
+    baseline: MetaEvalReport,
+    candidate: MetaEvalReport,
+    *,
+    candidate_id: str,
+    replay_case_ids: Iterable[str],
+    holdout_case_ids: Iterable[str],
+) -> CandidateGate:
+    """Compare a candidate report without invoking a model or mutating state.
+
+    Replay cases must pass under the candidate. Protected holdout cases must
+    also pass, and a case that passed in baseline but fails in the candidate is
+    recorded separately as a regression. Replay and holdout sets must be
+    disjoint so a candidate cannot approve itself with the same fixture.
+    """
+    replay_ids = tuple(sorted(set(replay_case_ids)))
+    holdout_ids = tuple(sorted(set(holdout_case_ids)))
+    overlap = sorted(set(replay_ids) & set(holdout_ids))
+    baseline_by_id = {case.case_id: case for case in baseline.cases}
+    candidate_by_id = {case.case_id: case for case in candidate.cases}
+
+    replay_failures = tuple(
+        case_id
+        for case_id in replay_ids
+        if candidate_by_id.get(case_id) is None
+        or candidate_by_id[case_id].status != "passed"
+    )
+    holdout_failures = tuple(
+        case_id
+        for case_id in holdout_ids
+        if candidate_by_id.get(case_id) is None
+        or candidate_by_id[case_id].status != "passed"
+    )
+    holdout_regressions = tuple(
+        case_id
+        for case_id in holdout_ids
+        if baseline_by_id.get(case_id) is not None
+        and baseline_by_id[case_id].status == "passed"
+        and (
+            candidate_by_id.get(case_id) is None
+            or candidate_by_id[case_id].status != "passed"
+        )
+    )
+    hard_gate_failures = tuple(
+        [f"replay_holdout_overlap:{case_id}" for case_id in overlap]
+        + [f"candidate_error:{case.case_id}" for case in candidate.cases if case.status == "error"]
+    )
+    promote = not (
+        replay_failures
+        or holdout_failures
+        or holdout_regressions
+        or hard_gate_failures
+    )
+    return CandidateGate(
+        candidate_id=candidate_id,
+        replay_case_ids=replay_ids,
+        holdout_case_ids=holdout_ids,
+        replay_failures=replay_failures,
+        holdout_failures=holdout_failures,
+        holdout_regressions=holdout_regressions,
+        hard_gate_failures=hard_gate_failures,
+        promote=promote,
+    )
 
 
 def _check_case(
@@ -312,5 +403,7 @@ __all__ = [
     "CaseMetaResult",
     "CaseSpec",
     "MetaEvalReport",
+    "CandidateGate",
+    "evaluate_candidate",
     "run_meta_eval",
 ]
