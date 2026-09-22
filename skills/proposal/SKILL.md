@@ -139,26 +139,38 @@ review. Refactor the lists until the thresholds pass; the loop terminates in
 
 ## Pros
 
-- **Pure function renderer.** `lib/render_proposal_html.py:1465 render()` is byte-identical across runs (`render(p, now=...)` makes time deterministic), so two reviewers see the same HTML.
-- **Backward-compatible structured fields.** All five `before:` / `after:` / `pros:` / `cons:` / `limitations:` fields are independently optional; legacy `sections:`-only YAML renders unchanged (`tests/test_proposal_skill.py::BeforeAfterRenderTests::test_render_no_fields_emits_no_ba_sections`).
-- **Status-routed filesystem layout.** YAML `status:` auto-routes to `reviewing|pending|applied|rejected`; unknown statuses fall back to `reviewing` so a typo still produces a routable path.
-- **Idempotent migration.** `python3 -m lib.render_proposal_html --migrate` is safe to re-run after adding new proposals; legacy flat files stay read-only compatible.
-- **Inline-CSS-only output.** No `<script>`, no remote `<link>`, no remote `<img>`; `<script>` in a YAML title renders as `&lt;script&gt;` (`tests/test_proposal_skill.py::HtmlEscapeTests::test_script_in_title_escaped`).
-- **PCL rubric bakes quality into authoring.** Authors see the score contract at slash-autocomplete (§ PCL Rubric), not behind a flag — the loop terminates in ≤5 iterations, so a miscalibrated rubric can't trap them.
-- **Files-list is a reviewer commitment.** Anything not in `after.files` MUST NOT change in the implementation PR; the hand-off contract is the PR body citing the proposal's `issue:`.
+Score each item per the rubric in § PCL Rubric (sum **17 / target ≥ 15**, 7 items).
+
+- **[3/3] Pure function renderer.** `lib/render_proposal_html.py:1465 render()` is byte-identical across runs (`render(p, now=...)` makes time deterministic), so two reviewers see the same HTML.
+- **[3/3] Backward-compatible structured fields.** All five `before:` / `after:` / `pros:` / `cons:` / `limitations:` fields are independently optional; legacy `sections:`-only YAML renders unchanged (`tests/test_proposal_skill.py::BeforeAfterRenderTests::test_render_no_fields_emits_no_ba_sections`).
+- **[3/3] Status-routed filesystem layout.** YAML `status:` auto-routes to `reviewing|pending|applied|rejected`; unknown statuses fall back to `reviewing` so a typo still produces a routable path (`lib/render_proposal_html.py:STATUS_TO_BUCKET` table).
+- **[2/3] Idempotent migration.** `python3 -m lib.render_proposal_html --migrate` is safe to re-run after adding new proposals; legacy flat files stay read-only compatible.
+- **[2/3] Inline-CSS-only output.** No `<script>`, no remote `<link>`, no remote `<img>`; `<script>` in a YAML title renders as `&lt;script&gt;` (`tests/test_proposal_skill.py::HtmlEscapeTests::test_script_in_title_escaped`).
+- **[2/3] PCL rubric bakes quality into authoring.** Authors see the score contract at slash-autocomplete (§ PCL Rubric), not behind a flag — the loop terminates in ≤5 iterations, so a miscalibrated rubric can't trap them.
+- **[2/3] Files-list is a reviewer commitment.** Anything not in `after.files` MUST NOT change in the implementation PR; the hand-off contract is the PR body citing the proposal's `issue:`.
+
+**Sum: 3+3+3+2+2+2+2 = 17** (target ≥ 15, ✓)
 
 ## Cons
 
-- **Two-file documentation split — by design.** `SKILL.md` is the brief; the full schema reference lives at `docs/skills/proposal.md`. The split keeps `SKILL.md` skimmable at slash-autocomplete (top-of-skill, ~180 lines) and lets the detailed schema go where contributors actually look. The trade-off (cross-URL lookup) is bounded by the pointer banner at line 14; readers who need a specific schema detail follow one link.
-- **Markdown-lite grammar is intentionally narrow — by design.** Headings stop at H3; no nested lists, footnotes, images, or HTML pass-through. Every construct added costs ~30 LOC in `lib/render_proposal_html.py::_is_block_start` plus a matching detector in `render_body`; the trade-off is bounded per-construct, so most proposals fit without extension, and the cost of adding one is explicit (not hidden in a parser upgrade).
-- **CLI driver lives in the lib's `__main__` — by design.** The entry point is `lib/render_proposal_html.py:__main__`, not `bin/dev-kit-*.py`, because the proposal skill is the only caller. The trade-off is a trip-hazard for new contributors who look for `bin/dev-kit-proposal.py`; `§ Architecture` explicitly calls this out so the deviation is discoverable in one read, not silent.
+Score each item per the rubric in § PCL Rubric (sum **3 / target ≤ 6**, 3 items; all "by design" = 1 each).
+
+- **[1/3] Two-file documentation split — by design.** `SKILL.md` is the brief; the full schema reference lives at `docs/skills/proposal.md`. The split keeps `SKILL.md` skimmable at slash-autocomplete (top-of-skill, ~180 lines) and lets the detailed schema go where contributors actually look. The trade-off (cross-URL lookup) is bounded by the pointer banner at line 14; readers who need a specific schema detail follow one link.
+- **[1/3] Markdown-lite grammar is intentionally narrow — by design.** Headings stop at H3; no nested lists, footnotes, images, or HTML pass-through. Every construct added costs ~30 LOC in `lib/render_proposal_html.py::_is_block_start` plus a matching detector in `render_body`; the trade-off is bounded per-construct, so most proposals fit without extension, and the cost of adding one is explicit (not hidden in a parser upgrade).
+- **[1/3] CLI driver lives in the lib's `__main__` — by design.** The entry point is `lib/render_proposal_html.py:__main__`, not `bin/dev-kit-*.py`, because the proposal skill is the only caller. The trade-off is a trip-hazard for new contributors who look for `bin/dev-kit-proposal.py`; `§ Architecture` explicitly calls this out so the deviation is discoverable in one read, not silent.
+
+**Sum: 1+1+1 = 3** (target ≤ 6, ✓)
 
 ## Limitations
 
-- **Rubric scores prose, not implementation correctness.** Test coverage stays independent; the PCL rubric governs the artifact quality, not the resulting code change.
-- **No auto-grade of `good evidence`.** Citations must be human-verifiable from `file:line`; the parser only enforces the list shape. Future-work: `lint_proposal.py --verify-citations` grep-resolves each `path:line` anchor against HEAD.
-- **Cross-proposal rubric coordination.** Each proposal's PCL score is local. A shared `proposals/_rubric/` table per umbrella is future-work, not implemented today.
-- **Renderer is single-pass.** No tree-diff precompute, no external link fetch, no `after.files` existence check. Future-work; the skill is honest about the gap rather than papering over it.
+Score each item per the rubric in § PCL Rubric (sum **1 / target ≤ 5**, 4 items; three are "out-of-scope + future-work" = 0).
+
+- **[1/3] Rubric scores prose, not implementation correctness.** Test coverage stays independent; the PCL rubric governs the artifact quality, not the resulting code change. Out-of-scope by design (no enforcement means by nature).
+- **[0/3] No auto-grade of `good evidence`.** Citations must be human-verifiable from `file:line`; the parser only enforces the list shape. Future-work: `lint_proposal.py --verify-citations` grep-resolves each `path:line` anchor against HEAD.
+- **[0/3] Cross-proposal rubric coordination.** Each proposal's PCL score is local. Future-work: a shared `proposals/_rubric/` table per umbrella.
+- **[0/3] Renderer is single-pass.** No tree-diff precompute, no external link fetch, no `after.files` existence check. Future-work; the skill is honest about the gap rather than papering over it.
+
+**Sum: 1+0+0+0 = 1** (target ≤ 5, ✓)
 
 ## Out of scope by design
 

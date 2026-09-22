@@ -8,7 +8,7 @@ pcl:
   pros: 17
   cons: 3
   limitations: 1
-  iterations: 4
+  iterations: 5
   passed: true
 before:
   summary: |
@@ -40,7 +40,7 @@ pros:
   - "Hard 5-iteration cap stops a miscalibrated rubric from trapping the author — the loop promotes a `rubric-failed:` YAML note instead of looping forever"
   - "PCL score chip in the HTML meta line (`P# / C# / L#`) gives reviewers an at-a-glance trust signal that the proposal converged against the rubric, not just someone-prose"
   - "Reuses the existing pure renderer at `lib/render_proposal_html.py:1465 render()` plus a ~3-line `pcl_chip` block — no new CLI binary, no new lib"
-  - "Tests pin the numeric rubric (`tests/test_proposal_skill.py::PclChipTests::test_chip_emitted_when_pcl_set`), not the prose wording — a reviewer can rewrite a list without breaking CI"
+  - "Tests pin the numeric rubric (proposed: `tests/test_proposal_skill.py::PclChipTests::test_chip_emitted_when_pcl_set` + `test_chip_absent_when_pcl_missing` — future-work until the chip-emit lands in `lib/render_proposal_html.py`), not the prose wording — a reviewer can rewrite a list without breaking CI"
 cons:
   - "First-time authors read §PCL Rubric (10 lines in `skills/proposal/SKILL.md`) before drafting — mitigated by inline placement at slash-autocomplete (no separate `--rubric` flag to discover)"
   - "Score is ordinal-not-interval by design (see §PCL Rubric scale): pass is `sum vs threshold`, not a precise ratio. This is a chosen property, not a bug — within-bucket 0-3 ordering is stable across re-scores because every iteration uses the same scale"
