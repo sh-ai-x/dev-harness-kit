@@ -106,9 +106,7 @@ class TestHooksStatus(unittest.TestCase):
                 "git-guard.sh",
             },
             "UserPromptSubmit": {"worktree-auto-cut.sh"},
-            "SessionStart": {
-                "session-start-check.sh", "log-on-session-start.sh",
-            },
+            "SessionStart": {"session-start.sh"},
             "PostToolUse": {
                 "secret-scan.sh", "slop-detector.sh",
                 "worktree-log-auto-install.sh",

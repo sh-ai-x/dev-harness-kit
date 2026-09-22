@@ -35,6 +35,8 @@ GUARDS = ("tdd_guard", "worktree_guard", "git_guard", "push_confirm", "fork_pr_c
 # The ask-tier fork confirmation is intentionally independent from the
 # repository guard policy. Push confirmation stays on by default because it
 # is a human confirmation surface, not a repository edit/branch guard.
+OPT_IN_GUARDS = frozenset({"fork_pr_confirm"})
+
 POLICY_GUARDS = frozenset({"tdd_guard", "worktree_guard", "git_guard"})
 
 GUARD_DESCRIPTIONS = {

@@ -432,12 +432,12 @@ class TestHookIsWired(unittest.TestCase):
             for entry in pre:
                 cmds = [h.get("command", "") for h in entry.get("hooks", [])]
                 matchers[entry.get("matcher", "*")] = cmds
-            for matcher in ("Write|Edit|MultiEdit", "Bash"):
-                with self.subTest(manifest=manifest.name, matcher=matcher):
-                    joined = " ".join(matchers.get(matcher, []))
-                    self.assertIn("destructive-confirm.sh", joined,
-                                  f"not wired on {matcher} in {manifest.name}")
-                    self.assertIn(token, joined)
+            matcher = "Write|Edit|MultiEdit|Bash"
+            with self.subTest(manifest=manifest.name, matcher=matcher):
+                joined = " ".join(matchers.get(matcher, []))
+                self.assertIn("destructive-confirm.sh", joined,
+                              f"not wired on {matcher} in {manifest.name}")
+                self.assertIn(token, joined)
 
     def test_fail_closed_is_set(self):
         data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())

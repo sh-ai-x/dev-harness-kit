@@ -1,0 +1,137 @@
+title: "Hook thinning — one SessionStart dispatcher and no redundant TDD judge"
+status: applied-with-changes
+date: 2026-09-18
+started: 2026-09-18
+shipped: 2026-09-18
+tags: [hooks, session-start, token-efficiency, runtime-parity, thin-harness]
+modifications: |
+  Implemented as a behavior-preserving registration cleanup. Both Claude and
+  Codex manifests now register one `session-start.sh` command, which fans out
+  to the existing SessionStart child scripts and merges their advisory context
+  into one valid envelope. The duplicate `destructive-confirm` matcher group
+  was merged. The channel-specific
+  `injection-content-guard` matcher groups stay separate to preserve behavior.
+  The child scripts stay
+  separate so their contracts and focused tests remain easy to inspect. The
+  prompt-time LLM TDD scope judge was also removed: unknown paths now use the
+  deterministic RED-evidence rule, with an explicit scope file for intentional
+  exemptions. The result is 27 registered command entries per runtime instead
+  of 36.
+
+before:
+  summary: |
+    The two runtime manifests registered the same lifecycle behavior through
+    eight independent SessionStart commands. One matcher repeated the same
+    `destructive-confirm` registration for Write-family tools and Bash.
+    This made the manifest larger, increased registration bookkeeping, and
+    made runtime parity harder to audit even though the underlying contracts
+    were already shared. A prompt-time LLM TDD judge also duplicated the
+    deterministic edit guard and added a model/network path to every prompt.
+  evidence:
+    - '`hooks/hooks.json` at baseline registered 36 command entries, including 8 SessionStart entries and one prompt-time TDD judge.'
+    - '`.codex-plugin/hooks/hooks.json` carried the same 36-entry shape for the Codex runtime.'
+    - '`tests/test_hooks_json_parity.py` treats both manifests as a parity pair, so registration drift is a cross-runtime risk.'
+
+after:
+  summary: |
+    Reduce registration surface without removing retained safety or lifecycle
+    behavior. A single SessionStart dispatcher reads the payload once, invokes
+    the existing child modules, and combines valid advisory context. The
+    duplicate destructive-confirm matcher registration is represented once;
+    channel-specific injection matchers remain separate to preserve behavior.
+    The redundant prompt-time TDD judge is removed; unknown code paths require
+    RED evidence unless `.dev-kit/.tdd-scope.json` explicitly opts them out.
+    Both manifests stay aligned,
+    and child scripts remain directly testable.
+  files:
+    - path: hooks/session-start.sh
+      change: 'Add one fail-open SessionStart dispatcher with payload fan-out and context merging.'
+    - path: hooks/hooks.json
+      change: 'Register the dispatcher, merge the duplicate destructive-confirm matcher, and remove the TDD judge entry.'
+    - path: .codex-plugin/hooks/hooks.json
+      change: 'Mirror the same reduced registry for Codex.'
+    - path: tests/test_session_start_dispatch.py
+      change: 'Verify one registration, payload delivery to every child, and merged SessionStart context.'
+    - path: tests/test_hooks_status.py
+      change: 'Update the direct SessionStart inventory to the dispatcher.'
+    - path: tests/test_hook_wiring.py
+      change: 'Pin the separate Agent and WebFetch injection matchers.'
+    - path: tests/test_destructive_confirm.py
+      change: 'Pin the merged destructive-confirm matcher.'
+    - path: tests/test_linear_trigger_hooks_wiring.py
+      change: 'Recognize Linear SessionStart as a dispatcher child.'
+    - path: tests/test_provider_divergence_wiring.py
+      change: 'Assert provider divergence is present in the shared dispatcher for both runtimes.'
+    - path: hooks/tdd-guard.sh
+      change: 'Keep TDD enforcement deterministic and conservative for unknown code paths.'
+    - path: hooks/tdd-scope-judge.sh
+      change: 'Delete the redundant prompt-time LLM guard hook.'
+    - path: lib/tdd_scope_judge.py
+      change: 'Delete the unused model-backed judge implementation.'
+    - path: tests/test_tdd_scope_judge.py
+      change: 'Delete tests for the removed judge surface.'
+    - path: lib/tdd_scope_policy.py
+      change: 'Delete the now-unreferenced policy wrapper; the shell guard owns the small deterministic allowlist.'
+    - path: tests/test_tdd_scope_policy.py
+      change: 'Delete tests for the removed policy wrapper.'
+    - path: hooks/index.md
+      change: 'Document registration counts, dispatcher ownership, and child-module boundaries.'
+    - path: docs/hooks/HOOK-REFERENCE.md
+      change: 'Document the single SessionStart registration and child modules.'
+    - path: docs/hooks/HOOK-REFERENCE.ko.md
+      change: 'Keep the Korean hook reference aligned.'
+    - path: docs/hooks/linear-triggers.md
+      change: 'Describe Linear SessionStart as a dispatcher child module.'
+    - path: docs/skills/ci-setup.md
+      change: 'Describe the canonical registry and dispatcher in installed output.'
+    - path: docs/skills/ci-setup.ko.md
+      change: 'Keep the Korean CI setup output aligned.'
+
+pros:
+  - 'Cuts registered command entries from 36 to 27 per runtime and SessionStart registrations from 8 to 1.'
+  - 'Preserves child behavior, fail-open boundaries, Claude/Codex parity, and focused test seams.'
+  - 'Removes duplicate destructive-confirm matcher bookkeeping without adding a new policy or recurring prompt.'
+  - 'Removes the prompt-time LLM TDD judge and keeps the RED-evidence rule local and deterministic.'
+  - 'Keeps the default-off guard policy and prior thin-harness deletions intact.'
+
+cons:
+  - 'Child checks still run inside the dispatcher, so registration count falls without removing their per-session work.'
+
+limitations:
+  - 'Further process-level consolidation is deferred to avoid coupling independent fail-closed contracts.'
+
+sections:
+  - title: "Decision"
+    body: |
+      Adopt the dispatcher only at the event-registration boundary. The
+      SessionStart children continue to own their behavior and can still be
+      executed and tested independently. The dispatcher is a thin adapter: it
+      reads the runtime payload once, fans it out, ignores unavailable or
+      malformed child output, and always returns a valid SessionStart envelope.
+
+      Merge matcher groups only where the matcher semantics are identical.
+      The combined `Write|Edit|MultiEdit|Bash` ask group preserves the
+      existing destructive-confirm decisions. Keep the `Agent` and `WebFetch`
+      injection groups separate: `sub-agent-handoff` is intentionally limited
+      to Agent responses.
+
+  - title: "Verification"
+    body: |
+      The reduced manifests are valid JSON and remain parity-compatible. The
+      focused hook suite covers the dispatcher, registry counts, matcher
+      wiring, guard defaults, active-hook regeneration, and retained guard
+      behavior.
+
+      `203 passed, 66 subtests passed in 137.67s` across the focused hook,
+      guard-mode, harness-mode, executor, and wiring suites.
+
+      The measured result is 27 registered command entries per runtime, down
+      from the 36-entry baseline.
+
+  - title: "Future reduction rule"
+    body: |
+      A later reduction should first prove that two hooks have identical event,
+      input, output, failure, and state contracts. If they do not, keep them as
+      separate child modules and reduce only their registration boundary. Any
+      process-level merge must add an isolated failure test before it replaces
+      a child script.

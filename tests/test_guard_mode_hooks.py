@@ -107,7 +107,7 @@ class TestWorktreeGuardBypass(unittest.TestCase):
                 ["bash", str(HOOKS / "tdd-guard.sh")],
                 input=json.dumps(_edit_payload(str(Path(tmp.name) / "lib" / "core.py"))),
                 capture_output=True, text=True, timeout=10, cwd=tmp.name,
-                env={**_ENV_WITH_LIB, "DEV_KIT_TDD_ROOT": tmp.name},
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARD_ROOT": tmp.name},
             )
             self.assertEqual(r.returncode, 2, r.stderr)
         finally:
@@ -124,7 +124,7 @@ class TestTddGuardBypass(unittest.TestCase):
                 ["bash", str(HOOKS / "tdd-guard.sh")],
                 input=json.dumps(_edit_payload(str(root / "lib" / "core.py"))),
                 capture_output=True, text=True, timeout=10, cwd=root,
-                env={**_ENV_WITH_LIB, "DEV_KIT_TDD_ROOT": str(root)},
+                env={**_ENV_WITH_LIB, "DEV_KIT_GUARD_ROOT": str(root)},
             )
             self.assertEqual(r.returncode, 0, r.stderr)
 
@@ -238,7 +238,7 @@ class TestGuardFailOpenShortCircuit(unittest.TestCase):
                 input=json.dumps(_edit_payload(str(root / "lib" / "core.py"))),
                 capture_output=True, text=True, timeout=10, cwd=root,
                 env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off",
-                     "DEV_KIT_TDD_ROOT": str(root)},
+                     "DEV_KIT_GUARD_ROOT": str(root)},
             )
             self.assertEqual(r.returncode, 0,
                              f"tdd-guard failed open: stderr={r.stderr!r}")

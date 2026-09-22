@@ -420,39 +420,3 @@ class TestWorktreeAutoCutHasNoGenerationCap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestTddScopeJudgeTimeoutCoverage(unittest.TestCase):
-    """Regression: PR #584 3-dim review (run 31059723614) found that the
-    timeout-policy test only covered worktree-auto-cut.sh. The same
-    coverage must apply to tdd-scope-judge.sh — the LLM judge fallback
-    path runs an HTTP call to the API and is at least as slow as
-    `git fetch origin main`. A 30s default on tdd-scope-judge.sh loses
-    the advisory on cold caches / slow models.
-    """
-
-    def setUp(self):
-        import json as _json
-        from pathlib import Path as _Path
-        self.cfg = _json.loads(
-            _Path(__file__).resolve().parents[1].joinpath("hooks", "hooks.json").read_text()
-        )
-
-    def test_tdd_scope_judge_has_explicit_timeout(self):
-        ups = self.cfg["hooks"].get("UserPromptSubmit", [])
-        flat = []
-        for entry in ups:
-            for h in entry.get("hooks", []):
-                flat.append(h)
-        match = [h for h in flat if "tdd-scope-judge.sh" in h.get("command", "")]
-        self.assertTrue(
-            match,
-            f"tdd-scope-judge.sh not wired into UserPromptSubmit: {flat}",
-        )
-        for h in match:
-            timeout = h.get("timeout", 30)
-            self.assertGreaterEqual(
-                timeout, 60,
-                f"tdd-scope-judge.sh timeout must be >= 60s (got {timeout}); "
-                f"30s default loses the LLM judge fallback path on slow API calls",
-            )

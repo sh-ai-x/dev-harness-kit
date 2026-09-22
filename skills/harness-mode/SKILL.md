@@ -6,7 +6,7 @@ alpha: state
 when_to_use: |
   - User types /dev-kit:harness-mode fast|full|custom|show
   - User wants a quick local iteration loop without the full local-hook stack
-  - User wants to opt individual optional local hooks (TDD judge, slop-detector, pre-commit review, maintenance, security depth, babysit-pr mode) on or off for this session only
+  - User wants to opt individual optional local hooks (slop-detector, pre-commit review, maintenance, security depth, babysit-pr mode) on or off for this session only
 allowed-tools: Read Bash AskUserQuestion
 model: opus
 disable-model-invocation: false
@@ -19,9 +19,9 @@ user-invocable: true
 ## What it does
 
 Writes `.dev-kit/harness-mode.session.json` via `lib/harness_mode_state.py`,
-which every gated skill and local hook (`lib/tdd_scope_judge.py`,
-`hooks/slop-detector.sh`, `lib/execute.py`'s intent-integrity gate) reads on
-each invocation. Four **correctness local hooks** — `stop_verify`,
+which every gated skill and local hook (for example
+`hooks/slop-detector.sh` and `lib/execute.py`'s intent-integrity gate) reads
+on each invocation. Four **correctness local hooks** — `stop_verify`,
 `secret_scan`, `intent_integrity` (high), `gh_ci_required` — are hardcoded
 in `lib/harness_mode_state.resolved_gate()` to always resolve `"on"`; no
 mode, and no hand-edited state file, can turn them off.
@@ -60,10 +60,8 @@ user sees exactly what changed.
 
 ### `custom`
 
-Issue exactly two `AskUserQuestion` calls, batched 3 questions each so no
-single prompt exceeds a comfortable choice count. **Call 1 must complete before
-Call 2 is issued** — do not batch all 6 into one call (the tool caps at 4
-questions per call, and 3-per-screen stays legible).
+Issue exactly two `AskUserQuestion` calls, with at most 3 questions per call.
+**Call 1 must complete before Call 2 is issued** — keep the screens legible.
 
 Each row's `Question` cell now explicitly names the local hook (so the user
 knows they are toggling a *local* switch, not a CI workflow gate) and the
@@ -74,7 +72,6 @@ gates CI re-checks anyway).
 
 | Question | Options |
 |---|---|
-| Run the **TDD scope judge** local hook before each build step? | Keep it ON (Recommended) / Skip locally (CI `test` re-runs) |
 | Run the **slop-detector** local hook on each write? | Keep it ON (Recommended) / Skip locally (CI l4-todo-scan re-runs) |
 | Run the **pre-commit codex:review** local hook before each commit? | Keep it ON (Recommended) / Skip locally (no CI equivalent) |
 
@@ -90,7 +87,6 @@ Map each answer to a gate key and write them all in one call:
 
 ```bash
 python3 -m lib.harness_mode_state write custom --gates '{
-  "tdd_scope_judge": "off",
   "slop_detector": "on",
   "pre_commit_review": "off",
   "maintenance": "on",
@@ -105,7 +101,7 @@ silently drops any correctness-gate key passed to it as defense in depth, but
 the picker itself should not offer them at all.
 
 **Non-interactive fallback**: if `AskUserQuestion` is unavailable (e.g. a
-headless/CI invocation), print the same 6 questions as a markdown table and
+headless/CI invocation), print the same 5 questions as a markdown table and
 tell the caller to run `fast` or `full` instead of hanging on interactive
 input.
 
@@ -130,7 +126,6 @@ by category (correctness / quality / style / process), with a one-line
       "gh_ci_required":  {"value": "on",   "type": "local_hook", "description": "refuse edits that would break GH-Actions"}
     },
     "quality": {
-      "tdd_scope_judge": {"value": "on",   "type": "local_hook", "description": "TDD scope judge before each build step"},
       "security_owasp":  {"value": "full", "type": "local_hook", "description": "local security scan depth (full 10-dim / quick / off)"}
     },
     "style": {
@@ -161,7 +156,6 @@ python3 -m lib.harness_mode_state show --json | jq '.local_hooks.style.slop_dete
 | Correctness | `secret_scan` | on | **on (always)** | **on (always, not offered)** |
 | Correctness | `intent_integrity` | on | **on (always)** | **on (always, not offered)** |
 | Correctness | `gh_ci_required` | on | **on (always)** | **on (always, not offered)** |
-| Quality | `tdd_scope_judge` | on | off | picker |
 | Quality | `security_owasp` | full | quick | picker (full/quick/off) |
 | Style | `slop_detector` | on | off | picker |
 | Style | `maintenance` | on | off | picker |
@@ -216,7 +210,7 @@ skip matrices) lives in the workflow files themselves — `ls
 
 - `lib/harness_mode_state.py` — the state module (`read_state`, `write_state`, `resolved_gate`, CLI, `_build_show_output`, `GATE_CATEGORIES`).
 - `hooks/session-start-harness-mode-reset.sh` — the SessionStart reset hook.
-- `hooks/slop-detector.sh`, `lib/tdd_scope_judge.py` — current local-hook consumers.
+- `hooks/slop-detector.sh`, `lib/execute.py` — current local-hook consumers.
 - `.github/workflows/review.yml`, `maintenance.yml`, `ci.yml` — the CI workflow gates this skill does NOT control.
 - `skills/build/SKILL.md` — documents the harness-mode-aware sub-agent preamble.
 - `skills/babysit-pr/SKILL.md` — documents `babysit_pr=manual` behavior.

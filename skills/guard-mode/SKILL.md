@@ -22,7 +22,7 @@ Writes `.dev-kit/guard-mode.session.json` via `lib/guard_mode_state.py`,
 which `hooks/tdd-guard.sh`, `hooks/worktree-guard.sh`, and `hooks/git-guard.sh`
 check before doing enforcement. Unlike
 `/dev-kit:harness-mode` (which controls *optional* local hooks —
-`tdd_scope_judge`, `slop_detector`, `maintenance`, ...), this skill controls
+`slop_detector`, `maintenance`, ...), this skill controls
 the three **hard-block** PreToolUse hooks that enforce Iron Law L1 (no prod
 code without a verification artifact) and the `rules/git-workflow.md`
 worktree-isolation/branch rules. Those hooks are deliberately out of
@@ -102,8 +102,8 @@ No side effects — safe to run any time to check what's currently bypassed.
 | `fork_pr_confirm` | `hooks/pr-create-route.sh` | Ask-tier confirmation before `gh pr create` when `lib/actor_classifier` routes a fork PR to `fork_pr_review_environment`. Default **off** — silent breadcrumb only; flip on per-session to surface every consumer_fork classification to the human before the PR is opened. |
 
 Turning a guard `off` does not touch the other guard, and does not touch
-anything `/dev-kit:harness-mode` controls (`tdd_scope_judge`,
-`slop_detector`, `maintenance`, `security_owasp`, `pre_commit_review`,
+anything `/dev-kit:harness-mode` controls (`slop_detector`, `maintenance`,
+`security_owasp`, `pre_commit_review`,
 `babysit_pr`) or the four hooks harness-mode always keeps on
 (`stop_verify`, `secret_scan`, `intent_integrity`, `gh_ci_required`) — those
 remain fully enforced regardless of guard-mode state.
