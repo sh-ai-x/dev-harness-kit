@@ -73,15 +73,25 @@ after:
 pros: ["Cited gain"]
 cons: ["Accepted weakness and mitigation"]
 limitations: ["Out-of-scope design limit"]
+pcl:                        # Optional PCL score block (see § PCL Rubric).
+  pros: 0                  # Integer sum of pros items scored 0-3 each.
+  cons: 0                  # Integer sum of cons items scored 0-3 each.
+  limitations: 0           # Integer sum of limitations items scored 0-3 each.
+  iterations: 0            # How many rubric iterations the loop ran.
+  passed: true             # Did the loop terminate with all thresholds met?
 sections:
   - title: Decision
     body: Markdown-lite content.
 ```
 
-The five structured fields are optional and independently rendered, so legacy
-section-only YAML remains valid. `before` describes the existing code with
-evidence; `after` describes the proposed state. `cons` are accepted trade-offs,
-not deferred work; `limitations` are intentional design boundaries.
+The six structured fields (`before:`, `after:`, `pros:`, `cons:`, `limitations:`, `pcl:`)
+are optional and independently rendered, so legacy section-only YAML remains
+valid. `before` describes the existing code with evidence; `after` describes
+the proposed state; `pcl` is the rubric score block (used by the § PCL
+Rubric iteration loop). `cons` are accepted trade-offs, not deferred work;
+`limitations` are intentional design boundaries. The `pcl:` block is read
+by the loop itself; today the renderer does not emit a chip from it (that
+is future-work, see § Limitations), so omitting the block is harmless.
 
 ## Safety and rendering invariants
 
@@ -143,7 +153,7 @@ Score each item per the rubric in § PCL Rubric (sum **17 / target ≥ 15**, 7 i
 
 - **[3/3] Pure function renderer.** `lib/render_proposal_html.py:1465 render()` is byte-identical across runs (`render(p, now=...)` makes time deterministic), so two reviewers see the same HTML.
 - **[3/3] Backward-compatible structured fields.** All five `before:` / `after:` / `pros:` / `cons:` / `limitations:` fields are independently optional; legacy `sections:`-only YAML renders unchanged (`tests/test_proposal_skill.py::BeforeAfterRenderTests::test_render_no_fields_emits_no_ba_sections`).
-- **[3/3] Status-routed filesystem layout.** YAML `status:` auto-routes to `reviewing|pending|applied|rejected`; unknown statuses fall back to `reviewing` so a typo still produces a routable path (`lib/render_proposal_html.py:STATUS_TO_BUCKET` table).
+- **[3/3] Status-routed filesystem layout.** YAML `status:` auto-routes to `reviewing|pending|applied|rejected`; unknown statuses fall back to `reviewing` so a typo still produces a routable path (`lib/render_proposal_html.py:108 STATUS_TO_BUCKET` table + `:124 route_for_status()` function).
 - **[2/3] Idempotent migration.** `python3 -m lib.render_proposal_html --migrate` is safe to re-run after adding new proposals; legacy flat files stay read-only compatible.
 - **[2/3] Inline-CSS-only output.** No `<script>`, no remote `<link>`, no remote `<img>`; `<script>` in a YAML title renders as `&lt;script&gt;` (`tests/test_proposal_skill.py::HtmlEscapeTests::test_script_in_title_escaped`).
 - **[2/3] PCL rubric bakes quality into authoring.** Authors see the score contract at slash-autocomplete (§ PCL Rubric), not behind a flag — the loop terminates in ≤5 iterations, so a miscalibrated rubric can't trap them.
@@ -157,9 +167,21 @@ Score each item per the rubric in § PCL Rubric (sum **3 / target ≤ 6**, 3 ite
 
 - **[1/3] Two-file documentation split — by design.** `SKILL.md` is the brief; the full schema reference lives at `docs/skills/proposal.md`. The split keeps `SKILL.md` skimmable at slash-autocomplete (top-of-skill, ~180 lines) and lets the detailed schema go where contributors actually look. The trade-off (cross-URL lookup) is bounded by the pointer banner at line 14; readers who need a specific schema detail follow one link.
 - **[1/3] Markdown-lite grammar is intentionally narrow — by design.** Headings stop at H3; no nested lists, footnotes, images, or HTML pass-through. Every construct added costs ~30 LOC in `lib/render_proposal_html.py::_is_block_start` plus a matching detector in `render_body`; the trade-off is bounded per-construct, so most proposals fit without extension, and the cost of adding one is explicit (not hidden in a parser upgrade).
-- **[1/3] CLI driver lives in the lib's `__main__` — by design.** The entry point is `lib/render_proposal_html.py:__main__`, not `bin/dev-kit-*.py`, because the proposal skill is the only caller. The trade-off is a trip-hazard for new contributors who look for `bin/dev-kit-proposal.py`; `§ Architecture` explicitly calls this out so the deviation is discoverable in one read, not silent.
+- **[1/3] CLI driver lives in the lib's `__main__` — by design.** The entry point is `lib/render_proposal_html.py:__main__`, not `bin/dev-kit-*.py`, because the proposal skill is the only caller. The trade-off is a trip-hazard for new contributors who look for `bin/dev-kit-proposal.py`; the § Architecture section below explicitly documents the deviation, so it is discoverable in one read.
 
 **Sum: 1+1+1 = 3** (target ≤ 6, ✓)
+
+## Architecture
+
+This skill deviates from the project's typical read-only-skill +
+`bin/dev-kit-*` CLI pattern. The proposal skill has Write permission and
+invokes `python3 -m lib.render_proposal_html <topic>` directly. The CLI
+logic lives in `lib/render_proposal_html.py:__main__`. Rationale: the
+proposal skill is the only caller, the maintainer workflow is "edit YAML,
+regenerate HTML", and a separate binary added indirection without adding
+capability. New contributors who grep for `bin/dev-kit-proposal.py` will
+not find one — this section is the documentation; see § Cons item 3 for
+why the `dev-kit-*.py` pattern is intentionally not used here.
 
 ## Limitations
 
