@@ -29,7 +29,6 @@ Markdown-only.
 | Workflow scenarios (interrupt / skip) | — | [`docs/workflow/WORKFLOW-SCENARIOS.md`](../workflow/WORKFLOW-SCENARIOS.md) | What to do when plan→build stops, plan drifts mid-build, etc. |
 | Token efficiency + research | — | [`docs/observability/token-efficiency.md`](../observability/token-efficiency.md) | The "every claim cites its source / cost" bundle |
 | Metric & gate skills | — | [`docs/observability/metrics.md`](../observability/metrics.md) | The five skill families that emit a number you can act on — `maintenance` (gate), `ci-doctor` (pre-flight), `security-metrics` (static triage), `evaluate` (post-hoc judge), `harness-effectiveness` (sub-second reducer) |
-| Session monitor | — | [`docs/observability/session-monitor.md`](../observability/session-monitor.md) | Cross-terminal session picker + resume |
 | Decision records | — | [`docs/adr/`](../adr/) | Locked ADRs (historical; English only) |
 | Repo map | [`docs/repo/REPOSITORY-MAP.html`](../repo/REPOSITORY-MAP.html) | [`docs/repo/REPOSITORY-MAP.md`](../repo/REPOSITORY-MAP.md) | Where each component lives in the tree |
 
@@ -40,4 +39,3 @@ Markdown-only.
 - **Resuming a flow that broke:** [`docs/workflow/WORKFLOW-SCENARIOS.md`](../workflow/WORKFLOW-SCENARIOS.md).
 - **Auditing cost or finding evidence for a claim:** [`docs/observability/token-efficiency.md`](../observability/token-efficiency.md).
 - **Picking the right metric or gate for a PR:** [`docs/observability/metrics.md`](../observability/metrics.md) — when to run `maintenance` vs `ci-doctor` vs `security-metrics` vs `evaluate` vs `harness-effectiveness`.
-- **Picking up a Claude Code / Codex session from a new shell:** [`docs/observability/session-monitor.md`](../observability/session-monitor.md).

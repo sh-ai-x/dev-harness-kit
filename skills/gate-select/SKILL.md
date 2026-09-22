@@ -96,7 +96,7 @@ PROJECT GATES (.dev-kit/gates.json + .dev-kit/ci-config.json marker)
 SESSION GATES (.dev-kit/harness-mode.session.json, reset every SessionStart)
   mode: full
   optional (picker-toggled):
-    tdd_scope_judge, slop_detector, pre_commit_review,
+    slop_detector, pre_commit_review,
     maintenance, security_owasp, babysit_pr
   correctness (always on): stop_verify, secret_scan, intent_integrity, gh_ci_required
 

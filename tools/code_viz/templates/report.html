@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>code-viz -- $target_name</title>
+<style>
+  :root {
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280;
+    --card:#ffffff; --card-border:#e5e7eb;
+    --accent:#2563eb; --code-bg:#f3f4f6;
+    --stripe:#f9fafb; --table-border:#e5e7eb;
+    --mermaid-bg:#fafbfc; --hover-bg:#f3f6fa;
+    --shadow:0 1px 3px rgba(0,0,0,0.05),0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg:0 10px 25px rgba(0,0,0,0.10),0 4px 10px rgba(0,0,0,0.05);
+  }
+  @media (prefers-color-scheme:dark) {
+    :root {
+      --bg:#0d1117; --fg:#e6edf3; --muted:#9da7b0;
+      --card:#161b22; --card-border:#30363d;
+      --accent:#58a6ff; --code-bg:#21262d;
+      --stripe:#0d1117; --table-border:#30363d;
+      --mermaid-bg:#161b22; --hover-bg:#1c232c;
+      --shadow:0 1px 3px rgba(0,0,0,0.4);
+      --shadow-lg:0 10px 25px rgba(0,0,0,0.5),0 4px 10px rgba(0,0,0,0.3);
+    }
+  }
+  *{box-sizing:border-box}
+  body{font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;max-width:1300px;margin:0 auto;padding:32px 28px 64px;background:var(--bg);color:var(--fg)}
+  h1{font-size:1.9em;font-weight:700;margin:0 0 6px;letter-spacing:-0.02em}
+  h2{font-size:1.18em;font-weight:600;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--card-border);color:var(--fg)}
+  h3{font-size:.95em;font-weight:600;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .meta{color:var(--muted);font-size:.85em;margin:0 0 20px}
+  .meta code{background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:.9em;color:var(--fg)}
+  .header{padding:24px 28px;border-radius:14px;background:linear-gradient(135deg,var(--card) 0%,var(--stripe) 100%);border:1px solid var(--card-border);box-shadow:var(--shadow);margin-bottom:20px}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 0}
+  .stats.secondary{margin-top:10px}
+  .stat{flex:1 1 100px;min-width:100px;padding:12px 16px;background:var(--card);border:1px solid var(--card-border);border-radius:10px;box-shadow:var(--shadow)}
+  .stat .num{font-size:1.85em;font-weight:700;color:var(--accent);line-height:1.1;letter-spacing:-0.02em}
+  .stat .lbl{font-size:.74em;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:4px;font-weight:500}
+  .nav{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--card-border);padding:10px 0;z-index:50;margin:0 -28px 20px;padding-left:28px;padding-right:28px}
+  .nav a{margin-right:12px;font-size:.83em;color:var(--accent);text-decoration:none;font-weight:500}
+  .nav a:hover{text-decoration:underline}
+  .card{background:var(--card);border:1px solid var(--card-border);border-radius:12px;box-shadow:var(--shadow);padding:20px 22px;margin-bottom:18px}
+  table{border-collapse:collapse;width:100%;margin:.4em 0;font-size:.92em}
+  th,td{border:1px solid var(--table-border);padding:6px 10px;text-align:left;vertical-align:top}
+  th{background:var(--stripe);font-weight:600;font-size:.85em;color:var(--fg)}
+  tbody tr:nth-child(even) td{background:var(--stripe)}
+  td code{background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:.88em;color:var(--fg);font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  pre.mermaid{display:block;width:100%;margin:0;padding:14px;background:var(--mermaid-bg);border:1px solid var(--card-border);border-radius:8px;cursor:zoom-in;position:relative;max-height:72vh;overflow:hidden}
+  pre.mermaid:hover{box-shadow:0 0 0 2px rgba(80,120,200,0.25);background:var(--hover-bg)}
+  pre.mermaid::after{content:"click to expand";position:absolute;bottom:8px;right:12px;font-size:11px;color:var(--muted);background:var(--card);padding:2px 8px;border-radius:4px;pointer-events:none;font-family:ui-monospace,monospace;border:1px solid var(--card-border)}
+  pre.mermaid svg{width:100%!important;height:auto!important;display:block}
+  pre.mermaid svg text{fill:#1a1a1a!important;font-weight:500}
+  @media (prefers-color-scheme:dark){pre.mermaid svg text{fill:#e6edf3!important}}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{display:inline-block;padding:5px 12px;background:var(--code-bg);border:1px solid var(--card-border);border-radius:14px;font-size:.85em;font-family:ui-monospace,SFMono-Regular,monospace;color:var(--fg)}
+  footer{color:var(--muted);font-size:.8em;text-align:center;padding-top:20px;border-top:1px solid var(--card-border);margin-top:28px}
+  footer code{background:var(--code-bg);padding:1px 6px;border-radius:4px;color:var(--fg)}
+  .mermaid-modal{position:fixed;inset:0;background:rgba(8,12,20,0.88);z-index:10000;cursor:zoom-out;padding:32px;overflow:auto;display:none;text-align:center}
+  .mermaid-modal.open{display:block}
+  .mermaid-modal .modal-card{background:var(--card);color:var(--fg);border-radius:10px;padding:24px;display:inline-block;position:relative;text-align:left;box-shadow:var(--shadow-lg)}
+  .mermaid-modal .modal-close{position:absolute;top:8px;right:12px;border:1px solid var(--card-border);background:var(--card);color:var(--fg);border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:13px}
+  .mermaid-modal .modal-card svg{width:auto!important;max-width:95vw;height:auto!important;display:block;margin:0 auto}
+  @media print{.nav,.mermaid-modal{display:none!important}body{padding:8px;max-width:none}.card{box-shadow:none;border:1px solid #ddd;page-break-inside:avoid;break-inside:avoid}pre.mermaid{max-height:none;overflow:visible;page-break-inside:avoid}}
+</style></head><body>
+
+<header class="header">
+  <h1>code-viz -- $target_name</h1>
+  <p class="meta">target <code>$target_path</code> . generated $generated_at . $n_diagrams mermaid diagrams . $n_workflows_viz workflows visualized + $n_no_workflow linear skills listed . $n_files files scanned . click any diagram to expand</p>
+  <div class="stats">$stat_tiles</div>
+  <div class="stats secondary">$pillar_tiles</div>
+</header>
+
+<nav class="nav">$nav_links</nav>
+
+<section class="card"><h2>Skills ($n_skills)</h2><table><thead><tr><th>name</th><th>category</th><th>alpha</th><th>pillars</th></tr></thead><tbody>$skill_rows</tbody></table></section>
+
+<section class="card"><h2>Commands ($n_commands)</h2><table><thead><tr><th>name</th><th>category</th></tr></thead><tbody>$cmd_rows</tbody></table></section>
+
+<section class="card"><h2>Hook scripts ($n_hooks)</h2><table><thead><tr><th>event</th><th>matcher</th><th>script</th></tr></thead><tbody>$hook_rows</tbody></table></section>
+
+<section class="card"><h2>GitHub Actions ($n_workflows)</h2><table><thead><tr><th>file</th><th>on</th><th>jobs</th></tr></thead><tbody>$wf_rows</tbody></table></section>
+
+<section class="card"><h2>Key files (top $n_key_files)</h2><table><thead><tr><th>path</th></tr></thead><tbody>$key_files_rows</tbody></table></section>
+
+$sections_html
+
+<div class="mermaid-modal" id="mermaid-modal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <button class="modal-close" type="button">close (esc)</button>
+    <div class="modal-content"></div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"
+        integrity="sha384-WmdflGW9aGfoBdHc4rRyWzYuAjEmDwMdGdiPNacbwfGKxBW/SO6guzuQ76qjnSlr"
+        crossorigin="anonymous"></script>
+<script>
+mermaid.initialize({
+  startOnLoad:true, securityLevel:'loose', theme:'base',
+  themeVariables:{
+    fontFamily:'ui-sans-serif,-apple-system,system-ui,sans-serif', fontSize:'13px',
+    primaryColor:'#e3f2fd', primaryTextColor:'#0d47a1', primaryBorderColor:'#1976d2',
+    secondaryColor:'#fce4ec', secondaryTextColor:'#880e4f', secondaryBorderColor:'#c2185b',
+    tertiaryColor:'#fff8e1', tertiaryTextColor:'#e65100', tertiaryBorderColor:'#f57c00',
+    lineColor:'#555555', edgeLabelBackground:'#ffffff',
+    clusterBkg:'#f5f5f5', clusterBorder:'#999999', titleColor:'#0a0a0a'
+  }
+});
+(function(){var modal=document.getElementById('mermaid-modal');var content=modal.querySelector('.modal-content');var closeBtn=modal.querySelector('.modal-close');function open(svg){content.innerHTML='';var c=svg.cloneNode(true);var vb=(c.getAttribute('viewBox')||'').split(/\s+/);if(vb.length===4){c.setAttribute('width',parseFloat(vb[2]));c.setAttribute('height',parseFloat(vb[3]))}c.style.removeProperty('max-width');c.style.removeProperty('width');c.style.removeProperty('height');content.appendChild(c);modal.classList.add('open');document.body.style.overflow='hidden'}function close(){modal.classList.remove('open');document.body.style.overflow=''}function bind(){document.querySelectorAll('pre.mermaid').forEach(function(p){if(p._bound)return;p._bound=true;p.addEventListener('click',function(){var svg=p.querySelector('svg');if(svg)open(svg)})})}var tries=0;var poll=setInterval(function(){if(document.querySelector('pre.mermaid svg')){clearInterval(poll);bind()}else if(++tries>30)clearInterval(poll)},200);closeBtn.addEventListener('click',close);modal.addEventListener('click',function(e){if(e.target===modal)close()});document.addEventListener('keydown',function(e){if(e.key==='Escape')close()})})();
+</script>
+<footer>generated by <code>/dev-kit:code-viz</code> . $footer_stats</footer>
+</body></html>

@@ -1,6 +1,7 @@
-"""test_provider_divergence_wiring.py -- ensures the new SessionStart hook
+"""test_provider_divergence_wiring.py -- ensures the SessionStart dispatcher
 is wired into BOTH .claude-plugin/hooks/hooks.json (the canonical Claude
-config at hooks/hooks.json) AND .codex-plugin/hooks/hooks.json.
+config at hooks/hooks.json) AND .codex-plugin/hooks/hooks.json, and that the
+dispatcher retains the provider-divergence child.
 
 The dual-runtime parity rule: every hook registered for Claude Code MUST
 also be registered for Codex. P3-bucket-C owns the full parity sweep
@@ -18,7 +19,7 @@ REPO_ROOT = Path(__file__).parent.parent
 
 
 def _hook_set(hooks_json_path: Path) -> set[str]:
-    """Return set of hook basenames referenced in `SessionStart`."""
+    """Return set of hook basenames directly referenced in `SessionStart`."""
     cfg = json.loads(hooks_json_path.read_text())
     names = set()
     for group in cfg["hooks"].get("SessionStart", []):
@@ -32,20 +33,26 @@ def _hook_set(hooks_json_path: Path) -> set[str]:
 class TestWiring(unittest.TestCase):
     def test_claude_registers_provider_divergence(self) -> None:
         names = _hook_set(REPO_ROOT / "hooks" / "hooks.json")
-        self.assertIn("provider-divergence-check.sh", names,
-                      "missing provider-divergence-check.sh in Claude SessionStart")
+        self.assertIn("session-start.sh", names,
+                      "missing SessionStart dispatcher in Claude manifest")
+        source = (REPO_ROOT / "hooks" / "session-start.sh").read_text(encoding="utf-8")
+        self.assertIn("provider-divergence-check.sh", source,
+                      "provider-divergence-check.sh missing from SessionStart dispatcher")
 
     def test_codex_registers_provider_divergence(self) -> None:
         names = _hook_set(REPO_ROOT / ".codex-plugin" / "hooks" / "hooks.json")
-        self.assertIn("provider-divergence-check.sh", names,
-                      "missing provider-divergence-check.sh in Codex SessionStart")
+        self.assertIn("session-start.sh", names,
+                      "missing SessionStart dispatcher in Codex manifest")
+        source = (REPO_ROOT / "hooks" / "session-start.sh").read_text(encoding="utf-8")
+        self.assertIn("provider-divergence-check.sh", source,
+                      "provider-divergence-check.sh missing from SessionStart dispatcher")
 
     def test_codex_registers_review_yml_isolation(self) -> None:
         """Regression: P4 Gap A.
 
         The review.yml isolation rule (hooks/review-yml-isolation.sh) was
-        historically only registered in the Claude SessionStart hook
-        block. A Codex babysit-pr run could land review.yml alongside
+            historically only registered in the Claude manifest. A Codex
+            babysit-pr run could land review.yml alongside
         unrelated edits and the CI gate verdict became unreadable.
         """
         cfg = json.loads((REPO_ROOT / ".codex-plugin" / "hooks" / "hooks.json").read_text())
@@ -62,9 +69,8 @@ class TestWiring(unittest.TestCase):
     def test_dual_runtime_session_start_parity(self) -> None:
         claude = _hook_set(REPO_ROOT / "hooks" / "hooks.json")
         codex = _hook_set(REPO_ROOT / ".codex-plugin" / "hooks" / "hooks.json")
-        missing_in_codex = claude - codex
-        self.assertEqual(missing_in_codex, set(),
-                         f"Claude-only SessionStart hooks: {sorted(missing_in_codex)}")
+        self.assertEqual(claude, codex,
+                         "Claude and Codex must use the same SessionStart dispatcher")
 
 
 if __name__ == "__main__":

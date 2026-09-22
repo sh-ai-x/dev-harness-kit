@@ -70,10 +70,10 @@ class TestReadWriteRoundTrip(unittest.TestCase):
             hms.write_state("bogus", root=self.root)
 
     def test_write_state_drops_correctness_gate_keys(self):
-        hms.write_state("custom", gates={"stop_verify": "off", "tdd_scope_judge": "off"}, root=self.root)
+        hms.write_state("custom", gates={"stop_verify": "off", "slop_detector": "off"}, root=self.root)
         state = hms.read_state(self.root)
         self.assertNotIn("stop_verify", state["gates"])
-        self.assertEqual(state["gates"]["tdd_scope_judge"], "off")
+        self.assertEqual(state["gates"]["slop_detector"], "off")
 
 
 class TestResolvedGate(unittest.TestCase):
@@ -108,14 +108,12 @@ class TestResolvedGate(unittest.TestCase):
 
     def test_full_mode_all_optional_gates_on(self):
         hms.write_state("full", root=self.root)
-        self.assertEqual(hms.resolved_gate("tdd_scope_judge", self.root), "on")
         self.assertEqual(hms.resolved_gate("slop_detector", self.root), "on")
         self.assertEqual(hms.resolved_gate("security_owasp", self.root), "full")
         self.assertEqual(hms.resolved_gate("babysit_pr", self.root), "full")
 
     def test_fast_mode_all_optional_gates_off(self):
         hms.write_state("fast", root=self.root)
-        self.assertEqual(hms.resolved_gate("tdd_scope_judge", self.root), "off")
         self.assertEqual(hms.resolved_gate("slop_detector", self.root), "off")
         self.assertEqual(hms.resolved_gate("pre_commit_review", self.root), "off")
         self.assertEqual(hms.resolved_gate("maintenance", self.root), "off")
@@ -125,10 +123,9 @@ class TestResolvedGate(unittest.TestCase):
     def test_custom_mode_per_gate_override_wins(self):
         hms.write_state(
             "custom",
-            gates={"tdd_scope_judge": "off", "slop_detector": "on"},
+            gates={"slop_detector": "on"},
             root=self.root,
         )
-        self.assertEqual(hms.resolved_gate("tdd_scope_judge", self.root), "off")
         self.assertEqual(hms.resolved_gate("slop_detector", self.root), "on")
         # Gates not explicitly overridden in custom mode fall back to "full"'s value.
         self.assertEqual(hms.resolved_gate("maintenance", self.root), "on")

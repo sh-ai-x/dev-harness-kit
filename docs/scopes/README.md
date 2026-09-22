@@ -1,6 +1,8 @@
 # Scope Reference
 
 Three scopes × three modes = nine cells. Pick the one that matches your situation.
+Guard activation is a separate opt-in decision: every checkout starts with
+`DEV_KIT_GUARDS=off` until bootstrap writes `on` to project or local scope.
 
 | You are...                       | Mode  | File you edit                          |
 |----------------------------------|-------|----------------------------------------|
@@ -48,3 +50,11 @@ If you remember nothing else, remember that URL.
 2. **Read the per-scope doc** for that file's purpose and anti-patterns.
 3. **Copy the matching template** from `templates/` and customize.
 4. **Verify** with the audit commands in `troubleshooting.md`.
+
+## Guard activation
+
+`DEV_KIT_GUARDS` controls only the worktree, git, and TDD guards. Resolution is
+shell env → local settings → project settings → default `off`. User-scope
+plugin enablement is deliberately ignored. The first `/dev-kit:bootstrap`
+asks whether to enable the guards and whether the choice is project-wide or
+checkout-local; SessionStart only records and reports the result.

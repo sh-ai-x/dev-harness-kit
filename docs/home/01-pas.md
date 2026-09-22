@@ -127,9 +127,8 @@ orientation. See [`docs/stages/STAGES.md`](../stages/STAGES.md).
 
 Every "done" claim must carry one of:
 
-- a failing-then-passing test (`build-tdd`, `tdd-guard`),
-- a quoted exit code + test count + build log (`build-verify`,
-  `stop-verify`),
+- a failing-then-passing test (`tdd-guard`),
+- a quoted exit code + test count + build log (`stop-verify`),
 - an LLM-judge verdict with per-line findings (`/dev-kit:review`,
   `/dev-kit:security`),
 - a deterministic scorecard (`/dev-kit:security-metrics`,

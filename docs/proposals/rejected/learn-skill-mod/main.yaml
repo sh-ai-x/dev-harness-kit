@@ -1,7 +1,14 @@
 title: "/dev-kit:learn — dev-harness-kit 자체의 신규 스킬"
-status: draft
+status: superseded
 date: 2026-08-05
+started: 2026-08-05
+shipped: 2026-08-06
 tags: [skill-design, audit, state, extract-and-persist, dev-kit-native]
+modifications:
+  - 'Phase 1 shipped as designed: skills/learn/SKILL.md, validate_skill.py, its regression tests, and the skill registry landed in commits 8711c578..4fa1c92c.'
+  - 'Phase 2 parse_source.py and the proposed external standards crib were not shipped; they remain deferred as designed.'
+  - 'The proposal moved from reviewing/ to applied/learn-skill-mod/ to match the lifecycle renderer contract.'
+  - 'The shipped learn surface was later removed by the thin-harness cleanup because it had no runtime consumer; this proposal is retained as superseded history.'
 sections:
   - title: Executive summary
     body: |
@@ -295,19 +302,14 @@ sections:
           base='origin/main')"
         ```
 
-  - title: Next steps (after this proposal is approved)
+  - title: As-shipped state
     body: |
-      1. **즉시 (현재 PR)**: `/dev-kit:proposal`으로 본 proposal을 HTML 렌더링
-         → 사용자가 `docs/proposals/learn-skill/main.html` 리뷰
-      2. **사용자 승인 후**: `/dev-kit:linear` 호출 → cherry-pick 1건 +
-         umbrella 1건 Linear 이슈 등록
-      3. **Phase 1 실행**: `/dev-kit:plan` → 4 파일 작성 + 테스트 + README
-         갱신 + PR + 머지 (hard gate: quoted exit code + token-economy
-         snapshot + Linear issue Done)
-      4. **Phase 2 (조건부)**: Phase 1 머지 후 30일간 usage 메트릭 측정 →
-         `parse_source.py` 추가 필요성 입증 시에만 별도 PR (DEFER 상태)
-      5. **금지 (모든 phase에서)**: 외부 영감 출처에 대한 일체의 언급
-         (코드, 주석, commit message, PR description, 검증 로그 포함)
+      Phase 1 is shipped in `skills/learn/` and covered by
+      `tests/test_learn_skill.py`. The proposal is marked
+      `applied-with-changes` because the implementation intentionally kept
+      the deferred parser and rejected crib out of the product surface.
+      Reconsider Phase 2 only after usage evidence justifies its additional
+      skill surface.
 
   - title: References (dev-harness-kit SSOT only)
     body: |
