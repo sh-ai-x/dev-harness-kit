@@ -1,5 +1,6 @@
 """Tests for lib/sot_harness_engine.py — pure synthesizer tests."""
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +10,10 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from sot_harness_engine import (
     ROUNDS,
+    SOT_HANDOFF_GENERATED_BY,
+    SOT_HANDOFF_KIND,
+    SOT_HANDOFF_STATUS_HELD,
+    SOT_HANDOFF_STATUS_LOCKED,
     RoundDecision,
     RoundLogEntry,
     SOTDecisionSet,
@@ -231,6 +236,95 @@ class TestWrite(unittest.TestCase):
             self.assertTrue(target.exists())
             self.assertIn("Decision log", target.read_text())
             self.assertIn("user picked first option", target.read_text())
+
+
+class TestWriteSotHandoutFrontmatter(unittest.TestCase):
+    """The SOT handoff must carry YAML frontmatter so the plan-skill consume
+    gate (Phase 6, issue #898) can route it via --from-sot instead of
+    misinterpreting it as an interview handoff.
+
+    Required keys:
+      handoff_kind: sot
+      status: locked (when complete) | held (when incomplete)
+      session_id: <session>
+      generated_by: sot-harness-writer
+    """
+
+    @staticmethod
+    def _extract_frontmatter(text: str) -> dict:
+        """Tiny YAML-subset parser for the frontmatter tests.
+
+        Mirrors the parser in lib/hand_off_consume.py but kept inline so
+        this test file remains the canonical pin for the SOT writer
+        contract (the consumer-side helper is exercised separately).
+        """
+        m = re.match(r"\A---\n(.*?)\n---\n", text, re.DOTALL)
+        if not m:
+            return {}
+        block = m.group(1)
+        out: dict = {}
+        for line in block.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            out[key.strip()] = value.strip().strip('"').strip("'")
+        return out
+
+    def test_complete_set_writes_locked_frontmatter(self):
+        import tempfile
+        ds = _full_decision_set()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = write_sot_handout(ds, root)
+            text = target.read_text()
+            fm = self._extract_frontmatter(text)
+            self.assertEqual(fm.get("handoff_kind"), SOT_HANDOFF_KIND)
+            self.assertEqual(fm.get("status"), SOT_HANDOFF_STATUS_LOCKED)
+            self.assertEqual(fm.get("session_id"), ds.session_id)
+            self.assertEqual(fm.get("generated_by"), SOT_HANDOFF_GENERATED_BY)
+
+    def test_incomplete_set_writes_held_frontmatter(self):
+        import tempfile
+        # Missing decisions → validate() returns errors → synthesize_sot
+        # emits the INCOMPLETE doc with status: held.
+        ds = SOTDecisionSet(
+            project_name="incomplete",
+            idea_one_liner="partial interview",
+            session_id="partial-session",
+        )
+        ds.decisions["project_context"] = RoundDecision(
+            round_key="project_context",
+            recommendation_id="long_running",
+            decision="accept",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = write_sot_handout(ds, root)
+            fm = self._extract_frontmatter(target.read_text())
+            self.assertEqual(fm.get("handoff_kind"), SOT_HANDOFF_KIND)
+            self.assertEqual(fm.get("status"), SOT_HANDOFF_STATUS_HELD)
+
+    def test_sot_handoff_filename_matches_session(self):
+        import tempfile
+        ds = _full_decision_set()
+        ds.session_id = "alpha-1"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = write_sot_handout(ds, root)
+            self.assertEqual(target.name, "sot-harness-alpha-1.md")
+
+    def test_sot_handoff_sits_alongside_interview_glob(self):
+        # The plan-skill consume gate restricts interview discovery to
+        # interview-*.md; the SOT writer must NOT use that filename pattern.
+        import tempfile
+        ds = _full_decision_set()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = write_sot_handout(ds, root)
+            self.assertTrue(target.name.startswith("sot-harness-"))
+            self.assertFalse(target.name.startswith("interview-"))
 
 
 if __name__ == "__main__":
