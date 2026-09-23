@@ -35,6 +35,12 @@
 # strip dirname along with jq — same pattern as bash-guard.sh).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
+
 
 # Source shared payload helpers (`deny` for fail-closed JSON emit).
 # shellcheck source=lib/payload-parse.sh
@@ -54,7 +60,9 @@ fi
 
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)"
 SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)"
-HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction (shared via lib/hook-cwd.sh, see inspect-pass4
+# finding p17). The hook inspects HOOK_CWD before deciding to cd.
+extract_hook_cwd
 
 # Short-circuit on already-asserted sessions. The sidecar is written by
 # this hook on the first successful assert; subsequent tool calls in the

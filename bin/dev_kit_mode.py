@@ -96,21 +96,6 @@ def _project_root(cwd: Path) -> Path | None:
     return Path(result.stdout.strip())
 
 
-def _read_env(settings_file: Path) -> str | None:
-    if not settings_file.is_file():
-        return None
-    try:
-        body = json.loads(settings_file.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-    env = body.get("env") or {}
-    if isinstance(env, dict):
-        v = env.get("DEV_KIT_MODE")
-        if isinstance(v, str):
-            return v
-    return None
-
-
 def _enabled_plugins(settings_file: Path) -> bool:
     if not settings_file.is_file():
         return False

@@ -85,21 +85,6 @@ def _project_root(cwd: Path) -> Path | None:
     return Path(result.stdout.strip())
 
 
-def _read_env(settings_file: Path) -> str | None:
-    if not settings_file.is_file():
-        return None
-    try:
-        body = json.loads(settings_file.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-    env = body.get("env") or {}
-    if isinstance(env, dict):
-        v = env.get("DEV_KIT_TEAM")
-        if isinstance(v, str):
-            return v
-    return None
-
-
 def cmd_resolve(args) -> int:
     cwd = Path(args.target or os.getcwd())
     team, _source = _resolve_team(cwd)

@@ -11,6 +11,12 @@
 # advisory in this hook. worktree-guard.sh is the hard-block layer.
 
 # Source the shared preamble (set -uo pipefail, INPUT=$(cat),
+
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
 # worktree_detect, jq-missing warning).
 HOOK_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 # shellcheck source=lib/hook-preamble.sh
@@ -26,7 +32,10 @@ fi
 
 # extract_hook_cwd — read HOOK_CWD from stdin payload and cd into it.
 # Falls back to current $PWD if the payload cwd is missing or not a directory.
-HOOK_CWD="$(printf '%s' "${INPUT:-$(cat 2>/dev/null)}" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction + cd (shared via lib/hook-cwd.sh, see
+# inspect-pass4 finding p10). The failure mode is `|| true`
+# (advisory hook).
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || true
 fi

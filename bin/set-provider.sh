@@ -111,16 +111,16 @@ check_extensibility() {
                      | sort)
   echo
   echo "=== ALLOWLIST (${script_path}:${allowlist_line}) ==="
-  if [ -n "$allowlist_parsed" ]; then printf '%s\n' $allowlist_parsed; fi
+  if [ -n "$allowlist_parsed" ]; then printf '%s\n' "$allowlist_parsed"; fi
   echo
   echo "=== case arms (${script_path}:${case_start}) ==="
-  if [ -n "$case_arms_parsed" ]; then printf '%s\n' $case_arms_parsed; fi
+  if [ -n "$case_arms_parsed" ]; then printf '%s\n' "$case_arms_parsed"; fi
   echo
   if [ "$allowlist_parsed" = "$case_arms_parsed" ]; then
     echo "OK: ALLOWLIST and case arms are in sync."
   else
     echo "DRIFT: ALLOWLIST and case arms disagree:"
-    diff <(printf '%s\n' $allowlist_parsed) <(printf '%s\n' $case_arms_parsed) || true
+    diff <(printf '%s\n' "$allowlist_parsed") <(printf '%s\n' "$case_arms_parsed") || true
   fi
 }
 

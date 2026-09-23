@@ -1,6 +1,6 @@
 """Regression suite for /dev-kit:ralph ATTENDED_RUN chain executor.
 
-Covers the pure ``skills.ralph.lib.ralph_chain`` module end-to-end
+Covers the pure ``lib.ralph_chain`` module end-to-end
 without spawning sub-skills. The dispatch shim is a RecordingDispatch
 that the test pre-loads with the desired outcomes.
 
@@ -18,9 +18,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL_LIB = ROOT / "skills" / "ralph" / "lib"
+LIB_DIR = ROOT / "lib"  # promoted from skills/ralph/lib/ in
+        # inspect-pass4 finding a1
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(SKILL_LIB))
+sys.path.insert(0, str(LIB_DIR))
 
 import ralph_state as rs  # noqa: E402, I001
 import ralph_chain as rc  # noqa: E402, I001
@@ -385,7 +386,7 @@ def test_extract_pr_number_handles_empty():
 
 
 def test_cli_dry_run_requires_attended_state(project_root: Path, capsys):
-    """python3 -m skills.ralph.lib.ralph_chain --project-root P run-attended --dispatch noop
+    """python3 -m lib.ralph_chain --project-root P run-attended --dispatch noop
     must exit 2 if current_stage is not ATTENDED_RUN."""
     import subprocess
     state = rs.new_state("hello", session="cli")
@@ -393,7 +394,7 @@ def test_cli_dry_run_requires_attended_state(project_root: Path, capsys):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "skills.ralph.lib.ralph_chain",
+            sys.executable, "-m", "lib.ralph_chain",
             "--project-root", str(project_root),
             "--session", "cli",
             "run-attended", "--dispatch", "noop",
@@ -411,7 +412,7 @@ def test_cli_dry_run_lands_user_merge(project_root: Path):
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "skills.ralph.lib.ralph_chain",
+            sys.executable, "-m", "lib.ralph_chain",
             "--project-root", str(project_root),
             "--session", "cli2",
             "run-attended", "--dispatch", "noop",

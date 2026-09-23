@@ -12,6 +12,15 @@
 # worktree_detect, jq-missing warning).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# shellcheck source=lib/find-python.sh
+source "${BASH_SOURCE[0]%/*}/lib/find-python.sh"
+
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
+
 
 # Hooks are advisory, but a silent fallback makes the next edit look like an
 # unrelated hard failure from worktree-guard.sh. Always return a handoff
@@ -38,7 +47,9 @@ PROMPT="$(printf '%s' "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)"
 [ -z "$PROMPT" ] && exit 0
 
 # Prefer cwd from the hook payload; fall back to PWD.
-HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction + cd (shared via lib/hook-cwd.sh, see
+# inspect-pass4 finding p14).
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || exit 0
 fi
@@ -296,12 +307,10 @@ fi
 # contract from PR #linear-auto-sync-owner-gated). Falls through
 # silently if tools/linear_sync.py is missing.
 if [ -f "$WT_PATH/tools/linear_sync.py" ]; then
-  for py in python3 python py; do
-    if command -v "$py" >/dev/null 2>&1; then
-      (cd "$WT_PATH" && "$py" "$WT_PATH/tools/linear_sync.py" auto-sync) || true
-      break
-    fi
-  done
+  # Resolve Python 3 via lib/find-python.sh (inspect-pass4 finding p7).
+  if PY="$(find_python)"; then
+    (cd "$WT_PATH" && "$PY" "$WT_PATH/tools/linear_sync.py" auto-sync) || true
+  fi
 fi
 
 # Build additionalContext — the harness consumes this as a client-specific

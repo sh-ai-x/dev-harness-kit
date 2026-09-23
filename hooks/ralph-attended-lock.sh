@@ -3,7 +3,8 @@
 # refusal during /dev-kit:ralph ATTENDED_RUN.
 #
 # Wires the state-machine `attended_lock` invariant into the host's
-# tool-use gate. Per skills/ralph/SKILL.md and lib/ralph_state.py the
+# tool-use gate. Per skills/ralph/SKILL.md and lib/ralph_state.py (promoted
+# from skills/ralph/lib/ in inspect-pass4 finding a1) the
 # invariant is already enforced at the state-machine layer; this hook
 # is the *mechanical* complement so even a misbehaving sub-skill or
 # a model invocation that ignores the prose contract cannot call
@@ -61,15 +62,15 @@ STATE_FILE="${PROJECT_ROOT}/.dev-kit/ralph/${RALPH_SESSION:-default}.json"
 
 # Resolve the ralph_state module location. The hook sits under
 # <repo>/hooks/ralph-attended-lock.sh; the lib is at
-# <repo>/skills/ralph/lib/ralph_state.py. Derive the lib path from
+# <repo>/lib/ralph_state.py. Derive the lib path from
 # the hook's own location (BASH_SOURCE) so the hook works whether or
 # not PROJECT_ROOT happens to be the dev-kit repo root.
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RALPH_LIB="${HOOK_DIR%/hooks}/skills/ralph/lib"
+RALPH_LIB="${HOOK_DIR%/hooks}/lib"
 if [ ! -f "${RALPH_LIB}/ralph_state.py" ]; then
   # Fallback: assume PROJECT_ROOT is the dev-kit repo root (canonical
   # install path).
-  RALPH_LIB="${PROJECT_ROOT}/skills/ralph/lib"
+  RALPH_LIB="${PROJECT_ROOT}/lib"
 fi
 [ -f "${RALPH_LIB}/ralph_state.py" ] || {
   echo "[ralph-attended-lock] WARN: ralph_state.py not found at ${RALPH_LIB}; mechanical Ask-refusal disabled." >&2
@@ -123,6 +124,6 @@ fi
 # names the state-machine invariant so the LLM can recover (delete the
 # AskUserQuestion call, take the auto-decision branch).
 SESSION=$(echo "$STATE_JSON" | jq -r '.session // "default"')
-printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"RALPH ATTENDED_LOCK: AskUserQuestion is forbidden while ralph session=%s is at stage=%s with attended_lock=%s. Crossed the one-way SHIP_CONFIRM_GATE -> ATTENDED_RUN boundary; the chain auto-decides instead. Drop this AskUserQuestion call and continue the unattended chain (skills/ralph/lib/ralph_chain.py run_attended)."}}\n' \
+printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"RALPH ATTENDED_LOCK: AskUserQuestion is forbidden while ralph session=%s is at stage=%s with attended_lock=%s. Crossed the one-way SHIP_CONFIRM_GATE -> ATTENDED_RUN boundary; the chain auto-decides instead. Drop this AskUserQuestion call and continue the unattended chain (lib/ralph_chain.py run_attended)."}}\n' \
   "$SESSION" "$STAGE" "$LOCK" >&2
 exit 2

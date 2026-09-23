@@ -23,7 +23,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks" / "ralph-attended-lock.sh"
-SKILL_LIB = ROOT / "skills" / "ralph" / "lib"
+# lib/ is the canonical SSOT surface for ralph_state (promoted 2026-09-23,
+# inspect-pass4 finding a1). The skills/ralph/lib/ path is now a
+# backwards-compat shim — tests use the top-level lib/ path directly.
+LIB_DIR = ROOT / "lib"
 
 
 # ============================================================================
@@ -52,7 +55,7 @@ def _run_hook(
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(project_root)
-    env["PYTHONPATH"] = f"{SKILL_LIB}:{env.get('PYTHONPATH', '')}"
+    env["PYTHONPATH"] = f"{LIB_DIR}:{env.get('PYTHONPATH', '')}"
     if session != "default":
         env["RALPH_SESSION"] = session
     if extra_env:
@@ -71,7 +74,7 @@ def _run_hook(
 def _write_state(project_root: Path, *, attended_lock: bool, current_stage: str) -> Path:
     """Construct a real RalphState on disk via the canonical module."""
     sys.path.insert(0, str(ROOT))
-    sys.path.insert(0, str(SKILL_LIB))
+    sys.path.insert(0, str(LIB_DIR))
     import ralph_state as rs  # type: ignore  # noqa: E402
 
     state = rs.RalphState(
@@ -302,7 +305,7 @@ def test_alt_session_lock_denies(project_root: Path):
     """A different session name (RALPH_SESSION=foo) with its own lock
     must still deny. Tests the env-var path through the hook."""
     sys.path.insert(0, str(ROOT))
-    sys.path.insert(0, str(SKILL_LIB))
+    sys.path.insert(0, str(LIB_DIR))
     import ralph_state as rs  # type: ignore  # noqa: E402
 
     state = rs.RalphState(
@@ -321,7 +324,7 @@ def test_alt_session_unlocked_passes(project_root: Path):
     """Default session locked, alt session unlocked → alt session
     passes. The hook operates on the named session only."""
     sys.path.insert(0, str(ROOT))
-    sys.path.insert(0, str(SKILL_LIB))
+    sys.path.insert(0, str(LIB_DIR))
     import ralph_state as rs  # type: ignore  # noqa: E402
 
     rs.RalphState(

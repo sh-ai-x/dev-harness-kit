@@ -39,6 +39,9 @@
 
 set -uo pipefail
 
+# shellcheck source=lib/find-python.sh
+source "${BASH_SOURCE[0]%/*}/lib/find-python.sh"
+
 INPUT="$(cat)"
 
 # ── opt-out (per-worktree) ──────────────────────────────────────────────────
@@ -71,14 +74,8 @@ fi
 # no-ops via `|| true`, defeating the contract — same shape as the
 # jq-missing gap. Loop through common binary names parallel to
 # linear-autosync.sh:52-58.
-PYTHON=""
-for py in python3 python py; do
-  if command -v "$py" >/dev/null 2>&1; then
-    PYTHON="$(command -v "$py")"
-    break
-  fi
-done
-if [ -z "$PYTHON" ]; then
+# Resolve Python 3 via lib/find-python.sh (inspect-pass4 finding p6).
+if ! PYTHON="$(find_python)"; then
   echo "[sub-agent-handoff] ERROR: python3 is required but not installed. The hook scans the payload in Python (to handle dict/list shapes); without it the handoff contract silently lapses. Install python3 (apt/brew/apk)." >&2
   exit 2
 fi

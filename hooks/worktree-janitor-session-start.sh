@@ -50,6 +50,21 @@
 # worktree_detect, jq-missing warning).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
+
+# Source the shared worktree classifier (inspect-pass4 finding s9
+# + s13). Two helpers:
+#   classify_worktree_record <record> [stale_days] -> merged/stale/age_days/path/branch
+#   should_auto_prune <merged> <stale> <wt> <current> <main> <safe> <rem> <max> <status>
+# Both print a single key=value line per output field; the main loop
+# parses them into a record instead of mutating 7 globals.
+# shellcheck source=lib/worktree-classify.sh
+source "${BASH_SOURCE[0]%/*}/lib/worktree-classify.sh"
+
 
 # Opt-out gate (must run BEFORE any output to honor per-worktree skip).
 if [ "${DEV_KIT_JANITOR_OFF:-0}" = "1" ]; then
@@ -64,7 +79,9 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # extract_hook_cwd — read HOOK_CWD from stdin payload and cd into it.
-HOOK_CWD="$(printf '%s' "${INPUT:-$(cat 2>/dev/null)}" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction + cd (shared via lib/hook-cwd.sh, see
+# inspect-pass4 finding p11). The failure mode is `|| true`.
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || true
 fi
@@ -178,47 +195,33 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
       # (the tag is the first token, value is everything after the
       # first space — `awk $2` would truncate paths containing spaces,
       # so we strip the leading tag and keep the rest of the line).
-      WT_PATH="$(printf '%s\n' "$RECORD" | sed -n 's/^worktree //p' | head -1)"
-      WT_BRANCH="$(printf '%s\n' "$RECORD" | awk '$1=="branch"{print $2}' | sed 's#^refs/heads/##')"
-      ORPHAN_THIS=0
-      STALE_THIS=0
-      if [ -n "$WT_PATH" ] && [ -n "$WT_BRANCH" ]; then
-        # Predicate 1: merged into origin/main.
-        if git merge-base --is-ancestor "$WT_BRANCH" origin/main 2>/dev/null; then
-          ORPHAN_THIS=1
+      # Inline classification + auto-prune decision are now helpers
+      # (lib/worktree-classify.sh). This avoids the previous 10-level
+      # nesting (s9 CRITICAL) and the 7-counter data clump (s13).
+      CLASSIFY_OUT="$(classify_worktree_record "$RECORD" "$STALE_DAYS")"
+      if [ -n "$CLASSIFY_OUT" ]; then
+        # parse 5 key=value lines into the loop's local scope
+        MERGED_THIS="$(printf '%s\n' "$CLASSIFY_OUT" | sed -n 's/^merged=//p')"
+        STALE_THIS="$(printf '%s\n' "$CLASSIFY_OUT" | sed -n 's/^stale=//p')"
+        WT_PATH="$(printf '%s\n' "$CLASSIFY_OUT" | sed -n 's/^path=//p')"
+        WT_BRANCH="$(printf '%s\n' "$CLASSIFY_OUT" | sed -n 's/^branch=//p')"
+        if [ "${MERGED_THIS:-0}" = "1" ]; then
           MERGED_COUNT=$((MERGED_COUNT + 1))
-        else
-          # Predicate 2: fix/classify-request-* older than STALE_DAYS.
-          if [[ "$WT_BRANCH" == fix/classify-request-* ]]; then
-            LAST_TS="$(git log -1 --pretty=%ct "$WT_BRANCH" 2>/dev/null || echo 0)"
-            NOW="$(date +%s)"
-            if [ "${LAST_TS:-0}" -gt 0 ] 2>/dev/null; then
-              AGE_DAYS=$(( (NOW - LAST_TS) / 86400 ))
-              if [ "${AGE_DAYS:-0}" -gt "${STALE_DAYS}" ]; then
-                ORPHAN_THIS=1
-                STALE_THIS=1
-                STALE_COUNT=$((STALE_COUNT + 1))
-              fi
-            fi
-          fi
         fi
-      fi
-      if [ "$ORPHAN_THIS" = "1" ]; then
-        ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
-        # Auto-apply path: predicate 2 only, with safety guards.
-        # Predicate 1 (merged-into-main) is reported but NEVER auto-
-        # removed because `--is-ancestor` is reflexive and a fresh
-        # branch off main would match.
-        if [ "$AUTO_PRUNE" = "1" ] \
-           && [ "$STALE_THIS" = "1" ] \
-           && [ "${REMOVED_COUNT:-0}" -lt "${AUTO_PRUNE_MAX}" ] \
-           && [ -n "$WT_PATH" ] && [ -d "$WT_PATH" ] \
-           && [ -n "$SAFE_REMOVE" ] && [ -x "$SAFE_REMOVE" ] \
-           && [ "$WT_PATH" != "$CURRENT_WT_PATH" ] \
-           && [ "$WT_PATH" != "$MAIN_WT_PATH" ] \
-           && [ -z "$(git -C "$WT_PATH" status --porcelain 2>/dev/null)" ]; then
-          # Drop `--force` so git's dirty-tree refusal is the backstop.
-          if "$SAFE_REMOVE" "$WT_PATH" -- >/dev/null 2>"$AUDIT_DIR/.last-rm-stderr"; then
+        if [ "${STALE_THIS:-0}" = "1" ]; then
+          STALE_COUNT=$((STALE_COUNT + 1))
+        fi
+        if [ "${MERGED_THIS:-0}" = "1" ]; then
+          ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
+          # Auto-apply path: predicate 2 only, with safety guards.
+          # Predicate 1 (merged-into-main) is reported but NEVER
+          # auto-removed because `--is-ancestor` is reflexive and a
+          # fresh branch off main would match.
+          WT_STATUS="$(git -C "$WT_PATH" status --porcelain 2>/dev/null)"
+          if [ "$AUTO_PRUNE" = "1" ] \
+             && [ "$(should_auto_prune "$MERGED_THIS" "$STALE_THIS" "$WT_PATH" "$CURRENT_WT_PATH" "$MAIN_WT_PATH" "$SAFE_REMOVE" "$REMOVED_COUNT" "$AUTO_PRUNE_MAX" "$WT_STATUS")" = "yes" ]; then
+            # Drop `--force` so git's dirty-tree refusal is the backstop.
+            if "$SAFE_REMOVE" "$WT_PATH" -- >/dev/null 2>"$AUDIT_DIR/.last-rm-stderr"; then
             REMOVED_COUNT=$((REMOVED_COUNT + 1))
             ARCHIVE_STATUS="$(printf '%s' "$(cat "$AUDIT_DIR/.last-rm-stderr" 2>/dev/null)" | python3 -c "
 import json, sys
@@ -236,6 +239,7 @@ sys.exit(1 if r.get('status') == 'error' else 0)
           fi
           rm -f "$AUDIT_DIR/.last-rm-stderr" 2>/dev/null || true
         fi
+      fi
       fi
       RECORD=""
       RECORDS_SEEN=$((RECORDS_SEEN + 1))
