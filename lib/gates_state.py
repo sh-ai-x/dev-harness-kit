@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -43,13 +44,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atomic import atomic_write_json  # noqa: E402
 
-# Dual-import gh_cli so consumer installs that land `lib/gh_cli.py` next to
-# `lib/gates_state.py` (the flat-bundle layout) keep working. Mirrors the
-# shim pattern in `lib/ci_setup.py:82-102`.
-try:
-    from lib.gh_cli import gh_available  # type: ignore
-except ImportError:
-    from gh_cli import gh_available  # type: ignore
+
+# gh presence + auth probe. Inlined (issue #915) — the previous
+# `lib/gh_cli.py` helper had 7 callers but the body is 3 lines; centralizing
+# it added an import hop + a try/except fallback for the flat-bundle layout
+# without earning a reuse win worth the indirection.
+def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "gh not on PATH"
+    try:
+        cp = subprocess.run(
+            [gh, "auth", "status"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return None, f"gh auth error: {type(e).__name__}"
+    if cp.returncode != 0:
+        return None, "gh not authenticated"
+    return gh, ""
 
 STATE_REL_PATH = Path(".dev-kit") / "gates.json"
 SCHEMA_VERSION = "1.1.0"
@@ -536,7 +549,7 @@ def sync(
     out: dict = {"results": {}, "repo": repo or ""}
     gh_path = _gh
     if gh_path is None and not _degraded:
-        gh_path, _degraded = gh_available(timeout=5)
+        gh_path, _degraded = _gh_available(timeout=5)
     if not gh_path:
         out["gh_path"] = None
         out["degraded"] = _degraded or "gh not on PATH"

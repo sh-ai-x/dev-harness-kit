@@ -25,11 +25,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
-from lib.ci_ruleset import check_ruleset_bypass_actors as _ci_ruleset_bypass_check
+from lib.ci_ruleset import (
+    check_ruleset_bypass_actors as _ci_ruleset_bypass_check,
+)
+from lib.ci_ruleset import (
+    check_ruleset_contract as _ci_ruleset_check,
+)
 
 # Dual-mode import for sibling ci_setup.py:
 #   * Source repo (this module loaded as `lib.ci_doctor`): the relative
@@ -37,38 +44,60 @@ from lib.ci_ruleset import check_ruleset_bypass_actors as _ci_ruleset_bypass_che
 #   * Test harness / consumer invocation (this module loaded as a top-level
 #     module via importlib.util.spec_from_file_location, with `lib/` on
 #     sys.path): the absolute `from ci_setup import` resolves directly.
-# Centralized dual-import shim (inspect 2026-08-27 dup-5). One helper
-# instead of N hand-copied try/except blocks across ci_setup / ci_doctor
-# / ci_update.
-from lib.ci_ruleset import check_ruleset_contract as _ci_ruleset_check
-from lib.dual_import import from_dual, from_dual_optional
-from lib.gh_cli import gh_available
+# Inlined per issue #915 (was: lib/dual_import.from_dual helper) — the body
+# is the same try/except dance as the other 4 sites it centralized, and
+# the second consumer (ci_update.py) has only one caller of from_dual too.
+try:
+    from lib.ci_setup import (  # type: ignore
+        PROVIDER_SECRETS,
+        check_provider_consistency,
+        detect_owner_repo,
+        gh_secret_set_command,
+        read_env_key,
+        read_provider,
+        required_secrets_for_provider,
+    )
+except ImportError:
+    from ci_setup import (  # type: ignore
+        PROVIDER_SECRETS,
+        check_provider_consistency,
+        detect_owner_repo,
+        gh_secret_set_command,
+        read_env_key,
+        read_provider,
+        required_secrets_for_provider,
+    )
 
-(
-    PROVIDER_SECRETS,
-    check_provider_consistency,
-    detect_owner_repo,
-    gh_secret_set_command,
-    read_env_key,
-    read_provider,
-    required_secrets_for_provider,
-) = from_dual(
-    "ci_setup",
-    [
-        "PROVIDER_SECRETS",
-        "check_provider_consistency",
-        "detect_owner_repo",
-        "gh_secret_set_command",
-        "read_env_key",
-        "read_provider",
-        "required_secrets_for_provider",
-    ],
-)
+# gh presence + auth probe. Inlined (issue #915) — 4 callers in this module;
+# centralizing into `lib/gh_cli.py` added an import hop without earning a
+# reuse win worth the indirection. Body is 3 lines.
+def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "gh not on PATH"
+    try:
+        cp = subprocess.run(
+            [gh, "auth", "status"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return None, f"gh auth error: {type(e).__name__}"
+    if cp.returncode != 0:
+        return None, "gh not authenticated"
+    return gh, ""
 
 # ci_update may not be installed in the source-repo checkout (the plugin
 # is its own dev environment; tests still run). The check returns SKIP
-# in that case so ci-doctor stays usable.
-(diff_ci_install,) = from_dual_optional("ci_update", ["diff_ci_install"])
+# in that case so ci-doctor stays usable. (issue #915: inlined from
+# lib/dual_import.from_dual_optional — the optional-importer helper
+# was a one-caller wrapper.)
+try:
+    from lib.ci_update import diff_ci_install  # type: ignore
+except ImportError:
+    try:
+        from ci_update import diff_ci_install  # type: ignore
+    except ImportError:
+        diff_ci_install = None  # type: ignore[assignment]
 
 
 
@@ -530,7 +559,7 @@ def _list_repo_secrets(repo: str) -> tuple[set[str], str]:
     rather than a FAIL (the user might just not be running this locally
     with gh auth).
     """
-    gh, degraded = gh_available(timeout=10)
+    gh, degraded = _gh_available(timeout=10)
     if not gh:
         return set(), degraded or "gh not on PATH"
     try:
@@ -844,7 +873,7 @@ def _check_secrets(target: Path, provider: str | None,
 
 
 def _check_gh_auth() -> Check:
-    gh, degraded = gh_available(timeout=5)
+    gh, degraded = _gh_available(timeout=5)
     if not gh:
         return Check("gh CLI", "SKIP", degraded or "gh not on PATH")
     return Check(
@@ -1128,7 +1157,7 @@ def _fetch_required_status_checks(repo: str) -> tuple[set[str], str]:
     newer GitHub responses. On either-or-both failure, returns an empty
     set and a degraded message so the caller can SKIP rather than FAIL.
     """
-    gh, degraded = gh_available(timeout=10)
+    gh, degraded = _gh_available(timeout=10)
     if not gh:
         return set(), degraded or "gh not on PATH"
 
@@ -1274,7 +1303,7 @@ def _fetch_open_pr_state(target: Path) -> tuple[dict, str]:
     PR open for the current branch, JSON parse failed, or detached
     HEAD). Caller emits a single SKIP row in that case.
     """
-    gh, degraded = gh_available(timeout=10)
+    gh, degraded = _gh_available(timeout=10)
     if not gh:
         return {}, degraded or "gh not on PATH"
     # Detect current branch via `git rev-parse --abbrev-ref HEAD`.

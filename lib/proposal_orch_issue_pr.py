@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -39,7 +40,25 @@ import yaml
 
 from lib import render_proposal_html
 from lib.atomic import atomic_write_text
-from lib.gh_cli import gh_available
+
+
+# gh presence + auth probe. Inlined (issue #915) — only one caller in
+# this module; centralizing into `lib/gh_cli.py` added an import hop
+# without earning a reuse win. The body is 3 lines.
+def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "gh not on PATH"
+    try:
+        cp = subprocess.run(
+            [gh, "auth", "status"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return None, f"gh auth error: {type(e).__name__}"
+    if cp.returncode != 0:
+        return None, "gh not authenticated"
+    return gh, ""
 
 # ----- Constants -------------------------------------------------------------
 
@@ -226,7 +245,7 @@ class SnapshotError(RuntimeError):
 # GhUnavailable on missing CLI / unauthenticated / non-zero exit, and
 # SnapshotError on malformed JSON.
 def _run_gh(args: List[str]) -> str:
-    gh_path, degraded = gh_available()
+    gh_path, degraded = _gh_available()
     if not gh_path:
         raise GhUnavailable(degraded or "gh unavailable")
     cp = subprocess.run(

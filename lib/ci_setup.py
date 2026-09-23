@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # `yaml` is imported lazily inside `_lint_if_block_scalar_hashes()` so
 # the rest of ci_setup (and consumers that only call install_ci_config /
@@ -87,19 +87,23 @@ except ImportError:
             return None
 
 # Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
-# lives at `lib/gh_cli.py`. `lib/install.sh:53-55` copies every `lib/*.py`
-# to consumer repos, so a real install always takes the `lib.` branch.
-# The minimal fixture at `tests/test_ci_setup.py::
-# test_import_succeeds_without_hooks_manifest` also stages `gh_cli.py`
-# as a flat sibling (no `lib/` package prefix), so the bare-`gh_cli`
-# branch resolves there too. With both paths satisfied by the fixture,
-# the inline reimplementation that was previously the 3-file fallback
-# is gone — there is exactly one `gh_available` body in the tree
-# (issue #834 round-3 MAJOR).
-try:
-    from lib.gh_cli import gh_available  # type: ignore
-except ImportError:
-    from gh_cli import gh_available  # type: ignore
+# gh presence + auth probe. Inlined (issue #915) — only one caller in
+# this module; centralizing into `lib/gh_cli.py` added an import hop +
+# a flat-bundle fallback without earning a reuse win. The body is 3 lines.
+def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "gh not on PATH"
+    try:
+        cp = subprocess.run(
+            [gh, "auth", "status"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+        return None, f"gh auth error: {type(e).__name__}"
+    if cp.returncode != 0:
+        return None, "gh not authenticated"
+    return gh, ""
 
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -505,7 +509,7 @@ def _read_ci_provider_via_gh() -> tuple[str, str]:
     are caught and surfaced as degraded messages using the exception
     *type* name only (the full repr can include fragments of argv).
     """
-    gh, degraded = gh_available(timeout=10)
+    gh, degraded = _gh_available(timeout=10)
     if not gh:
         return "", degraded or "gh not on PATH"
     try:
