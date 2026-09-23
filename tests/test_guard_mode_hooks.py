@@ -14,7 +14,6 @@ Verifies:
 from __future__ import annotations
 
 import json
-import os as _os
 import subprocess
 import sys
 import tempfile
@@ -27,6 +26,7 @@ LIB = REPO_ROOT / "lib"
 sys.path.insert(0, str(LIB))
 
 import guard_mode_state as gms  # noqa: E402
+from conftest import harness_free_env  # noqa: E402
 
 # Hooks invoke `python3 -m lib.guard_mode_state` bare (matching the
 # existing `python3 -m lib.tdd_scope_policy` call already in
@@ -37,17 +37,12 @@ import guard_mode_state as gms  # noqa: E402
 # so `lib` is not importable via cwd alone — PYTHONPATH bridges that gap
 # without changing how the hooks themselves resolve the module.
 #
-# Strip harness-controlled vars (DEV_KIT_GUARDS*, ANTHROPIC_*) so the
-# subprocess sees the same starting state regardless of the developer's
-# shell. Tests that need a specific DEV_KIT_GUARDS override it explicitly
-# via `env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off", ...}`.
-_HARNESS_SKIP = {"DEV_KIT_GUARDS", "DEV_KIT_GUARDS_SOURCE", "DEV_KIT_GUARD_ROOT"} | {
-    k for k in _os.environ if k.startswith("ANTHROPIC_")
-}
-_ENV_WITH_LIB = {
-    **{k: v for k, v in _os.environ.items() if k not in _HARNESS_SKIP},
-    "PYTHONPATH": str(REPO_ROOT),
-}
+# `_ENV_WITH_LIB` starts from a harness-free env (DEV_KIT_GUARDS* and
+# ANTHROPIC_* stripped by conftest.harness_free_env) so subprocess
+# invocations see the same starting state regardless of the developer's
+# shell. Tests that need a specific DEV_KIT_GUARDS override it
+# explicitly via `env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off", ...}`.
+_ENV_WITH_LIB = harness_free_env({"PYTHONPATH": str(REPO_ROOT)})
 
 
 def _edit_payload(file_path: str) -> dict:

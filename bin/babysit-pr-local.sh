@@ -151,9 +151,11 @@ fi
 # returns — two concurrent mkdir calls cannot both succeed).
 LOCK_BODY="$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown') source=babysit-pr-local pr=${PR_NUMBER}"
 # Pass the path + body via argv (not inlined into the python source).
-# Inlining via '''$LOCK_BODY''' broke when the body's git-fallback
-# `echo 'unknown'` contained single quotes that terminated the python
-# triple-quoted string early (a real bug for non-git working dirs).
+# The previous inlining used '''$LOCK_BODY''' which assumed the body
+# contained no single quotes; a git branch name with an apostrophe
+# (e.g. `joe's-branch`) embedded one and terminated the python
+# triple-quoted string early, surfacing as a silent ModuleNotFoundError
+# or SyntaxError. argv keeps the value opaque to the python source.
 if ! python3 -c "
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/../lib')
