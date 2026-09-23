@@ -39,6 +39,9 @@
 
 set -uo pipefail
 
+# shellcheck source=lib/find-python.sh
+source "${BASH_SOURCE[0]%/*}/lib/find-python.sh"
+
 INPUT="$(cat)"
 
 # ── opt-out (per-worktree) ──────────────────────────────────────────────────
