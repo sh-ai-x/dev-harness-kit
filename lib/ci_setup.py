@@ -290,12 +290,6 @@ class _LazyTuple(Sequence):
     def __repr__(self) -> str:
         return repr(self._materialize())
 
-    def __add__(self, other):
-        return self._materialize() + other
-
-    def __radd__(self, other):
-        return other + self._materialize()
-
 
 # One inventory drives copying, idempotency, marker hashes, and verification.
 EXPECTED_PATHS: _LazyTuple = _LazyTuple(

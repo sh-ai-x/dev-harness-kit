@@ -2,7 +2,7 @@
 """test_evaluate_extended.py — Phase 3 eval extension coverage.
 
 Tests the new surface added in Phase 3 (issues #362–#368):
-  - lib/eval_runner.py:RUBRIC_REGISTRY  (#362)
+  - lib/eval_runner.py:RubricRegistry  (#362)
   - lib/llm_judge.py:DIM_AXES extension  (#363)
   - lib/analysis_core/cross_validate.py (#366)
   - skills/evaluate/SKILL.md exists with alpha: enforcement  (#367)
@@ -75,7 +75,7 @@ class TestDimAxesExtension(unittest.TestCase):
 
 
 class TestRubricRegistry(unittest.TestCase):
-    """lib/eval_runner.py RUBRIC_REGISTRY (#362).
+    """lib/eval_runner.py RubricRegistry (#362).
 
     The registry must be empty by default (backward-compat) and the
     register/lookup/version contract must hold.
@@ -83,22 +83,22 @@ class TestRubricRegistry(unittest.TestCase):
 
     def setUp(self):
         # Each test starts from a clean registry to avoid bleed.
-        eval_runner.RUBRIC_REGISTRY.clear()
+        eval_runner.RubricRegistry.clear()
 
     def tearDown(self):
-        eval_runner.RUBRIC_REGISTRY.clear()
+        eval_runner.RubricRegistry.clear()
 
     def test_default_registry_empty(self):
-        self.assertEqual(eval_runner.RUBRIC_REGISTRY.names(), ())
-        self.assertEqual(eval_runner.RUBRIC_REGISTRY.version, 0)
+        self.assertEqual(eval_runner.RubricRegistry.names(), ())
+        self.assertEqual(eval_runner.RubricRegistry.version, 0)
 
     def test_register_then_lookup(self):
-        eval_runner.RUBRIC_REGISTRY.register(
+        eval_runner.RubricRegistry.register(
             "harness-quality",
             "eval/rubrics/harness-quality.yaml",
             "eval/prompts/judge-harness-quality.md",
         )
-        entry = eval_runner.RUBRIC_REGISTRY.lookup("harness-quality")
+        entry = eval_runner.RubricRegistry.lookup("harness-quality")
         self.assertEqual(
             entry["rubric_yaml_path"], "eval/rubrics/harness-quality.yaml",
         )
@@ -107,49 +107,49 @@ class TestRubricRegistry(unittest.TestCase):
         )
 
     def test_register_bumps_version(self):
-        v0 = eval_runner.RUBRIC_REGISTRY.version
-        eval_runner.RUBRIC_REGISTRY.register(
+        v0 = eval_runner.RubricRegistry.version
+        eval_runner.RubricRegistry.register(
             "os-quality",
             "eval/rubrics/os-quality.yaml",
             "eval/prompts/judge-os-quality.md",
         )
-        self.assertEqual(eval_runner.RUBRIC_REGISTRY.version, v0 + 1)
+        self.assertEqual(eval_runner.RubricRegistry.version, v0 + 1)
 
     def test_lookup_unknown_raises_keyerror(self):
         with self.assertRaises(KeyError):
-            eval_runner.RUBRIC_REGISTRY.lookup("nope")
+            eval_runner.RubricRegistry.lookup("nope")
 
     def test_get_rubric_returns_yaml_path_only(self):
-        eval_runner.RUBRIC_REGISTRY.register(
+        eval_runner.RubricRegistry.register(
             "harness-quality",
             "eval/rubrics/harness-quality.yaml",
             "eval/prompts/judge-harness-quality.md",
         )
         self.assertEqual(
-            eval_runner.RUBRIC_REGISTRY.get_rubric("harness-quality"),
+            eval_runner.RubricRegistry.get_rubric("harness-quality"),
             "eval/rubrics/harness-quality.yaml",
         )
 
     def test_names_returns_sorted_tuple(self):
-        eval_runner.RUBRIC_REGISTRY.register(
+        eval_runner.RubricRegistry.register(
             "os-quality",
             "eval/rubrics/os-quality.yaml",
             "eval/prompts/judge-os-quality.md",
         )
-        eval_runner.RUBRIC_REGISTRY.register(
+        eval_runner.RubricRegistry.register(
             "harness-quality",
             "eval/rubrics/harness-quality.yaml",
             "eval/prompts/judge-harness-quality.md",
         )
         # Sorted, not insertion order.
         self.assertEqual(
-            eval_runner.RUBRIC_REGISTRY.names(),
+            eval_runner.RubricRegistry.names(),
             ("harness-quality", "os-quality"),
         )
 
     def test_register_rejects_empty_name(self):
         with self.assertRaises(ValueError):
-            eval_runner.RUBRIC_REGISTRY.register("", "x", "y")
+            eval_runner.RubricRegistry.register("", "x", "y")
 
 
 class TestCrossValidate(unittest.TestCase):
@@ -257,7 +257,7 @@ class TestBackwardCompat(unittest.TestCase):
     def test_default_registry_empty_does_not_break_imports(self):
         # The default registry being empty is the contract — any code
         # path that consults the registry must handle the empty case.
-        self.assertEqual(eval_runner.RUBRIC_REGISTRY.names(), ())
+        self.assertEqual(eval_runner.RubricRegistry.names(), ())
 
     def test_judge_axes_default_unchanged(self):
         self.assertEqual(
