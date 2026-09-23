@@ -48,9 +48,9 @@ user-invocable: true             # expose as /dev-kit:build
 
 ```yaml
 ---
-name: valuate
-category: build
-description: Red-Green-Refactor cycle. Internal sub-skill of /dev-kit:build.
+name: interview
+category: design
+description: 5-field Socratic interview. Internal sub-skill of /dev-kit:plan.
 disable-model-invocation: false  # model may auto-invoke
 user-invocable: false            # hidden from /dev-kit: skill list
 safety:

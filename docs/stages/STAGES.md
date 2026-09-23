@@ -2,7 +2,7 @@
 
 
 
-> Reference: ADR-0011, ADR-0020. 7 stages (B / B.5 / 1 / 2 / 3 / 5a / 5b / 6 / 7) × must/must-not/AC unified.
+> Reference: ADR-0011, ADR-0020. 6 stages (B / B.5 / 1 / 3 / 5a / 5b / 6 / 7) × must/must-not/AC unified. The Phase 4 Valuate stage was removed (PR chore/remove-valuate); its hard auto-gate had already been removed in #463 and the verdict envelope was advisory.
 
 ## Stage B — Bootstrap (`/dev-kit:bootstrap`)
 
@@ -34,20 +34,10 @@
 - **Active Hooks**: `stop-verify`=ON. `slop-detector`=OFF (planning doc allowed). Others OFF.
 - **Hand-off out**: `plan→build.md`
 
-## Stage 2 — Valuate (`/dev-kit:valuate`)
-
-- **Goal**: Decide whether the plan from Stage 1 is worth building. Returns one of `proceed` / `revise` / `hold` / `kill`. Persists the verdict to `.dev-kit/valuations/<plan-id>.json`.
-- **Must**: (a) Score 6 rubric axes (problem_fit / roi_estimate / existing_solution_edge / team_capability / risk_vs_reward / measurability) via `lib/llm_judge.py:call_judge(axes=DIM_AXES["plan_value"])`. (b) Run `lib/valuation_engine.py:decide(plan, rubric_scores)` to produce the verdict. (c) Honor the absolute risk-floor rule: any axis < 2.0 → `kill`, regardless of all other axes. (d) Persist the verdict envelope (`decision` / `rationale` / `blocking_findings`) to `.dev-kit/valuations/<plan-id>.json`.
-- **Must-Not**: Allow the LLM to emit the verdict directly. The engine is the only authority — the judge returns scores, not decisions. Emit `kill` / `hold` / `revise` when the gate would.
-- **AC**: `.dev-kit/valuations/<plan-id>.json` exists with the canonical envelope. `python3 -m lib.valuation_engine --plan PRD.md --dry-run` exits 0 with a valid envelope.
-- **Active Skills**: `valuate` (`alpha: enforcement` — the engine is deterministic)
-- **Active Hooks**: `stop-verify`=ON. Others OFF.
-- **Hand-off out**: `.dev-kit/valuations/<plan-id>.json` (the build stage reads this file as its pre-flight verdict; the build-stage auto-gate was removed in #463 — the verdict envelope is now advisory, and as of PR #589 `valuate` is model-invocable only; `/dev-kit:plan` and other planning stages call into the rubric, and the build proceeds regardless).
-
 ## Stage 3 — Build (`/dev-kit:build`)
 
 - **Goal**: Per-step code completion per `phases/<name>/step<N>.md` + regression GREEN.
-- **Must**: (a) Follow `phases/<name>/step<N>.md` exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via `build-debug`). (d) 2-commit protocol (feat + chore). Note: a Phase 4 auto-gate that read `.dev-kit/valuations/<plan-id>.json` and refused non-PROCEED verdicts lived here until #463; the gate was tied to a URI substrate that has since been dropped, so the auto-gate went with it. As of PR #589 `valuate` is model-invocable only and the verdict envelope is purely advisory; the build proceeds regardless of any verdict.
+- **Must**: (a) Follow `phases/<name>/step<N>.md` exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via `build-debug`). (d) 2-commit protocol (feat + chore).
 - **Must-Not**: Speculate on AC ("should work", "probably fine"). Delete `output.json`. Batch multiple changes.
 - **AC**: All steps `status=completed`. `pytest` exit code 0 + count quoted. 2-commit protocol followed.
 - **Active Skills**: `build`, `build-debug` (the per-step harness runner, test-first discipline, and completion evidence live in `lib/execute.py`, `lib/methodology/`, and the active hooks; prune's 3-pass sweep is inlined into `prune`)

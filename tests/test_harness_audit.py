@@ -2,11 +2,11 @@
 """test_harness_audit.py — Phase 7 (issue #390) regression coverage.
 
 Verifies `tools/harness_audit.py` (cross-harness quality audit) over
-the 6 harnesses defined in the Phase 7 proposal: lcs, hooks, eval,
-plan_value, research, interview.
+the 4 harnesses defined as of PR chore/remove-valuate: hooks, eval,
+research, interview (LCS in #463, plan_value in chore/remove-valuate).
 
 Covers:
-- All 6 harnesses appear in audit output, in HARNESSES order
+- All 4 harnesses appear in audit output, in HARNESSES order
 - HTML and JSON output paths are well-formed + machine-readable
 - Read-only invariant: no .dev-kit/state.json mutation, no file write
   outside the user's chosen --html-out PATH (default writes a report
@@ -45,18 +45,18 @@ def _run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess
 
 class TestHarnessAudit(unittest.TestCase):
     def test_audit_covers_all_six_harnesses(self):
-        """audit dict must contain exactly 5 harnesses in HARNESSES order.
+        """audit dict must contain exactly 4 harnesses in HARNESSES order.
 
         The audit covered 6 harnesses through #447 (lcs / hooks / eval /
         plan_value / research / interview). PR #463 dropped the LCS
-        substrate, so the lcs audit slot went with it; 5 harnesses
-        remain. The test name is preserved (renaming would churn git
+        substrate (6 → 5); PR chore/remove-valuate dropped plan_value
+        (5 → 4). The test name is preserved (renaming would churn git
         history) but the assertion is updated.
         """
         audit = harness_audit.run_audit(PROJECT_ROOT)
         names = [h["name"] for h in audit["harnesses"]]
         self.assertEqual(names, list(harness_audit.HARNESSES))
-        self.assertEqual(audit["summary"]["total"], 5)
+        self.assertEqual(audit["summary"]["total"], 4)
 
     def test_audit_json_output_machine_readable(self):
         """--json emits parseable JSON with the canonical shape."""
@@ -66,7 +66,7 @@ class TestHarnessAudit(unittest.TestCase):
         self.assertIn("summary", data)
         self.assertIn("read_only", data)
         self.assertEqual(data["read_only"], True)
-        self.assertEqual(len(data["harnesses"]), 5)
+        self.assertEqual(len(data["harnesses"]), 4)
 
     def test_audit_emits_html_report(self):
         """--html-out PATH writes a self-contained HTML file with one row per harness."""
@@ -78,8 +78,8 @@ class TestHarnessAudit(unittest.TestCase):
             html = out.read_text(encoding="utf-8")
             self.assertIn("<!DOCTYPE html>", html)
             self.assertIn("<table>", html)
-            # 5 harness rows + 1 header row = 6 <tr>
-            self.assertEqual(html.count("<tr>"), 6)
+            # 4 harness rows + 1 header row = 5 <tr>
+            self.assertEqual(html.count("<tr>"), 5)
             # No external assets / no JavaScript
             self.assertNotIn("<script", html)
             self.assertNotIn("http://", html.replace("http://www.w3.org", ""))
@@ -135,7 +135,7 @@ class TestHarnessAudit(unittest.TestCase):
             root = Path(tmp)
             # Empty repo — all harnesses should report findings, no crashes
             audit = harness_audit.run_audit(root)
-            self.assertEqual(audit["summary"]["total"], 5)
+            self.assertEqual(audit["summary"]["total"], 4)
             for h in audit["harnesses"]:
                 self.assertFalse(h["shipped"], f"{h['name']} unexpectedly shipped")
                 self.assertGreater(len(h["findings"]), 0,

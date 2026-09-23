@@ -62,19 +62,6 @@ DIM_AXES: Dict[str, Tuple[str, ...]] = {
         "escalation_path",
         "audit_trail",
     ),
-    # Phase 4 (issue #371): plan_value 0-5 axis scores. The judge prompt
-    # (eval/prompts/judge-plan-value.md) returns six scores; the
-    # 4-way verdict (proceed/revise/hold/kill) is computed by
-    # lib/valuation_engine.py:decide() from these six, so the verdict
-    # is NOT an axis here.
-    "plan_value": (
-        "problem_fit",
-        "roi_estimate",
-        "existing_solution_edge",
-        "team_capability",
-        "risk_vs_reward",
-        "measurability",
-    ),
     # Phase 5 (issue #378, merged via PR #443): research_source +
     # research_claim axes for /dev-kit:research.
     "research_source": (
@@ -137,13 +124,9 @@ DIM_AXES: Dict[str, Tuple[str, ...]] = {
 
 # Per-dim score range. Most dims are 0-10 (higher = better, with the
 # polarity override for lower_is_better dims handled in
-# ``AXIS_POLARITY``). The plan_value dim is 0-5 because the valuation
-# engine's SCORE_MIN/SCORE_MAX are pinned to that range; a judge
-# emitting 6-10 for plan_value would crash the engine on validate().
+# ``AXIS_POLARITY``).
 # Default: 0-10 for unknown dims.
-DIM_SCORE_RANGE: Dict[str, Tuple[float, float]] = {
-    "plan_value": (0.0, 5.0),
-}
+DIM_SCORE_RANGE: Dict[str, Tuple[float, float]] = {}
 
 
 def score_range_for_dim(dim: str) -> Tuple[float, float]:
@@ -273,10 +256,9 @@ def call_judge(
     this alignment the judge receives contradictory axis lists between
     system and user and returns unreliable / axis-zero scores.
 
-    `dim` is the parent dim name (e.g. "review", "plan_value"). When
+    `dim` is the parent dim name (e.g. "review", "research_source"). When
     provided, the system prompt states the per-dim score range from
-    ``DIM_SCORE_RANGE`` (e.g. "each 0-5" for plan_value). Defaults to
-    0-10 when the dim is unknown.
+    ``DIM_SCORE_RANGE``. Defaults to 0-10 when the dim is unknown.
 
     `temperature` (v1.1.0) — defaults to 1.0 (provider default) for
     backward compat with all existing callers. Pass `0.0` to pin

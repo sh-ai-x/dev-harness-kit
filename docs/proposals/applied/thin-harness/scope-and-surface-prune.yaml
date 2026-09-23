@@ -307,7 +307,7 @@ sections:
       `build-refactor` skills, plus `learn` and its validator/test/docs. The
       three build skills duplicate deterministic hooks/parent stages; `learn`
       has no runtime consumer and its generator workflow is not needed. Keep
-      `valuate`, `interview`, `status`, and `prune-propose`: each still owns a
+      `interview`, `status`, and `prune-propose`: each still owns a
       distinct artifact or operator workflow and was not proven dead.
 
   - title: Context and token budget
