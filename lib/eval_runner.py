@@ -51,9 +51,9 @@ try:
     )
     from .harness_effectiveness import build_report as build_effectiveness_report  # type: ignore
 except ImportError:
-    import llm_judge  # type: ignore  # noqa: E402
-    from atomic import atomic_write_json, now_iso  # noqa: E402
-    from eval import (  # noqa: E402  -- single SSOT after PR-E extraction
+    import llm_judge  # type: ignore  # noqa: E402, I001
+    from atomic import atomic_write_json, now_iso  # noqa: E402, I001
+    from eval import (  # noqa: E402, I001  -- single SSOT after PR-E extraction
         CaseResult,
         RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
         _coerce_score,
@@ -62,7 +62,7 @@ except ImportError:
         mock_skipped,
         real_result,
     )
-    from harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
+    from harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402, I001
 
 logger = logging.getLogger(__name__)
 
