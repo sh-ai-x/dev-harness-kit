@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
 from lib.trace_log import append_event, read_events
+
+from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
 
 
 def _event(root: Path, *, event_id: str, event_type: str, subject: str,
@@ -170,15 +171,15 @@ def test_duplicate_event_is_integrity_finding(tmp_path: Path) -> None:
 
 def test_weights_sum_to_one() -> None:
     """Component weights must sum to 1.00 so overall_score stays in
-    [0, 100] without an implicit normalization factor. learning_quality
-    is intentionally 0.00 until a Phase-4 shadow-mode control cohort
-    exists; the remaining 1.00 is redistributed proportionally across the
-    four shippable components.
+    [0, 100] without an implicit normalization factor. The four
+    shippable components partition the unit weight proportionally.
+    `learning_quality` was removed because its evidence class
+    (treatment/control cohort tagging) is unreachable from current
+    producers.
     """
     assert sum(COMPONENT_WEIGHTS.values()) == 1.0
-    assert COMPONENT_WEIGHTS["learning_quality"] == 0.0
-    nonzero = [k for k, v in COMPONENT_WEIGHTS.items() if v > 0]
-    assert set(nonzero) == {
+    assert "learning_quality" not in COMPONENT_WEIGHTS
+    assert set(COMPONENT_WEIGHTS.keys()) == {
         "prevention_quality", "first_pass_quality",
         "recovery_quality", "measurement_integrity",
     }
@@ -186,7 +187,7 @@ def test_weights_sum_to_one() -> None:
 
 def _full_event_corpus(tmp_path: Path) -> None:
     """Emit the minimum event set that scores all four shippable
-    components to 100.0 (and leaves learning_quality unscored).
+    components to 100.0.
     """
     _event(tmp_path, event_id="g1", event_type="guard.blocked", subject="a1",
            outcome="blocked", ts="2026-08-12T00:00:00Z", policy_id="scope",
@@ -213,9 +214,9 @@ def _full_event_corpus(tmp_path: Path) -> None:
 
 
 def test_overall_score_equals_weighted_mean_when_all_scorable(tmp_path: Path) -> None:
-    """overall_score is the weighted mean of the scored components,
-    restricted to the four shippable ones (learning_quality weight 0).
-    The reducer reports the same number the formula below produces.
+    """overall_score is the weighted mean of the four shippable
+    components. The reducer reports the same number the formula
+    below produces.
     """
     _full_event_corpus(tmp_path)
     report = build_report(tmp_path)
@@ -232,30 +233,39 @@ def test_overall_score_equals_weighted_mean_when_all_scorable(tmp_path: Path) ->
 
 
 def test_overall_score_excludes_zero_weight_components(tmp_path: Path) -> None:
-    """A non-None but hypothetical learning_quality=100 must NOT change
-    overall_score when its weight is 0; re-enabling it later is a
-    one-line weight change. We verify the property by re-deriving the
-    weighted mean both with and without learning_quality=100 and
-    asserting the values are identical.
+    """The reducer's weighted-mean formula must skip any component whose
+    weight is 0, even when its score is not None. The test guards the
+    general invariant — if a future component ships with weight=0 for
+    staging, the formula must still treat it as inert. We verify by
+    forcing a hypothetical zero-weight component into the report and
+    asserting the totals match.
     """
-    assert COMPONENT_WEIGHTS["learning_quality"] == 0.0
+    assert all(w > 0 for w in COMPONENT_WEIGHTS.values()), (
+        "shippable components must all have non-zero weight; the "
+        "staging-zero-weight path is no longer used"
+    )
     _full_event_corpus(tmp_path)
     report = build_report(tmp_path)
-    without = sum(
-        item["score"] * COMPONENT_WEIGHTS[name]
-        for name, item in report["components"].items()
-        if COMPONENT_WEIGHTS[name] > 0 and item["score"] is not None
+    expected = sum(
+        item["score"] * item["weight"]
+        for item in report["components"].values()
+        if item["weight"] > 0 and item["score"] is not None
     )
-    # Synthetically inject learning_quality=100 into the components dict
-    # the formula iterates over; if the formula correctly skips weight-0
-    # components, the totals match.
-    report["components"]["learning_quality"]["score"] = 100.0
-    with_lq = sum(
-        item["score"] * COMPONENT_WEIGHTS[name]
-        for name, item in report["components"].items()
+    # Inject a hypothetical zero-weight component with score=100 into
+    # the dict the formula iterates over. The reducer reads the weight
+    # from `item["weight"]`, so any 0-weight component is naturally
+    # skipped regardless of its score.
+    report["components"]["_staging_dummy"] = {
+        "score": 100.0, "weight": 0.0, "status": "OK",
+        "coverage": 1.0, "submetrics": {}, "evidence_event_ids": [],
+        "findings": [], "config_version": "harness-effectiveness-v1",
+    }
+    actual = sum(
+        item["score"] * item["weight"]
+        for item in report["components"].values()
         if item["score"] is not None
     )
-    assert with_lq == without
+    assert actual == expected
 
 
 def test_overall_score_skips_none_scored_components(tmp_path: Path) -> None:
@@ -274,13 +284,13 @@ def test_overall_score_skips_none_scored_components(tmp_path: Path) -> None:
            ground_truth="unsafe", reason="x")
     report = build_report(tmp_path)
     assert report["components"]["prevention_quality"]["score"] is not None
-    # first_pass / recovery / learning must be None — that is the
-    # precondition for the contract under test. (measurement_integrity
-    # is NOT None any more: issue #702's subject_observability fallback
-    # gives it a low score from the symmetric ratio with no step.*
-    # events in the corpus. The None-skipped invariant still holds for
-    # the components that genuinely have no evidence.)
-    for key in ("first_pass_quality", "recovery_quality", "learning_quality"):
+    # first_pass / recovery must be None — that is the precondition
+    # for the contract under test. (measurement_integrity is NOT None
+    # any more: issue #702's subject_observability fallback gives it
+    # a low score from the symmetric ratio with no step.* events in
+    # the corpus. The None-skipped invariant still holds for the
+    # components that genuinely have no evidence.)
+    for key in ("first_pass_quality", "recovery_quality"):
         assert report["components"][key]["score"] is None, key
     # With the fix, overall_score must be a number and NOT None — the
     # visible scorecard no longer collapses. The exact value is the
@@ -382,11 +392,21 @@ def test_subject_observability_uses_submetric_shape(tmp_path: Path) -> None:
     assert sub["config_version"] == "harness-subject-observability-v1"
 
 
-def test_schema_version_bumped_to_three(tmp_path: Path) -> None:
-    """Issue #702: schema_version bumps from 2 to 3 to advertise the new
-    nested submetric. The top-level 5-component shape is unchanged."""
+def test_schema_version_bumped_to_four(tmp_path: Path) -> None:
+    """Schema version bumps:
+       1 → 2 in issue #663 (stability submetric)
+       2 → 3 in issue #702 (subject_observability submetric)
+       3 → 4 to advertise removal of `learning_quality` top-level
+       component. The remaining 4-component shape is unchanged so
+       existing consumers continue to work.
+    """
     report = build_report(tmp_path)
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     for key in ("components", "overall_score", "status", "event_count",
                 "contract_version"):
         assert key in report
+    assert "learning_quality" not in report["components"]
+    assert set(report["components"].keys()) == {
+        "prevention_quality", "first_pass_quality",
+        "recovery_quality", "measurement_integrity",
+    }

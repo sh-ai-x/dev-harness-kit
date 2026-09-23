@@ -7,9 +7,11 @@ field without diffing the source.
 
 The stability submetric is intentionally **not** a 6th top-level component.
 Adding it as a top-level entry would shift `COMPONENT_WEIGHTS` and change the
-5-component `overall_score` formula that every existing consumer reads. As a
+`overall_score` formula that every existing consumer reads. As a
 nested submetric it is opt-in: consumers that don't know about
-`schema_version: 2` continue to render the legacy 5-component table unchanged.
+`schema_version: 2` continue to render the legacy table unchanged. (Note:
+the legacy 5-component table referenced below was tightened to 4 components
+in a follow-up change; see the amendment at the bottom of this doc.)
 
 ## Where to find it
 
@@ -48,7 +50,7 @@ nested submetric it is opt-in: consumers that don't know about
 
 Consumers that ignore `schema_version` continue to work. Consumers that opt
 into `schema_version >= 2` can read the new submetric and ignore it without
-breaking the legacy 5-component `overall_score`.
+breaking the legacy `overall_score`.
 
 ## The five dimensions
 
@@ -126,11 +128,12 @@ payload, so the Stop-vs-SessionEnd terminal-event firing rate (which
 drives `subject_observability`, see `docs/quality/harness-effectiveness-stability.md`'s
 sibling submetric) is diagnosable from the trace log itself.
 
-`prevention_quality`, `first_pass_quality`, `recovery_quality`, and
-`learning_quality` are unaffected by this wiring — they need real
-`/dev-kit:build` activity, operator-supplied `DEV_KIT_GROUND_TRUTH`
-labels, and the (unbuilt) Phase-4 shadow-mode cohort respectively, none
-of which this change adds.
+`prevention_quality`, `first_pass_quality`, and `recovery_quality` are
+unaffected by this wiring — they need real `/dev-kit:build` activity
+and operator-supplied `DEV_KIT_GROUND_TRUTH` labels, neither of which
+this change adds. (`learning_quality` was later removed because its
+cohort-tagging evidence class was unreachable — see the amendment
+below.)
 
 ### Causal chaining in the executor
 
@@ -175,17 +178,31 @@ for the contract tests (14 cases).
 |---|---|---|---|
 | `harness_effectiveness.build_report` `schema_version` | `1` | `2` | Advertises the new submetric |
 | `lib.trace_log.EVENT_SCHEMA_VERSION` | `1` | `1` (unchanged) | `agent` / `provider` / `model` are additive top-level fields; `validate_event` already accepts unknown keys |
-| `COMPONENT_WEIGHTS` (5-component) | sums to 1.0 | sums to 1.0 (unchanged) | Stability is a submetric, not a 6th component |
+| `COMPONENT_WEIGHTS` (5-component at the time) | sums to 1.0 | sums to 1.0 (unchanged) | Stability is a submetric, not a 6th component |
 
 ## Backward compatibility
 
-- 5-component `overall_score` (sum of `COMPONENT_WEIGHTS * component_score`)
-  is bit-identical when no consumer reads the new submetric.
+- 5-component-at-the-time `overall_score` (sum of `COMPONENT_WEIGHTS *
+  component_score`) is bit-identical when no consumer reads the new
+  submetric. (The 5-component contract was later tightened to 4
+  components; see the amendment below.)
 - A consumer that ignores unknown `schema_version` continues to operate.
 - A consumer that wants the stability report reads
   `components.measurement_integrity.submetrics.stability` (opt-in).
-- The `learning_quality` zero-weight entry remains in the rendered output so
-  visibility is unchanged.
+- The `learning_quality` zero-weight entry was later removed (see
+  amendment below); consumer code that ignores unknown keys continues
+  to operate.
+
+## Amendment: `learning_quality` removal
+
+`learning_quality` was removed in a follow-up change because its
+evidence class (`learning.outcome` with `cohort=treatment|control`) is
+unreachable from current producers. The removal tightened the
+`COMPONENT_WEIGHTS` map to four shippable components that partition
+the unit weight proportionally; `schema_version` bumped from 3 → 4 to
+advertise the removal. Existing consumers that ignore unknown
+versions continue to operate unchanged. See
+`skills/harness-effectiveness/SKILL.md` for the current contract.
 
 ## Why "nested submetric" instead of "6th component"
 
@@ -193,7 +210,7 @@ The original proposal
 ([`docs/proposals/harness-effectiveness/00-index.yaml`](../proposals/harness-effectiveness/00-index.yaml))
 left the choice open between "submetric under `measurement_integrity`" and
 "versioned sixth component". The submetric shape was chosen because the 6th
-component shape would break the 5-component `overall_score` contract for every
+component shape would break the `overall_score` contract for every
 existing consumer on day one.
 
 ## Related
@@ -203,5 +220,6 @@ existing consumer on day one.
 - `tests/test_harness_stability.py` — 14 contract tests.
 - `skills/harness-effectiveness/SKILL.md` — operator-facing wrapper around the
   same reducer.
-- `docs/skills/harness-effectiveness.md` — pre-existing 5-component doc (now
-  extended by the SKILL.md update on this PR).
+- `docs/skills/harness-effectiveness.md` — operator-facing wrapper doc for
+  the harness-effectiveness skill. Was a 5-component doc at issue #663
+  time; tightened to 4 components in the follow-up amendment.

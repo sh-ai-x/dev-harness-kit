@@ -19,12 +19,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lib.trace_log import EVENT_SCHEMA_VERSION, append_event, read_events
+
 from lib.harness_effectiveness import (
     COMPONENT_WEIGHTS,
     INSUFFICIENT_EVIDENCE,
     build_report,
 )
-from lib.trace_log import EVENT_SCHEMA_VERSION, append_event, read_events
 
 
 def _event(root: Path, *, event_id: str, event_type: str, subject: str,
@@ -55,7 +56,7 @@ def _event(root: Path, *, event_id: str, event_type: str, subject: str,
 
 def _full_event_corpus(tmp_path: Path, *, identity=None) -> None:
     """Emit the minimum event set that scores all four shippable
-    components to 100.0 (and leaves learning_quality unscored).
+    components to 100.0.
     """
 
     def emit(event_id, event_type, subject, outcome, ts, parent=None, **evidence):
@@ -455,12 +456,12 @@ def test_stability_submetric_top_level_shape_uses_submetric_helper(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_compact_weights_still_sum_to_one() -> None:
-    """The 5-component contract is preserved: weights sum to 1.0, no
+    """The 4-component contract is preserved: weights sum to 1.0, no
     new top-level weight is added for stability."""
     assert sum(COMPONENT_WEIGHTS.values()) == 1.0
     assert set(COMPONENT_WEIGHTS.keys()) == {
         "prevention_quality", "first_pass_quality",
-        "recovery_quality", "learning_quality", "measurement_integrity",
+        "recovery_quality", "measurement_integrity",
     }
 
 
@@ -487,12 +488,13 @@ def test_event_schema_version_unchanged() -> None:
 
 # --- Issue #702: schema_version bump + submetric nesting pin -----------
 
-def test_schema_version_is_three_after_subject_observability(tmp_path: Path) -> None:
-    """Issue #702: schema_version bumped 2 -> 3 to advertise the nested
-    subject_observability submetric. Top-level shape is unchanged."""
+def test_schema_version_is_four_after_learning_quality_removal(tmp_path: Path) -> None:
+    """schema_version bumped 3 -> 4 to advertise removal of the
+    `learning_quality` top-level component. Top-level shape is
+    otherwise unchanged."""
     from lib.harness_effectiveness import build_report
     report = build_report(tmp_path)
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     for key in ("components", "overall_score", "status", "event_count",
                 "contract_version"):
         assert key in report
@@ -500,13 +502,13 @@ def test_schema_version_is_three_after_subject_observability(tmp_path: Path) -> 
 
 def test_compact_weights_still_sum_to_one_after_subject_observability(tmp_path: Path) -> None:
     """Issue #702: subject_observability is a nested submetric, not a
-    6th top-level component. Weights still sum to 1.0 and the key set
+    5th top-level component. Weights still sum to 1.0 and the key set
     is unchanged (matches the issue #663 precedent)."""
     from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
     assert sum(COMPONENT_WEIGHTS.values()) == 1.0
     assert set(COMPONENT_WEIGHTS.keys()) == {
         "prevention_quality", "first_pass_quality",
-        "recovery_quality", "learning_quality", "measurement_integrity",
+        "recovery_quality", "measurement_integrity",
     }
     report = build_report(tmp_path)
     assert "subject_observability" in (

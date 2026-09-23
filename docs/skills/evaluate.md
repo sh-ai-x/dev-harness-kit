@@ -32,10 +32,12 @@ repair without creating success evidence in a separate workflow. Source:
 ```
 
 Effectiveness is part of the default report and is not enabled by a new
-option. Its five components are
-`prevention_quality`, `first_pass_quality`, `recovery_quality`,
-`learning_quality`, and `measurement_integrity`. Missing workflow evidence
-will produce `INSUFFICIENT_EVIDENCE`, never a fabricated zero or pass.
+option. Its four shippable components are
+`prevention_quality`, `first_pass_quality`, `recovery_quality`, and
+`measurement_integrity`. `learning_quality` was removed because its
+evidence class (`learning.outcome` with `cohort=treatment|control`) is
+unreachable from current producers. Missing workflow evidence will
+produce `INSUFFICIENT_EVIDENCE`, never a fabricated zero or pass.
 `--dry-run` remains a legacy fixture/judge option and must label synthetic
 results. See `skills/evaluate/SKILL.md` and the proposal for the runtime
 contract.

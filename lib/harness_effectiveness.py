@@ -1,17 +1,25 @@
 """Evidence-based workflow effectiveness scoring.
 
 This module is deliberately small: it reduces structured TraceLog events and
-existing repair-coordinator events into five component reports. It never
+existing repair-coordinator events into four component reports. It never
 invents evidence from prose or treats missing telemetry as a score.
 
 Issue #663 adds a `stability` submetric nested under
 `measurement_integrity`. The stability submetric reports coverage,
 score/status, findings, and evidence event IDs for the harness's
-behaviour across agent/model/provider swaps. It is *not* a 6th
+behaviour across agent/model/provider swaps. It is *not* a 5th
 top-level component — that would change the weighting contract, so
-it lives as a submetric that can be ignored by existing 5-component
+it lives as a submetric that can be ignored by existing 4-component
 consumers. The `schema_version` is bumped to advertise the new
 submetric.
+
+The `learning_quality` component was removed in favor of the user's
+decision to drop metrics that can't be measured from current
+producers. The cohort-tagging evidence class
+(`learning.outcome` with `cohort=treatment|control`) was unreachable
+from the build loop; rather than wire it speculatively, the reducer
+contract was tightened to the four components whose evidence is
+already on the production path.
 """
 from __future__ import annotations
 
@@ -25,23 +33,17 @@ from lib.trace_log import EVENT_RECORD_REQUIRED_FIELDS, read_events, validate_ev
 INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 COMPONENT_WEIGHTS = {
-    # `learning_quality` is intentionally zero until a Phase-4 shadow-mode
-    # control cohort exists. The component is still rendered (visibility)
-    # but contributes nothing to `overall_score`. The remaining 1.00 is
-    # distributed proportionally to the four shippable components based on
-    # their pre-rebalance weights (0.20 / 0.20 / 0.25 / 0.15 → 0.80),
-    # scaled by 1/0.80 so they sum to 1.00.
+    # Four shippable components. `learning_quality` was removed because
+    # the cohort-tagging evidence class is unreachable from current
+    # producers — see module docstring. Weights sum to 1.00 by
+    # construction so overall_score stays in [0, 100] without an
+    # implicit normalization factor. None-scored components drop out
+    # of both numerator and divisor so a partially-scored corpus
+    # reports a meaningful overall instead of collapsing to None.
     "prevention_quality":      0.25,
     "first_pass_quality":      0.25,
     "recovery_quality":        0.31,
-    "learning_quality":        0.00,
     "measurement_integrity":   0.19,
-    # NOTE: the formula no longer divides by `sum(weights)` because
-    # weights sum to 1.00 by construction (the previous commit did
-    # divide; that step is gone). Zero-weight components and None-scored
-    # components drop out of both the numerator and the divisor so a
-    # partially-scored corpus reports a meaningful overall instead of
-    # collapsing to None.
 }
 
 # Identity fields an event may carry so the reducer can report on
@@ -239,26 +241,6 @@ def _recovery(events: List[Dict[str, Any]]) -> Dict[str, Any]:
              + metrics["cycle_bound_score"]["value"] * .20
              + metrics["recovery_no_regression"]["value"] * .10) if clean else None
     return _component("recovery_quality", score, submetrics=metrics, evidence=evidence_ids)
-
-
-def _learning(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    outcomes = [e for e in events if e["event_type"] == "learning.outcome"]
-    treatment = [e for e in outcomes if e["evidence_ref"].get("cohort") == "treatment"]
-    control = [e for e in outcomes if e["evidence_ref"].get("cohort") == "control"]
-    ids = [e["event_id"] for e in outcomes]
-    if not treatment or not control:
-        return _component("learning_quality", None, coverage=0.0,
-                          submetrics={}, evidence=ids,
-                          findings=["comparable treatment and control cohorts missing"])
-    tr = sum(bool(e["evidence_ref"].get("verified_recovery")) for e in treatment) / len(treatment)
-    co = sum(bool(e["evidence_ref"].get("verified_recovery")) for e in control) / len(control)
-    delta = round((tr - co) * 100, 1)
-    yield_score = max(0.0, min(100.0, 50.0 + delta * 10.0))
-    metrics = {"learning_yield_score": _metric(
-                   sum(bool(e["evidence_ref"].get("verified_recovery")) for e in treatment + control),
-                   len(treatment) + len(control), evidence=ids, value=yield_score),
-               "control_treatment_delta_pp": {"value": delta, "evidence_event_ids": ids}}
-    return _component("learning_quality", yield_score, submetrics=metrics, evidence=ids)
 
 
 def _stability(events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -616,7 +598,6 @@ def build_report(root: Path) -> Dict[str, Any]:
         "prevention_quality": _prevention(events),
         "first_pass_quality": _first_pass(events),
         "recovery_quality": _recovery(events),
-        "learning_quality": _learning(events),
         "measurement_integrity": _integrity(root, events),
     }
     scored = {name: item for name, item in components.items()
@@ -640,11 +621,13 @@ def build_report(root: Path) -> Dict[str, Any]:
     return {
         # Bumped from 1 → 2 in issue #663 to advertise the nested
         # stability submetric; 2 → 3 in issue #702 to advertise the
-        # nested subject_observability submetric. The top-level shape
-        # is unchanged so 5-component consumers still work; new
-        # consumers can opt in to
+        # nested subject_observability submetric; 3 → 4 to advertise
+        # the removal of the `learning_quality` top-level component.
+        # The remaining 4-component shape (components / overall_score /
+        # status / event_count / contract_version) is intact so existing
+        # consumers continue to work; new consumers can opt in to
         # `components.measurement_integrity.submetrics.subject_observability`.
-        "schema_version": 3,
+        "schema_version": 4,
         "contract_version": "harness-effectiveness-v1",
         "components": components,
         "overall_score": overall,
