@@ -78,3 +78,81 @@ the terminal trace record before `save_log.py` runs with
 | `session-start-guard-mode-reset` | all (SessionStart) | Applies `DEV_KIT_GUARDS` (shell → local → project → default off) to `.dev-kit/guard-mode.session.json` and records policy source + checkout class. It never prompts and never enables main specially. Best-effort — silent no-op when `python3` is missing. |
 | `install-pre-push` | all (SessionStart) | Runs `bin/install-pre-push.sh` to (re-)symlink `hooks/pre-push.sh` as the git pre-push hook on every session start. Idempotent (no-op if already installed) and worktree-aware (uses `--git-common-dir` to install into the shared hooks directory). The pre-push hook itself runs `tools/issue_sync.py pre-push --strict --from-log` so a stale-ref push is caught locally before LLM judges fire in GH Actions. See `docs/gates/local-pre-push.md` for the per-gate contract. Best-effort — silent no-op when `bin/install-pre-push.sh` is missing. |
 | `plugin-cache-refresh` | all (SessionStart) | If `dev-kit` marketplace HEAD short-SHA differs from the marker at `<cache-dir>/.devkit-refresh-head`, rsync marketplace → cache and update the marker. Closes the same-version-update gap left by `/reload-plugins` (cache is keyed by `plugin.json:version`, so a new commit at the same version is invisible until `claude plugin install dev-kit --force` is run manually). Fails open — never blocks session start. |
+
+## Complete hook registry
+
+> **SSOT for the on-disk hook inventory.** The matrix above stages hooks
+> by lifecycle; this table lists every hook script on disk with its
+> event / matcher / one-line purpose. Updated by code review, not by
+> regenerator. Helper files under `hooks/lib/` are listed separately
+> below the table.
+
+| Script | Event | Matcher | Purpose |
+|---|---|---|---|
+| `acp-tier-assert.sh` | PreToolUse | `*` | ACP tier assertion (catch-all). PreToolUse safety net that asserts the active ACP tier before any tool call. |
+| `bash-guard.sh` | PreToolUse | `Bash` | Tier-1 catastrophic + Tier-2 recoverable deny gate. See row above. |
+| `context-window-guard.sh` | UserPromptSubmit | `*` | Warns when input-token count crosses 100K / 200K / 300K thresholds, nudging the operator to `/compact` or sub-agent delegation. |
+| `destructive-confirm.sh` | PreToolUse | `Write\|Edit\|MultiEdit\|Bash` | Ask-tier confirmation for `.env` / `*.pem` / `*.key` / `.ssh/*` / force-with-lease / first push / bare worktree remove. |
+| `git-guard.sh` | PreToolUse | `Bash` | Hard block on `git commit` / `git push` to `main`, force-pushes, and `git checkout main && commit` patterns. Paired with `review-yml-isolation.sh`. |
+| `injection-content-guard.sh` | PostToolUse | `Agent` + `WebFetch` | Scans sub-agent output and fetched web content for prompt-injection / credential-leak patterns. |
+| `l4-todo-scan.sh` | PostToolUse | `Write\|Edit\|MultiEdit` | Iron Law #4 deferred-work marker scan (TODO/FIXME/"we'll extend later"). |
+| `linear-autosync.sh` | PreToolUse | `Write\|Edit\|MultiEdit` | Linear auto-sync on edit (owner-gated). No-op without `.dev-kit/linear-config.json:enabled` or `$LINEAR_API_KEY`. |
+| `linear-session-start.sh` | SessionStart (fanout) | `*` | One auto-sync round at session start inside a Linear-configured worktree. |
+| `linear-task-change.sh` | UserPromptSubmit | `*` | Detects plan / task scope change mid-session; triggers one sync round only on scope diff. |
+| `linear-worktree-create.sh` | PostToolUse | `Bash` | Catches `git worktree add` and syncs from inside the new worktree before the first Edit/Write. |
+| `log-on-session-start.sh` | SessionStart (fanout) | `*` | Auto-installs loghooks into the active `.claude/settings.json` on a fresh checkout. Best-effort. |
+| `plugin-cache-refresh.sh` | SessionStart (fanout) | `*` | rsyncs marketplace → versioned cache on HEAD drift. Closes the same-version-update gap left by `/reload-plugins`. |
+| `pr-create-route.sh` | PreToolUse | `Bash` | Routes `gh pr create` through `actor_classifier` so fork PRs use the review-environment path. |
+| `provider-divergence-check.sh` | SessionStart (fanout) | `*` | SessionStart nudge when `.env:CI_REVIEW_PROVIDER` drifts from the canonical provider. |
+| `ralph-attended-lock.sh` | PreToolUse | `AskUserQuestion` | During `/dev-kit:ralph`, locks `AskUserQuestion` so autonomous-loop can't escape into user prompts. |
+| `review-yml-isolation.sh` | PreToolUse | `Bash` | Blocks `git commit` if the staged set contains `review.yml` + any other path. review.yml PRs must be review.yml-only. |
+| `secret-scan.sh` | PostToolUse | `Write\|Edit\|MultiEdit` | Credential-pattern grep on edited content (mirror of `lib/secret_scan.py`). |
+| `session-start.sh` | SessionStart | `*` | Single SessionStart entry. Fans out to `session-start-check.sh` and the 7 child hooks (see fanout table below). Emits merged `additionalContext`. |
+| `session-start-check.sh` | SessionStart (fanout) | `*` | Regenerates `.dev-kit/.active-hooks.json`; emits `trace.started`; runs first-pass-quality smoke probe; records enrollment. |
+| `session-start-guard-mode-reset.sh` | SessionStart (fanout) | `*` | Applies `DEV_KIT_GUARDS` policy (shell → local → project → default) to `.dev-kit/guard-mode.session.json`. |
+| `session-start-harness-mode-reset.sh` | SessionStart (fanout) | `*` | Resets `.dev-kit/harness-mode.session.json` to `{"mode": "full"}` every session (strict-by-default). |
+| `slop-detector.sh` | PostToolUse | `Write\|Edit\|MultiEdit` | KO+EN banned-phrase scan (model-output slop detector). |
+| `stop-verify.sh` | Stop | `*` | AC claim verification before session stop. |
+| `sub-agent-handoff.sh` | PostToolUse | `Agent` | Advisory verifying the sub-agent response carries the STATUS / EVIDENCE / NEXT-ACTION handoff template (SHO-154). |
+| `tdd-guard.sh` | PreToolUse | `Write\|Edit\|MultiEdit` | RED-evidence block on prod-code edits (no test was added/updated). |
+| `trace-session-end.sh` | Stop + SessionEnd | `*` | Terminal trace record. MUST be the first hook on Stop and SessionEnd so `save_log.py` archives the trace correctly. |
+| `worktree-auto-cut.sh` | UserPromptSubmit | `*` | Suggests auto-cutting a fresh worktree from main when the operator's prompt indicates a new task. |
+| `worktree-guard.sh` | PreToolUse | `Write\|Edit\|MultiEdit` | Hard block on Edit/Write in the main checkout. Forces the worktree protocol. |
+| `worktree-janitor-session-start.sh` | SessionStart (fanout) | `*` | Orphan-worktree nudge at session start; optional auto-prune when configured. |
+| `worktree-log-auto-install.sh` | PostToolUse | `Bash` | Auto-installs loghooks in a fresh worktree when `git worktree add` is detected. |
+| `worktree-session-cleanup.sh` | Stop | `*` | After a completion-shaped response in a clean task worktree, asks the user to keep it or archive logs + remove. Never deletes from the hook itself. |
+
+### SessionStart fanout children
+
+`session-start.sh` is the single `SessionStart` entry registered in
+`hooks/hooks.json`. It invokes the 7 hooks below in deterministic order;
+none of these have their own `SessionStart` matcher in `hooks.json`.
+
+| Child | Purpose |
+|---|---|
+| `session-start-check.sh` | Active-hooks regeneration + trace.started + smoke probe |
+| `session-start-harness-mode-reset.sh` | `harness-mode.session.json` → `{"mode": "full"}` |
+| `session-start-guard-mode-reset.sh` | `guard-mode.session.json` ← scoped `DEV_KIT_GUARDS` |
+| `plugin-cache-refresh.sh` | marketplace → cache rsync on HEAD drift |
+| `log-on-session-start.sh` | loghooks auto-install |
+| `provider-divergence-check.sh` | `.env:CI_REVIEW_PROVIDER` drift nudge |
+| `worktree-janitor-session-start.sh` | orphan worktree nudge |
+
+### Helpers (`hooks/lib/`)
+
+Sourced by hook scripts via `. "${BASH_SOURCE[0]%/*}/lib/<helper>.sh"`.
+No hook scripts themselves live in this directory.
+
+| Helper | Purpose |
+|---|---|
+| `guard-policy.sh` | Resolves `DEV_KIT_GUARDS` policy + branch class |
+| `hook-preamble.sh` | Shared boilerplate: `set -uo pipefail`, `INPUT=$(cat)`, jq-missing warn |
+| `locale-utf8.sh` | Forces UTF-8 locale for `grep -E` |
+| `log_state.sh` | Reads/writes loghook install state |
+| `mode-resolve.sh` | Resolves `DEV_KIT_MODE` |
+| `payload-parse.sh` | Stdin / JSON / content extraction; defines `deny`, `ask`, `emit_guard_event` |
+| `secret-patterns.sh` | ERE credential patterns (mirror of Python SSOT) |
+| `slot-check.sh` | `plugin.json` version-slot freshness predicate |
+| `stage-gate.sh` | `hook_stage_active` — consults `.dev-kit/.active-hooks.json` |
+| `team-resolve.sh` | Resolves `DEV_KIT_TEAM` |
+| `worktree-detect.sh` | `worktree_detect` — main-vs-worktree discriminator (SSOT) |
