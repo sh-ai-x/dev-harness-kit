@@ -128,12 +128,15 @@ def parse_yaml_frontmatter(text: str) -> Optional[dict[str, Any]]:
     frontmatter" so the caller can decide between fail-closed and
     a soft skip).
 
-    Values are parsed as native YAML types (strings stay strings,
-    but bare numbers parse to int/float, `true`/`false` to bool,
-    `null` to None). The plan/interview/SOT contracts only use
-    flat string fields, so type coercion is a no-op for them —
-    but downstream consumers should treat the dict values
-    defensively.
+    Values are coerced to ``str`` to preserve the prior hand-rolled
+    parser's flat-string contract. The plan/interview/SOT validators
+    in this module (`validate_interview_handoff`,
+    `validate_sot_handoff`) compare ``handoff_kind`` / ``status``
+    against string constants, and the old parser already coerced
+    every value to string. Keeping that contract here avoids a
+    silent caller-AUDIT drift where a numeric-looking
+    ``handoff_kind`` would now compare as ``None != 'interview'``
+    instead of ``'' != 'interview'`` (review #920 round-3 VM-2).
     """
     if not text.startswith("---"):
         return None
@@ -144,7 +147,7 @@ def parse_yaml_frontmatter(text: str) -> Optional[dict[str, Any]]:
     parsed = yaml.safe_load(block)
     if not isinstance(parsed, dict):
         return None
-    return parsed
+    return {k: str(v) for k, v in parsed.items()}
 
 
 # --------------------------------------------------------------------------- #

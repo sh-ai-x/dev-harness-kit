@@ -231,6 +231,33 @@ class TestReadEnvKeyBehavior(unittest.TestCase):
         p.write_text('FOO="unterminated\n', encoding="utf-8")
         self.assertEqual(self.read_env_key(p, "FOO"), '"unterminated')
 
+    # C13: read_env_dict strips ONE matching quote pair (review #920 round-3
+    # VM-3). The prior inline llm_judge parser did
+    # ``.strip().strip('\"').strip(\"'\")`` (asymmetric, multi-layer); the
+    # canonical helper strips a single outer pair. These cases pin the
+    # single-strip contract so llm_judge.load_config (now delegating here)
+    # cannot silently regress on nested quotes.
+    def test_strip_one_quote_pair_double_outer_single_inner(self):
+        # Outer `"`, inner `'` — single outer strip leaves the inner
+        # intact. The strip-many behavior would have eaten the single
+        # quotes too.
+        p = self.root / "x.env"
+        p.write_text("FOO=\"'foo'\"\n", encoding="utf-8")
+        self.assertEqual(self.read_env_key(p, "FOO"), "'foo'")
+
+    def test_strip_one_quote_pair_single_outer_double_inner(self):
+        # Outer `'`, inner `"` — same logic, opposite quote chars.
+        p = self.root / "x.env"
+        p.write_text("FOO='\"foo\"'\n", encoding="utf-8")
+        self.assertEqual(self.read_env_key(p, "FOO"), '"foo"')
+
+    def test_strip_one_quote_pair_double_outer_double_inner(self):
+        # `""foo""` — two layers of double quotes. Single-strip leaves
+        # one layer; strip-many would return bare `foo`.
+        p = self.root / "x.env"
+        p.write_text('FOO=""foo""\n', encoding="utf-8")
+        self.assertEqual(self.read_env_key(p, "FOO"), '"foo"')
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
