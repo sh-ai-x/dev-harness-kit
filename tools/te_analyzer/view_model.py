@@ -361,6 +361,18 @@ HTML_TEMPLATE = """<!doctype html>
     </table>
   </div>
 
+  <div class="section-title">Archived Sessions <span class="muted" style="font-weight:400;font-size:11px">(sessions archived by <code>bin/worktree-remove-safe.sh</code>; live panels above exclude this population — branch / count from <code>&lt;logs_dir&gt;/.archive/&lt;branch&gt;/&lt;ts&gt;/&lt;source&gt;/</code>)</span></div>
+  <div class="grid cols-4">
+    <div class="panel metric"><div class="label">Archived Sessions</div><div class="value">{archive_session_count}</div><div class="delta">{archive_rows_count} distinct branches</div></div>
+    <div class="panel metric"><div class="label">Archived Total Cost</div><div class="value">${archive_total_cost:.2f}</div><div class="delta">across the historical population</div></div>
+  </div>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Archive Branch</th><th style="text-align:right">Sessions</th><th style="text-align:right">Cost</th><th style="width:40%">Share</th></tr></thead>
+      <tbody>{archive_rows}</tbody>
+    </table>
+  </div>
+
   <div class="section-title">Transcript Index <span class="muted" style="font-weight:400;font-size:11px">(click a worktree, then a session, to read the full captured log — loaded lazily per worktree)</span></div>
   <div class="panel">
     <table>
@@ -754,6 +766,9 @@ def build_view_model(
     wt_meta: dict[str, dict] | None = None,
     stale_cost: float = 0.0,
     stale_pct: float = 0.0,
+    archive_session_count: int = 0,
+    archive_total_cost: float = 0.0,
+    archive_sessions: list[dict] | None = None,
 ) -> dict:
     """Build the dashboard view-model — single source of truth shared by
     JSON + HTML sinks (issue #310).
@@ -972,6 +987,45 @@ def build_view_model(
                        if s.get("worktree_state") not in _stale_worktree_states())
     inactive_count = len(sessions) - active_count
 
+    # ---- archive rollup (issue #820) ----
+    # Bucket archived sessions by their path-derived ``archive_branch``.
+    # The dashboard's "Archived sessions" panel renders count + total cost
+    # + this branch breakdown, so an operator can see how much historical
+    # spend lives in the .archive/ tree at a glance. Live panels are NOT
+    # affected — these counts are derived strictly from sessions whose
+    # ``archive_branch`` is non-empty.
+    #
+    # Important: the branch breakdown is computed from the FULL
+    # ``archive_sessions`` list (passed in by the caller), NOT from
+    # ``repo_pool`` — the live panel filter excludes archived sessions,
+    # so iterating ``repo_pool`` would yield an empty breakdown. The
+    # ``archive_sessions`` arg defaults to ``sessions`` so legacy
+    # callers stay compatible.
+    archive_pool = archive_sessions if archive_sessions is not None else sessions
+    archive_by_branch: dict[str, list[float]] = defaultdict(lambda: [0, 0.0])
+    for s in archive_pool:
+        b = s.get("archive_branch")
+        if not b:
+            continue
+        c = _cost(s)
+        archive_by_branch[b][0] += 1
+        archive_by_branch[b][1] += c
+    archive_total_for_share = sum(rc[1] for rc in archive_by_branch.values()) or 1.0
+    archive_panel = {
+        "session_count": archive_session_count,
+        "total_cost_usd": archive_total_cost,
+        # Caller-supplied totals already account for ALL archived sessions
+        # (independent of the active ``sessions`` filter); the branch
+        # breakdown below mirrors the live ``cost_by_branch`` shape so the
+        # JSON sink and the HTML panel can both consume it.
+        "branch_breakdown": [
+            {"name": b, "sessions": int(archive_by_branch[b][0]),
+             "cost_usd": archive_by_branch[b][1],
+             "share": archive_by_branch[b][1] / archive_total_for_share}
+            for b in sorted(archive_by_branch, key=lambda k: -archive_by_branch[k][1])
+        ],
+    }
+
     # ---- warnings ----
     flat_warnings: list[dict] = []
     for (s, _), warns in zip(scored, warnings_per_session):
@@ -1020,6 +1074,11 @@ def build_view_model(
         "inactive_count": inactive_count,
         "stale_cost": stale_cost,
         "stale_pct": stale_pct,
+        # Issue #820: archived-sessions panel (count + total cost +
+        # branch breakdown). Empty rows emit a one-line "No archived
+        # sessions" cell; the panel itself always renders so the
+        # operator sees the contrast with the live panels.
+        "archive_panel": archive_panel,
         "estimated": {
             "cache_miss": estimated["cache_miss"],
             "dup_read": estimated["dup_read"],
