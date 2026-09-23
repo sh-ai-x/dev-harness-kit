@@ -156,3 +156,7 @@ No hook scripts themselves live in this directory.
 | `stage-gate.sh` | `hook_stage_active` — consults `.dev-kit/.active-hooks.json` |
 | `team-resolve.sh` | Resolves `DEV_KIT_TEAM` |
 | `worktree-detect.sh` | `worktree_detect` — main-vs-worktree discriminator (SSOT) |
+| `find-python.sh` | Resolves the first available Python 3 interpreter from `{python3, python, py}`. Shared by `hooks/sub-agent-handoff.sh` and `hooks/worktree-auto-cut.sh`. |
+| `hook-cwd.sh` | Resolves the hook invocation's effective cwd (handles path-aware lookups so sub-agents inherit the right working dir). |
+| `linear-fast-path.sh` | Bakes the Python 3 lookup into a one-shot for Linear hooks (avoids the per-invocation `find-python.sh` cost). |
+| `worktree-classify.sh` | Classifies the current worktree against the session policy (returns branch class + scope). |
