@@ -124,7 +124,7 @@ A run that contains any `escalate: true` block is reported with verdict
   sites that do not import or call `register()` are unaffected.
 - The harness-effectiveness reducer gains a nested `stability` submetric
   under `components.measurement_integrity.submetrics.stability` (issue
-  #663). `build_report` returns `schema_version: 2`. The 5-component
+  #663). `build_report` returns `schema_version: 2`. The 4-component
   `overall_score` contract is preserved — `COMPONENT_WEIGHTS` still
   sums to 1.0 and no top-level weight is added for stability. Missing
   stability evidence surfaces as `status: INSUFFICIENT_EVIDENCE` with

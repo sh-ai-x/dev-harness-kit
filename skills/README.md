@@ -66,8 +66,8 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 
 | Skill | α | Description |
 |---|---|---|
-| [`evaluate`](evaluate/SKILL.md) | `enforcement` | 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components plus the nested measurement… |
-| [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `enforcement` | 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line sta… |
+| [`evaluate`](evaluate/SKILL.md) | `enforcement` | 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting four harness-effectiveness components plus the nested measurement… |
+| [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `enforcement` | 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the four-component (prevention / first-pass / recovery / measurement-integrity) scorecard as JSON + a one-line sta… |
 
 ### `mode` (1)
 
