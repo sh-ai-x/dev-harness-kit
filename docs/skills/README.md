@@ -117,7 +117,6 @@ step inside their parent skill's flow; you never type them directly.
 | Skill | Alpha | Parent | Summary |
 |---|---|---|---|
 | [`hook-doctor`](hook-doctor.md) | `enforcement` | auto (visible hook failure) | Diagnose failed Claude Code / Codex hooks and repair safe cache + registration drift. |
-| [`valuate`](valuate.md) | `enforcement` | `/dev-kit:plan` and other planning stages | Plan-value gate; scores a plan on 6 axes and returns proceed/revise/hold/kill. Advisory — the build stage proceeds unless the operator flags a non-`proceed` verdict manually. |
 
 ---
 
@@ -169,7 +168,6 @@ step inside their parent skill's flow; you never type them directly.
 | [`status`](status.md) | `status` | `state` | human |
 | [`sync-version`](sync-version.md) | `config` | `state` | human |
 | [`token-analyzer`](token-analyzer.md) | `audit` | `analysis` | human |
-| [`valuate`](valuate.md) | `design` | `enforcement` | model |
 
 Skill detail pages (`docs/skills/<name>.md`) are generated for user-facing
 skills on a rolling basis; the per-skill row above links to the page when it

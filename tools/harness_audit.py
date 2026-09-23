@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """harness_audit.py — Cross-harness quality audit (Phase 7, issue #387).
 
-Reads the on-disk state of 5 dev-kit harnesses (hooks, eval,
-plan-value, research, interview) and reports per-harness health:
+Reads the on-disk state of 4 dev-kit harnesses (hooks, eval,
+research, interview) and reports per-harness health:
 
 - alpha classification (SKILL.md frontmatter)
 - L7 alignment (alpha ∈ state|enforcement|analysis)
@@ -22,7 +22,7 @@ AND no alpha_invalid; otherwise 1. No path returns 2 in practice
 (the only file writes are the user's chosen --html-out PATH or the
 default `.dev-kit/harness-audit-report.html` artifact).
 
-Per #387, the audit covers 5 harnesses and is **strictly read-only**
+Per #387, the audit covers 4 harnesses and is **strictly read-only**
 (verified by `tests/test_harness_audit.py::test_audit_is_read_only`).
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ _LIB_PATH = _PROJECT_ROOT_HINT / "lib"
 if _LIB_PATH.is_dir() and str(_LIB_PATH) not in sys.path:
     sys.path.insert(0, str(_LIB_PATH))
 
-HARNESSES = ("hooks", "eval", "plan_value", "research", "interview")
+HARNESSES = ("hooks", "eval", "research", "interview")
 
 VALID_ALPHA = ("state", "enforcement", "analysis")
 
@@ -110,7 +110,7 @@ def audit_hooks(project_root: Path) -> HarnessAudit:
     missing_hooks = sorted(HOOKS_EXPECTED - found_hooks)
     if missing_hooks:
         findings.append(f"missing hook scripts: {missing_hooks}")
-    # Symmetric with audit_eval / audit_plan_value: shipped iff
+    # Symmetric with audit_eval: shipped iff
     # ALL expected scripts present AND at least one runtime hook wiring.
     return HarnessAudit(
         name="hooks",
@@ -151,33 +151,6 @@ def audit_eval(project_root: Path) -> HarnessAudit:
         resource_count=0, resource_expected=0,
         rubric_count=len(matched_rubrics),
         rubric_expected=len(EVAL_EXPECTED_RUBRICS),
-        findings=findings,
-    )
-
-
-def audit_plan_value(project_root: Path) -> HarnessAudit:
-    engine = (project_root / "lib" / "valuation_engine.py").exists()
-    rubric = (project_root / "lib" / "valuation_rubrics" / "default.yaml").exists()
-    judge_prompt = (project_root / "eval" / "prompts" / "judge-plan-value.md").exists()
-    alpha, alpha_valid = _read_alpha(project_root, "valuate")
-    findings: List[str] = []
-    if not engine:
-        findings.append("missing lib/valuation_engine.py")
-    if not rubric:
-        findings.append("missing lib/valuation_rubrics/default.yaml")
-    if not judge_prompt:
-        findings.append("missing eval/prompts/judge-plan-value.md")
-    if not alpha:
-        findings.append("skills/valuate/SKILL.md missing alpha frontmatter")
-    elif not alpha_valid:
-        findings.append(f"skills/valuate alpha={alpha!r} not in {VALID_ALPHA}")
-    return HarnessAudit(
-        name="plan_value",
-        shipped=engine and rubric and judge_prompt and alpha_valid,
-        alpha=alpha or "",
-        alpha_valid=alpha_valid,
-        resource_count=0, resource_expected=0,
-        rubric_count=1 if rubric else 0, rubric_expected=1,
         findings=findings,
     )
 
@@ -233,7 +206,6 @@ def audit_interview(project_root: Path) -> HarnessAudit:
 AUDITORS = {
     "hooks": audit_hooks,
     "eval": audit_eval,
-    "plan_value": audit_plan_value,
     "research": audit_research,
     "interview": audit_interview,
 }

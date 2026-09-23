@@ -10,7 +10,7 @@ Markdown-only.
 | Topic | HTML | MD | What you get |
 |---|---|---|---|
 | Why + value + quickstart | — | [`docs/home/00-index.md`](00-index.md) | Beginner landing — read first |
-| STAGES (what each loop step owns) | [`docs/stages/STAGES.html`](../stages/STAGES.html) | [`docs/stages/STAGES.md`](../stages/STAGES.md) | bootstrap → plan → valuate → build → review → security → ship |
+| STAGES (what each loop step owns) | [`docs/stages/STAGES.html`](../stages/STAGES.html) | [`docs/stages/STAGES.md`](../stages/STAGES.md) | bootstrap → plan → build → review → security → ship |
 | CI install (run dev-kit CI elsewhere) | [`docs/quality/ci-setup.html`](../quality/ci-setup.html) | [`docs/quality/ci-setup.md`](../quality/ci-setup.md) | `branch-policy` + validate + test + auto-fix workflows |
 | CI template drift refresh (selective) | — | [`docs/quality/ci-update.md`](../quality/ci-update.md) | Detect + selectively apply dev-kit ⇄ consumer template drift; 4-state per-file classification with backup-before-overwrite (no `--force` blast) |
 | Maintenance gate (PR-only quality) | [`docs/quality/maintenance-gate.html`](../quality/maintenance-gate.html) | [`docs/quality/maintenance-gate.md`](../quality/maintenance-gate.md) | 20-checkbox rubric enforced in `.github/workflows/maintenance.yml` |
