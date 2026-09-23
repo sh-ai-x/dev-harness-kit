@@ -11,7 +11,7 @@ provider swaps. These tests pin the contract:
 4. Missing evidence is reported as INSUFFICIENT_EVIDENCE, never 0.0.
 5. The submetric exposes coverage + score/status + findings +
    evidence_event_ids.
-6. The 5-component `overall_score` contract is preserved (weights
+6. The 4-component `overall_score` contract is preserved (weights
    still sum to 1.0, schema_version is bumped to advertise the new
    stability evidence).
 """
@@ -165,7 +165,7 @@ def test_model_swap_does_not_change_verdict(tmp_path: Path) -> None:
     """Re-running the reducer with a different model identity yields a
     byte-identical verdict for the four shippable components. The
     stability submetric may legitimately differ (it reports coverage of
-    the new identity), but the 5-component `overall_score` + the four
+    the new identity), but the 4-component `overall_score` + the four
     shippable component scores are invariant."""
     opus_path = tmp_path / "opus"
     haiku_path = tmp_path / "haiku"
@@ -383,7 +383,7 @@ def test_neutrality_drops_when_evidence_ref_couples_to_agent(tmp_path: Path) -> 
 
 
 def test_overall_score_remains_number_when_only_stability_missing(tmp_path: Path) -> None:
-    """A missing stability submetric must NOT collapse the 5-component
+    """A missing stability submetric must NOT collapse the 4-component
     overall_score to None; the four shippable components still produce
     a meaningful score."""
     _full_event_corpus(tmp_path)
@@ -451,7 +451,7 @@ def test_stability_submetric_top_level_shape_uses_submetric_helper(tmp_path):
     assert 'weight' not in stability, 'stability submetric must NOT carry a weight field'
 
 # ---------------------------------------------------------------------------
-# Backward compatibility for the 5-component contract
+# Backward compatibility for the 4-component contract
 # ---------------------------------------------------------------------------
 
 def test_compact_weights_still_sum_to_one() -> None:
@@ -466,7 +466,7 @@ def test_compact_weights_still_sum_to_one() -> None:
 
 def test_schema_version_is_bumped_to_advertise_stability(tmp_path: Path) -> None:
     """build_report bumps schema_version so consumer code can detect the
-    new stability evidence and opt in. Existing 5-component consumers
+    new stability evidence and opt in. Existing 4-component consumers
     continue to work because the top-level shape (components /
     overall_score / status / event_count / contract_version) is intact."""
     import tempfile
