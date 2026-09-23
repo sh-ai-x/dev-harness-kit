@@ -13,6 +13,15 @@ PR; otherwise the ruleset treats the new context as "not yet satisfied"
 and the PR sits in `mergeStateStatus: BLOCKED` even though
 `mergeable: MERGEABLE`.
 
+The ruleset itself lives at
+**`.github/rulesets/protect-main.json`** (the local SSOT for ruleset
+id `20232367`, name `protect main (admin PAT bypass)`). The SSOT
+covers both the required-status-check contract above AND the
+bypass-actors contract below — see [Bypass actors SSOT](#bypass-actors-ssot)
+for the half this file added in the same commit. `bin/ruleset-sync.sh`
+PATCHes the live GitHub ruleset from the local SSOT so the two stay
+in lock-step.
+
 ## Why prefix-matching fails (the 33 / 50 example)
 
 PR #763 (`feat(security): prompt-injection defense`, merged
@@ -199,3 +208,57 @@ conclusion. A failure in L3 therefore flips the job's check to
 `failure` even when both LLM judges returned Approve — the
 combined status now distinguishes these two cases so the
 branch-protection gate doesn't blame the judges.
+
+## Bypass actors SSOT
+
+The same ruleset carries a second contract: the
+`bypass_actors[]` block renders in the GitHub UI as the
+**"Allow specified actors to bypass required pull requests"**
+checkbox list (Settings → Rules → selected ruleset →
+"Bypass list"). Each entry is one checkbox in that UI; clearing
+the list — or removing the only `RepositoryRole:ADMIN`
+entry — silently blocks admin/maintain emergency merges and
+also kills the `DEV_KIT_GITHUB_TOKEN` PAT push path that
+`.github/workflows/version-bump.yml` relies on for merge-queue
+bump commits (see `version-bump.yml:38-47` for the rationale).
+
+`.github/rulesets/protect-main.json` is the local SSOT for
+this block; the regression test
+`tests/test_ruleset_bypass_actors.py` pins it; `/dev-kit:ci-doctor`
+surfaces it as a dedicated `ruleset bypass actors` row so the
+operator sees drift before opening a PR.
+
+### Contract
+
+| Field              | Required           | Notes |
+|--------------------|--------------------|-------|
+| `bypass_actors[]`  | non-empty          | empty list = "checkbox cleared" state, surfaces FAIL |
+| At least one entry | `actor_type=RepositoryRole`, `repository_role=ADMIN`, `bypass_mode=always` | The whole point of the SSOT; without it admins can't push to main |
+| Optional entries   | `MAINTAIN` / `WRITE` (any role), `User`, `Team`, `Integration` | Mirrors the GitHub REST `bypass_actors[]` enum verbatim |
+
+`bypass_mode` semantics (from the GitHub REST API):
+
+- `always` — the actor can push directly to the protected ref
+  AND bypass required checks on PR branches. Required for the
+  admin/maintain role entries; anything else keeps the bypass
+  checkbox effectively unchecked.
+- `pull_request` — bypass only on PR branches. Used by
+  `RepositoryRole:WRITE` for the bot push path (pushes to PR
+  branches, not main).
+- `exempt` — actor is exempt from the ruleset entirely. Rare;
+  not currently used by the SSOT.
+
+### Restoring the checkbox after a ruleset wipe
+
+1. Restore the SSOT to its committed shape:
+   `git checkout origin/main -- .github/rulesets/protect-main.json`
+2. Verify locally:
+   `bin/ruleset-sync.sh --dry-run`
+3. Apply to GitHub:
+   `bin/ruleset-sync.sh`
+4. Confirm the drift check passes (idempotency guard):
+   `bin/ruleset-sync.sh --check` (exit 0 = in sync)
+
+`bin/ruleset-sync.sh --check` is safe to wire into a pre-PR hook
+or a `/dev-kit:ci-doctor` row — it exits 0 when the SSOT is in
+sync and 1 with a remediation hint otherwise.

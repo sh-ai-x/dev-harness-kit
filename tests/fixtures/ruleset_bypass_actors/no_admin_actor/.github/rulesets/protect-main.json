@@ -1,0 +1,24 @@
+{
+  "id": 20232367,
+  "name": "protect main (no admin)",
+  "target": "branch",
+  "enforcement": "active",
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {"context": "ci", "integration_id": null}
+        ]
+      }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_type": "Team",
+      "actor_id": 67890,
+      "bypass_mode": "always"
+    }
+  ]
+}

@@ -224,21 +224,27 @@ class TestCiRulesetContract(unittest.TestCase):
             with pytest.warns(UserWarning, match=r"workflow parse error"):
                 warnings.warn(f"workflow parse error (out of scope): {e}")
 
-    # ---- repos-real: no ruleset files means no FAIL --------------------
+    # ---- repos-real: contract surface against the live worktree -------
 
-    def test_real_repo_with_no_ruleset_files_does_not_fail(self):
-        """The source repo at HEAD (issue #774) does NOT author
-        `.github/rulesets/*.json`. The contract check must therefore
-        emit a single INFO row, NOT a FAIL - so this assertion
-        closes the loop on the "no local ruleset = INFO" code path
-        against the real worktree layout."""
+    def test_real_repo_with_local_ruleset_files_passes(self):
+        """The source repo at HEAD now authors
+        `.github/rulesets/protect-main.json` (the bypass-actor SSOT
+        added alongside the admin-bypass checkbox restoration; see
+        `tests/test_ruleset_bypass_actors.py` for the bypass half).
+        The contract check must therefore emit a PASS row (every
+        required context matches a workflow `name:`) and never a
+        FAIL — the FAIL assertion still holds against the no-local-
+        ruleset code path because the loader returns [] in that case
+        and the cross-check short-circuits to INFO, never FAIL."""
         rows = self.cr.check_ruleset_contract(PROJECT_ROOT)
         self.assertTrue(
             all(r.state != "FAIL" for r in rows),
-            "real repo (no local ruleset files) must never FAIL",
+            f"real repo contract must never FAIL; "
+            f"got {[(r.label, r.state, r.detail[:120]) for r in rows]}",
         )
         self.assertTrue(
-            any(r.state == "INFO" for r in rows),
-            f"real repo must emit an INFO row to surface the missing "
-            f"local ruleset; got {[(r.label, r.state) for r in rows]}",
+            any(r.state == "PASS" for r in rows),
+            f"real repo contract must emit a PASS row when the local "
+            f"ruleset SSOT is present; got "
+            f"{[(r.label, r.state) for r in rows]}",
         )

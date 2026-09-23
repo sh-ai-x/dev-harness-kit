@@ -1,0 +1,60 @@
+{
+  "_comment": "Local SSOT for the 'protect main (admin PAT bypass)' GitHub ruleset (id 20232367 on github.com/sh-ai-x/dev-harness-kit). PATCHed onto the live ruleset via `bin/ruleset-sync.sh` so the ruleset's `bypass_actors` block — which renders in the GitHub UI as the 'Allow specified actors to bypass required pull requests' checkbox list — is reproducible from the repo. Schema: https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset",
+  "id": 20232367,
+  "name": "protect main (admin PAT bypass)",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {"context": "test (python 3.12)", "integration_id": null},
+          {"context": "severity gate (review + security)", "integration_id": null},
+          {"context": "maintenance gate (verdict + docs-updated)", "integration_id": null}
+        ]
+      }
+    },
+    {
+      "type": "non_fast_forward",
+      "parameters": {}
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false
+      }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "_comment": "RepositoryRole ADMIN — the repo's owner(s). This is the entry that restores the 'admin bypass' checkbox; without it, admins are subject to the same required-status-checks as any other committer. version-bump.yml relies on this for `DEV_KIT_GITHUB_TOKEN` PAT pushes to bypass the ruleset (see .github/workflows/version-bump.yml:38-47 for the rationale).",
+      "actor_type": "RepositoryRole",
+      "repository_role": "ADMIN",
+      "bypass_mode": "always"
+    },
+    {
+      "_comment": "RepositoryRole MAINTAIN — any maintainer can also bypass. Mirrors the GitHub UI checkbox list so an org maintainer is not gated by a single admin's availability.",
+      "actor_type": "RepositoryRole",
+      "repository_role": "MAINTAIN",
+      "bypass_mode": "always"
+    },
+    {
+      "_comment": "RepositoryRole WRITE — write-role members (including dev-kit bots that push PR branches) get 'pull_request' bypass only, not 'always'. This keeps bot pushes to PR branches free of admin-level merge authority while still unblocking the version-bump PAT push path.",
+      "actor_type": "RepositoryRole",
+      "repository_role": "WRITE",
+      "bypass_mode": "pull_request"
+    }
+  ]
+}

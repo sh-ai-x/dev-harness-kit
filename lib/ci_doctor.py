@@ -29,6 +29,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lib.ci_ruleset import check_ruleset_bypass_actors as _ci_ruleset_bypass_check
+
 # Dual-mode import for sibling ci_setup.py:
 #   * Source repo (this module loaded as `lib.ci_doctor`): the relative
 #     `from .ci_setup import` resolves inside the `lib` package.
@@ -1246,7 +1248,14 @@ def audit(target_dir: Path, *, provider: str | None = None) -> DoctorReport:
     # test (`tests/test_ci_ruleset_contract.py`) and the ci-doctor
     # row stay in lock-step. The wrapper maps the helper's
     # `_CheckRow` dataclass into the ci-doctor `Check` row shape.
-    report.checks.extend(_check_ruleset_workflow_contract(target, source_repo))
+    report.checks.extend(_check_ruleset_workflow_contract(target))
+    # Ruleset bypass-actors contract (issue: restore the GitHub UI
+    # "Allow specified actors to bypass required pull requests"
+    # checkbox as a local SSOT at .github/rulesets/protect-main.json).
+    # Common-impl helper lives in lib/ci_ruleset.py so the regression
+    # test (`tests/test_ruleset_bypass_actors.py`) and the ci-doctor
+    # row stay in lock-step.
+    report.checks.extend(_check_ruleset_bypass_actors(target))
     return report
 
 
@@ -1374,9 +1383,28 @@ def _check_open_pr(target: Path) -> list[Check]:
 # shared helper or the regression test.
 
 def _check_ruleset_workflow_contract(
-    target: Path, source_repo: bool = False,
+    target: Path,
 ) -> list[Check]:
-    rows = _ci_ruleset_check(target, source_repo=source_repo)
+    rows = _ci_ruleset_check(target)
+    out: list[Check] = []
+    for r in rows:
+        out.append(Check(label=r.label, state=r.state, detail=r.detail))
+    return out
+
+
+# ---- Ruleset bypass-actors contract (admin PAT bypass SSOT) ------
+# Mirrors the wrapper pattern of `_check_ruleset_workflow_contract`
+# above: the shared helper in `lib/ci_ruleset.py` emits
+# `_CheckRow` dataclasses; the wrapper maps them into the
+# ci-doctor `Check` row shape. Two helpers kept behind separate
+# wrappers so a future ci-doctor row-format change (new state values,
+# new check label) doesn't have to touch the shared helper or the
+# regression test.
+
+def _check_ruleset_bypass_actors(
+    target: Path,
+) -> list[Check]:
+    rows = _ci_ruleset_bypass_check(target)
     out: list[Check] = []
     for r in rows:
         out.append(Check(label=r.label, state=r.state, detail=r.detail))
