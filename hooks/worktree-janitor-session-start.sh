@@ -50,6 +50,12 @@
 # worktree_detect, jq-missing warning).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
+
 
 # Opt-out gate (must run BEFORE any output to honor per-worktree skip).
 if [ "${DEV_KIT_JANITOR_OFF:-0}" = "1" ]; then
@@ -64,7 +70,9 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # extract_hook_cwd — read HOOK_CWD from stdin payload and cd into it.
-HOOK_CWD="$(printf '%s' "${INPUT:-$(cat 2>/dev/null)}" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction + cd (shared via lib/hook-cwd.sh, see
+# inspect-pass4 finding p11). The failure mode is `|| true`.
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || true
 fi

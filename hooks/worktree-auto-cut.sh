@@ -12,6 +12,12 @@
 # worktree_detect, jq-missing warning).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
+
 
 # Hooks are advisory, but a silent fallback makes the next edit look like an
 # unrelated hard failure from worktree-guard.sh. Always return a handoff
@@ -38,7 +44,9 @@ PROMPT="$(printf '%s' "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)"
 [ -z "$PROMPT" ] && exit 0
 
 # Prefer cwd from the hook payload; fall back to PWD.
-HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction + cd (shared via lib/hook-cwd.sh, see
+# inspect-pass4 finding p14).
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || exit 0
 fi

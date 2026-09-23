@@ -25,6 +25,12 @@
 # worktree_detect, jq-missing warning).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# Source the shared HOOK_CWD extractor (inspect-pass4 finding
+# p10-p18). Sets HOOK_CWD from the payload; caller decides
+# the cd failure mode.
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
+
 
 # Source the shared linear fast-path (activation-source guard +
 # python3 lookup). Extracted in inspect-pass2 (2026-09-23) to
@@ -42,7 +48,9 @@ fi
 
 # Prefer cwd from the hook payload (more authoritative than $PWD),
 # fall back to PWD if missing.
-HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
+# HOOK_CWD extraction + cd (shared via lib/hook-cwd.sh, see
+# inspect-pass4 finding p12).
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || exit 0
 fi

@@ -7,6 +7,8 @@
 # explicit `--decision remove` is required by bin/worktree-session-cleanup.sh.
 
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# shellcheck source=lib/hook-cwd.sh
+source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"
 
 if [ "${DEV_KIT_WORKTREE_CLEANUP_OFF:-0}" = "1" ]; then
   exit 0
@@ -25,7 +27,7 @@ if ! printf '%s' "$LAST_MSG" | grep -qiE \
   exit 0
 fi
 
-HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
+extract_hook_cwd
 if [ -n "$HOOK_CWD" ] && [ -d "$HOOK_CWD" ]; then
   cd "$HOOK_CWD" || exit 0
 fi
