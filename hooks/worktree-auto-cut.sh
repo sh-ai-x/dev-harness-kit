@@ -12,6 +12,9 @@
 # worktree_detect, jq-missing warning).
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
+# shellcheck source=lib/find-python.sh
+source "${BASH_SOURCE[0]%/*}/lib/find-python.sh"
+
 # Source the shared HOOK_CWD extractor (inspect-pass4 finding
 # p10-p18). Sets HOOK_CWD from the payload; caller decides
 # the cd failure mode.
@@ -304,12 +307,10 @@ fi
 # contract from PR #linear-auto-sync-owner-gated). Falls through
 # silently if tools/linear_sync.py is missing.
 if [ -f "$WT_PATH/tools/linear_sync.py" ]; then
-  for py in python3 python py; do
-    if command -v "$py" >/dev/null 2>&1; then
-      (cd "$WT_PATH" && "$py" "$WT_PATH/tools/linear_sync.py" auto-sync) || true
-      break
-    fi
-  done
+  # Resolve Python 3 via lib/find-python.sh (inspect-pass4 finding p7).
+  if PY="$(find_python)"; then
+    (cd "$WT_PATH" && "$PY" "$WT_PATH/tools/linear_sync.py" auto-sync) || true
+  fi
 fi
 
 # Build additionalContext — the harness consumes this as a client-specific
