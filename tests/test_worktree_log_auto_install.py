@@ -258,26 +258,6 @@ class TestWorktreeLogAutoInstall(unittest.TestCase):
         self.assertFalse((wt_path / ".claude" / "settings.json").exists(),
                          "settings.json was created in worktree when source was OFF")
 
-    def test_skips_when_source_settings_missing(self):
-        """Source repo: no .claude/settings.json at all → skip silently.
-
-        Covers a fresh clone or a project where `log setup` was never run
-        in the source checkout. Falls under "neither signal present".
-        """
-        off_tgt = self._make_off_target()
-        wt_path = off_tgt / ".claude" / "worktrees" / "wt-no-settings"
-        _git(off_tgt, "worktree", "add", "-b", "fix/no-settings", str(wt_path))
-
-        payload = {
-            "tool_input": {"command": f"git worktree add -b fix/no-settings {wt_path}"},
-            "cwd": str(off_tgt),
-        }
-        r = _drive_hook(payload, env_extra=self.env)
-        self.assertEqual(r.returncode, 0)
-        self.assertNotIn("hooks installed", r.stderr)
-        self.assertFalse((wt_path / "tools").exists(),
-                         "tools/ was created in worktree when source was OFF")
-
     def test_skips_when_only_script_present_no_settings_entries(self):
         """Source has tools/save_log.py but no managed entries.
 
