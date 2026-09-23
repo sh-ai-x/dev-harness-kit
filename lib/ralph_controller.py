@@ -1,7 +1,7 @@
 """Thin, file-backed RALPH worker/session boundary adapter.
 
 This module is deliberately smaller than a workflow engine.  The canonical
-workflow state remains ``skills.ralph.lib.ralph_state``; this adapter records
+workflow state remains ``lib.ralph_state``; this adapter records
 the evidence needed to resume a disposable worker turn without turning Stop
 or SessionEnd into workflow completion.
 
@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+from lib.ralph_state import RalphState
 from lib.trace_log import append_event, new_event_id
-from skills.ralph.lib.ralph_state import RalphState
 
 SCHEMA_VERSION = 1
 SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")

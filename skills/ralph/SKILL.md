@@ -157,7 +157,7 @@ JSON is the recovery source-of-truth, not the assistant's memory.
 ### CLI surface
 
 ```bash
-python3 -m skills.ralph.lib.ralph_chain \
+python3 -m lib.ralph_chain \
   --project-root . --session default \
   run-attended --dispatch noop   # dry-run: SHIP exits 0 → USER_MERGE_REQUIRED
 ```
@@ -187,11 +187,11 @@ GATE_ORDER = [RESEARCH_GATE, PROPOSAL_GATE, PLAN_GATE,
 CLI:
 
 ```bash
-python3 -m skills.ralph.lib.ralph_state --project-root . init "add a hello-world skill"
-python3 -m skills.ralph.lib.ralph_state --project-root . show
-python3 -m skills.ralph.lib.ralph_state --project-root . transition PLAN_GATE --action "user approved proposal"
-python3 -m skills.ralph.lib.ralph_state --project-root . rewind PROPOSAL_GATE --reason "user edits ambiguity A2"
-python3 -m skills.ralph.lib.ralph_state --project-root . can-ask  # exits 0 if Ask allowed, 1 if locked
+python3 -m lib.ralph_state --project-root . init "add a hello-world skill"
+python3 -m lib.ralph_state --project-root . show
+python3 -m lib.ralph_state --project-root . transition PLAN_GATE --action "user approved proposal"
+python3 -m lib.ralph_state --project-root . rewind PROPOSAL_GATE --reason "user edits ambiguity A2"
+python3 -m lib.ralph_state --project-root . can-ask  # exits 0 if Ask allowed, 1 if locked
 ```
 
 ## Linear is OUT OF SCOPE

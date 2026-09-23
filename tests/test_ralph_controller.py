@@ -1,9 +1,8 @@
 """Tests for the thin RALPH worker/session boundary adapter."""
 
 # ruff: noqa: I001  # isort's first-party detection breaks under pre-commit's
-# staged-checkout (skills.ralph.lib gets mis-classified as third-party). The
-# import order below is correct in the project root where both lib/ and
-# skills/ are first-party siblings.
+# staged-checkout. The promotion to lib/ (inspect-pass4 finding a1) puts
+# ralph_state on the canonical first-party surface.
 from __future__ import annotations
 
 import json
@@ -11,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from lib import ralph_controller
-from skills.ralph.lib import ralph_state
+from lib import ralph_state
 
 
 def _attended_state(root: Path, session: str = "ralph") -> None:
