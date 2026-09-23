@@ -281,22 +281,31 @@ class CrossRepoRefTests(unittest.TestCase):
         self.assertIn("repos/other-owner/other-repo/issues/800", called_with)
 
     def test_missing_owner_with_no_repo_errors(self):
-        """Bare `#N` with no --repo supplied must error (the missing-owner
-        branch in `_check_ref_states`), not silently default."""
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = issue_sync.main(
-                [
-                    "pre-push",
-                    "--pr-body",
-                    "Closes #900",
-                    "--json",
-                ]
-            )
-        self.assertEqual(rc, 1)
-        result = json.loads(buf.getvalue())
-        self.assertEqual(len(result["errors"]), 1)
-        self.assertIn("no owner/repo", result["errors"][0]["message"])
+        """Bare `#N` with no --repo and no GITHUB_REPOSITORY must error
+        (the missing-owner branch in `_check_ref_states`), not silently
+        default. CI sets ``GITHUB_REPOSITORY`` so we pop it for this test."""
+        # Strip GITHUB_REPOSITORY so the parser can't fall through to the
+        # env-based default and call `gh api` (which would error with rc=4
+        # in CI rather than the missing-owner branch).
+        saved = os.environ.pop("GITHUB_REPOSITORY", None)
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = issue_sync.main(
+                    [
+                        "pre-push",
+                        "--pr-body",
+                        "Closes #900",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            result = json.loads(buf.getvalue())
+            self.assertEqual(len(result["errors"]), 1)
+            self.assertIn("no owner/repo", result["errors"][0]["message"])
+        finally:
+            if saved is not None:
+                os.environ["GITHUB_REPOSITORY"] = saved
 
 
 class CliSubprocessIntegrationTests(unittest.TestCase):

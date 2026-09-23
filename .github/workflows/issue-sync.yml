@@ -128,7 +128,7 @@ jobs:
           # this step treated `.json.refs` as a literal path, which is
           # why the gate silently printed `reference_count=0` on every
           # run even when refs were present.
-          COUNT=$(jq '.refs | length' /tmp/issue-sync-result.json // 0)
+          COUNT=$(jq -r '.refs | length // 0' /tmp/issue-sync-result.json)
           echo "reference_count=$COUNT" >> "$GITHUB_OUTPUT"
 
           # Surface warnings (always informational, even in strict
