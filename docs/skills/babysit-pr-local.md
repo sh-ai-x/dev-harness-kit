@@ -55,7 +55,7 @@ This keeps the loop moving without modifying the workflow to silence an OIDC fai
 ## Related
 
 - [`/dev-kit:babysit-pr`](babysit-pr.md) — the GH-Actions-mode sibling; it re-runs only the specific failing check locally (step 8) and has no broad pre-push test gate.
-- [`bin/babysit-pr-local.sh`](../../bin/babysit-pr-local.sh) — single-call wrapper script (≈70 lines).
+- [`bin/babysit-pr-local.sh`](../../bin/babysit-pr-local.sh) — single-call wrapper script (~250 lines). Set `BABYSIT_LOCK_PARENT=<dir>` to override the per-PR lock directory (used by the hermetic test suite so a wrapper run in a tmpdir can't collide with a stale lock from a prior subprocess).
 - [`bin/review-local.sh`](../../bin/review-local.sh) — local equivalent of the GH-Actions review workflow.
 - [`bin/babysit-pr-local-status.py`](../../bin/babysit-pr-local-status.py) — read-only one-line ANSI summary of the active PR's gate state; consumed by Claude Code's statusLine, Codex's `[tui.status_line]`, and this skill's per-iteration tail.
 - [`docs/local-ci.md`](../local-ci.md) — full local-CI playbook (when / when not / how).
