@@ -92,12 +92,6 @@ def _read_alpha(project_root: Path, skill_name: str) -> tuple[Optional[str], boo
     return (alpha, alpha in VALID_ALPHA)
 
 
-def _py_modules(dirpath: Path) -> set:
-    if not dirpath.is_dir():
-        return set()
-    return {p.stem for p in dirpath.glob("*.py")} - {"__init__"}
-
-
 def audit_hooks(project_root: Path) -> HarnessAudit:
     hooks_dir = project_root / "hooks"
     found_hooks = {p.name for p in hooks_dir.glob("*.sh")} if hooks_dir.is_dir() else set()
