@@ -35,6 +35,7 @@ from typing import Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 import llm_judge  # type: ignore
 from atomic import atomic_write_json, now_iso  # noqa: E402
+
 from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
     CaseResult,
     RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry

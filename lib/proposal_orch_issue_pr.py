@@ -35,10 +35,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
-from lib.atomic import atomic_write_text
-from lib.gh_cli import gh_available
 
 from lib import render_proposal_html
+from lib.atomic import atomic_write_text
+from lib.gh_cli import gh_available
 
 # ----- Constants -------------------------------------------------------------
 
