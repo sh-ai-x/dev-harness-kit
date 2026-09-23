@@ -62,6 +62,27 @@ if [ ! -f "$ISSUE_SYNC" ]; then
   exit 0
 fi
 
+# Resolve the same-repo identity (`owner/repo`) so the parser can
+# build `repos/<owner>/<repo>/issues/<N>` paths for refs like `#N`
+# without a cross-repo keyword. Mirrors `$GITHUB_REPOSITORY` in the
+# remote workflow. Falls back to empty string if no origin remote
+# is configured (the parser then degrades to error-on-unknown-ref,
+# matching the strict contract). Implemented in Python (rather than
+# sed) so the pattern stays portable across BSD sed (macOS default)
+# and GNU sed.
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}"
+if [ -z "$GITHUB_REPOSITORY" ]; then
+  ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || true)"
+  if [ -n "$ORIGIN_URL" ]; then
+    GITHUB_REPOSITORY="$(python3 -c "
+import re,sys
+m=re.match(r'^(?:git@|ssh://git@|https?://)?[^:/]+[:/](.+?)(?:\.git)?$', sys.argv[1])
+print(m.group(1) if m else '')
+" "$ORIGIN_URL" 2>/dev/null || true)"
+  fi
+fi
+export GITHUB_REPOSITORY
+
 # ── Stage 1: issue-sync (always-on, strict) ──────────────────────────────
 # Reads commits via `git log origin/main..HEAD --format=%B` and runs the
 # same `gh api` check the remote workflow does. Strict mode (default for

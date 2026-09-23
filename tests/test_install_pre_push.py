@@ -30,16 +30,28 @@ HOOK_SRC = REPO_ROOT / "hooks" / "pre-push.sh"
 INSTALL = REPO_ROOT / "bin" / "install-pre-push.sh"
 
 
+# Shared identity for both `_make_repo` (its own `git commit`) and
+# `_run_install` (the install script's own `git config`-side calls).
+# CI runners leave `user.name` / `user.email` unset, which makes a bare
+# `git commit` exit 128 with `fatal: empty ident name`. Setting the env
+# vars + the global gitconfig pointers here guarantees the fixture works
+# whether the parent process inherited those values from the host
+# shell or not. The fixture is the source of truth; callers must
+# inherit its env for any nested `subprocess.run` that touches git.
+GIT_IDENTITY_ENV = {
+    "PATH": "/usr/bin:/bin:/usr/local/bin",
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+}
+
+
 def _run_install(repo: Path, extra_args: list[str] | None = None,
                  env_extra: dict | None = None) -> subprocess.CompletedProcess:
-    env = {
-        **os.environ,
-        "PATH": "/usr/bin:/bin:/usr/local/bin",
-        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x",
-        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x",
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-    }
+    env = {**os.environ, **GIT_IDENTITY_ENV}
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -57,12 +69,13 @@ def _make_repo(tmp: Path) -> tuple[Path, Path]:
     """
     repo = tmp / "repo"
     repo.mkdir()
+    env = {**os.environ, **GIT_IDENTITY_ENV}
     subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(repo)],
-                   check=True)
+                   check=True, env=env)
     (repo / "README.md").write_text("hi\n")
-    subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True, env=env)
     subprocess.run(["git", "-C", str(repo), "commit", "-m", "init", "--quiet"],
-                   check=True)
+                   check=True, env=env)
     # Mirror the source hook so `install-pre-push.sh` can find it.
     hooks = repo / "hooks"
     hooks.mkdir()

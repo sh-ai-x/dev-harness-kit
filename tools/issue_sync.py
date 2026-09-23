@@ -62,6 +62,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from typing import Iterable
 
@@ -277,10 +279,6 @@ def _check_ref_states(
             )
         return out
 
-    import os
-    import shutil
-    import subprocess
-
     gh = shutil.which("gh")
     if not gh:
         # ``gh`` missing — degrade to offline (matches the rationale
@@ -401,8 +399,6 @@ def _run_pre_push(args) -> int:
         # the full commit message (subject + body). When ``--base``
         # is empty, default to ``<remote>/main`` so a feature branch
         # off main is the assumed base.
-        import subprocess
-
         remote = args.remote or "origin"
         base = args.base or f"{remote}/main"
         try:

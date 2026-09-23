@@ -248,6 +248,57 @@ class MutualExclusionTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class CrossRepoRefTests(unittest.TestCase):
+    """`owner/repo#N` ref path: api_path must use the cross-repo owner/repo."""
+
+    def test_cross_repo_ref_uses_owner_repo_in_api_path(self):
+        """`Closes other-owner/other-repo#N` must call `gh api repos/other-owner/other-repo/issues/N`,
+        NOT the default --repo target."""
+        cp = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="closed\n", stderr=""
+        )
+        with patch("subprocess.run", return_value=cp) as mock_run:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = issue_sync.main(
+                    [
+                        "pre-push",
+                        "--pr-body",
+                        "Closes other-owner/other-repo#800",
+                        "--repo",
+                        "sh-ai-x/dev-harness-kit",
+                        "--json",
+                    ]
+                )
+        self.assertEqual(rc, 1)
+        result = json.loads(buf.getvalue())
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertEqual(result["errors"][0]["ref"], "other-owner/other-repo#800")
+        # Verify the api_path used the cross-repo owner/repo, not --repo.
+        called_with = mock_run.call_args[0][0]
+        self.assertEqual(Path(called_with[0]).name, "gh")
+        self.assertEqual(called_with[1], "api")
+        self.assertIn("repos/other-owner/other-repo/issues/800", called_with)
+
+    def test_missing_owner_with_no_repo_errors(self):
+        """Bare `#N` with no --repo supplied must error (the missing-owner
+        branch in `_check_ref_states`), not silently default."""
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = issue_sync.main(
+                [
+                    "pre-push",
+                    "--pr-body",
+                    "Closes #900",
+                    "--json",
+                ]
+            )
+        self.assertEqual(rc, 1)
+        result = json.loads(buf.getvalue())
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn("no owner/repo", result["errors"][0]["message"])
+
+
 class CliSubprocessIntegrationTests(unittest.TestCase):
     """End-to-end subprocess test (mirrors tests/test_issue_sync.py)."""
 

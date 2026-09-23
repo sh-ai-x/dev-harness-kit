@@ -243,9 +243,12 @@ class OptInTests(unittest.TestCase):
             # In a clean repo with no tests/, pytest exits non-zero
             # ("no test ran" or "file not found"). The hook surfaces
             # that as exit 1 with `pytest` mentioned in stdout/stderr.
-            self.assertTrue(
-                cp.returncode in (0, 1),
-                msg=f"unexpected rc={cp.returncode} stdout={cp.stdout!r}",
+            self.assertNotEqual(
+                cp.returncode, 0,
+                msg=(
+                    f"hook returned 0 — pytest was silently skipped; "
+                    f"stdout={cp.stdout!r} stderr={cp.stderr!r}"
+                ),
             )
             # The opt-in branch must mention pytest.
             joined = cp.stdout + cp.stderr

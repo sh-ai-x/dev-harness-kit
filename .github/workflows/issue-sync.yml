@@ -122,7 +122,13 @@ jobs:
           python3 tools/issue_sync.py pre-push "${FLAGS[@]}" \
             > /tmp/issue-sync-result.json
 
-          COUNT=$(jq 'length' /tmp/issue-sync-result.json.refs // 0)
+          # `.refs` / `.errors` are top-level keys on the JSON document
+          # (see tools/issue_sync.py `_check_ref_states` return shape);
+          # they are NOT a `.json.refs` filename. Earlier versions of
+          # this step treated `.json.refs` as a literal path, which is
+          # why the gate silently printed `reference_count=0` on every
+          # run even when refs were present.
+          COUNT=$(jq '.refs | length' /tmp/issue-sync-result.json // 0)
           echo "reference_count=$COUNT" >> "$GITHUB_OUTPUT"
 
           # Surface warnings (always informational, even in strict
@@ -135,7 +141,7 @@ jobs:
             /tmp/issue-sync-result.json || true
 
           # Final verdict.
-          ERRORS=$(jq 'length' /tmp/issue-sync-result.json.errors)
+          ERRORS=$(jq '.errors | length' /tmp/issue-sync-result.json)
           if [ "$ERRORS" -gt 0 ]; then
             echo "::error title=issue-sync::PR references $ERRORS issue(s) in a state that fails the gate; sync cannot match."
             echo "::error title=issue-sync::Fix: either re-open the issue(s), remove the reference from the PR body, or open a new issue and replace the ref."
