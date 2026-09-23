@@ -156,8 +156,8 @@ sections:
       2. **40-60% context utilization** — fits the HumanLayer pattern.
       3. **Plan is reviewable** before code is written.
       4. **Reusable across sessions** — same plan can be resumed.
-      5. **Composes with existing skills** — `skills/research/` and
-         `skills/valuate/` already use `lib/analysis_core/`.
+      5. **Composes with existing skills** — `skills/research/` already
+         uses `lib/analysis_core/`.
 
       ### Updated cons (2, was 3)
 

@@ -61,7 +61,6 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`proposal-orch-issue-pr`](proposal-orch-issue-pr/SKILL.md) | `state` | 0-arg orchestrator-first GitHub backlog triage. Gathers open PRs + issues, scores (bottleneck / risk / change containment), orders by orchestrator critical path, and writes a proposal YAML + HTML via the existing `/dev-… |
 | [`research`](research/SKILL.md) | `enforcement` | 0-arg research gate. Run Phase 0-3 escalation (cache / direct / multi / human) + verify() + enforce_citations(). /dev-kit:research <claim> [--max-phase N]. |
 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `state` | Interview-based Single Source of Truth harness document writer (5 rounds × 2-3 evidence-backed recommendations, full traceability, hands off to /dev-kit:plan). |
-| [`valuate`](valuate/SKILL.md) 🔒 | `enforcement` | Plan-value gate. Scores a plan on 6 axes via LLM judge and returns proceed / revise / hold / kill. Verdict envelope persists to .dev-kit/valuations/<plan-id>.json. |
 
 ### `eval` (2)
 
@@ -175,6 +174,5 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 47 | [`sync-version`](sync-version/SKILL.md) | `config` | `state` | human |
 | 48 | [`team`](team/SKILL.md) | `config` | `state` | human |
 | 49 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
-| 50 | [`valuate`](valuate/SKILL.md) | `design` | `enforcement` | model |
-| 51 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
+| 50 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
 

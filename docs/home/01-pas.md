@@ -111,7 +111,7 @@ and the matrix in [`hooks/index.md`](../../hooks/index.md).
 The same plugin pins a stage spec:
 
 ```
-bootstrap → (evidence-plan?) → plan → valuate → build → review → security → ship
+bootstrap → (evidence-plan?) → plan → build → review → security → ship
 ```
 
 Each stage owns its own slash (`/dev-kit:plan`, `/dev-kit:build`,

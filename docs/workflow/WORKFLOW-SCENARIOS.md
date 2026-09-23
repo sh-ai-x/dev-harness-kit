@@ -23,7 +23,6 @@ section has a 2-4 sentence pointer for each case.
 |---|---|---|
 | Build stopped partway (you closed the terminal, hit an error, or paused) | Re-run `/dev-kit:build` — it resumes from the first unfinished step | [Case 1](#case-1-a-build-that-stopped-partway) |
 | You're back on a different day or a different terminal and lost your place | `/dev-kit:status` plus `phases/<name>/index.json` shows the current worktree state | [Case 2](#case-2-coming-back-from-a-different-terminal-or-day) |
-| You don't want to run the Valuate step | Just skip it — it's advisory, nothing blocks the build | [Case 3](#case-3-skipping-the-valuate-step) |
 | You want to go straight to Build without a full Plan | Scope Plan tightly, or hand-seed a one-step phase file — there is no bypass flag | [Case 4](#case-4-skipping-straight-to-build-without-a-full-plan) |
 
 ---
@@ -106,33 +105,7 @@ session index.
 
 ---
 
-## Case 3: skipping the Valuate step
-
-`valuate` scores a plan on six axes and returns a verdict —
-`proceed`, `revise`, `hold`, or `kill`. It's a sanity check on *whether the plan
-is worth building*, not a build step.
-
-**Nothing stops the build if it returns `kill`.** Today Valuate is advisory:
-
-- As of PR #589 `valuate` is **model-invocable only** — `/dev-kit:plan` and other
-  planning stages call into the rubric; the slash is no longer in the user menu,
-  so there's nothing for you to run by hand.
-- `/dev-kit:build` does **not** require a Valuate verdict to run. There used to
-  be an auto-gate that refused to build on a non-`proceed` verdict; it was removed
-  in PR #463 along with the state substrate it depended on.
-- If the planning stage writes a `hold` / `revise` / `kill` envelope to
-  `.dev-kit/valuations/<plan-id>.json`, the build proceeds regardless. You (or a
-  reviewer) are expected to read the envelope by hand and decide whether to
-  heed it. No flag or override exists.
-
-**When it's still worth running:** for anything non-trivial, a `kill` or `hold`
-verdict is cheap insight before you spend build time. Skipping it is fine for
-small, obviously-worth-it changes; running it is a low-cost gut check for bigger
-ones.
-
----
-
-## Case 4: skipping straight to Build without a full Plan
+## Case 3: skipping straight to Build without a full Plan
 
 A common wish: "this is tiny, I don't want a whole PRD, let me just build."
 
@@ -172,7 +145,7 @@ is nothing to verify against, which is the whole point of the harness.
 ## See also
 
 - [`docs/stages/STAGES.md`](../stages/STAGES.md) — the full per-stage spec (what
-  each of bootstrap / plan / valuate / build / review / security / ship must do).
+  each of bootstrap / plan / build / review / security / ship must do).
 - [`docs/skills/build.md`](../skills/build.md) — the Build skill in detail.
 - [`docs/skills/log.md`](../skills/log.md) — optional local telemetry for
   token and skill-usage analysis.
