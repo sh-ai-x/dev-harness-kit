@@ -61,11 +61,47 @@ def _make_fake_loghooks(tmp: Path) -> Path:
     return src
 
 
-def _make_fake_target(tmp: Path) -> Path:
+def _make_fake_target(tmp: Path, *, log_state: str = "on") -> Path:
+    """Fake git checkout.
+
+    log_state:
+      "on"  — target has tools/save_log.py + .claude/settings.json
+              carrying _loghooks_managed=true entries. The hook should
+              propagate this state into the new worktree.
+      "off" — target has neither. The hook should skip the install.
+    """
     tgt = tmp / "target"
     (tgt / ".claude" / "worktrees").mkdir(parents=True)
     _git(tgt, "init", "-q")
     (tgt / "f").write_text("init")
+    _git(tgt, "add", ".")
+
+    if log_state == "on":
+        # Mirror a real `/dev-kit:log on` install: tools/save_log.py +
+        # .claude/settings.json managed entries.
+        _git(tgt, "mkdir", "-p", "tools", "-q", check=False)
+        (tgt / "tools").mkdir(parents=True, exist_ok=True)
+        (tgt / "tools" / "save_log.py").write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json\n"
+            "open('logs/__noop__','w').close()\n"
+        )
+        (tgt / "tools" / "save_log.py").chmod(0o755)
+        (tgt / ".claude").mkdir(parents=True, exist_ok=True)
+        (tgt / ".claude" / "settings.json").write_text(json.dumps({
+            "hooks": {
+                # _loghooks_managed lives on the matcher-level object
+                # (matches the real merge path at scripts/lib.sh:194-205
+                # which adds ($sentinel): true to the matcher entry).
+                "Stop": [{"hooks": [{"type": "command",
+                                      "command": 'for i in python3 python py; do if "$i" -c "" </dev/null >/dev/null 2>&1; then exec "$i" "${CLAUDE_PROJECT_DIR}/tools/save_log.py" --tool claude-code; fi; done'}],
+                          "_loghooks_managed": True}],
+                "SessionEnd": [{"hooks": [{"type": "command",
+                                            "command": 'for i in python3 python py; do if "$i" -c "" </dev/null >/dev/null 2>&1; then exec "$i" "${CLAUDE_PROJECT_DIR}/tools/save_log.py" --tool claude-code; fi; done'}],
+                                "_loghooks_managed": True}],
+            }
+        }))
+
     _git(tgt, "add", ".")
     _git(tgt, "-c", "user.email=t@t", "-c", "user.name=t",
          "commit", "-q", "-m", "init")
@@ -87,9 +123,16 @@ class TestWorktreeLogAutoInstall(unittest.TestCase):
             self.skipTest(f"hook not found: {HOOK}")
         self.tmp = Path(tempfile.mkdtemp(prefix="wtlog-auto-"))
         self.src = _make_fake_loghooks(self.tmp)
-        self.tgt = _make_fake_target(self.tmp)
+        # Default: target is "log on" state. Per-repo OFF cases override
+        # this in their own setUp / via a fresh target.
+        self.tgt = _make_fake_target(self.tmp, log_state="on")
         self.env = {"LOGHOOKS_DIR": str(self.src),
                     "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+
+    def _make_off_target(self) -> Path:
+        """Independent target with log OFF (no save_log.py, no managed
+        entries). Used by the per-repo OFF tests."""
+        return _make_fake_target(self.tmp / "off_child", log_state="off")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -183,6 +226,87 @@ class TestWorktreeLogAutoInstall(unittest.TestCase):
         r = _drive_hook(payload, env_extra=self.env)
         self.assertEqual(r.returncode, 0)
         self.assertNotIn("hooks installed", r.stderr)
+
+    # ----- per-repo log-state gate (fix/log-per-repo-state-gate) -----
+    #
+    # When the source repo has /dev-kit:log OFF, the hook MUST skip the
+    # auto-install in the new worktree — otherwise an OFF repo flips to
+    # ON silently on every `git worktree add`, which is the bug being
+    # fixed. Detection signal: managed entries + tools/save_log.py.
+
+    def test_skips_when_source_log_off(self):
+        """Source repo: /dev-kit:log OFF → no install in new worktree."""
+        off_tgt = self._make_off_target()
+        wt_path = off_tgt / ".claude" / "worktrees" / "wt-off"
+        _git(off_tgt, "worktree", "add", "-b", "fix/off-x", str(wt_path))
+        self.assertTrue(wt_path.exists())
+
+        payload = {
+            "tool_input": {"command": f"git worktree add -b fix/off-x {wt_path}"},
+            "cwd": str(off_tgt),
+        }
+        r = _drive_hook(payload, env_extra=self.env)
+        self.assertEqual(r.returncode, 0,
+                         f"hook failed: stdout={r.stdout} stderr={r.stderr}")
+        # Source-OFF path: must NOT install.
+        self.assertNotIn("hooks installed", r.stderr,
+                         f"unexpected install: {r.stderr}")
+        self.assertIn("OFF", r.stderr)
+        # And no save_log.py should land in the new worktree.
+        self.assertFalse((wt_path / "tools" / "save_log.py").exists(),
+                         "save_log.py leaked into worktree when source was OFF")
+        self.assertFalse((wt_path / ".claude" / "settings.json").exists(),
+                         "settings.json was created in worktree when source was OFF")
+
+    def test_skips_when_only_script_present_no_settings_entries(self):
+        """Source has tools/save_log.py but no managed entries.
+
+        This is the post-`log setup` / pre-`log on` state. The strict
+        gate (managed entries required, not just script presence) treats
+        this as OFF — the user has not opted in to capture yet.
+        """
+        off_tgt = self._make_off_target()
+        # Add only the script — no settings.json managed entries.
+        (off_tgt / "tools").mkdir(parents=True, exist_ok=True)
+        (off_tgt / "tools" / "save_log.py").write_text(
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n"
+        )
+        (off_tgt / "tools" / "save_log.py").chmod(0o755)
+        _git(off_tgt, "add", "tools")
+        _git(off_tgt, "-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "-q", "-m", "script only")
+
+        wt_path = off_tgt / ".claude" / "worktrees" / "wt-script-only"
+        _git(off_tgt, "worktree", "add", "-b", "fix/script-only", str(wt_path))
+
+        payload = {
+            "tool_input": {"command": f"git worktree add -b fix/script-only {wt_path}"},
+            "cwd": str(off_tgt),
+        }
+        r = _drive_hook(payload, env_extra=self.env)
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("hooks installed", r.stderr)
+        self.assertFalse((wt_path / ".claude" / "settings.json").exists(),
+                         "settings.json was created when source had no managed entries")
+
+    def test_installs_when_source_log_on(self):
+        """Regression: when source is ON, hook must still install.
+
+        Asserted separately from the older test_auto_installs_on_*
+        tests so the OFF→ON inversion is its own readable case.
+        """
+        # self.tgt is created with log_state="on" by setUp.
+        wt_path = self.tgt / ".claude" / "worktrees" / "wt-on"
+        _git(self.tgt, "worktree", "add", "-b", "fix/on-y", str(wt_path))
+
+        payload = {
+            "tool_input": {"command": f"git worktree add -b fix/on-y {wt_path}"},
+            "cwd": str(self.tgt),
+        }
+        r = _drive_hook(payload, env_extra=self.env)
+        self.assertEqual(r.returncode, 0, f"hook failed: {r.stderr}")
+        self.assertIn("hooks installed", r.stderr)
+        self.assertTrue((wt_path / "tools" / "save_log.py").exists())
 
 
 if __name__ == "__main__":
