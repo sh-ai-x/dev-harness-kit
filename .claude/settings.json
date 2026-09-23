@@ -25,7 +25,16 @@
         "_loghooks_managed": true
       }
     ],
-    "SessionStart": [],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "DEV_KIT_AGENT=claude-code bash \"${CLAUDE_PROJECT_DIR}/bin/install-pre-push.sh\""
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

@@ -11,7 +11,7 @@ provider swaps. These tests pin the contract:
 4. Missing evidence is reported as INSUFFICIENT_EVIDENCE, never 0.0.
 5. The submetric exposes coverage + score/status + findings +
    evidence_event_ids.
-6. The 5-component `overall_score` contract is preserved (weights
+6. The 4-component `overall_score` contract is preserved (weights
    still sum to 1.0, schema_version is bumped to advertise the new
    stability evidence).
 """
@@ -55,7 +55,7 @@ def _event(root: Path, *, event_id: str, event_type: str, subject: str,
 
 def _full_event_corpus(tmp_path: Path, *, identity=None) -> None:
     """Emit the minimum event set that scores all four shippable
-    components to 100.0 (and leaves learning_quality unscored).
+    components to 100.0.
     """
 
     def emit(event_id, event_type, subject, outcome, ts, parent=None, **evidence):
@@ -165,7 +165,7 @@ def test_model_swap_does_not_change_verdict(tmp_path: Path) -> None:
     """Re-running the reducer with a different model identity yields a
     byte-identical verdict for the four shippable components. The
     stability submetric may legitimately differ (it reports coverage of
-    the new identity), but the 5-component `overall_score` + the four
+    the new identity), but the 4-component `overall_score` + the four
     shippable component scores are invariant."""
     opus_path = tmp_path / "opus"
     haiku_path = tmp_path / "haiku"
@@ -383,7 +383,7 @@ def test_neutrality_drops_when_evidence_ref_couples_to_agent(tmp_path: Path) -> 
 
 
 def test_overall_score_remains_number_when_only_stability_missing(tmp_path: Path) -> None:
-    """A missing stability submetric must NOT collapse the 5-component
+    """A missing stability submetric must NOT collapse the 4-component
     overall_score to None; the four shippable components still produce
     a meaningful score."""
     _full_event_corpus(tmp_path)
@@ -451,22 +451,22 @@ def test_stability_submetric_top_level_shape_uses_submetric_helper(tmp_path):
     assert 'weight' not in stability, 'stability submetric must NOT carry a weight field'
 
 # ---------------------------------------------------------------------------
-# Backward compatibility for the 5-component contract
+# Backward compatibility for the 4-component contract
 # ---------------------------------------------------------------------------
 
 def test_compact_weights_still_sum_to_one() -> None:
-    """The 5-component contract is preserved: weights sum to 1.0, no
+    """The 4-component contract is preserved: weights sum to 1.0, no
     new top-level weight is added for stability."""
     assert sum(COMPONENT_WEIGHTS.values()) == 1.0
     assert set(COMPONENT_WEIGHTS.keys()) == {
         "prevention_quality", "first_pass_quality",
-        "recovery_quality", "learning_quality", "measurement_integrity",
+        "recovery_quality", "measurement_integrity",
     }
 
 
 def test_schema_version_is_bumped_to_advertise_stability(tmp_path: Path) -> None:
     """build_report bumps schema_version so consumer code can detect the
-    new stability evidence and opt in. Existing 5-component consumers
+    new stability evidence and opt in. Existing 4-component consumers
     continue to work because the top-level shape (components /
     overall_score / status / event_count / contract_version) is intact."""
     import tempfile
@@ -487,12 +487,13 @@ def test_event_schema_version_unchanged() -> None:
 
 # --- Issue #702: schema_version bump + submetric nesting pin -----------
 
-def test_schema_version_is_three_after_subject_observability(tmp_path: Path) -> None:
-    """Issue #702: schema_version bumped 2 -> 3 to advertise the nested
-    subject_observability submetric. Top-level shape is unchanged."""
+def test_schema_version_is_four_after_learning_quality_removal(tmp_path: Path) -> None:
+    """schema_version bumped 3 -> 4 to advertise removal of the
+    `learning_quality` top-level component. Top-level shape is
+    otherwise unchanged."""
     from lib.harness_effectiveness import build_report
     report = build_report(tmp_path)
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     for key in ("components", "overall_score", "status", "event_count",
                 "contract_version"):
         assert key in report
@@ -500,13 +501,13 @@ def test_schema_version_is_three_after_subject_observability(tmp_path: Path) -> 
 
 def test_compact_weights_still_sum_to_one_after_subject_observability(tmp_path: Path) -> None:
     """Issue #702: subject_observability is a nested submetric, not a
-    6th top-level component. Weights still sum to 1.0 and the key set
+    5th top-level component. Weights still sum to 1.0 and the key set
     is unchanged (matches the issue #663 precedent)."""
     from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
     assert sum(COMPONENT_WEIGHTS.values()) == 1.0
     assert set(COMPONENT_WEIGHTS.keys()) == {
         "prevention_quality", "first_pass_quality",
-        "recovery_quality", "learning_quality", "measurement_integrity",
+        "recovery_quality", "measurement_integrity",
     }
     report = build_report(tmp_path)
     assert "subject_observability" in (

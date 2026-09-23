@@ -30,6 +30,11 @@ source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
+# Source shared per-repo log-state detector (see hooks/lib/log_state.sh
+# for the rationale — managed entries + script presence).
+# shellcheck source=lib/log_state.sh
+source "$SCRIPT_DIR/lib/log_state.sh" 2>/dev/null || true
+
 if ! command -v jq >/dev/null 2>&1; then
   echo "worktree-log-auto-install: jq missing; skipping auto-install (run /dev-kit:log setup manually)" >&2
   exit 0
@@ -115,6 +120,37 @@ fi
 # silently if the dir vanished.
 if [[ ! -d "$NEW_WT" ]]; then
   echo "worktree-log-auto-install: new dir does not exist: $NEW_WT" >&2
+  exit 0
+fi
+
+# Per-repo gate: propagate the source repo's log-on state to the new
+# worktree. Source repo = main checkout of the cwd from which
+# `git worktree add` was invoked. Prefer the hook payload's cwd (more
+# authoritative than $PWD — the hook process may not have the same
+# cwd as the user's terminal), fall back to $PWD if missing.
+SRC_CWD="$CWD_FROM_HOOK"
+[[ -z "$SRC_CWD" || ! -d "$SRC_CWD" ]] && SRC_CWD="$PWD"
+
+# Resolve main-checkout of $SRC_CWD. `--path-format=absolute --git-common-dir`
+# forces an absolute path to the shared .git/ dir; the main checkout is
+# one level up. From a worktree the common-dir still points at the main
+# checkout's .git/, so `..` is the main checkout. Falls through silently
+# if $SRC_CWD is not in a git working tree.
+SRC_REPO=""
+COMMON_DIR="$(git -C "$SRC_CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+# Defense in depth: `--path-format` is supported in git 2.31+, but on
+# older versions relative paths may slip through. If non-empty and not
+# absolute, prefix with $SRC_CWD before cd.
+if [[ -n "$COMMON_DIR" ]]; then
+  case "$COMMON_DIR" in
+    /*) ;;
+    *)  COMMON_DIR="$SRC_CWD/$COMMON_DIR" ;;
+  esac
+  SRC_REPO="$(cd "$COMMON_DIR/.." 2>/dev/null && pwd || true)"
+fi
+
+if ! is_source_log_on "$SRC_REPO"; then
+  echo "worktree-log-auto-install: source repo log is OFF; skipping auto-install in $NEW_WT" >&2
   exit 0
 fi
 

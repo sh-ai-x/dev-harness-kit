@@ -263,18 +263,30 @@ then
   exit 0
 fi
 
-# Bootstrap: run /dev-kit:log setup + /dev-kit:log on inside the new
-# worktree so the delegated subagent's work is captured. Falls
-# through silently if either script is missing (e.g. dev-kit plugin
-# not yet installed in the consumer project).
-LOG_SETUP="$PLUGIN_ROOT/skills/log/scripts/log-setup.sh"
-LOG_ON="$PLUGIN_ROOT/skills/log/scripts/log-on.sh"
+# Per-repo gate: propagate source repo's log-on state to the new
+# worktree. See hooks/lib/log_state.sh for the detection rationale
+# (managed entries + script presence). At this point the hook has
+# already gated on WORKTREE_DETECT=main (see case-statement above),
+# so $PWD is the main checkout = the source repo.
+# shellcheck source=hooks/lib/log_state.sh
+source "$PLUGIN_ROOT/hooks/lib/log_state.sh" 2>/dev/null || true
 
-if [ -f "$LOG_SETUP" ]; then
-  (cd "$WT_PATH" && TARGET_DIR="$WT_PATH" bash "$LOG_SETUP" >/dev/null 2>&1) || true
-fi
-if [ -f "$LOG_ON" ]; then
-  (cd "$WT_PATH" && TARGET_DIR="$WT_PATH" bash "$LOG_ON" >/dev/null 2>&1) || true
+if ! is_source_log_on "$PWD"; then
+  echo "worktree-auto-cut: source repo log is OFF; skipping auto-install in $WT_PATH" >&2
+else
+  # Bootstrap: run /dev-kit:log setup + /dev-kit:log on inside the new
+  # worktree so the delegated subagent's work is captured. Falls
+  # through silently if either script is missing (e.g. dev-kit plugin
+  # not yet installed in the consumer project).
+  LOG_SETUP="$PLUGIN_ROOT/skills/log/scripts/log-setup.sh"
+  LOG_ON="$PLUGIN_ROOT/skills/log/scripts/log-on.sh"
+
+  if [ -f "$LOG_SETUP" ]; then
+    (cd "$WT_PATH" && TARGET_DIR="$WT_PATH" bash "$LOG_SETUP" >/dev/null 2>&1) || true
+  fi
+  if [ -f "$LOG_ON" ]; then
+    (cd "$WT_PATH" && TARGET_DIR="$WT_PATH" bash "$LOG_ON" >/dev/null 2>&1) || true
+  fi
 fi
 
 # Linear bootstrap: trigger one auto-sync round in the new worktree

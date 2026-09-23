@@ -236,8 +236,8 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | [`/dev-kit:log`](docs/skills/log.md) | Turns session logging on/off — feeds `token-analyzer` and `skill-usage`. |
 | [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | Shows which skills you actually use, and how much — useful for pruning. |
 | [`/dev-kit:sot-harness-writer`](docs/skills/sot-harness-writer.md) | Interview-based Single Source of Truth harness document writer — hands off to `/dev-kit:plan`. |
-| [`/dev-kit:evaluate`](docs/skills/evaluate.md) | LLM-judge eval across registered rubrics + the five-component harness-effectiveness report. Programmatic gate after any harness change. |
-| [`/dev-kit:harness-effectiveness`](docs/skills/harness-effectiveness.md) | The five-component scorecard (prevention / first-pass / recovery / learning / measurement-integrity) standalone — sub-second, zero API spend. |
+| [`/dev-kit:evaluate`](docs/skills/evaluate.md) | LLM-judge eval across registered rubrics + the four-component harness-effectiveness report. Programmatic gate after any harness change. |
+| [`/dev-kit:harness-effectiveness`](docs/skills/harness-effectiveness.md) | The four-component scorecard (prevention / first-pass / recovery / measurement-integrity) standalone — sub-second, zero API spend. |
 | [`/dev-kit:prune-propose`](docs/skills/prune-propose.md) | Usage-telemetry dump + per-skill delete proposal, each deletion approved explicitly. The evidence step before `/dev-kit:prune`. |
 | [`/dev-kit:worktree-prune`](skills/worktree-prune/SKILL.md) | Counts registered worktrees, lists them oldest-first by branch-tip age, removes the N oldest behind a y/N gate. |
 | [`/dev-kit:llm-refresh`](docs/skills/llm-refresh.md) | Refreshes `docs/llm-info/<provider>.json` from each vendor's official pricing page. Diff-then-commit, never silent. |
