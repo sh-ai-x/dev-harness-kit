@@ -25,9 +25,15 @@ extract_content
 
 HITS=()
 for p in "${SECRET_PATTERNS[@]}"; do
-  MATCHES=$(echo "$CONTENT" | grep -oE "$p" 2>/dev/null | head -3 || true)
-  if [ -n "$MATCHES" ]; then
-    HITS+=("$p × $(echo "$MATCHES" | wc -l)")
+  # Capture the full grep output for an accurate count, then truncate
+  # to 3 matches before printing. The previous implementation piped
+  # through `head -3` first and counted the head-truncated stream,
+  # so the displayed count was always 1-3 regardless of the actual
+  # number of matches in the file (finding c3 in inspect-report.md).
+  ALL_MATCHES=$(echo "$CONTENT" | grep -oE "$p" 2>/dev/null || true)
+  if [ -n "$ALL_MATCHES" ]; then
+    COUNT=$(printf '%s\n' "$ALL_MATCHES" | grep -c . || true)
+    HITS+=("$p × $COUNT")
   fi
 done
 
