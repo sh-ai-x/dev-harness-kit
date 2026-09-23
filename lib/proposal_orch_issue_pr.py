@@ -31,9 +31,10 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -43,7 +44,7 @@ from lib.gh_cli import gh_available
 
 # ----- Constants -------------------------------------------------------------
 
-KST = timezone(timedelta(hours=9))
+KST = ZoneInfo("Asia/Seoul")
 
 # Orchestrator boundaries (issue #843 step 3).
 BOUNDARIES: Tuple[str, ...] = (

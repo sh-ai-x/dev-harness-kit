@@ -32,16 +32,15 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Resolve lib/ for atomic.py without coupling to a relative layout.
-_LIB_DIR = Path(__file__).resolve().parent
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-from atomic import atomic_write_json, now_iso  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .atomic import atomic_write_json, now_iso  # type: ignore
+except ImportError:
+    from atomic import atomic_write_json, now_iso  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pricing
@@ -56,7 +55,16 @@ from atomic import atomic_write_json, now_iso  # noqa: E402
 # (e.g., a partial `--strict` clone). New code MUST go through
 # ``lib.llm_pricing`` — never edit these rows.
 # ---------------------------------------------------------------------------
-from llm_pricing import pricing_for as _loader_pricing_for  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from . import llm_pricing as _llm_pricing  # type: ignore
+    from .atomic import atomic_write_json, now_iso  # type: ignore
+    from .llm_pricing import pricing_for as _loader_pricing_for  # type: ignore
+except ImportError:
+    import llm_pricing as _llm_pricing  # noqa: E402
+    from atomic import atomic_write_json, now_iso  # noqa: E402
+    from llm_pricing import pricing_for as _loader_pricing_for  # noqa: E402
 
 DEFAULT_PRICING_KEY = "sonnet"
 
@@ -64,7 +72,12 @@ DEFAULT_PRICING_KEY = "sonnet"
 # resolve. We delegate the "is this id known?" check to the public
 # ``lib.llm_pricing.is_known_model`` (issue #310 overarch) so cost_gate
 # no longer reaches into ``_pricing_cache`` (a private lru_cache).
-import llm_pricing as _llm_pricing  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from . import llm_pricing as _llm_pricing  # type: ignore
+except ImportError:
+    import llm_pricing as _llm_pricing  # noqa: E402
 
 _UNKNOWN_MODELS: List[str] = []
 

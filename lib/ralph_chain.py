@@ -59,13 +59,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Re-use the pure state machine. Add the lib dir so the "import ralph_state"
-# form works the same as in tests/test_ralph_skill.py.
-_LIB_DIR = Path(__file__).resolve().parent
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-import ralph_state as rs  # noqa: E402, I001
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from . import ralph_state as rs  # type: ignore
+except ImportError:
+    import ralph_state as rs  # noqa: E402
 
 
 # ----------------------------------------------------------------------------

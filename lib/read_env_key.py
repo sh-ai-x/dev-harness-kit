@@ -12,6 +12,8 @@ it:
 * `bin/set-provider.sh:read_provider_from_env_file()` invokes it via
   `python3 -c "from lib.read_env_key import read_env_key ..."`.
 * `lib/ci_setup.read_env_key()` is a thin wrapper around this helper.
+* `lib/llm_judge.load_config()` consumes the whole-file variant via
+  `read_env_dict()` instead of carrying a duplicated parser.
 
 Rules (also pinned by `tests/test_read_env_key.py`):
   * Return the last `KEY=...` value in `path`.
@@ -26,6 +28,48 @@ Rules (also pinned by `tests/test_read_env_key.py`):
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Dict
+
+
+def read_env_dict(path: Path) -> Dict[str, str]:
+    """Parse every `KEY=...` from a dotenv-style file.
+
+    Returns the LAST value seen for each key (dotenv's "last wins"
+    convention), skipping blanks and `#` comments. Missing or
+    unreadable files return an empty dict. Quote stripping and the
+    `export KEY=...` prefix are handled identically to
+    `read_env_key()`.
+
+    Used by `lib/llm_judge.load_config` which previously kept its own
+    9-line parser. That parser silently drifted from `read_env_key`
+    on the `export` prefix — `read_env_dict` is now the single
+    source of truth.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    out: Dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k_stripped = k.strip()
+        if k_stripped.startswith("export "):
+            k_stripped = k_stripped[len("export "):].strip()
+        elif k_stripped.startswith("export\t"):
+            k_stripped = k_stripped[len("export\t"):].strip()
+        v = v.strip()
+        if len(v) >= 2 and (
+            (v[0] == '"' and v[-1] == '"')
+            or (v[0] == "'" and v[-1] == "'")
+        ):
+            v = v[1:-1]
+        out[k_stripped] = v
+    return out
 
 
 def read_env_key(path: Path, key: str) -> str:
@@ -40,43 +84,7 @@ def read_env_key(path: Path, key: str) -> str:
         single or double quotes stripped. Empty string when the file
         is missing/unreadable or the key is not present.
     """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        # Missing file, permission denied, etc. — fall through to "".
-        # Callers chain this into provider-resolution fallbacks and
-        # expect a sentinel, never an exception.
-        return ""
-    out = ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        # Handle `export KEY=...` (bash idiom). The space after `export`
-        # is optional in some shells; tolerate both shapes.
-        k_stripped = k.strip()
-        if k_stripped.startswith("export "):
-            k_stripped = k_stripped[len("export "):].strip()
-        elif k_stripped.startswith("export\t"):
-            k_stripped = k_stripped[len("export\t"):].strip()
-        if k_stripped != key:
-            continue
-        v = v.strip()
-        # Strip a single surrounding pair of quotes (single OR double).
-        # A bare value that happens to start AND end with the SAME quote
-        # is treated as quoted; an asymmetric value (e.g. `"foo`) is
-        # returned verbatim (the user's `.env` is malformed but we
-        # surface what they wrote instead of guessing).
-        if len(v) >= 2 and (
-            (v[0] == '"' and v[-1] == '"')
-            or (v[0] == "'" and v[-1] == "'")
-        ):
-            v = v[1:-1]
-        out = v
-    return out
+    return read_env_dict(path).get(key, "")
 
 
 if __name__ == "__main__":

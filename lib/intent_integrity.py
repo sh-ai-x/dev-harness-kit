@@ -20,7 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from atomic import atomic_write_json
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .atomic import atomic_write_json  # type: ignore
+except ImportError:
+    from atomic import atomic_write_json  # type: ignore
 
 # ---------- public data shape ----------
 

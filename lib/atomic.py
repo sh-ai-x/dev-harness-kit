@@ -8,11 +8,12 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
-KST = timezone(timedelta(hours=9))
+KST = ZoneInfo("Asia/Seoul")
 
 
 def now_iso() -> str:

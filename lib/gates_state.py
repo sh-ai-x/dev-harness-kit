@@ -39,15 +39,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from atomic import atomic_write_json  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .atomic import atomic_write_json  # type: ignore
+except ImportError:
+    from atomic import atomic_write_json  # type: ignore
 
 # Dual-import gh_cli so consumer installs that land `lib/gh_cli.py` next to
 # `lib/gates_state.py` (the flat-bundle layout) keep working. Mirrors the
 # shim pattern in `lib/ci_setup.py:82-102`.
 try:
-    from lib.gh_cli import gh_available  # type: ignore
+    from .gh_cli import gh_available  # type: ignore
 except ImportError:
     from gh_cli import gh_available  # type: ignore
 

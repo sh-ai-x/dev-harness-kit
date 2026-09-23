@@ -12,16 +12,22 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analysis_core import (
-    mask_secrets as _mask_secrets,  # noqa: E402 — reuse the repo's one secret-redaction pass (promoted from private in inspect 2026-08-27 overarch-1)
-)
-from repair_coordinator import failure_signature  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .analysis_core import (  # type: ignore
+        mask_secrets as _mask_secrets,  # reuse the repo's one secret-redaction pass (promoted from private in inspect 2026-08-27 overarch-1)
+    )
+    from .repair_coordinator import failure_signature  # type: ignore
+except ImportError:
+    from analysis_core import (  # noqa: E402
+        mask_secrets as _mask_secrets,
+    )
+    from repair_coordinator import failure_signature  # noqa: E402
 
 _VERIFICATION_HEADING_RE = re.compile(
     r"##\s*Verification\s*&?\s*Status\s*Update", re.IGNORECASE

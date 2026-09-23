@@ -21,6 +21,8 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
+from lib.read_env_key import read_env_dict
+
 JUDGE_AXES: Tuple[str, ...] = (
     "semantic_drift", "completeness", "correctness", "consistency",
 )
@@ -150,17 +152,11 @@ def load_config(project_root: Path) -> Dict[str, str]:
     """Load judge config from env (or .env parser). Empty values fall back to defaults."""
     env = dict(os.environ)
     env_path = project_root / ".env"
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                k, v = line.split("=", 1)
-                cur = env.get(k.strip())
-                # .env only populates if not already in os.environ
-                if not cur:
-                    env[k.strip()] = v.strip().strip('"').strip("'")
+    # .env only populates keys not already in os.environ. read_env_dict
+    # is the SSOT .env parser (issue #711); the inline version here used
+    # to drift silently on `export` prefixes.
+    for k, v in read_env_dict(env_path).items():
+        env.setdefault(k, v)
 
     provider = _env_get(env, "JUDGE_PROVIDER", "minimax")
     api_key_var = "MINIMAX_API_KEY" if provider == "minimax" else "ANTHROPIC_API_KEY"

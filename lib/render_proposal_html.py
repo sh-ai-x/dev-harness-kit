@@ -68,15 +68,16 @@ import html
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 import yaml
 
 from lib.atomic import atomic_write_text
 
-KST = timezone(timedelta(hours=9))
+KST = ZoneInfo("Asia/Seoul")
 
 STATUS_TAG_CLASS = {
     "draft": "tag-warn",

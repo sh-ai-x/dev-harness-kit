@@ -33,9 +33,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Allow `python3 -m lib.push_intent_judge` from the repo root.
-sys.path.insert(0, str(Path(__file__).parent))
-import llm_judge  # type: ignore  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from . import llm_judge  # type: ignore
+except ImportError:
+    import llm_judge  # type: ignore  # noqa: E402
 
 PUSH_INTENT_AXES = llm_judge.DIM_AXES["push_intent"]  # 4-axis VM-1..4
 
