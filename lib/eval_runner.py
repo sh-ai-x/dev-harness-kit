@@ -32,7 +32,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Dual-import so consumer installs that ship `lib/*.py` flat (no
-# `__init__.py` in the consumer `lib/`) keep working.
+# `__init__.py` in the consumer `lib/`) keep working. Single block —
+# the fallback uses FLAT imports only; if the relative branch failed
+# ``lib`` is not a package, so ``from lib.X`` would also fail (review
+# #920 round-2: prior version mixed ``from atomic`` with
+# ``from lib.eval`` in the same except, structurally broken).
 try:
     from . import llm_judge  # type: ignore
     from .atomic import atomic_write_json, now_iso  # type: ignore
@@ -49,8 +53,7 @@ try:
 except ImportError:
     import llm_judge  # type: ignore  # noqa: E402
     from atomic import atomic_write_json, now_iso  # noqa: E402
-
-    from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
+    from eval import (  # noqa: E402  -- single SSOT after PR-E extraction
         CaseResult,
         RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
         _coerce_score,
@@ -59,7 +62,7 @@ except ImportError:
         mock_skipped,
         real_result,
     )
-    from lib.harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
+    from harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

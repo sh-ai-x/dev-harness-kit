@@ -36,27 +36,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Dual-import so consumer installs that ship `lib/*.py` flat (no
-# `__init__.py` in the consumer `lib/`) keep working.
-try:
-    from .atomic import atomic_write_json, now_iso  # type: ignore
-except ImportError:
-    from atomic import atomic_write_json, now_iso  # noqa: E402
-
-# ---------------------------------------------------------------------------
-# Pricing
-#
-# As of 2026-07-17 the inline PRICING dict has been replaced by a single
-# shared loader: ``lib.llm_pricing``. That module reads
-# ``docs/llm-info/<provider>.json`` (the SSOT refreshed via
-# ``/dev-kit:llm-refresh``) so that ``lib/cost_gate.py`` (this file),
-# ``tools/token_efficiency_analyzer.py``, and any future consumer stay in
-# sync without re-typing numbers. The inline rows below remain only as a
-# fallback for installs where ``docs/llm-info/`` does not yet exist
-# (e.g., a partial `--strict` clone). New code MUST go through
-# ``lib.llm_pricing`` — never edit these rows.
-# ---------------------------------------------------------------------------
-# Dual-import so consumer installs that ship `lib/*.py` flat (no
-# `__init__.py` in the consumer `lib/`) keep working.
+# `__init__.py` in the consumer `lib/`) keep working. Single block at
+# the top so each name is bound exactly once (review #920 round-2: the
+# previous triple try/except duplicated ``atomic`` and ``llm_pricing``
+# and left dead relative-import branches in the fallback).
 try:
     from . import llm_pricing as _llm_pricing  # type: ignore
     from .atomic import atomic_write_json, now_iso  # type: ignore
@@ -66,18 +49,16 @@ except ImportError:
     from atomic import atomic_write_json, now_iso  # noqa: E402
     from llm_pricing import pricing_for as _loader_pricing_for  # noqa: E402
 
-DEFAULT_PRICING_KEY = "sonnet"
+# ---------------------------------------------------------------------------
+# Pricing SSOT — ``lib.llm_pricing`` reads ``docs/llm-info/<provider>.json``
+# (refreshed via ``/dev-kit:llm-refresh``) so this file, ``tools/token_efficiency_analyzer.py``,
+# and any future consumer stay in sync without re-typing numbers. The inline
+# rows in ``llm_pricing.py`` itself remain the canonical fallback for installs
+# where ``docs/llm-info/`` does not yet exist (e.g., a partial `--strict` clone).
+# New code MUST go through ``lib.llm_pricing`` — never edit those rows here.
+# ---------------------------------------------------------------------------
 
-# Loader returns the sonnet fallback row when the model id does not
-# resolve. We delegate the "is this id known?" check to the public
-# ``lib.llm_pricing.is_known_model`` (issue #310 overarch) so cost_gate
-# no longer reaches into ``_pricing_cache`` (a private lru_cache).
-# Dual-import so consumer installs that ship `lib/*.py` flat (no
-# `__init__.py` in the consumer `lib/`) keep working.
-try:
-    from . import llm_pricing as _llm_pricing  # type: ignore
-except ImportError:
-    import llm_pricing as _llm_pricing  # noqa: E402
+DEFAULT_PRICING_KEY = "sonnet"
 
 _UNKNOWN_MODELS: List[str] = []
 
