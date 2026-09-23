@@ -286,19 +286,17 @@ The full resolution order
 (shell env → `settings.json` → `settings.local.json`) lives in
 [`docs/scopes/modes.md`](docs/scopes/modes.md).
 
-**You want to skip the Valuate step.** Go ahead — the verdict is advisory.
-`valuate` scores whether a plan is worth building, but the build stage proceeds
-either way (the old hard gate was removed in PR #463). Note that as of PR #589
-`valuate` is **model-invocable only** — `/dev-kit:plan` and other planning
-stages call it; the slash no longer appears in the user menu. So "skipping" it
-just means letting those stages run without an explicit verdict call. Skip on
+**You want to skip the Valuate step.** The Valuate stage was removed entirely
+(PR chore/remove-valuate); the prior advisory verdict envelope is gone. `/dev-kit:plan`
+covers value judgment via its interview hand-off, and `/dev-kit:build` proceeds
+regardless. Nothing to skip.
 small obvious work; rely on it as a sanity check on bigger bets.
 
 **You want to skip straight to Build without a full plan.** There is **no
 one-command bypass** today. Your honest options are to scope `/dev-kit:plan` very
 tightly (it can emit a one- or two-step plan quickly) or to hand-seed a minimal
 `phases/<name>/index.json` yourself. The [workflow scenarios
-doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-straight-to-build-without-a-full-plan)
+doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-3-skipping-straight-to-build-without-a-full-plan)
 explains both, and why the removed `tdd-fast` / `quick-fix` shortcuts are not an
 option anymore.
 
@@ -569,10 +567,7 @@ session ends). Full inventory in [`docs/hooks/HOOK-REFERENCE.md`](docs/hooks/HOO
 per-runtime wiring gaps in [`docs/hooks/hook-coverage-gaps.md`](docs/hooks/hook-coverage-gaps.md).
 
 **Stage I/O** — what each stage reads and writes: [`docs/stages/STAGES.md`](docs/stages/STAGES.md)
-is the canonical table. The verdict envelope `/dev-kit:valuate` writes
-(`decision` / `rationale` / `blocking_findings`) is pinned by
-`lib/valuation_engine.py:decision_is_canonical_envelope`; the old hard gate that
-blocked Build on a non-`proceed` verdict was removed in PR #463.
+is the canonical table.
 
 **Eval layer** — `/dev-kit:evaluate` keeps the existing transcript/rubric
 evaluation and adds a workflow-native harness-effectiveness report (five
