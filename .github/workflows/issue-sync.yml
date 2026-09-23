@@ -22,6 +22,14 @@ name: GitHub issue sync gate
 # gate runs at the same moments (open / re-open / new commit / body
 # edit). `closed` and `ready_for_review` are intentionally absent —
 # they do not change the issue-state contract.
+#
+# v1.1.0 (issue #833, PR #832 design): the bash loop is replaced by
+# the `tools/issue_sync.py pre-push` subcommand — single source of
+# truth between this remote gate and the local `hooks/pre-push.sh`
+# hook. Honor the `audit-trail` label by running `--lenient` so
+# audit-trail PRs (PR #829's failure mode) don't block merges on
+# `Issue #N (closed)` refs while still failing on `Closes #N
+# (closed)`.
 
 on:
   pull_request:
@@ -62,110 +70,80 @@ jobs:
           # checkout pattern.
           sparse-checkout: tools/issue_sync.py
 
-      - name: Parse PR body for GitHub issue references
-        id: parse
+      - name: Detect audit-trail label
+        # When the PR carries the `audit-trail` label (PR #829's
+        # actual failure mode — the body uses `Issue #N` for closed
+        # refs to preserve the historical audit trail), the gate
+        # runs in `--lenient` mode so closed `Issue #N` / `Related to
+        # #N` / etc. refs become warnings instead of errors. Close
+        # keyword (`Closes` / `Fixes` / `Resolves`) + bare `#N`
+        # still hard-fail under lenient.
+        id: detect_label
         env:
-          # Move attacker-influenced fields out of the `run:` block.
-          # GitHub Actions substitutes `${{ … }}` textually into the
-          # shell source before bash ever sees it, so a PR title or
-          # body containing `'` / `;` / `$()` could otherwise break
-          # out of an unquoted shell variable and run arbitrary code
-          # on the runner. `env:` values are passed via the step's
-          # environment, not spliced into shell source.
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          if echo "$LABELS_JSON" | jq -e 'index("audit-trail") != null' >/dev/null 2>&1; then
+            echo "audit_trail=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=issue-sync::audit-trail label detected — running in lenient mode."
+          else
+            echo "audit_trail=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Parse + check issue states
+        # v1.1.0 (issue #833, PR #832): the bash loop is replaced by
+        # the `pre-push` subcommand of `tools/issue_sync.py`. Single
+        # source of truth between this remote gate and the local
+        # `hooks/pre-push.sh` hook. The subcommand parses the PR
+        # body + title (passed via `--pr-title` / `--pr-body`),
+        # hits `gh api` per ref, and emits a structured JSON
+        # result with `errors[]` / `warnings[]` / `refs[]`.
+        # Lenient mode is selected by `--lenient` when the
+        # `audit-trail` label is set; strict mode otherwise.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          python3 tools/issue_sync.py parse \
-            --title "$PR_TITLE" \
-            --body "$PR_BODY" \
-            --json > /tmp/refs.json
-
-          COUNT=$(jq 'length' /tmp/refs.json)
-          echo "reference_count=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "References parsed:"
-          jq -r '.[] | "  \(.source)\t\(.ref)\t\(.keyword // "-")"' /tmp/refs.json
-
-      - name: Skip — no issue references
-        # When the PR body + title parse to zero references, sync is
-        # not owed and the gate is a no-op. Use a distinct job output
-        # `skipped=true` so the summary step below can render the
-        # "no references → skipped" branch without grepping logs.
-        if: steps.parse.outputs.reference_count == '0'
-        id: skip
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "skipped=true" >> "$GITHUB_OUTPUT"
-          echo "::notice title=issue-sync::PR does not reference any GitHub issue — sync check skipped."
-
-      - name: Check issue states
-        # Only runs when at least one reference was parsed. For each
-        # ref, GETs the issue via `gh api` and emits one of:
-        #   * state=open   → ok (gate passes)
-        #   * state=closed → error (gate fails)
-        # Cross-repo references (`owner/repo#N`) hit the named repo's
-        # issue endpoint; same-repo references hit the current repo
-        # (the default `repos/{owner}/{repo}/issues/{N}` path). The
-        # issue number is extracted from the ref by `awk` so the
-        # `owner/repo#N` syntax doesn't trip the URL path.
-        if: steps.parse.outputs.reference_count != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUDIT_TRAIL: ${{ steps.detect_label.outputs.audit_trail }}
         run: |
           set -euo pipefail
 
-          # Aggregate state-tracking arrays. Using parallel arrays
-          # (rather than a JSON accumulator) keeps the script
-          # transparent — each failure line reads naturally in CI logs.
-          OPEN_REFS=()
-          CLOSED_REFS=()
+          # Build the flag list. `--lenient` (the remote default for
+          # audit-trail PRs) demotes closed `Issue #N` / `Related to
+          # #N` / etc. refs to warnings; close-keyword + bare refs
+          # still hard-fail. `--strict` is the default for non-label
+          # PRs.
+          FLAGS=(--pr-title "$PR_TITLE" --pr-body "$PR_BODY" --json)
+          if [ "${AUDIT_TRAIL:-false}" = "true" ]; then
+            FLAGS+=(--lenient)
+          else
+            FLAGS+=(--strict)
+          fi
 
-          while IFS=$'\t' read -r REF _KEYWORD _SOURCE; do
-            NUMBER="${REF##*#}"
-            if [[ "$REF" == *"/"* ]]; then
-              OWNER="${REF%%/*}"
-              REST="${REF#*/}"
-              REPO="${REST%%#*}"
-              API_PATH="repos/${OWNER}/${REPO}/issues/${NUMBER}"
-            else
-              API_PATH="repos/${{ github.repository }}/issues/${NUMBER}"
-            fi
+          python3 tools/issue_sync.py pre-push "${FLAGS[@]}" \
+            > /tmp/issue-sync-result.json
 
-            # `gh api` exit codes:
-            #   * 0   — issue fetched (open or closed)
-            #   * non-0 — fetch failed (404 for missing issue, 403 for
-            #     token scope, etc.). We treat any non-0 as a hard
-            #     failure so a stale ref surfaces immediately.
-            STATE="$(gh api "$API_PATH" --jq '.state' 2>/dev/null || true)"
-            if [ -z "$STATE" ]; then
-              echo "::error title=issue-sync::failed to fetch ${REF} (${API_PATH}). Reference is stale or token scope is insufficient."
-              exit 1
-            fi
-            echo "  ${REF} → state=${STATE}"
-            case "$STATE" in
-              open)
-                OPEN_REFS+=("$REF")
-                ;;
-              closed)
-                CLOSED_REFS+=("$REF")
-                ;;
-              *)
-                echo "::error title=issue-sync::${REF} returned unexpected state '${STATE}' (expected open|closed)."
-                exit 1
-                ;;
-            esac
-          done < <(jq -r '.[] | [.ref, (.keyword // ""), .source] | @tsv' /tmp/refs.json)
+          COUNT=$(jq 'length' /tmp/issue-sync-result.json.refs // 0)
+          echo "reference_count=$COUNT" >> "$GITHUB_OUTPUT"
 
-          # Final gate verdict. The blocking contract: any closed
-          # reference fails the gate. A 404 (issue deleted) also
-          # fails — see the empty-state branch above.
-          if [ "${#CLOSED_REFS[@]}" -gt 0 ]; then
-            echo ""
-            echo "::error title=issue-sync::PR references ${#CLOSED_REFS[@]} closed issue(s); sync cannot match."
-            echo "::error title=issue-sync::Closed refs: ${CLOSED_REFS[*]}"
+          # Surface warnings (always informational, even in strict
+          # mode — warnings don't fail the gate by definition).
+          jq -r '.warnings[]? | "::warning title=issue-sync::\(.message)"' \
+            /tmp/issue-sync-result.json || true
+
+          # Surface errors. Any error entry fails the gate.
+          jq -r '.errors[]? | "::error title=issue-sync::\(.message)"' \
+            /tmp/issue-sync-result.json || true
+
+          # Final verdict.
+          ERRORS=$(jq 'length' /tmp/issue-sync-result.json.errors)
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error title=issue-sync::PR references $ERRORS issue(s) in a state that fails the gate; sync cannot match."
             echo "::error title=issue-sync::Fix: either re-open the issue(s), remove the reference from the PR body, or open a new issue and replace the ref."
             exit 1
           fi
 
-          echo ""
-          echo "::notice title=issue-sync::All ${#OPEN_REFS[@]} referenced issue(s) are open; sync gate passed."
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::notice title=issue-sync::PR does not reference any GitHub issue — sync check skipped."
+          else
+            echo "::notice title=issue-sync::All $COUNT referenced issue(s) are open (or warn-only under audit-trail); sync gate passed."
+          fi
