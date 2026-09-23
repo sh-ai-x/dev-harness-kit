@@ -25,7 +25,7 @@ skill owns which step and what the acceptance criteria are.
 | Property | Value |
 |---|---|
 | **What it is** | A Claude Code + Codex plugin (skills + hooks + commands) |
-| **Stage spec** | Bootstrap → Plan → Valuate → Build → Review → Security → Ship |
+| **Stage spec** | Bootstrap → Plan → Build → Review → Security → Ship |
 | **State substrate** | Direct shell + subprocess; no shared in-process cache |
 | **Wire format** | JSON envelopes on disk (`.dev-kit/`) |
 
@@ -50,7 +50,7 @@ three hooks on a different day each.
 The harness answers this with strict per-stage ownership (one skill
 per stage), shared hook enforcement (no per-file re-implementation),
 and a typed on-disk envelope (`.dev-kit/hand-off/*.md`,
-`.dev-kit/valuations/<plan-id>.json`, `phases/<name>/index.json`).
+`phases/<name>/index.json`).
 
 **Why it has to exist**: in a multi-runtime harness (Claude Code +
 Codex), every consumer that re-implements state-reading creates a
@@ -97,7 +97,7 @@ That is the entire surface. Anything more specific is in the docs.
 | Metric | Value | Detail |
 |---|---|---|
 | Hooks shipped | see [Under the hood](../../README.md#under-the-hood) | `worktree-guard`, `git-guard`, `tdd-guard`, `bash-guard`, `secret-scan`, `slop-detector`, `stop-verify`, and others — the table there is the current, maintained inventory |
-| Stage owners | **7** | bootstrap, plan, valuate, build, review, security, ship |
+| Stage owners | **6** | bootstrap, plan, build, review, security, ship |
 | Eval-Repair loops | **2 dims** | harness-quality + os-quality |
 | Return shapes | **1 per stage** | typed envelope contract pinned by `docs/stages/STAGES.md` |
 
@@ -108,14 +108,11 @@ That is the entire surface. Anything more specific is in the docs.
    state substrate required — direct `git show
    origin/main:.claude-plugin/plugin.json` + JSON parse.
 
-2. **Build no-go gate transparency.** `valuate` (model-invocable since
-   PR #589; the user slash was removed) writes the verdict envelope
-   (`decision` / `rationale` / `blocking_findings`) to
-   `.dev-kit/valuations/<plan-id>.json`. The envelope contract is
-   pinned by `lib/valuation_engine.py:decision_is_canonical_envelope`.
-   `/dev-kit:plan` and other planning stages invoke the rubric; the
-   build proceeds regardless of the verdict since the #463 auto-gate
-   removal.
+2. **Build no-go gate transparency.** The plan-value gate was removed
+   entirely (PR chore/remove-valuate); the prior advisory envelope
+   (`decision` / `rationale` / `blocking_findings`) at
+   `.dev-kit/valuations/<plan-id>.json` no longer exists. `/dev-kit:plan`
+   owns value judgment via its interview hand-off; the build proceeds regardless.
 
 3. **Pre-push intent check.** `.githooks/pre-push` runs the maintenance
    gate on every push; `hooks/worktree-guard.sh` denies Edit/Write in

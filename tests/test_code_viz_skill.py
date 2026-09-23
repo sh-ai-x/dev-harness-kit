@@ -34,6 +34,42 @@ import pytest
 # subprocess and the modal-click meta-test are local-environment concerns.
 pytest.importorskip("playwright", reason="playwright not installed; skipping Playwright-dependent tests")
 
+
+def _chromium_headless_shell_available() -> bool:
+    """True iff the playwright chromium-headless-shell binary is on disk.
+
+    The Python wheel may be installed while the matching browser build
+    (downloaded separately via `playwright install chromium`) is not —
+    common in CI and in minimal dev containers. Walks the platform
+    cache (`~/Library/Caches/ms-playwright/` on macOS,
+    `~/.cache/ms-playwright/` on Linux) and looks for any
+    `chromium_headless_shell-*/chrome-{mac,linux}/headless_shell`
+    binary, version-agnostic so a Playwright upgrade does not break
+    the gate.
+    """
+    home = Path.home()
+    for cache_root in (home / "Library/Caches/ms-playwright",
+                       home / ".cache" / "ms-playwright"):
+        if not cache_root.exists():
+            continue
+        for d in cache_root.iterdir():
+            if not d.name.startswith("chromium_headless_shell-"):
+                continue
+            for binary in (d / "chrome-mac" / "headless_shell",
+                           d / "chrome-linux" / "headless_shell"):
+                if binary.exists():
+                    return True
+    return False
+
+
+if not _chromium_headless_shell_available():
+    pytest.skip(
+        "playwright chromium-headless-shell binary missing; "
+        "run `playwright install chromium` to enable the "
+        "code-viz validator tests (env gap, not a code defect)",
+        allow_module_level=True,
+    )
+
 PROJECT_ROOT = Path(__file__).parent.parent
 TOOL_FILE = PROJECT_ROOT / "tools" / "code_viz.py"
 

@@ -127,6 +127,7 @@ class TestBootstrapGuardPolicyBehavior(unittest.TestCase):
         """
         sys.path.insert(0, str(LIB))
         import guard_mode_state as gms  # noqa: E402
+        from conftest import harness_free_env  # noqa: E402
 
         tmp = _init_main_repo()
         try:
@@ -134,8 +135,13 @@ class TestBootstrapGuardPolicyBehavior(unittest.TestCase):
             (Path(tmp.name) / ".claude" / "settings.json").write_text(
                 json.dumps({"env": {"DEV_KIT_GUARDS": "on"}})
             )
-            env = {**os.environ, "PYTHONPATH": str(ROOT),
-                   "CLAUDE_PROJECT_DIR": tmp.name}
+            # Strip harness-controlled vars from the parent env so the
+            # hook's policy resolution walks the project-scope path
+            # instead of short-circuiting on a shell-scope export.
+            env = harness_free_env({
+                "PYTHONPATH": str(ROOT),
+                "CLAUDE_PROJECT_DIR": tmp.name,
+            })
             r = subprocess.run(
                 ["bash", str(ROOT / "hooks" / "session-start-guard-mode-reset.sh")],
                 capture_output=True, text=True, timeout=10,

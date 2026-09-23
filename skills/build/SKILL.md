@@ -41,22 +41,6 @@ enabled or available. Continue normally on `LINEAR_SKIP` or an implicit
 
 Refuses to start if `.dev-kit/ci-config.json` is absent. Run `/dev-kit:ci-setup` (or `/dev-kit:ci-setup --force` to refresh stale templates) first. No version comparison — presence of the marker is the only precondition; dev-kit does not gate consumer builds on a plugin-version floor.
 
-## Pre-flight valuation gate (Phase 4, issue #373)
-
-> **Removed in #463.** The build stage's hard auto-gate that read the
-> valuation verdict and refused non-PROCEED verdicts was tied to the LCS
-> substrate that backed the URI. The LCS substrate is gone; the
-> auto-gate went with it. Operators run `/dev-kit:valuate` explicitly
-> before invoking `/dev-kit:build`; a non-PROCEED verdict is the
-> operator's signal to halt, not a hard block.
-
-The verdict envelope (when it exists) is at
-`.dev-kit/valuations/<plan-id>.json`. If `/dev-kit:valuate` was run,
-the build proceeds and the verdict is operator context; if the verdict
-is `kill` or unresolved `hold`, the operator should not have invoked
-`build`. There is no auto-gate, no `--skip-valuation` flag, and no exit
-code based on the verdict.
-
 ## Composition with /dev-kit:research and /dev-kit:build-debug
 
 For net-new feature ideas that need cited evidence before planning,
