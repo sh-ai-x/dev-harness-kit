@@ -25,6 +25,12 @@
 # shellcheck source=lib/hook-preamble.sh
 source "${BASH_SOURCE[0]%/*}/lib/hook-preamble.sh"
 
+# Source the shared linear fast-path (activation-source guard +
+# python3 lookup). Extracted in inspect-pass2 (2026-09-23) to
+# eliminate the 4-copy duplication across the linear-* hooks.
+# shellcheck source=lib/linear-fast-path.sh
+source "${BASH_SOURCE[0]%/*}/lib/linear-fast-path.sh"
+
 # Fail open with a stderr warning if jq is missing.
 if ! command -v jq >/dev/null 2>&1; then
   worktree_detect_jq_missing_warn "linear-worktree-create.sh"
@@ -140,27 +146,7 @@ if [ ! -f "$WT_PATH/tools/linear_sync.py" ]; then
   exit 0
 fi
 
-# Fast-path mirror of hooks/linear-autosync.sh: bail before
-# forking Python when no activation source is present. The
-# owner-gate + enabled checks live in Python.
-USER_ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
-USER_ENV="$USER_ENV_DIR/dev-kit/.env"
-if [ -z "${LINEAR_API_KEY:-}" ] && \
-   [ ! -f "$USER_ENV" ] && \
-   [ ! -f "$WT_PATH/.dev-kit/.env.linear" ] && \
-   [ ! -f "$WT_PATH/.dev-kit/linear-config.json" ] && \
-   [ ! -f "$WT_PATH/.dev-kit/.enabled.json" ]; then
-  exit 0
-fi
-
 # Run the auto-sync from inside the new worktree so the handoff
 # lands at .dev-kit/hand-off/linear/<worktree-slug>.json. The
 # owner gate inside auto_sync bails silently for non-owners.
-for py in python3 python py; do
-  if command -v "$py" >/dev/null 2>&1; then
-    (cd "$WT_PATH" && "$py" "$WT_PATH/tools/linear_sync.py" auto-sync) || true
-    exit 0
-  fi
-done
-
-exit 0
+linear_fast_path "$WT_PATH" "auto-sync" "1"

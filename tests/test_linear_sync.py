@@ -1905,36 +1905,48 @@ class TestLinearAutosyncHookCallsAutoSync(unittest.TestCase):
     """
 
     def test_hook_invokes_auto_sync_subcommand(self):
-        path = ROOT / "hooks" / "linear-autosync.sh"
-        text = path.read_text(encoding="utf-8")
-        self.assertIn("auto-sync", text,
-                      "linear-autosync.sh must call the owner-gated auto-sync entry point")
-        # Defense in depth: the bare subcommand (no owner gate) is
-        # still in the file via `if argv[0] == "sync"` in main(), but
-        # the hook must invoke `auto-sync` (not bare `sync`).
-        self.assertIn("linear_sync.py\" auto-sync", text,
-                      "the hook must pass auto-sync as the subcommand argument")
+        # The 4 linear-* hooks share lib/linear-fast-path.sh (extracted
+        # 2026-09-23 to dedupe the activation-source guard + python3
+        # lookup). The contract here is: the hook sources the helper
+        # AND the helper carries the auto-sync invocation literal.
+        hook_path = ROOT / "hooks" / "linear-autosync.sh"
+        hook_text = hook_path.read_text(encoding="utf-8")
+        self.assertIn("linear-fast-path.sh", hook_text,
+                      "linear-autosync.sh must source the shared linear-fast-path helper")
+        helper_path = ROOT / "hooks" / "lib" / "linear-fast-path.sh"
+        helper_text = helper_path.read_text(encoding="utf-8")
+        self.assertIn("auto-sync", helper_text,
+                      "the helper must pass auto-sync as the subcommand argument")
 
     def test_session_start_hook_invokes_auto_sync(self):
-        path = ROOT / "hooks" / "linear-session-start.sh"
-        text = path.read_text(encoding="utf-8")
-        self.assertIn("linear_sync.py\" auto-sync", text,
-                      "the hook must pass auto-sync as the subcommand argument")
+        hook_path = ROOT / "hooks" / "linear-session-start.sh"
+        hook_text = hook_path.read_text(encoding="utf-8")
+        self.assertIn("linear-fast-path.sh", hook_text,
+                      "linear-session-start.sh must source the shared helper")
+        helper_text = (ROOT / "hooks" / "lib" / "linear-fast-path.sh").read_text(encoding="utf-8")
+        self.assertIn("auto-sync", helper_text,
+                      "the helper must pass auto-sync as the subcommand argument")
 
     def test_worktree_create_hook_invokes_auto_sync(self):
-        path = ROOT / "hooks" / "linear-worktree-create.sh"
-        text = path.read_text(encoding="utf-8")
-        self.assertIn("linear_sync.py\" auto-sync", text,
-                      "the hook must pass auto-sync as the subcommand argument")
-        # The hook must parse the bash command for `git worktree add`.
-        self.assertIn("git worktree add", text)
+        hook_path = ROOT / "hooks" / "linear-worktree-create.sh"
+        hook_text = hook_path.read_text(encoding="utf-8")
+        self.assertIn("linear-fast-path.sh", hook_text,
+                      "linear-worktree-create.sh must source the shared helper")
+        self.assertIn("git worktree add", hook_text,
+                      "the hook must still parse the bash command for `git worktree add`")
+        helper_text = (ROOT / "hooks" / "lib" / "linear-fast-path.sh").read_text(encoding="utf-8")
+        self.assertIn("auto-sync", helper_text,
+                      "the helper must pass auto-sync as the subcommand argument")
 
     def test_task_change_hook_invokes_task_change_sync(self):
-        path = ROOT / "hooks" / "linear-task-change.sh"
-        text = path.read_text(encoding="utf-8")
         # task-change-sync is the scope-diff entry point; auto-sync
-        # would always fire and defeat the diff.
-        self.assertIn("linear_sync.py\" task-change-sync", text,
+        # would always fire and defeat the diff. The hook passes the
+        # subcommand to the shared helper.
+        hook_path = ROOT / "hooks" / "linear-task-change.sh"
+        hook_text = hook_path.read_text(encoding="utf-8")
+        self.assertIn("linear-fast-path.sh", hook_text,
+                      "linear-task-change.sh must source the shared helper")
+        self.assertIn("task-change-sync", hook_text,
                       "the hook must pass task-change-sync as the subcommand argument")
 
 
