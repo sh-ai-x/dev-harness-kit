@@ -166,7 +166,7 @@ dev_kit_mode_active() {
 #     dev_kit_mode_require full
 #     # hook body below — only reached when active mode == "full"
 #
-# To avoid the footgun, prefer `dev_kit_mode_gate <required>` (alias)
+# Pass the bare required-value list (one or more modes for mode, on/off for team)
 # which reads as a gate rather than a require.
 dev_kit_mode_require() {
   local required="$1"
@@ -180,14 +180,3 @@ dev_kit_mode_require() {
   exit 0
 }
 
-# dev_kit_mode_gate <required> — alias of dev_kit_mode_require with
-# gate-flavored naming. Same call-and-forget semantics.
-dev_kit_mode_gate() {
-  dev_kit_mode_require "$@"
-}
-
-# require_mode — backward-compat alias for older callers. Same as
-# dev_kit_mode_require / dev_kit_mode_gate.
-require_mode() {
-  dev_kit_mode_require "$@"
-}

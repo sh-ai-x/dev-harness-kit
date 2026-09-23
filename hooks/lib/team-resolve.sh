@@ -175,7 +175,7 @@ dev_kit_team_active() {
 #     dev_kit_team_require on
 #     # hook body below — only reached when active team == "on"
 #
-# To avoid the footgun, prefer `dev_kit_team_gate <required>` (alias)
+# Pass the bare required-value list (one or more modes for mode, on/off for team)
 # which reads as a gate rather than a require.
 dev_kit_team_require() {
   local required="$1"
@@ -189,14 +189,3 @@ dev_kit_team_require() {
   exit 0
 }
 
-# dev_kit_team_gate <required> — alias of dev_kit_team_require with
-# gate-flavored naming. Same call-and-forget semantics.
-dev_kit_team_gate() {
-  dev_kit_team_require "$@"
-}
-
-# require_team — backward-compat alias for older callers. Same as
-# dev_kit_team_require / dev_kit_team_gate.
-require_team() {
-  dev_kit_team_require "$@"
-}
