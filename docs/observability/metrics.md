@@ -10,7 +10,7 @@ reducer** (replay or walk the repo without I/O).
 | [`/dev-kit:maintenance`](../skills/maintenance.md) | **Gate** | PR-time | PR diff + `eval/prompts/judge-code-sanity.md` | One **Verdict:** line + CC-1..8 / OE-1..8 / VM-1..4 breakdown. `>=8.0` → Approve, `5.0..7.99` → Changes Requested, `<5.0` → Blocked | Production-code PR opened; you want the code-sanity verdict before requesting review. |
 | [`/dev-kit:ci-doctor`](../skills/ci-doctor.md) | Observer (pre-flight) | Pre-PR | `.github/`, `.dev-kit/ci-config.json`, provider file, secrets, `gh auth` | One PASS/FAIL summary across five readiness checks | "If I open a PR now, will CI even start?" |
 | [`/dev-kit:security-metrics`](../skills/security-metrics.md) | Observer (static) | Anytime | Source tree only (`Read` / `Grep` / `Glob` / `Bash`) | Deterministic 0–100 OWASP A01–A10 scorecard + evidence Markdown | Quick triage metric before the full `/dev-kit:security` review. |
-| [`/dev-kit:evaluate`](../skills/evaluate.md) | Observer (post-hoc) | Post-merge | Replayed transcripts + workflow evidence via `lib/eval_runner.RUBRIC_REGISTRY` | Per-rubric LLM-judge verdict + legacy D1–D7 + the five harness-effectiveness components | After a harness change — programmatic gate on harness-quality and os-quality rubrics before merge. |
+| [`/dev-kit:evaluate`](../skills/evaluate.md) | Observer (post-hoc) | Post-merge | Replayed transcripts + workflow evidence via `lib/eval_runner.RubricRegistry` | Per-rubric LLM-judge verdict + legacy D1–D7 + the five harness-effectiveness components | After a harness change — programmatic gate on harness-quality and os-quality rubrics before merge. |
 | [`/dev-kit:harness-effectiveness`](../skills/harness-effectiveness.md) | Observer (static reducer) | Anytime | Same reducer as `evaluate`'s harness-effectiveness column (`lib.harness_effectiveness.build_report`) | The five-component scorecard (prevention / first-pass / recovery / learning / measurement-integrity) standalone, sub-second, zero API spend | When you want the harness-effectiveness number without running the full `evaluate` judge pass. |
 
 > Only `/dev-kit:maintenance` is a hard gate. The other four emit numbers but
@@ -42,7 +42,7 @@ reducer** (replay or walk the repo without I/O).
 ## Nightly / scheduled
 
 `evaluate` runs *itself* as a cron on a per-dimension rotation (see
-`lib/eval_runner.RUBRIC_REGISTRY`). Nightly calls land in
+`lib/eval_runner.RubricRegistry`). Nightly calls land in
 `.dev-kit/evaluations/` for trend tracking — the gate does not wait for them,
 but the trajectory is the long-term signal.
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
-# ---------- RUBRIC_REGISTRY (Phase 3) ----------
+# ---------- RubricRegistry (Phase 3) ----------
 #
 # Class-level registry of named eval rubrics. Each entry pairs a YAML
 # rubric path with the judge prompt path used to score it. The default
