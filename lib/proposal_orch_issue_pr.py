@@ -36,9 +36,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
-from lib.atomic import atomic_write_text
 
 from lib import render_proposal_html
+from lib.atomic import atomic_write_text
 
 # gh presence + auth probe. Re-instated centralization (see lib/gh_cli.py).
 try:

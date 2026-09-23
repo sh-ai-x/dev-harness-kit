@@ -5,6 +5,15 @@ target-version = "py310"
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
+[lint.isort]
+# Mark `lib` as a known first-party import so `from lib.X` and
+# `from lib import X` sort into the same group in both the worktree
+# (ruff can see lib/) and the tempdir materialization the pre-commit
+# hook uses (where lib/ is not visible). Without this, the two
+# checkpoints disagree and `from lib.X` falls into the third-party
+# section in tempdir — see #918.
+known-first-party = ["lib"]
+
 [lint.per-file-ignores]
 # Tests import under mutated sys.path — the E402 (module-level import not
 # at top) is intentional and uniform across the test suite.
