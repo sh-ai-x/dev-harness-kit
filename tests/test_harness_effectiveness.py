@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from lib.trace_log import append_event, read_events
-
 from lib.harness_effectiveness import COMPONENT_WEIGHTS, build_report
+from lib.trace_log import append_event, read_events
 
 
 def _event(root: Path, *, event_id: str, event_type: str, subject: str,

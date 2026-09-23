@@ -19,13 +19,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lib.trace_log import EVENT_SCHEMA_VERSION, append_event, read_events
-
 from lib.harness_effectiveness import (
     COMPONENT_WEIGHTS,
     INSUFFICIENT_EVIDENCE,
     build_report,
 )
+from lib.trace_log import EVENT_SCHEMA_VERSION, append_event, read_events
 
 
 def _event(root: Path, *, event_id: str, event_type: str, subject: str,
