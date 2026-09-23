@@ -31,6 +31,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -38,6 +39,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPT = PROJECT_ROOT / "bin" / "review-local.sh"
+sys.path.insert(0, str(PROJECT_ROOT / "tests"))
+from conftest import harness_free_env  # noqa: E402
 
 
 def _run(*args: str, check: bool = False, env: dict | None = None, path: str | None = None) -> subprocess.CompletedProcess:
@@ -686,18 +689,23 @@ exit 0
         `.env.example` (a committed template, not operator config)
         would otherwise supply -- guarantees hermetic "no signal" runs.
         """
-        env = os.environ.copy()
-        for k in (
-            "CI_REVIEW_PROVIDER", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_BASE_URL", "MINIMAX_API_KEY", "DEEPSEEK_API_KEY",
-        ):
-            # Delete (not blank) -- an env var present with an empty
-            # value is still "present" to the child `claude` stub's
-            # `env | grep ANTHROPIC_` capture, which would falsely
-            # look like injection. A truly clean operator shell never
-            # set these keys at all.
+        # Drop harness-controlled keys (DEV_KIT_GUARDS* + ANTHROPIC_*
+        # via conftest.harness_free_env) plus the provider-key trio so
+        # the child `claude` stub's `env | grep ANTHROPIC_` capture
+        # sees an empty provider surface — a developer shell with
+        # `ANTHROPIC_DEFAULT_*_MODEL` or stray `MINIMAX_API_KEY` would
+        # otherwise leak through and the fallback-path assertion
+        # below would falsely look like provider injection.
+        env = harness_free_env({
+            "PATH": self.new_path,
+            "CI_REVIEW_PROVIDER": "",
+            "MINIMAX_API_KEY": "",
+            "DEEPSEEK_API_KEY": "",
+        })
+        # Pop the empties so a var present-with-empty doesn't show up
+        # in `env | grep ANTHROPIC_` (defensive delete, not blank).
+        for k in ("CI_REVIEW_PROVIDER", "MINIMAX_API_KEY", "DEEPSEEK_API_KEY"):
             env.pop(k, None)
-        env["PATH"] = self.new_path
         if env_extra:
             env.update(env_extra)
         return subprocess.run(

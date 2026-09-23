@@ -14,7 +14,6 @@ Verifies:
 from __future__ import annotations
 
 import json
-import os as _os
 import subprocess
 import sys
 import tempfile
@@ -27,6 +26,7 @@ LIB = REPO_ROOT / "lib"
 sys.path.insert(0, str(LIB))
 
 import guard_mode_state as gms  # noqa: E402
+from conftest import harness_free_env  # noqa: E402
 
 # Hooks invoke `python3 -m lib.guard_mode_state` bare (matching the
 # existing `python3 -m lib.tdd_scope_policy` call already in
@@ -36,7 +36,13 @@ import guard_mode_state as gms  # noqa: E402
 # repo elsewhere to exercise worktree-guard's main-checkout detection,
 # so `lib` is not importable via cwd alone — PYTHONPATH bridges that gap
 # without changing how the hooks themselves resolve the module.
-_ENV_WITH_LIB = {**_os.environ, "PYTHONPATH": str(REPO_ROOT)}
+#
+# `_ENV_WITH_LIB` starts from a harness-free env (DEV_KIT_GUARDS* and
+# ANTHROPIC_* stripped by conftest.harness_free_env) so subprocess
+# invocations see the same starting state regardless of the developer's
+# shell. Tests that need a specific DEV_KIT_GUARDS override it
+# explicitly via `env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off", ...}`.
+_ENV_WITH_LIB = harness_free_env({"PYTHONPATH": str(REPO_ROOT)})
 
 
 def _edit_payload(file_path: str) -> dict:

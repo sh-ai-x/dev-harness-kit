@@ -60,6 +60,29 @@ def _safe_env_for_telemetry() -> dict:
     return env
 
 
+# Keys that, if set in the test runner's env, would leak into a
+# subprocess invocation of a hook or binary and skew the policy
+# resolution / API-key fallback the test is trying to pin. Strip
+# these from any subprocess env before invoking a hook or wrapper
+# that reads `DEV_KIT_GUARDS*` / `ANTHROPIC_*` itself. Tests that
+# intentionally set a specific value should set it explicitly on
+# top of the cleaned env.
+_HARNESS_FREE_SKIP_KEYS = frozenset({
+    "DEV_KIT_GUARDS", "DEV_KIT_GUARDS_SOURCE", "DEV_KIT_GUARD_ROOT",
+}) | {k for k in os.environ if k.startswith("ANTHROPIC_")}
+
+
+def harness_free_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return a copy of `os.environ` with harness-controlled keys
+    (`DEV_KIT_GUARDS*`, `ANTHROPIC_*`) removed. Optional `extra` is
+    merged on top so callers can still pin specific values.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _HARNESS_FREE_SKIP_KEYS}
+    if extra:
+        env.update(extra)
+    return env
+
+
 def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ANN001
     """Append one contract.test event after a pytest session ends.
 

@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT / "tests"))
+from conftest import harness_free_env  # noqa: E402
 
 
 class TestTddGuard(unittest.TestCase):
@@ -23,7 +26,10 @@ class TestTddGuard(unittest.TestCase):
     def test_core_edit_is_off_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            env = {**os.environ, "DEV_KIT_TDD_ROOT": str(root)}
+            # Strip harness-controlled vars so the hook starts from the
+            # unconfigured default; the user's shell may have
+            # DEV_KIT_GUARDS=on set globally.
+            env = harness_free_env({"DEV_KIT_TDD_ROOT": str(root)})
             result = subprocess.run(["bash", str(ROOT / "hooks/tdd-guard.sh")], cwd=root,
                 input=json.dumps({"tool_input": {"file_path": str(root / "lib/core.py")}}),
                 text=True, capture_output=True, env=env)
