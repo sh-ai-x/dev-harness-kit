@@ -37,8 +37,8 @@ import llm_judge  # type: ignore
 from atomic import atomic_write_json, now_iso  # noqa: E402
 
 from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
-    RUBRIC_REGISTRY,  # noqa: F401  -- re-exported; tests reference eval_runner.RUBRIC_REGISTRY
     CaseResult,
+    RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
     _coerce_score,
     exception_rot,
     mock_drift_warning,
@@ -73,7 +73,7 @@ SESSION_AXES: tuple = (
 )
 
 
-# ---------- RUBRIC_REGISTRY (Phase 3) ----------
+# ---------- RubricRegistry (Phase 3) ----------
 #
 # Class-level registry of named eval rubrics. Each entry pairs a YAML
 # rubric path with the judge prompt path used to score it. The default

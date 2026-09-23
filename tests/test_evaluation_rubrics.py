@@ -150,39 +150,39 @@ class TestJudgeOsQualityPrompt(unittest.TestCase):
 class TestRubricRegistryShape(unittest.TestCase):
     """The two new rubrics + prompts together form a registry-coherent
     pair. Sanity-check that a caller could register them with
-    `RUBRIC_REGISTRY` and look them up again."""
+    `RubricRegistry` and look them up again."""
 
     def test_harness_pair_roundtrip(self):
         import eval_runner
-        eval_runner.RUBRIC_REGISTRY.clear()
+        eval_runner.RubricRegistry.clear()
         try:
-            eval_runner.RUBRIC_REGISTRY.register(
+            eval_runner.RubricRegistry.register(
                 "harness-quality",
                 str(RUBRICS_DIR / "harness-quality.yaml"),
                 str(PROMPTS_DIR / "judge-harness-quality.md"),
             )
             self.assertEqual(
-                eval_runner.RUBRIC_REGISTRY.get_rubric("harness-quality"),
+                eval_runner.RubricRegistry.get_rubric("harness-quality"),
                 str(RUBRICS_DIR / "harness-quality.yaml"),
             )
         finally:
-            eval_runner.RUBRIC_REGISTRY.clear()
+            eval_runner.RubricRegistry.clear()
 
     def test_os_pair_roundtrip(self):
         import eval_runner
-        eval_runner.RUBRIC_REGISTRY.clear()
+        eval_runner.RubricRegistry.clear()
         try:
-            eval_runner.RUBRIC_REGISTRY.register(
+            eval_runner.RubricRegistry.register(
                 "os-quality",
                 str(RUBRICS_DIR / "os-quality.yaml"),
                 str(PROMPTS_DIR / "judge-os-quality.md"),
             )
             self.assertEqual(
-                eval_runner.RUBRIC_REGISTRY.get_rubric("os-quality"),
+                eval_runner.RubricRegistry.get_rubric("os-quality"),
                 str(RUBRICS_DIR / "os-quality.yaml"),
             )
         finally:
-            eval_runner.RUBRIC_REGISTRY.clear()
+            eval_runner.RubricRegistry.clear()
 
 
 if __name__ == "__main__":

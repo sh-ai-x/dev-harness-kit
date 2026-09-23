@@ -27,7 +27,7 @@ Runs the existing eval dimensions and adds workflow-evidence-based
 harness-effectiveness reporting. Backward-compatible: the existing review,
 security, plan, harness-quality, os-quality, and D1–D7 contracts remain
 unchanged. The effectiveness result is gated on structured evidence (via
-`lib.eval_runner.RUBRIC_REGISTRY`), which is the deterministic enforcement hook
+`lib.eval_runner.RubricRegistry`), which is the deterministic enforcement hook
 that prevents the LLM judge from scoring against an unknown rubric.
 
 The `alpha: enforcement` declaration is required by Iron Law L6 — the
@@ -44,7 +44,7 @@ deterministic registry lookup is the part the model cannot self-impose.
   the new submetric — consumers that ignore unknown versions continue
   to work unchanged.
 - `/dev-kit:evaluate --harness-quality`: register `harness-quality` rubric +
-  judge prompt with `RUBRIC_REGISTRY`, then run per-dim eval against the
+  judge prompt with `RubricRegistry`, then run per-dim eval against the
   `harness` DIM_AXES tuple.
 - `/dev-kit:evaluate --os-quality`: register `os-quality` rubric + judge
   prompt, then run per-dim eval against the `os` DIM_AXES tuple.
@@ -61,12 +61,12 @@ converted to a passing/zero score.
 
 ## Rubric registry (deterministic enforcement)
 
-`lib/eval_runner.RUBRIC_REGISTRY` is the registry this skill writes to. The
+`lib/eval_runner.RubricRegistry` is the registry this skill writes to. The
 call path is:
 
 ```
 --harness-quality -->
-    RUBRIC_REGISTRY.register(
+    RubricRegistry.register(
         name="harness-quality",
         rubric_yaml_path="eval/rubrics/harness-quality.yaml",
         judge_prompt_path="eval/prompts/judge-harness-quality.md",
@@ -74,7 +74,7 @@ call path is:
     judge against DIM_AXES["harness"]
 
 --os-quality -->
-    RUBRIC_REGISTRY.register(
+    RubricRegistry.register(
         name="os-quality",
         rubric_yaml_path="eval/rubrics/os-quality.yaml",
         judge_prompt_path="eval/prompts/judge-os-quality.md",
@@ -120,7 +120,7 @@ A run that contains any `escalate: true` block is reported with verdict
 
 - `--harness-quality` and `--os-quality` are NEW flags. Without them,
   the skill behaves exactly like the pre-Phase-3 eval.
-- `RUBRIC_REGISTRY` is class-level and starts empty. Existing call
+- `RubricRegistry` is class-level and starts empty. Existing call
   sites that do not import or call `register()` are unaffected.
 - The harness-effectiveness reducer gains a nested `stability` submetric
   under `components.measurement_integrity.submetrics.stability` (issue
