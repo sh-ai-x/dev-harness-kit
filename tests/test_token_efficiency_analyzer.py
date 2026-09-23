@@ -974,6 +974,67 @@ class TestArchivePanelDashboard(unittest.TestCase):
         self.assertEqual(a["archive_panel"]["session_count"], 0)
         self.assertEqual(b["archive_panel"]["session_count"], 0)
 
+    def test_live_panel_byte_equivalent_when_archives_included(self):
+        """Symmetric to ``test_live_panel_byte_equivalent_when_archives_excluded``.
+
+        With ``--include-archives`` (the default) and the same disk layout
+        that has BOTH live + archived sessions, every live panel number
+        must still match a ``--no-include-archives`` run on the SAME disk.
+        Pins the contract that
+        ``_partition_by_archive(sessions)`` keeps archives out of the live
+        totals regardless of the ``include_archives`` flag value — the
+        single filter ``live_sessions = [s for s in sessions if not
+        s.get('archive_branch')]`` is what makes this guarantee hold.
+        Without this test, a future refactor that drops the partition step
+        would silently inflate live cost / active_session count whenever
+        archives were present on disk.
+        """
+        import contextlib
+        import io
+
+        def _capture(*extra: str) -> dict:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                main([
+                    "--repo", "fixture-repo",
+                    "--days", "3650",
+                    "--logs-dir", str(self.tmpdir / "logs"),
+                    "--no-include-worktree-logs",
+                    "--json",
+                    *extra,
+                ])
+            return json.loads(buf.getvalue())
+
+        # Both runs hit the SAME disk layout (1 live + 2 archive fixtures).
+        a = _capture("--include-archives")
+        b = _capture("--no-include-archives")
+        # Live panel numbers must agree across the two flag values.
+        # ``files_scanned`` legitimately differs (scanner count, not
+        # live panel); ``archive_panel`` legitimately differs (that's
+        # the whole point of the toggle). Everything else — sessions
+        # count, totals, cost-gate — must be byte-equivalent so an
+        # operator who switches the flag mid-run doesn't see their
+        # live dashboard silently shift.
+        for k in ("sessions", "active_sessions", "inactive_sessions",
+                  "total_cost_usd", "stale_cost_usd", "stale_pct",
+                  "estimated_savings_usd"):
+            self.assertEqual(
+                a[k], b[k],
+                f"live {k!r} drifted between --include-archives "
+                f"(default-on) and --no-include-archives — the "
+                f"live/archived partition is leaking into live totals",
+            )
+        # And the archive panel must reflect the toggle.
+        self.assertEqual(a["archive_panel"]["session_count"], 2)
+        self.assertEqual(b["archive_panel"]["session_count"], 0)
+        self.assertGreater(a["archive_panel"]["total_cost_usd"], 0.0)
+        self.assertEqual(b["archive_panel"]["total_cost_usd"], 0.0)
+        # Per-source + per-branch breakdowns for the live set should
+        # also be empty (the fixtures only carry one branch and one
+        # source — but the test pins that those rows render the live
+        # set, not the union of live + archive).
+        self.assertEqual(a["worktrees"], b["worktrees"])
+
     def test_cli_include_archives_flag_default_on(self):
         """Default run scans archives (acceptance criterion)."""
         import contextlib

@@ -305,6 +305,47 @@ def session_cost(s: dict, *, model: str | None = None) -> float:
     )
 
 
+def _archive_session_cost(s: dict) -> float:
+    """USD cost for one archived session (issue #820 contract pin).
+
+    Single source of truth for archive cost — used by
+    ``build_analysis_snapshot`` (sum into ``archive_total_cost``) and
+    ``build_view_model`` (per-branch sum in ``archive_panel``) so the
+    snapshot's ``archive_total_cost`` cannot drift from the panel's
+    branch-breakdown totals when a new token bucket lands. Mirrors the
+    kwargs shape of :func:`session_cost` with one difference: the legacy
+    ``cache_write_tokens`` bucket is read directly (not via ``.get(0)``)
+    because archived sessions are always expected to carry it.
+    """
+    return cost_usd(
+        s["model"],
+        input_tokens=s["input_tokens"],
+        output_tokens=s["output_tokens"],
+        cache_write_5m_tokens=s.get("ephemeral_5m", 0),
+        cache_write_1h_tokens=s.get("ephemeral_1h", 0),
+        cache_write_tokens=s["cache_write_tokens"],
+        cache_read_tokens=s["cache_read_tokens"],
+    )
+
+
+def _partition_by_archive(sessions: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split ``sessions`` into ``(live, archived)`` in one pass.
+
+    Issue #820 SSOT: replaces the two inverse ``[s for s in sessions
+    if ... s.get("archive_branch")]`` walks with a single partition so
+    ``build_analysis_snapshot`` cannot drift the two lists if a future
+    schema adds a third bucket (e.g. ``s.get("quarantined")``).
+    """
+    live: list[dict] = []
+    archived: list[dict] = []
+    for s in sessions:
+        if s.get("archive_branch"):
+            archived.append(s)
+        else:
+            live.append(s)
+    return live, archived
+
+
 # ---------------------------------------------------------------------------
 # Log discovery + session aggregation
 # ---------------------------------------------------------------------------
@@ -359,10 +400,8 @@ def _discover_archive(logs_dir: Path) -> list[ArchivePath]:
     Mirrors :func:`_discover_one_logs_dir` for the archive sibling of
     the live logs dir. Returns ``[]`` when ``logs_dir`` does not exist,
     when ``.archive`` is absent (fresh clones), or when the archive
-    tree is empty. Each result carries the path-derived ``archive_branch``
-    (sanitized branch label) and ``archive_ts`` (UTC timestamp string)
-    so the dashboard can bucket archived sessions by branch without
-    re-walking.
+    tree is empty. See :class:`ArchivePath` for the path layout and
+    the issue #820 rationale.
 
     Walks breadth-first by sorted directory iteration so the emitted
     list order is stable across runs — a stable order keeps the
@@ -392,6 +431,34 @@ def _discover_archive(logs_dir: Path) -> list[ArchivePath]:
     return out
 
 
+def _probe_any_archive_jsonl(archive_root: Path) -> bool:
+    """True if any ``*.jsonl`` exists anywhere under ``archive_root``.
+
+    Handles both the flat ``<archive>/<source>/...`` layout and the
+    production ``<archive>/<branch>/<ts>/<source>/...`` layout so the
+    pre-snapshot empty-input guard in ``main()`` fires only on truly
+    empty inputs regardless of which writer produced the archive.
+    Returns False fast when ``archive_root`` is missing or not a dir.
+    """
+    if not archive_root.is_dir():
+        return False
+    # Flat layout: source dir sits directly under the archive root.
+    for sub in ("claude-code", "codex"):
+        d = archive_root / sub
+        if d.is_dir() and any(d.rglob("*.jsonl")):
+            return True
+    # Production layout: two levels of branch / timestamp dirs before the source.
+    for branch_dir in archive_root.iterdir():
+        if not branch_dir.is_dir():
+            continue
+        for ts_dir in branch_dir.iterdir():
+            if not ts_dir.is_dir():
+                continue
+            if any(ts_dir.rglob("*.jsonl")):
+                return True
+    return False
+
+
 def discover_logs(logs_dir: Path, *, repo_root: Path | None = None,
                    include_archives: bool = True) -> list[Path]:
     """Return every .jsonl under ``<logs_dir>/<source>/**``.
@@ -412,11 +479,7 @@ def discover_logs(logs_dir: Path, *, repo_root: Path | None = None,
     a separate :func:`_discover_archive` walk that they can zip against
     the resulting sessions (this keeps ``discover_logs`` backward-
     compatible with existing tests + callers that consume ``list[Path]``).
-
-    Issue #820: the live+archive merge is conditional on
-    ``include_archives``. Default-on preserves multi-quarter trend
-    coverage from the issue's #624 stale-worktree cost angle; default-off
-    keeps fast per-worktree-prune dashboards clean.
+    See :class:`ArchivePath` for the path layout + default-on rationale.
     """
     out = _discover_one_logs_dir(logs_dir)
     if repo_root is not None:
@@ -1622,11 +1685,10 @@ def aggregate_session(path: Path, *, archive_branch: str = "",
     worktree counter — before dispatching, so a new provider only needs
     to implement its record-type handlers.
 
-    Issue #820: ``archive_branch`` and ``archive_ts`` are populated by
-    callers (notably :func:`build_analysis_snapshot`) when ``path``
-    was discovered under ``<logs_dir>/.archive/...``. Live records
-    pass both as empty strings so the rendered dashboard can split
-    live vs. archived panels via a single ``archive_branch`` test.
+    ``archive_branch`` / ``archive_ts`` are populated by callers when
+    ``path`` was discovered under ``<logs_dir>/.archive/...``; live
+    records pass both as empty strings. See :class:`ArchivePath` for
+    the path layout + default-on rationale.
     """
     source = _source_for(path)
     st = _new_session_state(source=source)
@@ -2914,10 +2976,8 @@ def build_analysis_snapshot(
     field set. The caller is responsible for warning-line emission
     (unknown models / unknown worktrees / cost-gate stderr lines).
 
-    Issue #820: ``include_archives`` defaults to True so multi-quarter
-    trend dashboards surface the historical population that
-    ``bin/worktree-remove-safe.sh`` has been archiving. ``False`` keeps
-    fast per-worktree-prune dashboards clean.
+    See :class:`ArchivePath` for the archive path layout and the
+    default-on rationale behind the ``include_archives`` flag.
     """
     request = AnalysisRequest(
         repo=repo, days=days, logs_dir=logs_dir,
@@ -2934,18 +2994,20 @@ def build_analysis_snapshot(
     resolved_logs_dir = logs_dir.resolve()
     resolved_repo_root = (Path.cwd().resolve() if include_worktree_logs
                           else None)
-    # Issue #820: discover archive paths in parallel with live paths so the
-    # dedup step sees the union (an archived session's live copy is gone,
-    # so live+archive are already disjoint — dedup is a no-op for the
-    # archive half but kept for shape parity).
+    # Single archive walk — feed both the live ``files`` list and the
+    # ``archive_by_path`` lookup from this one result so the disk is
+    # only touched once per snapshot (avoids the race window where the
+    # second walk could disagree with the first).
     archive_paths: list[ArchivePath] = (
         _discover_archive(resolved_logs_dir) if include_archives else []
     )
     files = discover_logs(
         resolved_logs_dir,
         repo_root=resolved_repo_root,
-        include_archives=include_archives,
+        include_archives=False,  # appended manually below from `archive_paths`
     )
+    if include_archives:
+        files.extend(ap.path for ap in archive_paths)
     # Dual-write (#173) places the same sessionId in two files; dedup to
     # one snapshot per sessionId so cost and branch attribution are not
     # double-counted or skewed by the stale main-side copy.
@@ -2998,8 +3060,9 @@ def build_analysis_snapshot(
     # Inactive Sessions tables) so the live panel is byte-equivalent
     # (modulo the new archive panel) whether archives are included or
     # not. They surface ONLY via the dedicated Archived Sessions panel
-    # + the JSON ``archive_panel`` key.
-    live_sessions = [s for s in sessions if not s.get("archive_branch")]
+    # + the JSON ``archive_panel`` key. The single partition here is
+    # the SSOT for that split — see :func:`_partition_by_archive`.
+    live_sessions, archive_sessions = _partition_by_archive(sessions)
     windowed = filter_sessions(live_sessions, repo, days, worktree=worktree)
     selected = filter_sessions(live_sessions, repo, days, branch, worktree)
 
@@ -3060,18 +3123,12 @@ def build_analysis_snapshot(
     # FULL `sessions` list (not the ``selected`` filter) so the archived
     # panel surfaces every archived session, independent of the active
     # branch filter — auditors want the historical total visible without
-    # having to clear every CLI flag.
-    archive_sessions = [s for s in sessions if s.get("archive_branch")]
+    # having to clear every CLI flag. ``_archive_session_cost`` is the
+    # SSOT cost helper shared with ``build_view_model``'s archive
+    # branch_breakdown so the snapshot total cannot drift from the
+    # branch sums.
     archive_session_count = len(archive_sessions)
-    archive_total_cost = sum(cost_usd(
-        s["model"],
-        input_tokens=s["input_tokens"],
-        output_tokens=s["output_tokens"],
-        cache_write_5m_tokens=s.get("ephemeral_5m", 0),
-        cache_write_1h_tokens=s.get("ephemeral_1h", 0),
-        cache_write_tokens=s["cache_write_tokens"],
-        cache_read_tokens=s["cache_read_tokens"],
-    ) for s in archive_sessions)
+    archive_total_cost = sum(_archive_session_cost(s) for s in archive_sessions)
 
     view_model = build_view_model(
         repo=repo,
@@ -3217,32 +3274,11 @@ def main(argv: list[str] | None = None) -> int:
     # CLI was pointing at a specific dir — silence stderr noise). With
     # ``--include-archives`` (default) we also probe the .archive/ tree
     # so the empty-exit-2 guard fires on truly-empty inputs even when
-    # the user opted into archive discovery (issue #820).
+    # the user opted into archive discovery.
     probe_target = logs_dir / "claude-code" if (logs_dir / "claude-code").exists() else logs_dir
     probe_has_live = probe_target.exists() and any(probe_target.rglob("*.jsonl"))
     if not probe_has_live and include_archives:
-        # Look one level deeper into .archive — accept any depth match.
-        archive_root = logs_dir / ".archive"
-        if archive_root.is_dir():
-            for sub in ("claude-code", "codex"):
-                d = archive_root / sub
-                if d.is_dir() and any(d.rglob("*.jsonl")):
-                    probe_has_live = True
-                    break
-            if not probe_has_live:
-                # Layout is <archive>/<branch>/<ts>/<source>... so also
-                # walk two levels deep to confirm the historical shape.
-                for branch_dir in archive_root.iterdir():
-                    if not branch_dir.is_dir():
-                        continue
-                    for ts_dir in branch_dir.iterdir():
-                        if not ts_dir.is_dir():
-                            continue
-                        if any(ts_dir.rglob("*.jsonl")):
-                            probe_has_live = True
-                            break
-                    if probe_has_live:
-                        break
+        probe_has_live = _probe_any_archive_jsonl(logs_dir / ".archive")
     if not probe_has_live:
         # Mirror the historical stderr message; keep exit code 2.
         print(f"[error] No JSONL logs found under {logs_dir}/(claude-code|codex)/"

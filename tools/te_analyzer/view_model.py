@@ -44,6 +44,11 @@ def _aggregate_worktree_rows(*a, **kw):
     return _f(*a, **kw)
 
 
+def _archive_session_cost(*a, **kw):
+    from token_efficiency_analyzer import _archive_session_cost as _f
+    return _f(*a, **kw)
+
+
 def _stale_worktree_states():
     from token_efficiency_analyzer import STALE_WORKTREE_STATES
     return STALE_WORKTREE_STATES
@@ -1000,14 +1005,17 @@ def build_view_model(
     # ``repo_pool`` — the live panel filter excludes archived sessions,
     # so iterating ``repo_pool`` would yield an empty breakdown. The
     # ``archive_sessions`` arg defaults to ``sessions`` so legacy
-    # callers stay compatible.
+    # callers stay compatible. Cost uses ``_archive_session_cost`` —
+    # the SSOT helper shared with ``build_analysis_snapshot`` so the
+    # snapshot's ``archive_total_cost`` cannot drift from this per-
+    # branch sum when a new token bucket lands.
     archive_pool = archive_sessions if archive_sessions is not None else sessions
     archive_by_branch: dict[str, list[float]] = defaultdict(lambda: [0, 0.0])
     for s in archive_pool:
         b = s.get("archive_branch")
         if not b:
             continue
-        c = _cost(s)
+        c = _archive_session_cost(s)
         archive_by_branch[b][0] += 1
         archive_by_branch[b][1] += c
     archive_total_for_share = sum(rc[1] for rc in archive_by_branch.values()) or 1.0
