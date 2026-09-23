@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 # `yaml` is imported lazily inside `_lint_if_block_scalar_hashes()` so
 # the rest of ci_setup (and consumers that only call install_ci_config /
@@ -86,24 +86,15 @@ except ImportError:
         def runners_from_gates(*args, **kwargs):  # type: ignore[no-redef]
             return None
 
-# Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
-# gh presence + auth probe. Inlined (issue #915) — only one caller in
-# this module; centralizing into `lib/gh_cli.py` added an import hop +
-# a flat-bundle fallback without earning a reuse win. The body is 3 lines.
-def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
-    gh = shutil.which("gh")
-    if not gh:
-        return None, "gh not on PATH"
-    try:
-        cp = subprocess.run(
-            [gh, "auth", "status"],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return None, f"gh auth error: {type(e).__name__}"
-    if cp.returncode != 0:
-        return None, "gh not authenticated"
-    return gh, ""
+# Centralized gh-CLI presence + auth probe. Re-instated after the YAGNI
+# sweep (PR #915) — inlining produced 4 byte-identical 13-line copies
+# across ci_doctor / ci_setup / gates_state / proposal_orch_issue_pr,
+# exactly the duplication the original lib/gh_cli.py docstring warned
+# against. See lib/gh_cli.py.
+try:
+    from lib.gh_cli import _gh_available  # type: ignore
+except ImportError:
+    from gh_cli import _gh_available  # type: ignore
 
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent

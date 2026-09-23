@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -37,28 +36,15 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
-
-from lib import render_proposal_html
 from lib.atomic import atomic_write_text
 
+from lib import render_proposal_html
 
-# gh presence + auth probe. Inlined (issue #915) — only one caller in
-# this module; centralizing into `lib/gh_cli.py` added an import hop
-# without earning a reuse win. The body is 3 lines.
-def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
-    gh = shutil.which("gh")
-    if not gh:
-        return None, "gh not on PATH"
-    try:
-        cp = subprocess.run(
-            [gh, "auth", "status"],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return None, f"gh auth error: {type(e).__name__}"
-    if cp.returncode != 0:
-        return None, "gh not authenticated"
-    return gh, ""
+# gh presence + auth probe. Re-instated centralization (see lib/gh_cli.py).
+try:
+    from lib.gh_cli import _gh_available  # type: ignore
+except ImportError:
+    from gh_cli import _gh_available  # type: ignore
 
 # ----- Constants -------------------------------------------------------------
 

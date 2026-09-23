@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -44,25 +43,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from atomic import atomic_write_json  # noqa: E402
 
-
-# gh presence + auth probe. Inlined (issue #915) — the previous
-# `lib/gh_cli.py` helper had 7 callers but the body is 3 lines; centralizing
-# it added an import hop + a try/except fallback for the flat-bundle layout
-# without earning a reuse win worth the indirection.
-def _gh_available(*, timeout: int = 10) -> "tuple[Optional[str], str]":
-    gh = shutil.which("gh")
-    if not gh:
-        return None, "gh not on PATH"
-    try:
-        cp = subprocess.run(
-            [gh, "auth", "status"],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
-        return None, f"gh auth error: {type(e).__name__}"
-    if cp.returncode != 0:
-        return None, "gh not authenticated"
-    return gh, ""
+# gh presence + auth probe. Centralized in lib/gh_cli.py (re-instated after
+# the YAGNI sweep; 4 inlined copies across ci_doctor / ci_setup /
+# gates_state / proposal_orch_issue_pr re-created the byte-identical
+# duplication the original lib/gh_cli.py docstring warned against).
+try:
+    from lib.gh_cli import _gh_available  # type: ignore
+except ImportError:
+    from gh_cli import _gh_available  # type: ignore
 
 STATE_REL_PATH = Path(".dev-kit") / "gates.json"
 SCHEMA_VERSION = "1.1.0"
