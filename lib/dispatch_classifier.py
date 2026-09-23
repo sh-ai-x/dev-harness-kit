@@ -18,12 +18,10 @@ tmux + long-running safety:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, NamedTuple
 
 
-@dataclass(frozen=True)
-class DispatchDecision:
+class DispatchDecision(NamedTuple):
     """The classifier's verdict.
 
     Attributes:

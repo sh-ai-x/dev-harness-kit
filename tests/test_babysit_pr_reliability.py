@@ -418,7 +418,7 @@ class TestSelectGatesDynamic(unittest.TestCase):
 
         import gate_dynamic
         decisions = tuple(
-            gate_dynamic.GateDecision(
+            gate_dynamic.new_gate_decision(
                 gate_name=n,
                 skip=(n in skip_names),
                 reasoning=f"fake:{n}",
@@ -430,7 +430,7 @@ class TestSelectGatesDynamic(unittest.TestCase):
         )
         return mock.patch.object(
             gate_dynamic, "select_gates",
-            return_value=gate_dynamic.GateSkipDecision(
+            return_value=gate_dynamic.new_gate_skip_decision(
                 head_sha="abc",
                 decisions=decisions,
                 llm_raw={"scores": {}, "raw": ""},

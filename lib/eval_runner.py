@@ -35,7 +35,6 @@ from typing import Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 import llm_judge  # type: ignore
 from atomic import atomic_write_json, now_iso  # noqa: E402
-
 from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
     CaseResult,
     RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
@@ -521,7 +520,7 @@ def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict)
     try:
         from effectiveness_collection import collect as _eff_collect  # noqa: WPS433 — local import
         envelope = _eff_collect(project_root)
-        measurement_envelope = envelope.to_dict()
+        measurement_envelope = envelope
     except Exception:  # noqa: BLE001
         measurement_envelope = None
     write_report(

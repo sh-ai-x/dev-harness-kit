@@ -20,15 +20,16 @@ from babysit_pr_loop import (  # noqa: E402
     RESET_CONTEXT,
     WAIT_FOR_APPROVAL,
     WAIT_FOR_CHECKS,
-    LoopState,
     load_state,
     mark_transition_synced,
+    new_loop_state,
     new_state,
     next_wake_seconds,
     observe,
     record_outcome,
     save_state,
     transition_key,
+    validate_loop_state,
 )
 
 
@@ -62,8 +63,8 @@ def test_review_required_is_resumable_approval_wait_not_success() -> None:
         now_epoch=1_700_000_000,
         now_iso="2026-08-20T12:00:00Z",
     )
-    assert state.phase == WAIT_FOR_APPROVAL
-    assert state.phase != DONE
+    assert state["phase"] == WAIT_FOR_APPROVAL
+    assert state["phase"] != DONE
     assert next_wake_seconds(state) == 30
 
 
@@ -76,7 +77,7 @@ def test_approved_and_green_is_only_terminal_state() -> None:
         now_epoch=1_700_000_000,
         now_iso="2026-08-20T12:00:00Z",
     )
-    assert state.phase == DONE
+    assert state["phase"] == DONE
     assert next_wake_seconds(state) == 0
 
 
@@ -98,11 +99,11 @@ def test_snapshot_classification(checks, verdict, expected) -> None:
         now_epoch=1_700_000_000,
         now_iso="2026-08-20T12:00:00Z",
     )
-    assert state.phase == expected
+    assert state["phase"] == expected
 
 
 def test_head_sha_change_bumps_context_epoch_and_resets_stale_strategy() -> None:
-    state = LoopState(7, 7, phase=REPAIRING, head_sha="old", context_epoch=2)
+    state = new_loop_state(parent_pr=7, current_pr=7, phase=REPAIRING, head_sha="old", context_epoch=2)
     state = observe(
         state,
         head_sha="new",
@@ -111,25 +112,25 @@ def test_head_sha_change_bumps_context_epoch_and_resets_stale_strategy() -> None
         now_epoch=1_700_000_000,
         now_iso="2026-08-20T12:00:00Z",
     )
-    assert state.context_epoch == 3
-    assert state.strategy == "continue"
-    assert state.phase == WAIT_FOR_APPROVAL
+    assert state["context_epoch"] == 3
+    assert state["strategy"] == "continue"
+    assert state["phase"] == WAIT_FOR_APPROVAL
 
 
 def test_dynamic_skipped_defaults_to_empty_frozenset() -> None:
-    # v1.1.0 — `LoopState` carries an optional `dynamic_skipped` set
-    # of gate names that the LLM-judge layer recommended skipping for
-    # the current head_sha. Defaults to empty so older persisted
+    # v1.1.0 — the state dict carries an optional `dynamic_skipped`
+    # set of gate names that the LLM-judge layer recommended skipping
+    # for the current head_sha. Defaults to empty so older persisted
     # state files (without the field) load cleanly.
-    state = LoopState(7, 7)
-    assert state.dynamic_skipped == frozenset()
+    state = new_loop_state(parent_pr=7, current_pr=7)
+    assert state["dynamic_skipped"] == frozenset()
 
 
 def test_dynamic_skipped_persists_through_observe() -> None:
     # observe() without `dynamic_skipped` kwarg preserves the
     # existing value — the LLM-judge layer sets it on iteration N,
     # and iteration N+1 (without a new judge call) inherits it.
-    state = LoopState(7, 7, dynamic_skipped=frozenset({"maintenance"}))
+    state = new_loop_state(parent_pr=7, current_pr=7, dynamic_skipped=frozenset({"maintenance"}))
     state = observe(
         state,
         head_sha="abc",
@@ -138,18 +139,18 @@ def test_dynamic_skipped_persists_through_observe() -> None:
         now_epoch=1_700_000_000,
         now_iso="2026-08-20T12:00:00Z",
     )
-    assert state.dynamic_skipped == frozenset({"maintenance"})
+    assert state["dynamic_skipped"] == frozenset({"maintenance"})
 
 
 def test_dynamic_skipped_persists_through_record_outcome() -> None:
-    state = LoopState(7, 7, dynamic_skipped=frozenset({"maintenance"}))
+    state = new_loop_state(parent_pr=7, current_pr=7, dynamic_skipped=frozenset({"maintenance"}))
     state = record_outcome(state, outcome="progress", now_iso="t")
-    assert state.dynamic_skipped == frozenset({"maintenance"})
+    assert state["dynamic_skipped"] == frozenset({"maintenance"})
 
 
 def test_observe_accepts_dynamic_skipped_kwarg() -> None:
     # Fresh judge decision: observer passes it explicitly.
-    state = LoopState(7, 7)
+    state = new_loop_state(parent_pr=7, current_pr=7)
     state = observe(
         state,
         head_sha="abc",
@@ -159,18 +160,18 @@ def test_observe_accepts_dynamic_skipped_kwarg() -> None:
         now_iso="2026-08-20T12:00:00Z",
         dynamic_skipped=frozenset({"review", "maintenance"}),
     )
-    assert state.dynamic_skipped == frozenset({"review", "maintenance"})
+    assert state["dynamic_skipped"] == frozenset({"review", "maintenance"})
 
 
 def test_dynamic_skipped_validates_known_gate_names() -> None:
     # Operator typo / stray value should fail closed at validate() time.
     with pytest.raises(ValueError):
-        LoopState(7, 7, dynamic_skipped=frozenset({"lint"}))
+        new_loop_state(parent_pr=7, current_pr=7, dynamic_skipped=frozenset({"lint"}))
 
 
 def test_dynamic_skipped_round_trip_via_save_load() -> None:
     import tempfile
-    state = LoopState(7, 7, dynamic_skipped=frozenset({"maintenance"}))
+    state = new_loop_state(parent_pr=7, current_pr=7, dynamic_skipped=frozenset({"maintenance"}))
     state = observe(
         state,
         head_sha="abc",
@@ -185,25 +186,25 @@ def test_dynamic_skipped_round_trip_via_save_load() -> None:
         path = save_state(state, f"{td}/state.json")
         loaded = load_state(path)
     assert loaded is not None
-    assert loaded.dynamic_skipped == frozenset({"review"})
+    assert loaded["dynamic_skipped"] == frozenset({"review"})
 
 
 def test_no_information_evolves_then_resets_then_waits_for_recovery() -> None:
     state = new_state(7)
     state = record_outcome(state, outcome="unchanged", now_iso="t1")
-    assert state.strategy == CHANGE_DIRECTION and state.phase == REPAIRING
+    assert state["strategy"] == CHANGE_DIRECTION and state["phase"] == REPAIRING
     state = record_outcome(state, outcome="unchanged", now_iso="t2")
-    assert state.strategy == RESET_CONTEXT and state.phase == REPAIRING
+    assert state["strategy"] == RESET_CONTEXT and state["phase"] == REPAIRING
     state = record_outcome(state, outcome="unchanged", now_iso="t3")
-    assert state.strategy == "recover" and state.phase == RECOVERY_REQUIRED
+    assert state["strategy"] == "recover" and state["phase"] == RECOVERY_REQUIRED
     assert next_wake_seconds(state) == 300
 
 
 def test_partial_progress_evolves_without_resetting_the_pr() -> None:
     state = record_outcome(new_state(7), outcome="partial_progress", now_iso="t1")
-    assert state.strategy == "evolve_step"
-    assert state.phase == REPAIRING
-    assert state.no_information == 0
+    assert state["strategy"] == "evolve_step"
+    assert state["phase"] == REPAIRING
+    assert state["no_information"] == 0
 
 
 def test_state_round_trips_atomically(tmp_path: Path) -> None:
@@ -222,7 +223,7 @@ def test_state_round_trips_atomically(tmp_path: Path) -> None:
 
 def test_invalid_phase_is_rejected() -> None:
     with pytest.raises(ValueError):
-        LoopState(1, 1, phase="finished").validate()
+        validate_loop_state(new_loop_state(parent_pr=1, current_pr=1, phase="finished"))
 
 
 def test_production_snapshot_seam_loads_and_persists_state(tmp_path: Path) -> None:
@@ -238,9 +239,9 @@ def test_production_snapshot_seam_loads_and_persists_state(tmp_path: Path) -> No
         linear_issue="SHO-316",
         state_path=path,
     )
-    assert state.phase == WAIT_FOR_APPROVAL
-    assert state.github_tracker_issue == 696
-    assert state.linear_issue == "SHO-316"
+    assert state["phase"] == WAIT_FOR_APPROVAL
+    assert state["github_tracker_issue"] == 696
+    assert state["linear_issue"] == "SHO-316"
     assert load_state(path) == state
 
 
@@ -261,7 +262,7 @@ def test_production_outcome_seam_resumes_from_saved_state(tmp_path: Path) -> Non
         now_iso="2026-08-20T12:01:00Z",
         state_path=path,
     )
-    assert state.strategy == CHANGE_DIRECTION
+    assert state["strategy"] == CHANGE_DIRECTION
     assert load_state(path) == state
 
 
@@ -277,4 +278,4 @@ def test_transition_key_and_sync_marker_are_restart_safe() -> None:
     key = transition_key(state)
     synced = mark_transition_synced(state, now_iso="2026-08-20T12:01:00Z")
     assert key == "695:abc:0:wait_for_approval"
-    assert synced.last_synced_transition == key
+    assert synced["last_synced_transition"] == key
