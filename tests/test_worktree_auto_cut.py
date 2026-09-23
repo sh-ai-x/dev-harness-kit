@@ -169,21 +169,39 @@ class TestWorktreeAutoCutSilentForNonTaskPrompts(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
 
-    def test_silent_for_task_prompt_without_code_edit_verb(self):
-        # "fix the bug" is task-intent but no code-edit verb
-        # (no `fix <noun>` pattern that names what to fix).
+    def test_uncertain_for_task_prompt_without_code_edit_verb(self):
+        # "fix the bug" carries a task verb but no code-edit noun.
+        # Under the intent-first contract (issue #845) this surfaces
+        # a structured next-question — NOT a silent pass — so the
+        # user knows the classifier saw the request but did not
+        # promote it to implementation.
         r = _run_hook(
             "worktree-auto-cut.sh",
             _payload(prompt="fix the bug", cwd=self._main.name),
             cwd=Path(self._main.name),
         )
         self.assertEqual(r.returncode, 0)
-        self.assertEqual(r.stdout.strip(), "",
-                         f"task w/o code-edit verb should not fire; got: {r.stdout!r}")
+        # stdout must carry the next-question envelope.
+        doc = json.loads(r.stdout)
+        ctx = doc["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("uncertain", ctx.lower())
+        self.assertIn("clarifying question", ctx.lower())
 
 
 class TestWorktreeAutoCutDirtyMain(unittest.TestCase):
-    """In main checkout + task prompt + DIRTY main: hook must NOT fire."""
+    """In main checkout + DIRTY main + ACCEPTED intent.md: hook must
+    surface the dirty-main message and NOT cut. Without the
+    accepted intent the hook must surface the capture-prompt
+    instead — the dirty-main check is gated on accepted intent per
+    the issue #845 brief.
+
+    The "dirty" state we exercise is a tracked file that has been
+    modified (e.g. README.md after the initial commit). Untracked
+    files are intentionally ignored by the hook — the proto-spec
+    ``.dev-kit/round-0/intent.md`` is untracked until the
+    orchestrator commits it, and we don't want the cut blocked by
+    its mere presence.
+    """
 
     def setUp(self):
         if not (HOOKS / "worktree-auto-cut.sh").exists():
@@ -191,13 +209,48 @@ class TestWorktreeAutoCutDirtyMain(unittest.TestCase):
         if not shutil.which("jq"):
             self.skipTest("jq not installed; hook fails open")
         self._main = _init_clean_main()
-        # Make main dirty.
-        (Path(self._main.name) / "dirty.txt").write_text("uncommitted")
+        # Make main dirty by modifying the tracked README.md —
+        # untracked files alone should not block the cut (see the
+        # class docstring).
+        (Path(self._main.name) / "README.md").write_text("modified")
 
     def tearDown(self):
         self._main.cleanup()
 
-    def test_explains_when_main_dirty(self):
+    def test_without_intent_prompts_capture(self):
+        """Implementation prompt + dirty main + no accepted intent
+        → hook surfaces the capture-prompt envelope (it must not
+        reach the dirty-main check)."""
+        r = _run_hook(
+            "worktree-auto-cut.sh",
+            _payload(prompt="add file foo", cwd=self._main.name),
+            cwd=Path(self._main.name),
+        )
+        self.assertEqual(r.returncode, 0)
+        doc = json.loads(r.stdout)
+        ctx = doc["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("no intent record", ctx)
+        self.assertFalse((Path(self._main.name) / ".worktrees").exists())
+
+    def test_with_accepted_intent_explains_dirty(self):
+        """Implementation prompt + dirty main + accepted intent.md
+        → hook surfaces the dirty-main message. The dirty check
+        lives behind the intent gate."""
+        root = Path(self._main.name)
+        intent_dir = root / ".dev-kit" / "round-0"
+        intent_dir.mkdir(parents=True, exist_ok=True)
+        (intent_dir / "intent.md").write_text(
+            "# Intent: add file foo\n"
+            "\n"
+            "request_id: req-deadbeefcafef00d\n"
+            "client: claude-code\n"
+            "decision_mode: accepted\n"
+            "goal: add file foo\n"
+            "\n"
+            "## Acceptance criteria\n"
+            "- foo file added\n",
+            encoding="utf-8",
+        )
         r = _run_hook(
             "worktree-auto-cut.sh",
             _payload(prompt="add file foo", cwd=self._main.name),
@@ -212,8 +265,15 @@ class TestWorktreeAutoCutDirtyMain(unittest.TestCase):
 
 
 class TestWorktreeAutoCutFires(unittest.TestCase):
-    """In clean main + task prompt with code-edit verb: hook must
-    auto-cut a worktree, bootstrap log-on, and return additionalContext."""
+    """In clean main + ACCEPTED intent.md + task prompt with
+    code-edit verb: hook must auto-cut a worktree, bootstrap
+    log-on, and return additionalContext.
+
+    Per the issue #845 brief, the cut is gated on the accepted
+    Intent record at .dev-kit/round-0/intent.md. Without that
+    record the hook surfaces a capture-prompt envelope instead
+    (see TestWorktreeAutoCutCapturePath below).
+    """
 
     def setUp(self):
         if not (HOOKS / "worktree-auto-cut.sh").exists():
@@ -221,6 +281,22 @@ class TestWorktreeAutoCutFires(unittest.TestCase):
         if not shutil.which("jq"):
             self.skipTest("jq not installed; hook fails open")
         self._main = _init_clean_main()
+        # Materialize an accepted intent.md so the cut is unblocked.
+        root = Path(self._main.name)
+        intent_dir = root / ".dev-kit" / "round-0"
+        intent_dir.mkdir(parents=True, exist_ok=True)
+        (intent_dir / "intent.md").write_text(
+            "# Intent: add file foo\n"
+            "\n"
+            "request_id: req-deadbeefcafef00d\n"
+            "client: claude-code\n"
+            "decision_mode: accepted\n"
+            "goal: add file foo\n"
+            "\n"
+            "## Acceptance criteria\n"
+            "- foo file added\n",
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         # Clean up any worktree the hook may have created.
@@ -255,18 +331,20 @@ class TestWorktreeAutoCutFires(unittest.TestCase):
         # Output must be valid JSON with additionalContext.
         doc = json.loads(r.stdout)
         ctx = doc.get("hookSpecificOutput", {}).get("additionalContext", "")
-        self.assertIn("worktree auto-cut ready", ctx,
-                      f"expected auto-cut marker; got: {ctx!r}")
+        self.assertIn("worktree cut ready", ctx,
+                      f"expected cut-ready marker; got: {ctx!r}")
         self.assertIn("Claude Code next: open a new session", ctx)
         self.assertIn("Codex next: spawn a subagent", ctx)
-        self.assertIn("handoff: pass the original task prompt", ctx)
-        # Slug must match <type>/<verb>-<noun>-<hash6>.
+        # Slug must match the project branch-naming regex. The
+        # new shape prefers the classifier's <type>/<slug>
+        # suggestion over the old hash-suffix shape; both pass the
+        # same regex.
         m = re.search(r"branch:\s+(\S+)", ctx)
         self.assertIsNotNone(m, f"no branch line in context: {ctx!r}")
         branch = m.group(1)
         self.assertRegex(
             branch,
-            r"^fix/[a-z0-9-]{2,40}-[a-f0-9]{6}$",
+            r"^fix/[a-z0-9-]{2,40}$",
             f"branch '{branch}' does not match slug policy",
         )
         # Worktree dir must exist on disk.
@@ -304,9 +382,9 @@ class TestWorktreeAutoCutFires(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         doc = json.loads(r.stdout)
         ctx = doc["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("worktree auto-cut ready", ctx)
+        self.assertIn("worktree cut ready", ctx)
         branch = re.search(r"branch:\s+(\S+)", ctx).group(1)
-        self.assertRegex(branch, r"^fix/[a-z0-9-]{2,40}-[a-f0-9]{6}$")
+        self.assertRegex(branch, r"^fix/[a-z0-9-]{2,40}$")
 
     def test_cuts_worktree_at_repo_root_when_session_starts_in_subdirectory(self):
         """The hook's cwd is not necessarily the repository root."""

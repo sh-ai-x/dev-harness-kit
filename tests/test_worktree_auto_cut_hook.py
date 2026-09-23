@@ -19,12 +19,12 @@ This test pins the post-refactor shape:
   3. The safe-mode contract is preserved: ``reset_branch`` is NOT set to
      True (the historical ``-b`` flag is the default for
      ``cut_worktree``).
-  4. End-to-end: with ``python3`` replaced by a recording stub, the hook
+  4. End-to-end: with ``python3`` replaced by a recording shim, the hook
      actually invokes ``cut_worktree`` when given a task prompt in a
      clean main checkout. This proves the source-level assertions are
      connected to runtime behavior, not decorative.
   5. The cleanup semantics survive the refactor: when ``cut_worktree``
-     returns non-zero (stub exits 1), the hook still emits the
+     returns non-zero (shim exits 1), the hook still emits the
      "git worktree add failed for branch ..." fallback envelope (the
      old ``git worktree remove --force`` + ``git branch -D`` cleanup was
      deliberate — keeping the same envelope keeps downstream callers
@@ -55,6 +55,11 @@ def _init_clean_main() -> "tempfile.TemporaryDirectory":
     not configured. The Python-helper path is fully exercised against
     this fixture via a recording ``python3`` shim (see
     ``TestHookInvokesCutWorktreeHelper``).
+
+    Per the issue #845 brief the hook requires an ACCEPTED intent
+    record before invoking ``cut_worktree``. Tests that exercise
+    the cut path call ``_write_accepted_intent(root)`` after
+    initialising the repo.
     """
     td = tempfile.TemporaryDirectory()
     root = Path(td.name)
@@ -70,6 +75,27 @@ def _init_clean_main() -> "tempfile.TemporaryDirectory":
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "init"],
                    check=True, capture_output=True)
     return td
+
+
+def _write_accepted_intent(root: Path) -> None:
+    """Materialize an ACCEPTED intent.md at ``.dev-kit/round-0/intent.md``.
+
+    The hook's cut path is gated on this record existing and being
+    valid (decision_mode=accepted + acceptance_criteria)."""
+    intent_dir = root / ".dev-kit" / "round-0"
+    intent_dir.mkdir(parents=True, exist_ok=True)
+    (intent_dir / "intent.md").write_text(
+        "# Intent: add file foo\n"
+        "\n"
+        "request_id: req-deadbeefcafef00d\n"
+        "client: claude-code\n"
+        "decision_mode: accepted\n"
+        "goal: add file foo\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "- foo file added\n",
+        encoding="utf-8",
+    )
 
 
 def _run_hook_with_env(
@@ -99,6 +125,56 @@ def _payload(prompt: str, cwd: str) -> dict:
         "prompt": prompt,
         "cwd": cwd,
     }
+
+
+def _install_shim(
+    *,
+    bin_dir: Path,
+    python_log: Path,
+    rc: int,
+    fail_on_cut_worktree: bool = False,
+) -> None:
+    """Module-level shim installer shared by the success + failure
+    test classes. The shim records every invocation's args + script
+    body to ``python_calls.log`` AND delegates to the real
+    ``python3`` so the script actually runs.
+
+    ``fail_on_cut_worktree=True`` makes the shim exit ``rc`` ONLY
+    when the script body contains ``cut_worktree`` — the helper
+    that performs the worktree cut. For the success path the shim
+    forwards everything to the real python and exits with the
+    real python's status.
+    """
+    shim = bin_dir / "python3"
+    fail_marker = "1" if fail_on_cut_worktree else "0"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        f"echo '----INVOCATION----' >> '{python_log}'\n"
+        "echo \"args: $*\" >> \"" + str(python_log) + "\"\n"
+        "REAL_PY=\"${REAL_PY:-/usr/bin/python3}\"\n"
+        "[ -x \"$REAL_PY\" ] || REAL_PY=\"$(command -v /usr/bin/env)\"\n"
+        "FAIL_ON_CUT=" + fail_marker + "\n"
+        "RC=" + str(rc) + "\n"
+        "if [ \"$1\" = \"-c\" ]; then\n"
+        "  echo \"script: $2\" >> \"" + str(python_log) + "\"\n"
+        "  if [ \"$FAIL_ON_CUT\" = \"1\" ] && printf '%s' \"$2\" | grep -q 'cut_worktree'; then\n"
+        "    exit $RC\n"
+        "  fi\n"
+        "  \"$REAL_PY\" \"$@\" 2>/dev/null\n"
+        "  exit $?\n"
+        "elif [ \"$1\" = \"-\" ]; then\n"
+        "  body=$(cat)\n"
+        "  printf '%s\\n' \"$body\" >> \"" + str(python_log) + "\"\n"
+        "  if [ \"$FAIL_ON_CUT\" = \"1\" ] && printf '%s' \"$body\" | grep -q 'cut_worktree'; then\n"
+        "    exit $RC\n"
+        "  fi\n"
+        "  printf '%s' \"$body\" | \"$REAL_PY\" \"$@\" 2>/dev/null\n"
+        "  exit $?\n"
+        "fi\n"
+        "exit $RC\n",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
 
 
 class TestHookSourceShape(unittest.TestCase):
@@ -212,8 +288,10 @@ class TestHookInvokesCutWorktreeHelper(unittest.TestCase):
         self.bin_dir = Path(tempfile.mkdtemp())
         self.python_log = self.bin_dir / "python_calls.log"
         # Recording python3: writes each invocation's args + script body
-        # to the log, then exits 0 (success path). Tests that need a
-        # failing helper can swap in a different shim.
+        # to the log, then delegates to the real python3 so the
+        # classifier + intent-check + cut chain actually executes.
+        # Tests that need a failing helper can swap in a different
+        # shim (rc=1).
         self._install_python_shim(rc=0)
 
     def tearDown(self):
@@ -240,38 +318,30 @@ class TestHookInvokesCutWorktreeHelper(unittest.TestCase):
         shutil.rmtree(self.bin_dir, ignore_errors=True)
         self.tmp.cleanup()
 
-    def _install_python_shim(self, *, rc: int) -> None:
-        """Replace ``python3`` in PATH with a recording script.
-
-        The script logs ``args: <argv>`` then the script body (either
-        the ``-c`` argument or the heredoc fed via stdin). Exits with
-        ``rc`` so tests can simulate a failing helper.
-        """
-        shim = self.bin_dir / "python3"
-        shim.write_text(
-            "#!/usr/bin/env bash\n"
-            f"echo '----INVOCATION----' >> '{self.python_log}'\n"
-            "echo \"args: $*\" >> \"" + str(self.python_log) + "\"\n"
-            "if [ \"$1\" = \"-c\" ]; then\n"
-            "  echo \"script: $2\" >> \"" + str(self.python_log) + "\"\n"
-            "elif [ \"$1\" = \"-\" ]; then\n"
-            "  cat >> \"" + str(self.python_log) + "\"\n"
-            "fi\n"
-            f"exit {rc}\n",
-            encoding="utf-8",
+    def _install_python_shim(self, *, rc: int, fail_on_cut_worktree: bool = False) -> None:
+        """Test-method entry point — delegates to the module-level
+        ``_install_shim``. Keeps the per-class API stable while the
+        underlying installer is shared."""
+        _install_shim(
+            bin_dir=self.bin_dir,
+            python_log=self.python_log,
+            rc=rc,
+            fail_on_cut_worktree=fail_on_cut_worktree,
         )
-        shim.chmod(0o755)
 
     def _path_with_shim(self) -> str:
         return f"{self.bin_dir}{os.pathsep}{os.environ['PATH']}"
 
     def test_hook_invokes_cut_worktree_for_task_prompt(self):
-        """In clean main + task prompt: the hook MUST shell out to a Python
-        invocation that references ``cut_worktree``.
+        """In clean main + ACCEPTED intent.md + task prompt: the
+        hook MUST shell out to a Python invocation that references
+        ``cut_worktree``.
 
-        This is the runtime counterpart to the source-level grep
-        assertions in ``TestHookSourceShape``.
+        Per the issue #845 brief, the cut is gated on the accepted
+        intent record. This is the runtime counterpart to the
+        source-level grep assertions in ``TestHookSourceShape``.
         """
+        _write_accepted_intent(Path(self.tmp.name))
         r = _run_hook_with_env(
             _payload(prompt="add file foo to the project", cwd=self.tmp.name),
             cwd=Path(self.tmp.name),
@@ -310,6 +380,14 @@ class TestHookCutFailureCleanup(unittest.TestCase):
     ``cut_worktree`` itself (overwrite_worktree + pre-existing-branch
     survival in safe mode). The fallback envelope MUST still fire when
     ``cut_worktree`` raises.
+
+    Per the issue #845 brief: failed cut leaves no ``ready``
+    envelope; the fallback names the canonical retry path.
+
+    Under the intent-first contract the failure case is: classify +
+    intent-check succeed, but the cut itself fails. The shim is
+    installed with ``fail_on_cut_worktree=True`` so only the cut
+    python invocation exits non-zero.
     """
 
     @classmethod
@@ -323,36 +401,36 @@ class TestHookCutFailureCleanup(unittest.TestCase):
         self.tmp = _init_clean_main()
         self.bin_dir = Path(tempfile.mkdtemp())
         self.python_log = self.bin_dir / "python_calls.log"
-        self._install_python_shim(rc=1)
+        self._install_python_shim(rc=1, fail_on_cut_worktree=True)
 
     def tearDown(self):
         shutil.rmtree(self.bin_dir, ignore_errors=True)
         self.tmp.cleanup()
 
-    def _install_python_shim(self, *, rc: int) -> None:
-        shim = self.bin_dir / "python3"
-        shim.write_text(
-            "#!/usr/bin/env bash\n"
-            f"echo '----INVOCATION----' >> '{self.python_log}'\n"
-            "echo \"args: $*\" >> \"" + str(self.python_log) + "\"\n"
-            "if [ \"$1\" = \"-c\" ]; then\n"
-            "  echo \"script: $2\" >> \"" + str(self.python_log) + "\"\n"
-            "elif [ \"$1\" = \"-\" ]; then\n"
-            "  cat >> \"" + str(self.python_log) + "\"\n"
-            "fi\n"
-            f"exit {rc}\n",
-            encoding="utf-8",
+    def _install_python_shim(self, *, rc: int, fail_on_cut_worktree: bool = False) -> None:
+        # Delegates to the module-level helper so the failure-test
+        # shim carries the cut-only failure flag (the success-path
+        # TestHookInvokesCutWorktreeHelper installs the same shim
+        # shape with the flag off).
+        _install_shim(
+            bin_dir=self.bin_dir,
+            python_log=self.python_log,
+            rc=rc,
+            fail_on_cut_worktree=fail_on_cut_worktree,
         )
-        shim.chmod(0o755)
 
     def _path_with_shim(self) -> str:
         return f"{self.bin_dir}{os.pathsep}{os.environ['PATH']}"
 
     def test_fallback_envelope_fires_when_helper_fails(self):
-        """When the Python helper exits non-zero, the hook must emit the
-        same ``git worktree add failed for branch <BRANCH>`` envelope the
-        pre-refactor inline implementation emitted.
+        """When the Python helper exits non-zero, the hook must emit
+        the same ``worktree cut failed for branch <BRANCH>`` envelope
+        the pre-refactor inline implementation emitted.
+
+        Per the issue #845 brief: failed cut leaves no ``ready``
+        envelope; the fallback names the canonical retry path.
         """
+        _write_accepted_intent(Path(self.tmp.name))
         r = _run_hook_with_env(
             _payload(prompt="add file foo to the project", cwd=self.tmp.name),
             cwd=Path(self.tmp.name),
@@ -371,13 +449,14 @@ class TestHookCutFailureCleanup(unittest.TestCase):
         except json.JSONDecodeError as exc:
             self.fail(f"hook output not JSON: {r.stdout!r} ({exc})")
         ctx = doc.get("hookSpecificOutput", {}).get("additionalContext", "")
-        # The exact fallback string from the pre-refactor hook was
-        # ``git worktree add failed for branch $BRANCH``. After the
-        # refactor we accept any envelope that names the failing helper
-        # AND identifies the branch so the user's manual-cut nudge is
-        # actionable.
+        # The intent-first shape replaces ``git worktree add failed``
+        # with ``worktree cut failed`` (no worktree was created —
+        # the envelope is a retry nudge, not a ready signal). Both
+        # phrasings are accepted for transitional compatibility.
         self.assertTrue(
-            ("git worktree add failed" in ctx) or ("cut_worktree failed" in ctx),
+            ("git worktree add failed" in ctx)
+            or ("worktree cut failed" in ctx)
+            or ("cut_worktree failed" in ctx),
             f"Expected fallback envelope on helper failure; got: {ctx!r}",
         )
         # The branch must be named in the envelope so the user knows
