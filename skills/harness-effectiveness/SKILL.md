@@ -1,10 +1,10 @@
 ---
 name: harness-effectiveness
 category: eval
-description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the five-component (prevention / first-pass / recovery / learning / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested stability submetric (issue #663) covering agent / model / provider swap behaviour, and a nested subject_observability submetric (issue #702) reporting producer coverage so event_coverage is observable in worktrees that have not yet run a build step.
+description: 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the four-component (prevention / first-pass / recovery / measurement-integrity) scorecard as JSON + a one-line status verdict. The measurement-integrity component also reports a nested stability submetric (issue #663) covering agent / model / provider swap behaviour, and a nested subject_observability submetric (issue #702) reporting producer coverage so event_coverage is observable in worktrees that have not yet run a build step.
 when_to_use:
   - User types /dev-kit:harness-effectiveness
-  - Operator wants the 5-component metric without running the full 12-case `/dev-kit:evaluate` judge pass
+  - Operator wants the 4-component metric without running the full 12-case `/dev-kit:evaluate` judge pass
   - After a Phase 3 batch lands, to inspect effectiveness in isolation before the full eval
   - When `.dev-kit/eval-report.md` shows `INSUFFICIENT_EVIDENCE` for the effectiveness table and the operator wants to see the raw JSON behind each finding
 allowed-tools: Read Bash
@@ -21,7 +21,7 @@ alpha: enforcement
 
 Invokes the deterministic `lib.harness_effectiveness.build_report(root)` reducer and prints the resulting JSON. The reducer consumes structured TraceLog events (guard actions, first-write verification, repair events, control/treatment cohorts, measurement-integrity signals) already emitted by the harness; **no LLM judge runs**, no transcript replay, no case fixture. Missing evidence is reported as `INSUFFICIENT_EVIDENCE` per component — it is never converted to a passing or zero score.
 
-This is the standalone counterpart to the table that `/dev-kit:evaluate` embeds at the bottom of `.dev-kit/eval-report.md`. The difference is intent: `/dev-kit:evaluate` runs the 12-case judge pass + the 5-component report together; `/dev-kit:harness-effectiveness` runs only the 5-component reducer (cheap, sub-second, no API spend).
+This is the standalone counterpart to the table that `/dev-kit:evaluate` embeds at the bottom of `.dev-kit/eval-report.md`. The difference is intent: `/dev-kit:evaluate` runs the 12-case judge pass + the 4-component report together; `/dev-kit:harness-effectiveness` runs only the 4-component reducer (cheap, sub-second, no API spend).
 
 ## Inputs (resolved at runtime, NOT user args)
 
@@ -33,15 +33,21 @@ This is the standalone counterpart to the table that `/dev-kit:evaluate` embeds 
 
 No flags. The slash is 0-arg by design.
 
-## Five components
+## Four components
 
 | Component | Weight | What it scores |
 |---|---:|---|
-| `prevention_quality` | 0.20 | guard block-rate vs. ground-truth-labelled guard events |
-| `first_pass_quality` | 0.20 | write → first-verification-pass rate |
-| `recovery_quality` | 0.25 | median iterations to recover from a verification error |
-| `learning_quality` | 0.20 | treatment-vs-control cohort divergence after guard intervention |
-| `measurement_integrity` | 0.15 | TraceLog event_id uniqueness, schema-version compliance, dedup; nested `stability` submetric (issue #663) reports agent / model / provider swap behaviour |
+| `prevention_quality` | 0.25 | guard block-rate vs. ground-truth-labelled guard events |
+| `first_pass_quality` | 0.25 | write → first-verification-pass rate |
+| `recovery_quality` | 0.31 | median iterations to recover from a verification error |
+| `measurement_integrity` | 0.19 | TraceLog event_id uniqueness, schema-version compliance, dedup; nested `stability` submetric (issue #663) reports agent / model / provider swap behaviour |
+
+`learning_quality` (treatment-vs-control cohort divergence) was removed
+because its evidence class is unreachable from current producers — the
+cohort-tagging instrumentation isn't wired into the build loop, so the
+component reported `INSUFFICIENT_EVIDENCE` permanently. The remaining
+four shippable components carry the unit weight and are observable
+from evidence already on the production path.
 
 Each component returns:
 ```
@@ -57,11 +63,16 @@ Each component returns:
 }
 ```
 
-`overall_score` is `null` when **any** component is `null` (i.e. when **any** component reports `INSUFFICIENT_EVIDENCE`). Otherwise it is the weighted sum of component scores.
+`overall_score` is `null` when **no** component has a score (i.e.
+when every component reports `INSUFFICIENT_EVIDENCE`). Otherwise it
+is the weighted sum of the scored components' scores, with both the
+numerator and the divisor restricted to the scored set so a
+partially-scored corpus reports a meaningful overall instead of
+collapsing to `None`.
 
 ## Incremental measurement envelope (PR #817)
 
-The 5-component reducer above remains the canonical
+The 4-component reducer above remains the canonical
 `harness-effectiveness` contract. A complementary bounded envelope is
 available from `lib.effectiveness_collection.collect(root)` and is
 exposed by this skill under the `envelope` field of the printed JSON.
@@ -85,12 +96,12 @@ The envelope:
 The envelope is read-only with respect to the existing
 `harness_effectiveness` reducer. Callers that want a hard gate check
 the envelope's `readiness == "READY"`; callers that want quality
-scores use the 5-component report above.
+scores use the 4-component report above.
 
 ## Stability submetric (issue #663)
 
 Nested under `components.measurement_integrity.submetrics.stability`. It is a
-sixth dimension that is *not* a top-level weight — the five-component
+fifth dimension that is *not* a top-level weight — the four-component
 `overall_score` formula is unchanged. The submetric carries:
 
 - `coverage` (float 0..1) — minimum of the five dimension sub-coverage ratios
@@ -112,7 +123,7 @@ A new `INSUFFICIENT_EVIDENCE` constant is exported from
 `lib.harness_effectiveness`; consumer code should compare against the
 constant instead of hardcoding the string. `build_report` also bumps
 `schema_version` from 1 → 2 so consumers can detect the new submetric
-without breaking the 5-component contract.
+without breaking the 4-component contract.
 
 ## Output
 
@@ -121,7 +132,7 @@ The full reducer JSON is printed to stdout (one line per field, pretty-printed).
 ```
 $ /dev-kit:harness-effectiveness
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "contract_version": "harness-effectiveness-v1",
   "event_count": 81,
   "overall_score": null,
@@ -130,7 +141,6 @@ $ /dev-kit:harness-effectiveness
     "prevention_quality":    { "score": null, ..., "findings": ["ground_truth label missing for guard actions"] },
     "first_pass_quality":    { "score": null, ..., "findings": ["no write with first verification evidence"] },
     "recovery_quality":      { "score": null, ..., "findings": ["no verification errors observed"] },
-    "learning_quality":      { "score": null, ..., "findings": ["comparable treatment and control cohorts missing"] },
     "measurement_integrity": {
       "score": null,
       "submetrics": {
@@ -161,14 +171,15 @@ The skill body is the reducer. There is no algorithm loop, no LLM call, no fixtu
 
 ## Backward-compat
 
-- `lib/harness_effectiveness.build_report` is unchanged for the 5-component
+- `lib/harness_effectiveness.build_report` is unchanged for the 4-component
   contract: `COMPONENT_WEIGHTS` still sums to 1.0, the `overall_score` formula
   is the same, and `components` / `overall_score` / `status` / `event_count`
   / `contract_version` still exist. `schema_version` bumps from 1 → 2 in
-  issue #663 to advertise the nested `stability` submetric, and 2 → 3 in
-  issue #702 to advertise the nested `subject_observability` submetric.
-  Consumers that ignore unknown versions continue to work unchanged.
-  Callers that import it directly still work. The parent
+  issue #663 to advertise the nested `stability` submetric, 2 → 3 in
+  issue #702 to advertise the nested `subject_observability` submetric,
+  and 3 → 4 to advertise removal of the `learning_quality` top-level
+  component. Consumers that ignore unknown versions continue to work
+  unchanged. Callers that import it directly still work. The parent
   `measurement_integrity.score` now falls back to the `subject_observability`
   symmetric ratio when `event_coverage` is `None` (producer-missing case),
   so an empty worktree reports a non-null score tied to a specific finding.
@@ -195,7 +206,7 @@ All stdout/stderr messages in **English only**.
 
 ## Related
 
-- `lib/harness_effectiveness.py` — `build_report` (the reducer) + the five private `_prevention` / `_first_pass` / `_recovery` / `_learning` / `_integrity` component builders.
+- `lib/harness_effectiveness.py` — `build_report` (the reducer) + the four private `_prevention` / `_first_pass` / `_recovery` / `_integrity` component builders.
 - `lib/trace_log.py` — `read_events` + `validate_event` (the schema the reducer depends on).
 - `eval/rubrics/harness-effectiveness.yaml` — the spec the components conform to.
 - `eval/prompts/judge-harness-effectiveness.md` — the LLM-judge prompt used only by `/dev-kit:evaluate --harness-quality` (NOT used here — this skill is reducer-only).
@@ -203,7 +214,7 @@ All stdout/stderr messages in **English only**.
 - `tests/test_harness_stability.py` — 14 hermetic tests covering the stability
   submetric (issue #663): model swap, provider swap, replay compatibility,
   missing evidence, and backward compat.
-- `/dev-kit:evaluate` — runs the 5-component reducer + the 12-case judge pass in one report. Use that when you want the full picture; use this skill when you want the reducer in isolation.
+- `/dev-kit:evaluate` — runs the 4-component reducer + the 12-case judge pass in one report. Use that when you want the full picture; use this skill when you want the reducer in isolation.
 
 ## Next step
 

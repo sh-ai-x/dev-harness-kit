@@ -1,0 +1,198 @@
+{
+  "events": {
+    "PostToolUse": [
+      {
+        "fail_closed": false,
+        "name": "injection-content-guard",
+        "path": "hooks/injection-content-guard.sh",
+        "when": "Agent"
+      },
+      {
+        "fail_closed": false,
+        "name": "injection-content-guard",
+        "path": "hooks/injection-content-guard.sh",
+        "when": "WebFetch"
+      },
+      {
+        "fail_closed": true,
+        "name": "l4-todo-scan",
+        "path": "hooks/l4-todo-scan.sh",
+        "when": "Write|Edit|MultiEdit"
+      },
+      {
+        "fail_closed": false,
+        "name": "linear-worktree-create",
+        "path": "hooks/linear-worktree-create.sh",
+        "when": "Bash"
+      },
+      {
+        "fail_closed": true,
+        "name": "loop-detect",
+        "path": "hooks/loop-detect.sh",
+        "when": "Bash"
+      },
+      {
+        "fail_closed": true,
+        "name": "secret-scan",
+        "path": "hooks/secret-scan.sh",
+        "when": "Write|Edit|MultiEdit"
+      },
+      {
+        "fail_closed": true,
+        "name": "slop-detector",
+        "path": "hooks/slop-detector.sh",
+        "when": "Write|Edit|MultiEdit"
+      },
+      {
+        "fail_closed": true,
+        "name": "sub-agent-handoff",
+        "path": "hooks/sub-agent-handoff.sh",
+        "when": "Agent"
+      },
+      {
+        "fail_closed": false,
+        "name": "worktree-log-auto-install",
+        "path": "hooks/worktree-log-auto-install.sh",
+        "when": "Bash"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "fail_closed": true,
+        "name": "acp-tier-assert",
+        "path": "hooks/acp-tier-assert.sh",
+        "when": "*"
+      },
+      {
+        "fail_closed": true,
+        "name": "bash-guard",
+        "path": "hooks/bash-guard.sh",
+        "when": "Bash"
+      },
+      {
+        "fail_closed": true,
+        "name": "destructive-confirm",
+        "path": "hooks/destructive-confirm.sh",
+        "when": "Write|Edit|MultiEdit|Bash"
+      },
+      {
+        "fail_closed": true,
+        "name": "git-guard",
+        "path": "hooks/git-guard.sh",
+        "when": "Bash"
+      },
+      {
+        "fail_closed": false,
+        "name": "linear-autosync",
+        "path": "hooks/linear-autosync.sh",
+        "when": "Write|Edit|MultiEdit"
+      },
+      {
+        "fail_closed": false,
+        "name": "pr-create-route",
+        "path": "hooks/pr-create-route.sh",
+        "when": "Bash"
+      },
+      {
+        "fail_closed": false,
+        "name": "ralph-attended-lock",
+        "path": "hooks/ralph-attended-lock.sh",
+        "when": "AskUserQuestion"
+      },
+      {
+        "fail_closed": true,
+        "name": "review-yml-isolation",
+        "path": "hooks/review-yml-isolation.sh",
+        "when": "Bash"
+      },
+      {
+        "fail_closed": true,
+        "name": "tdd-guard",
+        "path": "hooks/tdd-guard.sh",
+        "when": "Write|Edit|MultiEdit"
+      },
+      {
+        "fail_closed": true,
+        "name": "worktree-guard",
+        "path": "hooks/worktree-guard.sh",
+        "when": "Write|Edit|MultiEdit"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "fail_closed": false,
+        "name": "trace-session-end",
+        "path": "hooks/trace-session-end.sh",
+        "when": ""
+      }
+    ],
+    "SessionStart": [
+      {
+        "fail_closed": false,
+        "name": "session-start",
+        "path": "hooks/session-start.sh",
+        "when": ""
+      }
+    ],
+    "Stop": [
+      {
+        "fail_closed": true,
+        "name": "stop-verify",
+        "path": "hooks/stop-verify.sh",
+        "when": ""
+      },
+      {
+        "fail_closed": false,
+        "name": "trace-session-end",
+        "path": "hooks/trace-session-end.sh",
+        "when": ""
+      },
+      {
+        "fail_closed": false,
+        "name": "worktree-session-cleanup",
+        "path": "hooks/worktree-session-cleanup.sh",
+        "when": ""
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "fail_closed": false,
+        "name": "context-window-guard",
+        "path": "hooks/context-window-guard.sh",
+        "when": ""
+      },
+      {
+        "fail_closed": false,
+        "name": "linear-task-change",
+        "path": "hooks/linear-task-change.sh",
+        "when": ""
+      },
+      {
+        "fail_closed": false,
+        "name": "notification-collapse",
+        "path": "hooks/notification-collapse.sh",
+        "when": ""
+      },
+      {
+        "fail_closed": false,
+        "name": "worktree-auto-cut",
+        "path": "hooks/worktree-auto-cut.sh",
+        "when": ""
+      }
+    ]
+  },
+  "generated_at": "2026-09-23T08:13:17+00:00",
+  "matrix": {},
+  "override": {},
+  "schema_version": "1.0.0",
+  "_git_hooks_note": "Git-level hooks (pre-commit, pre-push, commit-msg) are NOT in `hooks/hooks.json` (which is the Claude Code event hook SSOT). The `git_hooks` array below is hand-curated and survives regen by living in a separate top-level field. Do not merge into `events`.",
+  "git_hooks": [
+    {
+      "name": "pre-push",
+      "path": "hooks/pre-push.sh",
+      "when": "git push",
+      "fail_closed": true,
+      "scope": "local-hook for issue-sync opt-in + opt-in opt-out per `.dev-kit/local-gates.yaml`"
+    }
+  ]
+}

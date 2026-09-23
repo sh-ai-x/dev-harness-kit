@@ -1,0 +1,61 @@
+# .dev-kit/local-gates.yaml.example — opt-in local pre-push gates.
+#
+# Copy this file to `.dev-kit/local-gates.yaml` and flip individual
+# `enabled: true` lines to activate the corresponding pre-push gate.
+# The `issue-sync` stage is **always on** (cannot be opted out of
+# here — it ships in `hooks/pre-push.sh` unconditionally because it
+# is the only gate that saves provider tokens per issue #833).
+#
+# Each opt-in stage has a per-gate cost (wall-clock + RAM) listed in
+# `docs/gates/local-pre-push.md`. Keep them all off on battery-powered
+# laptops / CI runners / dev containers unless you specifically want
+# the local pre-push signal.
+#
+# This file ships with all four opt-in stages COMMENTED OUT (i.e.
+# `enabled: false`). A power user opts in by:
+#
+#   cp .dev-kit/local-gates.yaml.example .dev-kit/local-gates.yaml
+#   $EDITOR .dev-kit/local-gates.yaml   # flip `test: true` etc.
+#
+# Then every `git push` reads `.dev-kit/local-gates.yaml` and runs
+# each `enabled: true` stage in order. Stage failures block the push
+# with the same exit-1 contract as the always-on `issue-sync` stage.
+
+# Always-on (cannot be toggled here — see hooks/pre-push.sh Stage 1).
+# Catches stale `Issue #N` / `Closes #N` / etc. refs in commit
+# messages at ~9s wall-clock + <10MB RSS, before any LLM judge fires
+# in GH Actions. Saves $1-3 of provider tokens per caught stale-ref
+# push (issue #833 / PR #832 design).
+#
+# issue_sync:
+#   enabled: true   # hard-coded; do not edit
+
+# ── Opt-in Stage 2a: validate (~10s, 50MB RAM) ─────────────────────
+# Runs the same validation suite as `.github/workflows/validate.yml`.
+# Cheapest of the opt-in stages; safe on most laptops.
+#
+# validate:
+#   enabled: false
+
+# ── Opt-in Stage 2b: ruff (~7s, 30MB RAM) ───────────────────────────
+# Runs `ruff check .` — faster than `validate` if lint is the only
+# signal you want pre-push.
+#
+# lint:
+#   enabled: false
+
+# ── Opt-in Stage 2c: pytest subset (~30-120s, 200-500MB RAM) ───────
+# Runs `pytest tests/ -q --tb=line -x` ignoring the slowest review
+# and security gate tests so the wall-clock stays bounded. Honors
+# the same opt-out list as `bin/review-local.sh`.
+#
+# test:
+#   enabled: false
+
+# ── Opt-in Stage 2d: cache-decay-audit (~30s, 200MB RAM) ───────────
+# Runs `tests/test_cache_decay.py` + `tests/test_skill_frontmatter.py`
+# to catch prompt-cache and skill-frontmatter regressions before
+# they reach GH Actions.
+#
+# cache_decay_audit:
+#   enabled: false

@@ -75,7 +75,17 @@ any `tools/token_efficiency_analyzer.py` change.*
 | `--cost-gate-tokens <int>` | `200000` | Per-session `input + cache_read` gate; sessions over this trigger a stderr WARN |
 | `--cost-gate-usd <float>` | `5.00` | Per-session USD gate; sessions over this trigger a stderr WARN |
 | `--pricing-override <path>` | _(none)_ | JSON file overriding the PRICING dict (`{tier: {in, out, cache_write_5m, cache_write_1h, cache_read}}`) |
+| `--include-archives` / `--no-include-archives` | `--include-archives` (on) | See [Archives](#archives) below |
 | `--json` | _(off)_ | Emit machine-readable JSON summary to stdout, skip HTML write; exit code 3 on `cost_gate=bad` |
+
+### Archives
+
+`--include-archives` walks `<logs_dir>/.archive/<branch>/<ts>/<source>/**/*.jsonl`
+in addition to the live `<logs_dir>/<source>/` tree. Archived sessions are tagged
+with `archive_branch` + `archive_ts` and rendered in a SEPARATE *Archived
+Sessions* panel; live panels stay byte-equivalent whether the flag is on or off.
+Default-on preserves multi-quarter trend coverage; `--no-include-archives` keeps
+fast per-worktree-prune dashboards clean.
 
 ### Output sections
 

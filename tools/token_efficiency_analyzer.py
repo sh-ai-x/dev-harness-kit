@@ -305,6 +305,47 @@ def session_cost(s: dict, *, model: str | None = None) -> float:
     )
 
 
+def _archive_session_cost(s: dict) -> float:
+    """USD cost for one archived session (issue #820 contract pin).
+
+    Single source of truth for archive cost — used by
+    ``build_analysis_snapshot`` (sum into ``archive_total_cost``) and
+    ``build_view_model`` (per-branch sum in ``archive_panel``) so the
+    snapshot's ``archive_total_cost`` cannot drift from the panel's
+    branch-breakdown totals when a new token bucket lands. Mirrors the
+    kwargs shape of :func:`session_cost` with one difference: the legacy
+    ``cache_write_tokens`` bucket is read directly (not via ``.get(0)``)
+    because archived sessions are always expected to carry it.
+    """
+    return cost_usd(
+        s["model"],
+        input_tokens=s["input_tokens"],
+        output_tokens=s["output_tokens"],
+        cache_write_5m_tokens=s.get("ephemeral_5m", 0),
+        cache_write_1h_tokens=s.get("ephemeral_1h", 0),
+        cache_write_tokens=s["cache_write_tokens"],
+        cache_read_tokens=s["cache_read_tokens"],
+    )
+
+
+def _partition_by_archive(sessions: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split ``sessions`` into ``(live, archived)`` in one pass.
+
+    Issue #820 SSOT: replaces the two inverse ``[s for s in sessions
+    if ... s.get("archive_branch")]`` walks with a single partition so
+    ``build_analysis_snapshot`` cannot drift the two lists if a future
+    schema adds a third bucket (e.g. ``s.get("quarantined")``).
+    """
+    live: list[dict] = []
+    archived: list[dict] = []
+    for s in sessions:
+        if s.get("archive_branch"):
+            archived.append(s)
+        else:
+            live.append(s)
+    return live, archived
+
+
 # ---------------------------------------------------------------------------
 # Log discovery + session aggregation
 # ---------------------------------------------------------------------------
@@ -326,7 +367,100 @@ def _discover_one_logs_dir(logs_dir: Path) -> list[Path]:
     return out
 
 
-def discover_logs(logs_dir: Path, *, repo_root: Path | None = None) -> list[Path]:
+@dataclass
+class ArchivePath:
+    """One archive-discovered JSONL plus the path-derived metadata.
+
+    The worktree-removal flow (bin/worktree-remove-safe.sh +
+    tools/worktree_cleanup.py) archives ``<worktree>/logs/`` to
+    ``<archive_root>/<branch>/<ts>/<worktree-content>`` where:
+
+      * ``<archive_root>`` is ``<logs_dir>/.archive`` (default) or
+        ``$AGENT_LOG_ROOT/<repo>/.archive`` when the external env var
+        is set.
+      * ``<branch>`` is the sanitized branch label (``_sanitize_branch``).
+      * ``<ts>`` is a ``YYYYMMDDTHHMMSSZ`` UTC timestamp.
+      * The worktree's own ``logs/`` content is COPIED INTO the target
+        (no worktree-name segment in the destination path), so the
+        archived JSONL sits at ``<archive_root>/<branch>/<ts>/<source>/**/*.jsonl``
+        for ``<source>`` in ``{claude-code, codex}``.
+
+    Issue #820: the analyzer must surface these as separate sessions
+    with ``archive_branch`` + ``archive_ts`` tags so the dashboard can
+    split live vs. archived cost without losing either side.
+    """
+    path: Path
+    archive_branch: str
+    archive_ts: str
+
+
+def _discover_archive(logs_dir: Path) -> list[ArchivePath]:
+    """Walk ``<logs_dir>/.archive/<branch>/<ts>/<source>/**/*.jsonl``.
+
+    Mirrors :func:`_discover_one_logs_dir` for the archive sibling of
+    the live logs dir. Returns ``[]`` when ``logs_dir`` does not exist,
+    when ``.archive`` is absent (fresh clones), or when the archive
+    tree is empty. See :class:`ArchivePath` for the path layout and
+    the issue #820 rationale.
+
+    Walks breadth-first by sorted directory iteration so the emitted
+    list order is stable across runs — a stable order keeps the
+    per-branch breakdown deterministic in tests.
+    """
+    if not logs_dir.exists():
+        return []
+    archive_root = logs_dir / ".archive"
+    if not archive_root.is_dir():
+        return []
+    out: list[ArchivePath] = []
+    for branch_dir in sorted(archive_root.iterdir()):
+        if not branch_dir.is_dir():
+            continue
+        branch = branch_dir.name
+        for ts_dir in sorted(branch_dir.iterdir()):
+            if not ts_dir.is_dir():
+                continue
+            ts = ts_dir.name
+            for sub in _KNOWN_SOURCES:
+                src = ts_dir / sub
+                if src.is_dir():
+                    for p in sorted(src.rglob("*.jsonl")):
+                        out.append(ArchivePath(
+                            path=p, archive_branch=branch, archive_ts=ts,
+                        ))
+    return out
+
+
+def _probe_any_archive_jsonl(archive_root: Path) -> bool:
+    """True if any ``*.jsonl`` exists anywhere under ``archive_root``.
+
+    Handles both the flat ``<archive>/<source>/...`` layout and the
+    production ``<archive>/<branch>/<ts>/<source>/...`` layout so the
+    pre-snapshot empty-input guard in ``main()`` fires only on truly
+    empty inputs regardless of which writer produced the archive.
+    Returns False fast when ``archive_root`` is missing or not a dir.
+    """
+    if not archive_root.is_dir():
+        return False
+    # Flat layout: source dir sits directly under the archive root.
+    for sub in ("claude-code", "codex"):
+        d = archive_root / sub
+        if d.is_dir() and any(d.rglob("*.jsonl")):
+            return True
+    # Production layout: two levels of branch / timestamp dirs before the source.
+    for branch_dir in archive_root.iterdir():
+        if not branch_dir.is_dir():
+            continue
+        for ts_dir in branch_dir.iterdir():
+            if not ts_dir.is_dir():
+                continue
+            if any(ts_dir.rglob("*.jsonl")):
+                return True
+    return False
+
+
+def discover_logs(logs_dir: Path, *, repo_root: Path | None = None,
+                   include_archives: bool = True) -> list[Path]:
     """Return every .jsonl under ``<logs_dir>/<source>/**``.
 
     Walked recursively so per-branch subdirs (``logs/<tool>/<branch>/<sid>.jsonl``)
@@ -337,6 +471,15 @@ def discover_logs(logs_dir: Path, *, repo_root: Path | None = None) -> list[Path
     canonical or legacy worktree roots so sessions run in any worktree
     are visible from a single ``/dev-kit:token-analyzer`` invocation in the
     main checkout (worktree logs are gitignored and live in separate dirs).
+
+    When ``include_archives`` is true (default), the
+    ``<logs_dir>/.archive/<branch>/<ts>/<source>/**/*.jsonl`` tree is also
+    walked — see :func:`_discover_archive`. Archive-discovered paths are
+    returned bare; the branch + ts metadata is recovered by callers via
+    a separate :func:`_discover_archive` walk that they can zip against
+    the resulting sessions (this keeps ``discover_logs`` backward-
+    compatible with existing tests + callers that consume ``list[Path]``).
+    See :class:`ArchivePath` for the path layout + default-on rationale.
     """
     out = _discover_one_logs_dir(logs_dir)
     if repo_root is not None:
@@ -348,6 +491,9 @@ def discover_logs(logs_dir: Path, *, repo_root: Path | None = None) -> list[Path
             if wt_root.exists():
                 for sub_wt in sorted(wt_root.iterdir()):
                     out.extend(_walk_all_worktree_logs(sub_wt))
+    if include_archives:
+        for ap in _discover_archive(logs_dir):
+            out.append(ap.path)
     return out
 
 
@@ -1136,6 +1282,14 @@ class SessionAggregate:
     # diagnostic produces a broken cache_decay curve on any Codex
     # session that re-establishes its baseline mid-stream).
     have_seen_codex_baseline: bool = None  # type: ignore[assignment]
+    # Archive provenance tags (issue #820). Populated on the session
+    # dict by :func:`build_analysis_snapshot` when the path was
+    # returned by :func:`_discover_archive`; live records carry
+    # neither. ``archive_branch`` is the sanitized branch label from
+    # ``<logs_dir>/.archive/<archive_branch>/<archive_ts>/...``;
+    # ``archive_ts`` is the ``YYYYMMDDTHHMMSSZ`` UTC stamp directory.
+    archive_branch: str = ""
+    archive_ts: str = ""
 
     def __post_init__(self) -> None:
         # Mutable defaults must be constructed per-instance.
@@ -1505,13 +1659,20 @@ def _finalize_session(st: SessionAggregate, *, source: str, log_path: Path) -> d
         # caller (JSON-serializable plain dict, not a Counter).
         "parse_errors": dict(st.parse_errors),
         "log_path": str(log_path),
+        # Issue #820: archive provenance tags. Set by
+        # ``build_analysis_snapshot`` for archive-discovered sessions;
+        # live records carry empty strings here (the dashboard keys
+        # off ``archive_branch`` to split live vs. archived panels).
+        "archive_branch": st.archive_branch,
+        "archive_ts": st.archive_ts,
         # F1 cache_decay fix: per-turn hit ratio. Empty when no turns
         # were tracked; the dashboard skips bucketing in that case.
         "cache_decay": _compute_cache_decay(st.turn_inputs, st.turn_cache_reads),
     }
 
 
-def aggregate_session(path: Path) -> dict | None:
+def aggregate_session(path: Path, *, archive_branch: str = "",
+                      archive_ts: str = "") -> dict | None:
     """Walk one JSONL file once and return per-session aggregates, or None.
 
     Issue #310: split by provider record type. The walker dispatches
@@ -1523,6 +1684,11 @@ def aggregate_session(path: Path) -> dict | None:
     (``_harvest_common``) — timestamps, sid, repo, branch counter,
     worktree counter — before dispatching, so a new provider only needs
     to implement its record-type handlers.
+
+    ``archive_branch`` / ``archive_ts`` are populated by callers when
+    ``path`` was discovered under ``<logs_dir>/.archive/...``; live
+    records pass both as empty strings. See :class:`ArchivePath` for
+    the path layout + default-on rationale.
     """
     source = _source_for(path)
     st = _new_session_state(source=source)
@@ -1544,6 +1710,12 @@ def aggregate_session(path: Path) -> dict | None:
                 handler(rec, st)
     except OSError:
         return None
+
+    # Archive provenance — see issue #820. Live sessions carry empty
+    # strings; the dashboard's archived panel splits on `archive_branch`.
+    if archive_branch or archive_ts:
+        st.archive_branch = archive_branch
+        st.archive_ts = archive_ts
 
     return _finalize_session(st, source=source, log_path=path)
 
@@ -2018,6 +2190,33 @@ def _render_cost_by_repo_panel(rows: list[dict]) -> str:
 
 def _render_cost_by_branch_panel(rows: list[dict]) -> str:
     """Render Cost by Branch table rows from ``view_model['cost_by_branch']``."""
+    return "".join(
+        f"<tr><td>{html.escape(r['name'])}</td>"
+        f"<td style='text-align:right'>{r['sessions']}</td>"
+        f"<td style='text-align:right'>${r['cost_usd']:.2f}</td>"
+        f"<td><div class='bar'><span style='width:{r['share'] * 100:.1f}%'></span></div></td></tr>"
+        for r in rows
+    )
+
+
+def _render_archive_panel(panel: dict) -> str:
+    """Render the "Archived sessions" panel rows (issue #820).
+
+    Reads from ``view_model['archive_panel']['branch_breakdown']`` and
+    emits a one-row "no archived sessions" cell when the count
+    is zero. The panel ALWAYS emits markup so the operator sees the
+    contrast with the live panels regardless of whether the archive
+    walker found anything. Passes the same ``html.escape`` /
+    per-row shape rules as the other per-panel renderers.
+
+    Empty branches bucket under "(no archive_branch)" so a session
+    whose path lost the <branch>/<ts> prefix still surfaces; the
+    dashboard shows it as a zero-cost row when cost is also zero.
+    """
+    rows = panel.get("branch_breakdown") or []
+    if not rows:
+        return ('<tr><td colspan="4" class="muted">No archived sessions '
+                'in this window.</td></tr>')
     return "".join(
         f"<tr><td>{html.escape(r['name'])}</td>"
         f"<td style='text-align:right'>{r['sessions']}</td>"
@@ -2508,6 +2707,8 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
                      stale_pct: float = 0.0,
                      worktree_filter: str = "",
                      transcripts_dirname: str = "",
+                     archive_session_count: int = 0,
+                     archive_total_cost: float = 0.0,
                      *, view_model: dict | None = None) -> str:
     """Compose the HTML dashboard.
 
@@ -2542,6 +2743,15 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
             wt_meta=wt_meta,
             stale_cost=stale_cost,
             stale_pct=stale_pct,
+            archive_session_count=archive_session_count,
+            archive_total_cost=archive_total_cost,
+            # Legacy fallback: build the archive branch breakdown from
+            # the same ``sessions`` list the snapshot would have used.
+            # A live-only caller (no snapshot) cannot separate archives
+            # cleanly — the branch breakdown falls back to whatever
+            # ``archive_branch`` tags happen to be on ``sessions``,
+            # which is fine for direct calls that pass pre-tagged data.
+            archive_sessions=[s for s in sessions if s.get("archive_branch")],
         )
 
     vm = view_model
@@ -2561,6 +2771,7 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
     ttl_middle_html = _render_cache_ttl_panel(vm["cache_ttl"])
     cache_decay_rows = _render_cache_decay_rows(vm.get("cache_decay") or {})
     cost_gate_banner = _render_cost_gate_banner(gate_status, gate_violations)
+    archive_rows = _render_archive_panel(vm.get("archive_panel") or {})
 
     # Session table split — derived from scored/warnings_per_session
     # (view_model only carries the COUNT split, not the row-level split).
@@ -2601,6 +2812,13 @@ def render_dashboard(repo: str, days: int, sessions: list[dict],
         avg_cache_hit_unweighted=totals.get("avg_cache_hit_unweighted", totals["avg_cache_hit"]),
         stale_cost=stale_cost,
         stale_pct=stale_pct,
+        # Issue #820: archived-sessions panel (count + total cost + branch
+        # breakdown). Surfaced as a SEPARATE panel so the live panels
+        # stay byte-equivalent when run with ``--no-include-archives``.
+        archive_session_count=archive_session_count,
+        archive_total_cost=archive_total_cost,
+        archive_rows=archive_rows,
+        archive_rows_count=len(vm.get("archive_panel", {}).get("branch_breakdown") or []),
         cost_gate_banner=cost_gate_banner,
         repo_rows=repo_rows,
         branch_rows=branch_rows,
@@ -2657,6 +2875,7 @@ class AnalysisRequest:
     cost_gate_usd: float = DEFAULT_COST_GATE_USD
     pricing_override: Path | None = None
     include_worktree_logs: bool = True
+    include_archives: bool = True
 
 
 @dataclass
@@ -2715,6 +2934,8 @@ class AnalysisSnapshot:
     stale_cost: float
     stale_pct: float
     view_model: dict
+    archive_session_count: int
+    archive_total_cost: float
 
 
 def build_analysis_snapshot(
@@ -2728,6 +2949,7 @@ def build_analysis_snapshot(
     cost_gate_usd: float = DEFAULT_COST_GATE_USD,
     pricing_override: Path | None = None,
     include_worktree_logs: bool = True,
+    include_archives: bool = True,
     repo_root: Path | None = None,
 ) -> AnalysisSnapshot:
     """Build the single AnalysisSnapshot consumed by JSON + HTML sinks.
@@ -2737,20 +2959,25 @@ def build_analysis_snapshot(
     the full pipeline:
 
       1. Apply pricing override (CLI flag)
-      2. Discover JSONL logs (auto-walk worktrees when requested)
+      2. Discover JSONL logs (auto-walk worktrees when requested,
+         archive dirs when ``include_archives``)
       3. Dedup dual-write sessionId collisions
-      4. Per-file ``aggregate_session`` → ``sessions``
+      4. Per-file ``aggregate_session`` → ``sessions`` (with archive
+         provenance tags for archive-discovered paths)
       5. Stamp ``worktree_state`` from ``wt_meta``
       6. Filter to ``windowed`` (repo+days+worktree) and ``selected``
          (repo+days+branch+worktree)
       7. Score, evaluate warnings, estimate savings, enforce cost gate
       8. Walk once for unknown-model ids
-      9. Compute totals + stale_cost + stale_pct
+      9. Compute totals + stale_cost + stale_pct + archive totals
      10. Build the view-model
 
     Returns an :class:`AnalysisSnapshot` — see its docstring for the
     field set. The caller is responsible for warning-line emission
     (unknown models / unknown worktrees / cost-gate stderr lines).
+
+    See :class:`ArchivePath` for the archive path layout and the
+    default-on rationale behind the ``include_archives`` flag.
     """
     request = AnalysisRequest(
         repo=repo, days=days, logs_dir=logs_dir,
@@ -2758,6 +2985,7 @@ def build_analysis_snapshot(
         cost_gate_tokens=cost_gate_tokens, cost_gate_usd=cost_gate_usd,
         pricing_override=pricing_override,
         include_worktree_logs=include_worktree_logs,
+        include_archives=include_archives,
     )
 
     # Apply pricing override before any pricing call.
@@ -2766,11 +2994,29 @@ def build_analysis_snapshot(
     resolved_logs_dir = logs_dir.resolve()
     resolved_repo_root = (Path.cwd().resolve() if include_worktree_logs
                           else None)
-    files = discover_logs(resolved_logs_dir, repo_root=resolved_repo_root)
+    # Single archive walk — feed both the live ``files`` list and the
+    # ``archive_by_path`` lookup from this one result so the disk is
+    # only touched once per snapshot (avoids the race window where the
+    # second walk could disagree with the first).
+    archive_paths: list[ArchivePath] = (
+        _discover_archive(resolved_logs_dir) if include_archives else []
+    )
+    files = discover_logs(
+        resolved_logs_dir,
+        repo_root=resolved_repo_root,
+        include_archives=False,  # appended manually below from `archive_paths`
+    )
+    if include_archives:
+        files.extend(ap.path for ap in archive_paths)
     # Dual-write (#173) places the same sessionId in two files; dedup to
     # one snapshot per sessionId so cost and branch attribution are not
     # double-counted or skewed by the stale main-side copy.
     files = _dedupe_by_session(files)
+    # Map archive path → ArchivePath so each session knows its
+    # archive_branch + archive_ts (issue #820 acceptance criterion).
+    archive_by_path: dict[Path, ArchivePath] = {
+        ap.path: ap for ap in archive_paths
+    }
 
     # Worktree classification (per project canonical/legacy worktree dir, vs
     # `git worktree list` + ancestor-of-origin/main check). Skipped when
@@ -2781,7 +3027,12 @@ def build_analysis_snapshot(
 
     sessions: list[dict] = []
     for p in files:
-        s = aggregate_session(p)
+        ap = archive_by_path.get(p)
+        s = aggregate_session(
+            p,
+            archive_branch=ap.archive_branch if ap else "",
+            archive_ts=ap.archive_ts if ap else "",
+        )
         if s is not None:
             sessions.append(s)
 
@@ -2803,8 +3054,17 @@ def build_analysis_snapshot(
     # not just the per-session total. Pass ``repo`` so the window
     # matches the selection; an empty string here would let other repos'
     # sessions bleed into the per-repo / per-branch / per-worktree rows.
-    windowed = filter_sessions(sessions, repo, days, worktree=worktree)
-    selected = filter_sessions(sessions, repo, days, branch, worktree)
+    #
+    # Issue #820: archived sessions are EXCLUDED from the live panels
+    # (Cost by Repository / Branch / Worktree / Tool / Model + Active /
+    # Inactive Sessions tables) so the live panel is byte-equivalent
+    # (modulo the new archive panel) whether archives are included or
+    # not. They surface ONLY via the dedicated Archived Sessions panel
+    # + the JSON ``archive_panel`` key. The single partition here is
+    # the SSOT for that split — see :func:`_partition_by_archive`.
+    live_sessions, archive_sessions = _partition_by_archive(sessions)
+    windowed = filter_sessions(live_sessions, repo, days, worktree=worktree)
+    selected = filter_sessions(live_sessions, repo, days, branch, worktree)
 
     scored: list[tuple[dict, dict]] = [(s, score_session(s)) for s in selected]
     reclaim_cache = cache_miss_reclaim(scored)
@@ -2857,6 +3117,19 @@ def build_analysis_snapshot(
     # (issue #310). Adding a new panel now touches one aggregation site
     # instead of two (the old ``main()`` / ``render_dashboard()``
     # duplicated the cost-by-X loops).
+
+    # Issue #820: separate archive rollup — count + total USD across all
+    # sessions whose ``archive_branch`` is non-empty. Computed from the
+    # FULL `sessions` list (not the ``selected`` filter) so the archived
+    # panel surfaces every archived session, independent of the active
+    # branch filter — auditors want the historical total visible without
+    # having to clear every CLI flag. ``_archive_session_cost`` is the
+    # SSOT cost helper shared with ``build_view_model``'s archive
+    # branch_breakdown so the snapshot total cannot drift from the
+    # branch sums.
+    archive_session_count = len(archive_sessions)
+    archive_total_cost = sum(_archive_session_cost(s) for s in archive_sessions)
+
     view_model = build_view_model(
         repo=repo,
         days=days,
@@ -2870,6 +3143,9 @@ def build_analysis_snapshot(
         wt_meta=wt_meta,
         stale_cost=stale_cost,
         stale_pct=stale_pct,
+        archive_session_count=archive_session_count,
+        archive_total_cost=archive_total_cost,
+        archive_sessions=archive_sessions,
     )
 
     return AnalysisSnapshot(
@@ -2893,6 +3169,8 @@ def build_analysis_snapshot(
         stale_cost=stale_cost,
         stale_pct=stale_pct,
         view_model=view_model,
+        archive_session_count=archive_session_count,
+        archive_total_cost=archive_total_cost,
     )
 
 
@@ -2974,6 +3252,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="Write per-session full-transcript sidecar pages under <out>.assets/ and link "
                              "them from the Transcript Index (default: True). Pass --no-transcripts for an "
                              "index-only run.")
+    parser.add_argument("--include-archives", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Include archived sessions under <logs_dir>/.archive/<branch>/<ts>/<source>/**/*.jsonl "
+                             "in the dashboard (default: True). Archived sessions are tagged with archive_branch + "
+                             "archive_ts and rendered as a SEPARATE 'Archived sessions' panel so live-vs-archived "
+                             "cost is auditable at a glance. Pass --no-include-archives to skip archive discovery "
+                             "for fast per-worktree-prune dashboards.")
     args = parser.parse_args(argv)
 
     # Pre-snapshot guard: surface "no logs found" as exit 2 BEFORE we
@@ -2981,17 +3266,24 @@ def main(argv: list[str] | None = None) -> int:
     explicit_logs_dir = args.logs_dir is not None
     logs_dir = Path(args.logs_dir) if explicit_logs_dir else Path("logs")
     include_worktree_logs = args.include_worktree_logs and not explicit_logs_dir
+    include_archives = args.include_archives
     # Cheap probe — does the user-supplied logs dir contain any JSONL?
     # ``build_analysis_snapshot`` does the heavy walk; we only need to
     # confirm a JSONL exists under the explicit logs dir (the worktree
     # auto-walk in ``build_analysis_snapshot`` may find more, but the
-    # CLI was pointing at a specific dir — silence stderr noise).
+    # CLI was pointing at a specific dir — silence stderr noise). With
+    # ``--include-archives`` (default) we also probe the .archive/ tree
+    # so the empty-exit-2 guard fires on truly-empty inputs even when
+    # the user opted into archive discovery.
     probe_target = logs_dir / "claude-code" if (logs_dir / "claude-code").exists() else logs_dir
-    has_files = probe_target.exists() and any(probe_target.rglob("*.jsonl"))
-    if not has_files:
+    probe_has_live = probe_target.exists() and any(probe_target.rglob("*.jsonl"))
+    if not probe_has_live and include_archives:
+        probe_has_live = _probe_any_archive_jsonl(logs_dir / ".archive")
+    if not probe_has_live:
         # Mirror the historical stderr message; keep exit code 2.
         print(f"[error] No JSONL logs found under {logs_dir}/(claude-code|codex)/"
-              f"{' (including sibling-worktree logs)' if include_worktree_logs else ''}",
+              f"{' (including sibling-worktree logs)' if include_worktree_logs else ''}"
+              f"{' or .archive/' if include_archives else ''}",
               file=sys.stderr)
         return 2
 
@@ -3006,6 +3298,7 @@ def main(argv: list[str] | None = None) -> int:
         cost_gate_usd=args.cost_gate_usd,
         pricing_override=Path(args.pricing_override) if args.pricing_override else None,
         include_worktree_logs=include_worktree_logs,
+        include_archives=include_archives,
     )
 
     # Empty-but-valid case: no error, but no selected sessions either.
@@ -3029,6 +3322,8 @@ def main(argv: list[str] | None = None) -> int:
           f"total_cost=${snap.total_cost:.2f}  "
           f"estimated_savings=${snap.estimated['total']:.2f}  "
           f"stale_cost=${snap.stale_cost:.2f}  "
+          f"archived_sessions={snap.archive_session_count}  "
+          f"archived_cost=${snap.archive_total_cost:.2f}  "
           f"transcripts={transcripts_written}")
     print(f"[ok] dashboard -> {out_path}")
     return 0
@@ -3071,6 +3366,15 @@ def _emit_json(snap: AnalysisSnapshot) -> int:
         "warnings": vm["warnings"],
         "unknown_models": vm["unknown_models"],
         "worktrees": vm["cost_by_worktree_rows"],
+        # Issue #820: archived-sessions panel (count + total USD +
+        # branch breakdown). Empty / zero when ``--no-include-archives``
+        # was passed. Same shape as the live panels so consumers can
+        # render or aggregate them with one code path.
+        "archive_panel": {
+            "session_count": snap.archive_session_count,
+            "total_cost_usd": round(snap.archive_total_cost, 4),
+            "branch_breakdown": vm.get("archive_panel", {}).get("branch_breakdown", []),
+        },
         # F1 cache_decay fix — emit the per-bucket aggregation in JSON
         # too so CI / external consumers can gate on hit-rate decay
         # without parsing HTML. The shape mirrors the HTML tile:
@@ -3108,6 +3412,8 @@ def _render_html(snap: AnalysisSnapshot, out_path: Path, *,
         stale_pct=snap.stale_pct,
         worktree_filter=snap.request.worktree,
         transcripts_dirname=transcripts_dirname,
+        archive_session_count=snap.archive_session_count,
+        archive_total_cost=snap.archive_total_cost,
         view_model=snap.view_model,
     )
     out_path.write_text(html_out, encoding="utf-8")
