@@ -296,7 +296,7 @@ small obvious work; rely on it as a sanity check on bigger bets.
 one-command bypass** today. Your honest options are to scope `/dev-kit:plan` very
 tightly (it can emit a one- or two-step plan quickly) or to hand-seed a minimal
 `phases/<name>/index.json` yourself. The [workflow scenarios
-doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-4-skipping-straight-to-build-without-a-full-plan)
+doc](docs/workflow/WORKFLOW-SCENARIOS.md#case-3-skipping-straight-to-build-without-a-full-plan)
 explains both, and why the removed `tdd-fast` / `quick-fix` shortcuts are not an
 option anymore.
 

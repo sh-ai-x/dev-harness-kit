@@ -23,7 +23,7 @@ section has a 2-4 sentence pointer for each case.
 |---|---|---|
 | Build stopped partway (you closed the terminal, hit an error, or paused) | Re-run `/dev-kit:build` — it resumes from the first unfinished step | [Case 1](#case-1-a-build-that-stopped-partway) |
 | You're back on a different day or a different terminal and lost your place | `/dev-kit:status` plus `phases/<name>/index.json` shows the current worktree state | [Case 2](#case-2-coming-back-from-a-different-terminal-or-day) |
-| You want to go straight to Build without a full Plan | Scope Plan tightly, or hand-seed a one-step phase file — there is no bypass flag | [Case 4](#case-4-skipping-straight-to-build-without-a-full-plan) |
+| You want to go straight to Build without a full Plan | Scope Plan tightly, or hand-seed a one-step phase file — there is no bypass flag | [Case 3](#case-3-skipping-straight-to-build-without-a-full-plan) |
 
 ---
 

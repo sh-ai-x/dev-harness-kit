@@ -25,7 +25,7 @@ skill owns which step and what the acceptance criteria are.
 | Property | Value |
 |---|---|
 | **What it is** | A Claude Code + Codex plugin (skills + hooks + commands) |
-| **Stage spec** | Bootstrap → Plan → Valuate → Build → Review → Security → Ship |
+| **Stage spec** | Bootstrap → Plan → Build → Review → Security → Ship |
 | **State substrate** | Direct shell + subprocess; no shared in-process cache |
 | **Wire format** | JSON envelopes on disk (`.dev-kit/`) |
 
@@ -50,7 +50,7 @@ three hooks on a different day each.
 The harness answers this with strict per-stage ownership (one skill
 per stage), shared hook enforcement (no per-file re-implementation),
 and a typed on-disk envelope (`.dev-kit/hand-off/*.md`,
-`.dev-kit/valuations/<plan-id>.json`, `phases/<name>/index.json`).
+`phases/<name>/index.json`).
 
 **Why it has to exist**: in a multi-runtime harness (Claude Code +
 Codex), every consumer that re-implements state-reading creates a
