@@ -45,9 +45,9 @@ def test_conftest_is_named_so_pytest_autoloads_it() -> None:
 
 def test_session_hook_appends_contract_test_event(tmp_path: Path, monkeypatch) -> None:
     """Calling the hook emits exactly one valid ``contract.test`` event."""
-    monkeypatch.setenv("CI", "true")
-    # In CI the hook runs with cwd == repo root, so `python -m lib.trace_log`
-    # resolves. Here cwd is a temp dir, so make `lib` importable explicitly.
+    # Make `lib` importable explicitly so the subprocess CLI resolves
+    # when cwd is a temp dir. Always-on default — no DEV_KIT_TRACE_LOCAL
+    # opt-out, no CI gate.
     monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT))
     monkeypatch.chdir(tmp_path)
     sys.path.insert(0, str(REPO_ROOT / "tests"))
@@ -66,13 +66,15 @@ def test_session_hook_appends_contract_test_event(tmp_path: Path, monkeypatch) -
     assert contract_events[0]["subject_id"] == "harness-contract"
 
 
-def test_session_hook_is_a_noop_outside_ci(tmp_path: Path, monkeypatch) -> None:
-    """Local ``pytest`` runs must not pollute the developer's trace log.
+def test_session_hook_respects_dev_kit_trace_local_opt_out(tmp_path: Path, monkeypatch) -> None:
+    """``DEV_KIT_TRACE_LOCAL=0`` disables the hook for that invocation.
 
-    Without a CI gate the hook appends a ``contract.test`` event on every
-    local invocation, silently inflating the trajectory the reducer scores.
+    The hook is always-on by default (PR #905 redesign: the previous
+    ``CI=true`` gate was broken because CI ephemeral filesystems
+    discarded the emitted events). Operators that want a clean trace
+    log opt out per-invocation.
     """
-    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("DEV_KIT_TRACE_LOCAL", "0")
     monkeypatch.chdir(tmp_path)
     sys.path.insert(0, str(REPO_ROOT / "tests"))
     try:
@@ -83,14 +85,40 @@ def test_session_hook_is_a_noop_outside_ci(tmp_path: Path, monkeypatch) -> None:
 
     events_path = tmp_path / ".dev-kit" / "trace" / "events.jsonl"
     assert not events_path.exists(), (
-        "hook must be a no-op when CI is unset; it wrote "
+        "hook must be a no-op when DEV_KIT_TRACE_LOCAL=0; it wrote "
         f"{events_path.read_text() if events_path.exists() else ''!r}"
     )
 
 
+def test_session_hook_emits_by_default(tmp_path: Path, monkeypatch) -> None:
+    """Without ``DEV_KIT_TRACE_LOCAL=0`` the hook fires — even on local runs.
+
+    The always-on design is the only one that actually wires
+    ``stability.contract_test_pass_rate`` because the reducer reads
+    the user's local ``.dev-kit/trace/events.jsonl``, not the
+    ephemeral CI one.
+    """
+    monkeypatch.delenv("DEV_KIT_TRACE_LOCAL", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT))
+    monkeypatch.chdir(tmp_path)
+    sys.path.insert(0, str(REPO_ROOT / "tests"))
+    try:
+        import conftest as contract_hook
+        contract_hook.pytest_sessionfinish(session=None, exitstatus=0)
+    finally:
+        sys.path.remove(str(REPO_ROOT / "tests"))
+
+    events_path = tmp_path / ".dev-kit" / "trace" / "events.jsonl"
+    assert events_path.is_file(), "hook should emit by default on local pytest runs"
+    events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()]
+    contract_events = [e for e in events if e["event_type"] == "contract.test"]
+    assert len(contract_events) == 1
+    assert contract_events[0]["outcome"] == "passed"
+
+
 def test_hook_never_raises_when_trace_log_is_unavailable(tmp_path: Path, monkeypatch) -> None:
     """Telemetry is best-effort: a broken environment must not fail the run."""
-    monkeypatch.setenv("CI", "true")
     monkeypatch.chdir(tmp_path)
     sys.path.insert(0, str(REPO_ROOT / "tests"))
     try:
