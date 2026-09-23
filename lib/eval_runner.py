@@ -35,17 +35,17 @@ from typing import Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 import llm_judge  # type: ignore
 from atomic import atomic_write_json, now_iso  # noqa: E402
+from lib.harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
 
 from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
-    RUBRIC_REGISTRY,  # noqa: F401  -- re-exported; tests reference eval_runner.RUBRIC_REGISTRY
     CaseResult,
+    RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
     _coerce_score,
     exception_rot,
     mock_drift_warning,
     mock_skipped,
     real_result,
 )
-from lib.harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

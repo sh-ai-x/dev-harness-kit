@@ -86,11 +86,6 @@ class RubricRegistry:
         return tuple(sorted(cls._entries))
 
 
-# Convenience module-level instance — call sites use
-# `RUBRIC_REGISTRY.register(...)` / `.lookup(...)` directly.
-RUBRIC_REGISTRY = RubricRegistry
-
-
 @dataclass
 class CaseResult:
     """One case outcome from run_eval.
