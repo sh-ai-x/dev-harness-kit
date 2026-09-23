@@ -134,7 +134,16 @@ class TestBootstrapGuardPolicyBehavior(unittest.TestCase):
             (Path(tmp.name) / ".claude" / "settings.json").write_text(
                 json.dumps({"env": {"DEV_KIT_GUARDS": "on"}})
             )
-            env = {**os.environ, "PYTHONPATH": str(ROOT),
+            # Strip harness-controlled vars from the parent env so the
+            # hook's policy resolution walks the project-scope path
+            # instead of short-circuiting on a shell-scope export.
+            clean = {
+                k: v for k, v in os.environ.items()
+                if k not in {"DEV_KIT_GUARDS", "DEV_KIT_GUARDS_SOURCE",
+                             "DEV_KIT_GUARD_ROOT"}
+                and not k.startswith("ANTHROPIC_")
+            }
+            env = {**clean, "PYTHONPATH": str(ROOT),
                    "CLAUDE_PROJECT_DIR": tmp.name}
             r = subprocess.run(
                 ["bash", str(ROOT / "hooks" / "session-start-guard-mode-reset.sh")],

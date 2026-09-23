@@ -119,8 +119,8 @@ if [[ -f "$PR_LOCK_PATH" ]]; then
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/../lib')
 import babysit_pr_reliability as bpr
-sys.exit(0 if bpr.is_stale_lock('$PR_LOCK_PATH') else 1)
-" 2>/dev/null; then
+sys.exit(0 if bpr.is_stale_lock(sys.argv[1]) else 1)
+" "$PR_LOCK_PATH" 2>/dev/null; then
     echo "stale pr lock removed: $PR_LOCK_PATH" >&2
     rm -f "$PR_LOCK_PATH"
     # Also clear any stale lockdir from a prior crashed run.
@@ -134,8 +134,8 @@ sys.exit(0 if bpr.is_stale_lock('$PR_LOCK_PATH') else 1)
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/../lib')
 import babysit_pr_reliability as bpr
-sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
-" 2>/dev/null || true)"
+sys.stdout.write(bpr.read_pr_lock_body(sys.argv[1]))
+" "$PR_LOCK_PATH" 2>/dev/null || true)"
     HOLDER="${HOLDER:-<unreadable>}"
     echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
     exit 1
@@ -150,18 +150,22 @@ fi
 # guarantees the directory either exists or doesn't after mkdir
 # returns — two concurrent mkdir calls cannot both succeed).
 LOCK_BODY="$(date -Iseconds) pid=$$ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown') source=babysit-pr-local pr=${PR_NUMBER}"
+# Pass the path + body via argv (not inlined into the python source).
+# Inlining via '''$LOCK_BODY''' broke when the body's git-fallback
+# `echo 'unknown'` contained single quotes that terminated the python
+# triple-quoted string early (a real bug for non-git working dirs).
 if ! python3 -c "
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/../lib')
 import babysit_pr_reliability as bpr
-sys.exit(0 if bpr.try_acquire_pr_lock('$PR_LOCK_PATH', '''$LOCK_BODY''') else 1)
-" 2>/dev/null; then
+sys.exit(0 if bpr.try_acquire_pr_lock(sys.argv[1], sys.argv[2]) else 1)
+" "$PR_LOCK_PATH" "$LOCK_BODY" 2>/dev/null; then
   HOLDER="$(python3 -c "
 import sys
 sys.path.insert(0, '$SCRIPT_DIR/../lib')
 import babysit_pr_reliability as bpr
-sys.stdout.write(bpr.read_pr_lock_body('$PR_LOCK_PATH'))
-" 2>/dev/null || true)"
+sys.stdout.write(bpr.read_pr_lock_body(sys.argv[1]))
+" "$PR_LOCK_PATH" 2>/dev/null || true)"
   HOLDER="${HOLDER:-<unreadable>}"
   echo "already running babysit-pr-local for PR #${PR_NUMBER}: ${HOLDER}" >&2
   exit 1

@@ -23,7 +23,16 @@ class TestTddGuard(unittest.TestCase):
     def test_core_edit_is_off_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            env = {**os.environ, "DEV_KIT_TDD_ROOT": str(root)}
+            # Strip harness-controlled vars so the hook starts from the
+            # unconfigured default; the user's shell may have
+            # DEV_KIT_GUARDS=on set globally.
+            clean = {
+                k: v for k, v in os.environ.items()
+                if k not in {"DEV_KIT_GUARDS", "DEV_KIT_GUARDS_SOURCE",
+                             "DEV_KIT_GUARD_ROOT"}
+                and not k.startswith("ANTHROPIC_")
+            }
+            env = {**clean, "DEV_KIT_TDD_ROOT": str(root)}
             result = subprocess.run(["bash", str(ROOT / "hooks/tdd-guard.sh")], cwd=root,
                 input=json.dumps({"tool_input": {"file_path": str(root / "lib/core.py")}}),
                 text=True, capture_output=True, env=env)

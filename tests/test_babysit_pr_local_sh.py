@@ -125,6 +125,21 @@ class TestWrapperDelegation(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.bindir = Path(self._tmp.name) / "bin"
         self.bindir.mkdir(parents=True)
+        # Per-test BABYSIT_LOCK_PARENT — point the wrapper's per-PR
+        # lock at this tmpdir so it can't collide with a stale lock
+        # from a prior subprocess still alive at teardown. See
+        # bin/babysit-pr-local.sh for the lock contract.
+        self.lock_parent = self._tmp.name
+        # The wrapper inlines `sys.path.insert(0, '$SCRIPT_DIR/../lib')`
+        # to find `babysit_pr_reliability`. In production SCRIPT_DIR is
+        # `<repo>/bin` and `../lib` resolves to `<repo>/lib`. In a
+        # test tmpdir that path doesn't exist — symlink the project
+        # `lib/` next to the tmpdir's `bin/` so the wrapper's import
+        # succeeds (and so the lock + retry machinery is load-bearing).
+        project_lib = PROJECT_ROOT / "lib"
+        test_lib = Path(self._tmp.name) / "lib"
+        os.symlink(project_lib, test_lib)
+        self.addCleanup(lambda: test_lib.unlink(missing_ok=True))
         # Copy the wrapper into the tmpdir so SCRIPT_DIR resolves there.
         # The script references "$(dirname "${BASH_SOURCE[0]}")" at
         # runtime; copying preserves the lookup shape exactly.
@@ -150,6 +165,12 @@ class TestWrapperDelegation(unittest.TestCase):
     def _run_wrapper(self, *args: str, stub_exit: int = 0) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["BABYSIT_STUB_EXIT"] = str(stub_exit)
+        # Point the wrapper's per-PR lock at this tmpdir so it can't
+        # collide with a stale lock from a prior subprocess still
+        # alive at teardown. Without this, `is_stale_lock` sees the
+        # previous iteration's PID (now a zombie) and refuses to
+        # acquire, returning "already running".
+        env["BABYSIT_LOCK_PARENT"] = self.lock_parent
         # Disable the viewer auto-launch block by default: it's
         # exercised on its own in test_viewer_wiring_is_graceful_noop_
         # without_server_script. Without this, a real
@@ -253,6 +274,7 @@ class TestWrapperDelegation(unittest.TestCase):
         env = os.environ.copy()
         env["BABYSIT_STUB_EXIT"] = "0"
         env["BABYSIT_VIEWER_PORT"] = "18765"
+        env["BABYSIT_LOCK_PARENT"] = self.lock_parent
         if self.call_log.exists():
             self.call_log.unlink()
         start = time.monotonic()

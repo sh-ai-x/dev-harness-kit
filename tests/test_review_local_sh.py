@@ -687,15 +687,20 @@ exit 0
         would otherwise supply -- guarantees hermetic "no signal" runs.
         """
         env = os.environ.copy()
+        # Delete (not blank) — an env var present with an empty value
+        # is still "present" to the child `claude` stub's
+        # `env | grep ANTHROPIC_` capture, which would falsely look
+        # like injection. A truly clean operator shell never set
+        # these keys at all. Drop every ANTHROPIC_* (including
+        # ANTHROPIC_DEFAULT_*_MODEL, ANTHROPIC_SMALL_FAST_MODEL, etc.)
+        # so a developer shell with model overrides doesn't pollute
+        # the fallback-path assertion.
+        for k in list(env):
+            if k.startswith("ANTHROPIC_"):
+                env.pop(k, None)
         for k in (
-            "CI_REVIEW_PROVIDER", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_BASE_URL", "MINIMAX_API_KEY", "DEEPSEEK_API_KEY",
+            "CI_REVIEW_PROVIDER", "MINIMAX_API_KEY", "DEEPSEEK_API_KEY",
         ):
-            # Delete (not blank) -- an env var present with an empty
-            # value is still "present" to the child `claude` stub's
-            # `env | grep ANTHROPIC_` capture, which would falsely
-            # look like injection. A truly clean operator shell never
-            # set these keys at all.
             env.pop(k, None)
         env["PATH"] = self.new_path
         if env_extra:

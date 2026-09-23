@@ -36,7 +36,18 @@ import guard_mode_state as gms  # noqa: E402
 # repo elsewhere to exercise worktree-guard's main-checkout detection,
 # so `lib` is not importable via cwd alone — PYTHONPATH bridges that gap
 # without changing how the hooks themselves resolve the module.
-_ENV_WITH_LIB = {**_os.environ, "PYTHONPATH": str(REPO_ROOT)}
+#
+# Strip harness-controlled vars (DEV_KIT_GUARDS*, ANTHROPIC_*) so the
+# subprocess sees the same starting state regardless of the developer's
+# shell. Tests that need a specific DEV_KIT_GUARDS override it explicitly
+# via `env={**_ENV_WITH_LIB, "DEV_KIT_GUARDS": "off", ...}`.
+_HARNESS_SKIP = {"DEV_KIT_GUARDS", "DEV_KIT_GUARDS_SOURCE", "DEV_KIT_GUARD_ROOT"} | {
+    k for k in _os.environ if k.startswith("ANTHROPIC_")
+}
+_ENV_WITH_LIB = {
+    **{k: v for k, v in _os.environ.items() if k not in _HARNESS_SKIP},
+    "PYTHONPATH": str(REPO_ROOT),
+}
 
 
 def _edit_payload(file_path: str) -> dict:
