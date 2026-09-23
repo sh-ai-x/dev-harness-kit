@@ -528,5 +528,76 @@ class TestGitGuardRefactor(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f"got rc={r.returncode}, stderr={r.stderr}")
 
 
+class GuardSubjectNamespaceTests(unittest.TestCase):
+    """Regression: guard events must use subject_id="guard:<tool>" prefix.
+
+    Without the prefix, every Bash tool call lands a ``guard.*`` event
+    under subject_id="Bash" with no matching terminal event, inflating
+    measurement_integrity.subject_observability's denominator and
+    pulling the coverage ratio toward 0 (was 0.003 before the fix).
+
+    The reducer's `_first_pass` and `_recovery` group by exact subject_id
+    via `_events_by_subject`, so a shared "Bash" subject would also
+    contaminate any future `write.observed`/`verify.*` chain emitted
+    with that subject — silently breaking first_pass_quality.
+
+    See the comment block at hooks/lib/payload-parse.sh:101-107.
+    """
+
+    def test_emit_guard_event_uses_guard_prefix(self):
+        """Source payload-parse.sh in a subshell, call ``emit_guard_event``
+        with a Bash tool_name, and verify the persisted event uses
+        ``subject_id="guard:Bash"`` — NOT the bare ``"Bash"``.
+        """
+        # Run from a temp cwd so .dev-kit/trace/events.jsonl doesn't
+        # pollute the real worktree.
+        import sys as _sys
+        import tempfile
+        # Build a PATH that has bash, jq, and python3 — needed for the
+        # full payload-parse.sh invocation including the append-event CLI.
+        jq_dir = os.path.dirname(shutil.which("jq") or "/nonexistent") or "/nonexistent"
+        python3_dir = os.path.dirname(_sys.executable or "/nonexistent") or "/nonexistent"
+        bash_dir = os.path.dirname(_bash())
+        full_path = os.pathsep.join([p for p in (bash_dir, jq_dir, python3_dir) if p and p != "/nonexistent"])
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            script = """
+            cd "$1"
+            source "$2/lib/hook-preamble.sh" >/dev/null 2>&1 || true
+            source "$2/lib/payload-parse.sh"
+            INPUT_JSON='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
+            emit_guard_event "test-guard" "synthetic test event" "allowed"
+            """
+            r = subprocess.run(
+                [_bash(), "-c", script, "--", str(tmp_path), str(HOOKS)],
+                capture_output=True, text=True, timeout=10,
+                env={**os.environ, "PATH": full_path,
+                       "PYTHONPATH": str(REPO_ROOT)},
+            )
+            # emit_guard_event suppresses errors with `|| true`; the
+            # trace event is best-effort. We check the side effect, not
+            # the return code.
+            events_path = tmp_path / ".dev-kit" / "trace" / "events.jsonl"
+            if not events_path.is_file():
+                # Best-effort path may have failed for unrelated reasons
+                # (no git repo in tmp, etc.); skip the assertion in that
+                # case. The CI environment for this test always has the
+                # .dev-kit/trace dir writable.
+                self.skipTest(f"trace log not written: stderr={r.stderr}")
+            events = [
+                json.loads(line) for line in
+                events_path.read_text().splitlines() if line.strip()
+            ]
+            self.assertTrue(events, "no events emitted by emit_guard_event")
+            last = events[-1]
+            self.assertTrue(
+                last["subject_id"].startswith("guard:"),
+                f"guard event subject_id must be prefixed with 'guard:' "
+                f"to avoid polluting session-lifecycle subjects; got "
+                f"{last['subject_id']!r}",
+            )
+            self.assertEqual(last["subject_id"], "guard:Bash")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

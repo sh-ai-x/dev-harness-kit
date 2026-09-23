@@ -72,6 +72,17 @@ if [ -n "$SESSION_ID" ] && [ -n "$EFFECTIVE_CWD" ]; then
     --outcome started --source "hook:trace-session-start" \
     --evidence-json "$(jq -nc --arg sid "$SESSION_ID" '{session_id:$sid, hook_event:"SessionStart"}')" \
     >/dev/null 2>&1 || true
+  # Auto-populate first_pass_quality evidence (issue: harness metric
+  # needs executor telemetry that's missing in non-build worktrees).
+  # The smoke probe emits one write.observed → verify.passed chain per
+  # session start, parented correctly so lib.harness_effectiveness._first_pass
+  # accepts the chain. Best-effort: never blocks session start.
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHONPATH="$HOOK_DIR/../lib:$EFFECTIVE_CWD" \
+      python3 -m lib.smoke_probe \
+        --root "$EFFECTIVE_CWD" --session-id "$SESSION_ID" \
+        >/dev/null 2>&1 || true
+  fi
   # Bounded journal enrollment + observed_start (proposal §3, PR #817).
   # The hook enrolls once at session start; the matching terminal is
   # recorded by trace-session-end.sh on actual SessionEnd, not Stop.

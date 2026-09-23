@@ -98,7 +98,14 @@ emit_guard_event() {
     local outcome="${3:-blocked}"
     local root subject run_id workflow_id evidence
     root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    subject="$(printf '%s' "${INPUT_JSON:-}" | jq -r '.tool_name // .tool_input.file_path // "unknown"' 2>/dev/null || printf 'unknown')"
+    # Issue #702 follow-up: prefix guard subjects with `guard:` so they
+    # don't share a namespace with session-lifecycle subjects
+    # (`session:<uuid>` from session-start-check.sh / trace-session-end.sh).
+    # Without this prefix every Bash tool call lands a `step.started`-like
+    # event under subject_id="Bash" with no matching terminal event, which
+    # inflates measurement_integrity.subject_observability's denominator
+    # and pulls subject_observability.coverage toward 0.
+    subject="guard:$(printf '%s' "${INPUT_JSON:-}" | jq -r '.tool_name // .tool_input.file_path // "unknown"' 2>/dev/null || printf 'unknown')"
     run_id="${DEV_KIT_RUN_ID:-hook-$(date -u +%Y%m%d)}"
     workflow_id="${DEV_KIT_WORKFLOW_ID:-hook:${hook_prefix}}"
     # Policy-driven default ground_truth (issue #663).
