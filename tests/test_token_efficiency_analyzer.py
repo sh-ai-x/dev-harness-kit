@@ -14,6 +14,7 @@ Tests:
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -32,7 +33,9 @@ from token_efficiency_analyzer import (  # noqa: E402
     _KNOWN_SOURCES,
     DEFAULT_PRICING_KEY,
     PRICING,
+    ArchivePath,  # noqa: E402
     _aggregate_worktree_rows,
+    _discover_archive,
     _session_cost,
     _source_for,
     aggregate_session,
@@ -647,6 +650,497 @@ class TestDiscoverLogsWorktree(unittest.TestCase):
                 else:
                     os.environ["AGENT_LOG_ROOT"] = old
             self.assertIn(external_file, files)
+
+
+class TestArchiveDiscovery(unittest.TestCase):
+    """Issue #820: archive-aware log discovery + per-session tagging.
+
+    Acceptance criteria (verbatim from the brief):
+
+      - [ ] Default run scans <logs_dir>/.archive/**/<source>/**/*.jsonl
+            in addition to <logs_dir>/{claude-code,codex}/**/*.jsonl for
+            <source> in {claude-code, codex}.
+      - [ ] --include-archives and --no-include-archives both work;
+            behavior is observably different (count of sessions scanned,
+            panel contents).
+      - [ ] Archived sessions are tagged with archive_branch (from the
+            parent worktree dir name in the archive path) and archive_ts
+            (from the timestamp directory in the archive path).
+    """
+
+    @staticmethod
+    def _touch(p: Path) -> Path:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("{}\n", encoding="utf-8")
+        return p
+
+    def test_discover_archive_empty_dir_returns_empty(self):
+        """Fresh clone: <logs_dir>/.archive doesn't exist → empty list."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "logs"
+            root.mkdir(parents=True)
+            self.assertEqual(_discover_archive(root), [])
+
+    def test_discover_archive_empty_archive_dir_returns_empty(self):
+        """Archive dir exists but is empty → empty list."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "logs"
+            (root / ".archive").mkdir(parents=True)
+            self.assertEqual(_discover_archive(root), [])
+
+    def test_discover_archive_populated_returns_archive_paths_with_tags(self):
+        """Populated archive: every jsonl gets archive_branch + archive_ts
+        derived from the path layout <archive>/<branch>/<ts>/<source>/... .
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "logs"
+            branch_a = root / ".archive" / "fix-task-aaa" / "20260101T120000Z" / "claude-code"
+            branch_b = root / ".archive" / "feat-other-bbb" / "20260202T130000Z" / "codex"
+            file_a = self._touch(branch_a / "sid_a.jsonl")
+            file_b = self._touch(branch_b / "sid_b.jsonl")
+
+            out = _discover_archive(root)
+            self.assertEqual(len(out), 2)
+            self.assertTrue(all(isinstance(ap, ArchivePath) for ap in out))
+            by_path = {ap.path: ap for ap in out}
+            self.assertEqual(by_path[file_a].archive_branch, "fix-task-aaa")
+            self.assertEqual(by_path[file_a].archive_ts, "20260101T120000Z")
+            self.assertEqual(by_path[file_b].archive_branch, "feat-other-bbb")
+            self.assertEqual(by_path[file_b].archive_ts, "20260202T130000Z")
+
+    def test_discover_archive_handles_non_dir_entries_in_archive(self):
+        """A stray file at the archive root (e.g. .DS_Store) is silently
+        skipped — only directory entries are walked. Regression for
+        upstream issues where the analyzer crashed on non-dir siblings.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "logs"
+            (root / ".archive").mkdir(parents=True)
+            (root / ".archive" / "stray.txt").write_text("not a dir")
+            branch_dir = root / ".archive" / "fix-task-aaa" / "20260101T120000Z" / "claude-code"
+            branch_dir.mkdir(parents=True)
+            (branch_dir / "sid.jsonl").write_text("{}\n")
+
+            out = _discover_archive(root)
+            self.assertEqual(len(out), 1)
+            self.assertEqual(out[0].archive_branch, "fix-task-aaa")
+
+    def test_discover_logs_includes_archive_by_default(self):
+        """Default run scans archive dir in addition to live + worktree."""
+        with tempfile.TemporaryDirectory() as td:
+            logs_dir = Path(td) / "logs"
+            live = self._touch(logs_dir / "claude-code" / "live.jsonl")
+            archived = self._touch(
+                logs_dir / ".archive" / "fix-x" / "20260101T000000Z" / "claude-code" / "arch.jsonl"
+            )
+            files = discover_logs(logs_dir)
+            self.assertIn(live, files)
+            self.assertIn(archived, files)
+
+    def test_discover_logs_excludes_archive_when_disabled(self):
+        """--no-include-archives (and the equivalent kwargs) skips archive."""
+        with tempfile.TemporaryDirectory() as td:
+            logs_dir = Path(td) / "logs"
+            live = self._touch(logs_dir / "claude-code" / "live.jsonl")
+            archived = self._touch(
+                logs_dir / ".archive" / "fix-x" / "20260101T000000Z" / "claude-code" / "arch.jsonl"
+            )
+            files = discover_logs(logs_dir, include_archives=False)
+            self.assertIn(live, files)
+            self.assertNotIn(archived, files)
+
+    def test_aggregate_session_tags_archive_session_with_branch_and_ts(self):
+        """aggregate_session(path, archive_branch=..., archive_ts=...) stamps
+        those values onto the resulting session dict. Live sessions (no
+        tags passed) carry empty strings so the dashboard's split test
+        (s.get('archive_branch') truthy) works.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "logs"
+            branch_dir = root / ".archive" / "feat-x" / "20260101T000000Z" / "claude-code"
+            jsonl = branch_dir / "sid.jsonl"
+            ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(
+                timespec="milliseconds"
+            ).replace("+00:00", "Z")
+            jsonl.parent.mkdir(parents=True, exist_ok=True)
+            jsonl.write_text(
+                '{"type":"user","timestamp":"' + ts + '","sessionId":"sid",'
+                '"cwd":"/tmp/test","gitBranch":"main","userType":"external","version":"t"}\n'
+                '{"type":"assistant","timestamp":"' + ts + '","sessionId":"sid",'
+                '"cwd":"/tmp/test","gitBranch":"main","userType":"external","version":"t",'
+                '"message":{"role":"assistant","model":"claude-sonnet-5",'
+                '"content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn",'
+                '"usage":{"input_tokens":10,"cache_creation_input_tokens":0,'
+                '"cache_read_input_tokens":0,"output_tokens":5}}}\n',
+                encoding="utf-8",
+            )
+
+            # Live (no tags) — empty.
+            live_session = aggregate_session(jsonl)
+            self.assertEqual(live_session["archive_branch"], "")
+            self.assertEqual(live_session["archive_ts"], "")
+
+            # Archived (with tags) — populated.
+            arch_session = aggregate_session(
+                jsonl, archive_branch="feat-x", archive_ts="20260101T000000Z",
+            )
+            self.assertEqual(arch_session["archive_branch"], "feat-x")
+            self.assertEqual(arch_session["archive_ts"], "20260101T000000Z")
+
+
+class TestArchivePanelDashboard(unittest.TestCase):
+    """Issue #820: dashboard surfaces an 'Archived sessions' panel that
+    splits archived cost from live cost. Live panels stay byte-equivalent
+    (modulo the new archive panel) when run with --no-include-archives.
+    """
+
+    @staticmethod
+    def _fixture_session_jsonl(sid: str = "sid") -> str:
+        """One minimal session — user + assistant turn with cache hits so
+        the dashboard can compute a non-zero cost. ``ts`` is the
+        canonical 2026-07-09 base time so the test mirrors the fixture
+        pattern in TestEndToEndDashboard (refresh ts → now-1d).
+
+        Each archive fixture uses its OWN sessionId so the dedup pass
+        in ``_dedupe_by_session`` doesn't collapse all three fixtures
+        (live + two archived branches) into one record. The production
+        case is disjoint sessionIds because each worktree removal
+        archives sessions that no longer have a live counterpart.
+        """
+        ts = "2026-07-09T10:00:00.000Z"
+        return (
+            '{"type":"user","timestamp":"' + ts + '","sessionId":"' + sid + '",'
+            '"cwd":"/tmp/fixture-repo","gitBranch":"main","userType":"external","version":"t"}\n'
+            '{"type":"assistant","timestamp":"' + ts + '","sessionId":"' + sid + '",'
+            '"cwd":"/tmp/fixture-repo","gitBranch":"main","userType":"external","version":"t",'
+            '"message":{"role":"assistant","model":"claude-sonnet-5",'
+            '"content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn",'
+            '"usage":{"input_tokens":1000,"cache_creation_input_tokens":0,'
+            '"cache_read_input_tokens":1000,"output_tokens":100}}}\n'
+        )
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="token-analyzer-archive-"))
+        target = self.tmpdir / "logs" / "claude-code"
+        target.mkdir(parents=True)
+        live = target / "live.jsonl"
+        live.write_text(self._fixture_session_jsonl(sid="live_sid"))
+
+        # Two archived branches under .archive/ — each with its OWN
+        # sessionId so the dedup pass doesn't collapse them into the
+        # live record (or into each other).
+        for branch, ts, sid in (
+            ("fix-task-aaa", "20260101T120000Z", "archive_a_sid"),
+            ("feat-other-bbb", "20260202T130000Z", "archive_b_sid"),
+        ):
+            branch_dir = (
+                self.tmpdir / "logs" / ".archive" / branch / ts / "claude-code"
+            )
+            branch_dir.mkdir(parents=True)
+            (branch_dir / "sid.jsonl").write_text(self._fixture_session_jsonl(sid=sid))
+
+        _refresh_fixture_timestamps(target)
+        for branch, ts in (("fix-task-aaa", "20260101T120000Z"),
+                           ("feat-other-bbb", "20260202T130000Z")):
+            branch_dir = (
+                self.tmpdir / "logs" / ".archive" / branch / ts / "claude-code"
+            )
+            _refresh_fixture_timestamps(branch_dir)
+
+        self.out_html = self.tmpdir / "dashboard.html"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_render_dashboard_archive_panel_html_present(self):
+        """When archives are included, the dashboard HTML emits the
+        'Archived Sessions' section, count metric, and branch breakdown.
+        """
+        rc = main([
+            "--repo", "fixture-repo",
+            "--days", "3650",
+            "--logs-dir", str(self.tmpdir / "logs"),
+            "--no-include-worktree-logs",
+            "--out", str(self.out_html),
+        ])
+        self.assertEqual(rc, 0)
+        html_text = self.out_html.read_text()
+        self.assertIn("Archived Sessions", html_text)
+        self.assertIn("Archived Total Cost", html_text)
+        # Both archived branches should appear in the breakdown table.
+        self.assertIn("fix-task-aaa", html_text)
+        self.assertIn("feat-other-bbb", html_text)
+        # Live session id is in the HTML (Active Sessions row).
+        self.assertIn("live_sid", html_text)
+
+    def test_json_includes_archive_panel(self):
+        """--json emits an ``archive_panel`` key with session_count,
+        total_cost_usd, and branch_breakdown. Empty when --no-include-archives.
+        """
+        rc = main([
+            "--repo", "fixture-repo",
+            "--days", "3650",
+            "--logs-dir", str(self.tmpdir / "logs"),
+            "--no-include-worktree-logs",
+            "--json",
+        ])
+        self.assertEqual(rc, 0)
+        # The previous call was --json only; the html wasn't written.
+        # Re-run with HTML so we keep parity, but assert via the JSON
+        # sink separately.
+        import contextlib
+        import io
+        stdout_buf = io.StringIO()
+        with contextlib.redirect_stdout(stdout_buf):
+            main([
+                "--repo", "fixture-repo",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--no-include-worktree-logs",
+                "--json",
+            ])
+        data = json.loads(stdout_buf.getvalue())
+        self.assertIn("archive_panel", data)
+        ap = data["archive_panel"]
+        self.assertEqual(ap["session_count"], 2)
+        self.assertGreater(ap["total_cost_usd"], 0.0)
+        self.assertEqual(len(ap["branch_breakdown"]), 2)
+        branch_names = {b["name"] for b in ap["branch_breakdown"]}
+        self.assertEqual(branch_names, {"fix-task-aaa", "feat-other-bbb"})
+
+    def test_json_no_archive_panel_when_disabled(self):
+        """--no-include-archives keeps the panel key but zeroes its
+        counts so consumers can rely on the shape without branching.
+        """
+        import contextlib
+        import io
+        stdout_buf = io.StringIO()
+        with contextlib.redirect_stdout(stdout_buf):
+            rc = main([
+                "--repo", "fixture-repo",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--no-include-worktree-logs",
+                "--no-include-archives",
+                "--json",
+            ])
+        self.assertEqual(rc, 0)
+        data = json.loads(stdout_buf.getvalue())
+        self.assertEqual(data["archive_panel"]["session_count"], 0)
+        self.assertEqual(data["archive_panel"]["total_cost_usd"], 0.0)
+        self.assertEqual(data["archive_panel"]["branch_breakdown"], [])
+
+    def test_live_panel_byte_equivalent_when_archives_excluded(self):
+        """With --no-include-archives, the live panel numbers (sessions
+        / total_cost_usd / files_scanned) must match what they would
+        be on an empty archive dir. Verifies the acceptance criterion
+        that excluding archives doesn't perturb the live aggregation.
+        """
+        import contextlib
+        import io
+
+        def _capture(*extra: str) -> dict:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                main([
+                    "--repo", "fixture-repo",
+                    "--days", "3650",
+                    "--logs-dir", str(self.tmpdir / "logs"),
+                    "--no-include-worktree-logs",
+                    "--json",
+                    *extra,
+                ])
+            return json.loads(buf.getvalue())
+
+        a = _capture("--no-include-archives")
+        # Run again but with archive removed from disk for a clean baseline.
+        backup = self.tmpdir / "logs" / ".archive"
+        backup.rename(backup.with_suffix(".archive.bak"))
+        try:
+            b = _capture("--no-include-archives")
+        finally:
+            backup.with_suffix(".archive.bak").rename(backup)
+        # Live panel numbers must agree. ``files_scanned`` is the only metric
+        # that legitimately changes with --no-include-archives (it's a
+        # scanner count, not a live panel); all the live aggregations
+        # + JSON totals + cost-gate must be byte-equivalent so an
+        # operator switching the flag off mid-run doesn't see their
+        # live dashboard silently shift.
+        for k in ("sessions", "active_sessions", "inactive_sessions",
+                  "total_cost_usd", "stale_cost_usd", "stale_pct",
+                  "estimated_savings_usd"):
+            self.assertEqual(a[k], b[k], f"live {k!r} drifted with --no-include-archives")
+        # And the archive panel must be zero in both.
+        self.assertEqual(a["archive_panel"]["session_count"], 0)
+        self.assertEqual(b["archive_panel"]["session_count"], 0)
+
+    def test_live_panel_byte_equivalent_when_archives_included(self):
+        """Symmetric to ``test_live_panel_byte_equivalent_when_archives_excluded``.
+
+        With ``--include-archives`` (the default) and the same disk layout
+        that has BOTH live + archived sessions, every live panel number
+        must still match a ``--no-include-archives`` run on the SAME disk.
+        Pins the contract that
+        ``_partition_by_archive(sessions)`` keeps archives out of the live
+        totals regardless of the ``include_archives`` flag value — the
+        single filter ``live_sessions = [s for s in sessions if not
+        s.get('archive_branch')]`` is what makes this guarantee hold.
+        Without this test, a future refactor that drops the partition step
+        would silently inflate live cost / active_session count whenever
+        archives were present on disk.
+        """
+        import contextlib
+        import io
+
+        def _capture(*extra: str) -> dict:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                main([
+                    "--repo", "fixture-repo",
+                    "--days", "3650",
+                    "--logs-dir", str(self.tmpdir / "logs"),
+                    "--no-include-worktree-logs",
+                    "--json",
+                    *extra,
+                ])
+            return json.loads(buf.getvalue())
+
+        # Both runs hit the SAME disk layout (1 live + 2 archive fixtures).
+        a = _capture("--include-archives")
+        b = _capture("--no-include-archives")
+        # Live panel numbers must agree across the two flag values.
+        # ``files_scanned`` legitimately differs (scanner count, not
+        # live panel); ``archive_panel`` legitimately differs (that's
+        # the whole point of the toggle). Everything else — sessions
+        # count, totals, cost-gate — must be byte-equivalent so an
+        # operator who switches the flag mid-run doesn't see their
+        # live dashboard silently shift.
+        for k in ("sessions", "active_sessions", "inactive_sessions",
+                  "total_cost_usd", "stale_cost_usd", "stale_pct",
+                  "estimated_savings_usd"):
+            self.assertEqual(
+                a[k], b[k],
+                f"live {k!r} drifted between --include-archives "
+                f"(default-on) and --no-include-archives — the "
+                f"live/archived partition is leaking into live totals",
+            )
+        # And the archive panel must reflect the toggle.
+        self.assertEqual(a["archive_panel"]["session_count"], 2)
+        self.assertEqual(b["archive_panel"]["session_count"], 0)
+        self.assertGreater(a["archive_panel"]["total_cost_usd"], 0.0)
+        self.assertEqual(b["archive_panel"]["total_cost_usd"], 0.0)
+        # Per-source + per-branch breakdowns for the live set should
+        # also be empty (the fixtures only carry one branch and one
+        # source — but the test pins that those rows render the live
+        # set, not the union of live + archive).
+        self.assertEqual(a["worktrees"], b["worktrees"])
+
+    def test_cli_include_archives_flag_default_on(self):
+        """Default run scans archives (acceptance criterion)."""
+        import contextlib
+        import io
+        stdout_buf = io.StringIO()
+        with contextlib.redirect_stdout(stdout_buf):
+            main([
+                "--repo", "fixture-repo",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--no-include-worktree-logs",
+                "--json",
+            ])
+        data = json.loads(stdout_buf.getvalue())
+        self.assertGreater(data["archive_panel"]["session_count"], 0,
+                           "default run should include archives")
+
+    def test_cli_no_include_archives_disables(self):
+        """--no-include-archives disables archive discovery explicitly."""
+        import contextlib
+        import io
+        stdout_buf = io.StringIO()
+        with contextlib.redirect_stdout(stdout_buf):
+            main([
+                "--repo", "fixture-repo",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--no-include-worktree-logs",
+                "--no-include-archives",
+                "--json",
+            ])
+        data = json.loads(stdout_buf.getvalue())
+        self.assertEqual(data["archive_panel"]["session_count"], 0)
+        self.assertEqual(data["archive_panel"]["total_cost_usd"], 0.0)
+
+    def test_archive_panel_renders_branch_breakdown_in_html(self):
+        """The HTML ``Archived Sessions`` section table lists each
+        archive_branch with its session count + cost + share bar.
+        """
+        import contextlib
+        import io
+        # Use --json path for deterministic stdout, then re-run for HTML.
+        stdout_buf = io.StringIO()
+        with contextlib.redirect_stdout(stdout_buf):
+            main([
+                "--repo", "fixture-repo",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--no-include-worktree-logs",
+                "--include-archives",
+                "--json",
+            ])
+        data = json.loads(stdout_buf.getvalue())
+        breakdown = data["archive_panel"]["branch_breakdown"]
+        # Each breakdown row carries sessions / cost / name + the HTML
+        # re-renders them. Assert the JSON shape so the test stays
+        # focused on the data contract.
+        for row in breakdown:
+            self.assertIn("name", row)
+            self.assertIn("sessions", row)
+            self.assertIn("cost_usd", row)
+            self.assertIn("share", row)
+            self.assertGreaterEqual(row["sessions"], 1)
+            self.assertGreaterEqual(row["cost_usd"], 0.0)
+
+        # And the HTML render reflects the same set of branches.
+        main([
+            "--repo", "fixture-repo",
+            "--days", "3650",
+            "--logs-dir", str(self.tmpdir / "logs"),
+            "--no-include-worktree-logs",
+            "--include-archives",
+            "--out", str(self.out_html),
+        ])
+        html_text = self.out_html.read_text()
+        # The breakdown rows are rendered AFTER the "Archived Sessions"
+        # section header; substring search for the branch names after
+        # that header to make sure they're inside the breakdown block
+        # (not, e.g., in a transcript index).
+        idx = html_text.find("Archived Sessions")
+        self.assertGreater(idx, 0)
+        tail = html_text[idx:]
+        for row in breakdown:
+            self.assertIn(html.escape(row["name"]), tail,
+                          f"branch {row['name']} missing from archive panel")
+
+    def test_stdout_summary_includes_archive_totals(self):
+        """The [ok] stdout line reports archive_session_count + cost so
+        CI / scripts can gate on archive coverage without parsing HTML.
+        """
+        import contextlib
+        import io
+        stdout_buf, stderr_buf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+            main([
+                "--repo", "fixture-repo",
+                "--days", "3650",
+                "--logs-dir", str(self.tmpdir / "logs"),
+                "--no-include-worktree-logs",
+                "--out", str(self.out_html),
+            ])
+        # The first stdout line is the [ok] summary; second is the
+        # dashboard path. Look for the archive fields in the summary.
+        summary_line = stdout_buf.getvalue().splitlines()[0]
+        self.assertIn("archived_sessions=2", summary_line)
+        self.assertIn("archived_cost=$", summary_line)
 
 
 class TestEndToEndDashboard(unittest.TestCase):
@@ -3119,7 +3613,7 @@ class TestDashboardViewModel(unittest.TestCase):
         for k in ("cost_by_repo", "cost_by_branch", "cost_by_worktree",
                   "cost_by_tool", "cost_by_model", "cost_by_worktree_rows",
                   "cache_ttl", "totals", "active_count", "inactive_count",
-                  "stale_cost", "stale_pct"):
+                  "stale_cost", "stale_pct", "archive_panel"):
             self.assertIn(k, vm, f"view-model missing key {k!r}")
 
     def test_json_and_html_share_same_view_model(self) -> None:
