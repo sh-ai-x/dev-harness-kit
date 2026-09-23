@@ -204,7 +204,7 @@ class TestValidate(unittest.TestCase):
 class TestSync(unittest.TestCase):
     def test_sync_degraded_exits_3(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            with mock.patch.object(gates_state, "gh_available", return_value=(None, "gh not on PATH")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=(None, "gh not on PATH")):
                 rc, _, err = _run_cli(["sync", "--root", td])
             self.assertEqual(rc, 3)
             self.assertIn("gh not on PATH", err)
@@ -220,7 +220,7 @@ class TestSync(unittest.TestCase):
                 ["git", "-C", td, "remote", "add", "origin", "https://github.com/acme/widgets.git"],
                 capture_output=True, check=True,
             )
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 with mock.patch.object(gates_state, "_sync_one", return_value=(True, "")):
                     rc, out, err = _run_cli(["sync", "--root", td])
             self.assertEqual(rc, 0, err)
