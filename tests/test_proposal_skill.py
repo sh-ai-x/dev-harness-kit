@@ -762,18 +762,18 @@ class BeforeAfterFieldsTests(unittest.TestCase):
             "  summary: |\n"
             "    A new hook reads the last 10 entries.\n"
             "  files:\n"
-            "    - path: hooks/lib/loop-detect.sh\n"
+            "    - path: hooks/lib/find-python.sh\n"
             "      change: |\n"
             "        Reads hand-off log; emits UserPromptSubmit injection.\n"
             "    - path: hooks/index.md\n"
-            "      change: 'register loop-detect.sh in the matrix'\n"
+            "      change: 'register find-python.sh in the matrix'\n"
             "sections: []\n"
         )
         p = rph.parse_proposal_yaml(text)
         self.assertIsNotNone(p.after)
         self.assertIn("new hook", p.after.summary)
         self.assertEqual(len(p.after.files), 2)
-        self.assertEqual(p.after.files[0].path, "hooks/lib/loop-detect.sh")
+        self.assertEqual(p.after.files[0].path, "hooks/lib/find-python.sh")
         self.assertIn("hand-off log", p.after.files[0].change)
 
     def test_parse_pros_cons_limitations(self):
@@ -986,7 +986,7 @@ class BeforeAfterRenderTests(unittest.TestCase):
             "  summary: |\n"
             "    New hook reads last 10 entries; emits UserPromptSubmit.\n"
             "  files:\n"
-            "    - path: hooks/lib/loop-detect.sh\n"
+            "    - path: hooks/lib/find-python.sh\n"
             "      change: 'Reads hand-off log; emits injection.'\n"
             "pros:\n"
             "  - 'Catches silent doom loops'\n"
@@ -1026,7 +1026,7 @@ class BeforeAfterRenderTests(unittest.TestCase):
 
     def test_render_includes_file_paths(self):
         html = rph.render_from_yaml(self._full_yaml())
-        self.assertIn("hooks/lib/loop-detect.sh", html)
+        self.assertIn("hooks/lib/find-python.sh", html)
 
     def test_render_no_fields_emits_no_ba_sections(self):
         """Backward compat: a proposal without before/after/pros/cons/

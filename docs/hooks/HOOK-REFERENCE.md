@@ -31,13 +31,11 @@ per-runtime wiring differences), see
 | `secret-scan` | Redacts credential patterns in tool inputs | All |
 | `slop-detector` | Catches AI-typical patterns across phrase + structure banks (KO+EN) | Build + Review + Security |
 | `l4-todo-scan` | PostToolUse deferred-work marker scan (Iron Law L4): fails closed on TODO/FIXME/'we'll extend later'/starting-point/placeholder markers in `Write`/`Edit`/`MultiEdit` payloads outside allowed paths (`*.md`, `tests/fixtures/**`, `docs/adoption/**`). Strict mode via `L4_STRICT=1`. Marker bank SSOT: `hooks/references/l4/markers.md` | Build + Review + Security |
-| `loop-detect` | Warns after three consecutive identical Bash calls using per-session fingerprints | All |
 | `worktree-guard` | Hard-blocks Edit/Write in the main checkout; on deny, prints the live worktree list via `git worktree list --porcelain` | All |
 | `git-guard` | Enforces branch strategy: blocks commit/push to main, force-push, `gh pr merge`; verifies `plugin.json` slot on `git push` to a feature branch (slot check extracted to `hooks/lib/slot-check.sh` for unit-testable truth table — see *Shared helpers* below). Prefers the PreToolUse payload's `.cwd` over the hook process cwd so hook runners whose process cwd is in a worktree still target the parent session checkout | All |
 | `worktree-auto-cut` | Creates the per-task worktree + branch | All |
 | `stop-verify` | Quoted exit codes / test counts + 5-item intent checklist (`lib/pre_completion_checklist.py`) before session end | Plan + Design + Build + Review + Security + Ship |
 | `review-yml-isolation` | Forces `review.yml` PRs to be `review.yml`-only | All |
-| `notification-collapse` | Stderr WARN when ≥ 2 `<task-notification>` envelopes are in a UserPromptSubmit payload (the `Monitor` / `run_in_background` bloat pattern from the 2026-08-11 `/dev-kit:token-analyzer` diagnostic) | All |
 | `context-window-guard` | Stderr tiered WARN (100K / 200K / 300K cumulative input tokens) recommending `/compact` per `rules/session-hygiene.md` Iron Law 4; thresholds tunable via `CONTEXT_WINDOW_*_KB` env vars | All |
 | `pr-create-route` | Deterministic actor classification on every `gh pr create` via `lib/actor_classifier`; writes `.dev-kit/.pr-route.json` breadcrumb + prints one-line route to stderr; silent by default, opt-in ask via `fork_pr_confirm=on` in `.dev-kit/guard-mode.session.json`. Mirrors the `push_confirm` opt-in pattern. | All |
 
@@ -72,8 +70,6 @@ registration overhead without removing any retained SessionStart behavior.
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
 | `l4-todo-scan.sh` | PostToolUse (Write\|Edit) | Fail-closed scan for TODO/FIXME deferred-work markers in `Write`/`Edit`/`MultiEdit` payloads; strict-mode via `L4_STRICT=1` (MUST-4) | hard-block (advisory under allowed-path exemption) |
 | `worktree-log-auto-install.sh` | PostToolUse (Bash) | Install loghooks into a newly-added worktree | advisory |
-| `loop-detect.sh` | PostToolUse (Bash) | Warn before another retry after repeated identical Bash calls | advisory (fails open) |
-| `notification-collapse.sh` | UserPromptSubmit | Stderr WARN when 2+ `<task-notification>` envelopes are in the prompt (harness `Monitor` / `run_in_background` bloat signal) | advisory (fails open) |
 | `context-window-guard.sh` | UserPromptSubmit | Stderr tiered WARN at 100K / 200K / 300K cumulative input tokens recommending `/compact` | advisory (fails open) |
 | `acp-tier-assert.sh` | PreToolUse (`*`) | Enforce ACP agent tier-assertion line on first tool call (M/T/L) | hard-block |
 | `stop-verify.sh` | Stop | Run regression tests + pre-completion intent checklist on session end | hard-block |
@@ -103,7 +99,6 @@ inside a PreToolUse shell script). Each helper carries its own
 | `locale-utf8.sh` | preamble-using hooks | One-shot `LC_ALL=C.UTF-8` / `LANG=C.UTF-8` setup |
 | `slot-check.sh` | `git-guard.sh` | `slot_should_deny <claude> <codex> <expected>` truth table for the `plugin.json` version-slot check (added 2026-08-03, inspect finding #2) |
 | `stage-gate.sh` | `stop-verify.sh` | `hook_stage_active` + `pre_completion_checklist_active` stage-activation helpers (the second follows stop-verify's stage + override rules so the intent checklist fires under the same gate) |
-| `loop-detect.sh` | `hooks/loop-detect.sh` | Append per-session Bash fingerprints and detect consecutive matches at the configured threshold |
 
 ## Reference data banks (`hooks/references/`)
 
