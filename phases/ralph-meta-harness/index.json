@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "phase": "ralph-meta-harness",
-  "steps": [
-    {"step": 1, "name": "thin-continuity", "status": "completed"},
-    {"step": 2, "name": "completion-proof", "status": "completed"},
-    {"step": 3, "name": "offline-replay-contract", "status": "completed"}
-  ]
-}
