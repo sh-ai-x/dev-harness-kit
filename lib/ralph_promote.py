@@ -633,11 +633,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
     except RalphPromoteError as exc:
-        # The prior InvalidIdentifierError → exit 1 and PromotionError →
-        # exit 2 distinction collapsed to a single exit code when the
-        # exception hierarchy collapsed (refactor/ralph-babysit-collapse).
-        # Identifier-validation failures and bundle-validation failures
-        # now share the same code; the message distinguishes them.
+        # Restore the prior exit-code contract: identifier-validation
+        # failures (`_validate_identifier`) return 1; bundle-validation
+        # and other promotion failures return 2. After the exception
+        # hierarchy collapsed (refactor/ralph-babysit-collapse) both
+        # raised RalphPromoteError, so we discriminate by message
+        # prefix — uniquely emitted by `_validate_identifier` at the
+        # path `_validate_identifier(value, label) → raise
+        # RalphPromoteError(f"{label} must be one safe path segment
+        # using letters, digits, '.', '_' or '-'")`.
+        msg = str(exc)
+        if msg.endswith("must be one safe path segment using letters, digits, '.', '_' or '-'"):
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:
