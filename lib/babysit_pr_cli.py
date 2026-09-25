@@ -50,6 +50,7 @@ from babysit_pr_loop import (  # noqa: E402
     record_outcome,
     save_state,
 )
+from babysit_pr_reliability import classify_merge_state  # noqa: E402
 
 PathLike = str | Path
 
@@ -506,6 +507,8 @@ def persist_loop_snapshot(
     github_tracker_issue: int | None = None,
     linear_issue: str = "",
     dynamic_skipped: frozenset | None = None,
+    mergeable: str = "",
+    merge_state_status: str = "",
     state_path: PathLike = STATE_FILE,
 ) -> dict[str, Any]:
     """Persist one fresh GitHub snapshot and return its resumable phase.
@@ -519,6 +522,14 @@ def persist_loop_snapshot(
     can omit the kwarg when no fresh judge call has happened). The
     babysit-pr SKILL flow passes the result of
     `lib.babysit_pr_reliability.select_gates_dynamic()` here.
+
+    `mergeable` / `merge_state_status` (v1.2.0) — snapshot of
+    `gh pr view --json mergeable,mergeStateStatus`. When the classifier
+    (`lib.babysit_pr_reliability.classify_merge_state`) returns
+    "conflicting", the snapshot stamps a `merge_conflict:` failure
+    signature so a restarted worker recognizes the resolution path
+    even after the operator closes the terminal (the algorithm's
+    step 6.5 routes on this prefix).
     """
     state = _load_or_create_loop_state(
         parent_pr, current_pr=current_pr, state_path=state_path
@@ -529,6 +540,15 @@ def persist_loop_snapshot(
             "github_tracker_issue": github_tracker_issue or state["github_tracker_issue"],
             "linear_issue": linear_issue or state["linear_issue"],
         }
+    merge_class = classify_merge_state(mergeable, merge_state_status)
+    effective_signature = failure_signature
+    if merge_class == "conflicting" and not effective_signature.startswith("merge_conflict:"):
+        effective_signature = "merge_conflict:1"
+    elif merge_class == "clean" and effective_signature.startswith("merge_conflict:"):
+        # The conflict was resolved (by a prior babysit iteration or by
+        # a human). Clear the prefix so the next iteration does not
+        # re-trigger the merge path on an unrelated failure.
+        effective_signature = ""
     state = observe(
         state,
         head_sha=head_sha,
@@ -536,8 +556,10 @@ def persist_loop_snapshot(
         checks=checks,
         now_epoch=now_epoch,
         now_iso=now_iso,
-        failure_signature=failure_signature,
+        failure_signature=effective_signature,
         dynamic_skipped=dynamic_skipped,
+        mergeable=mergeable,
+        merge_state_status=merge_state_status,
     )
     save_state(state, state_path)
     return state

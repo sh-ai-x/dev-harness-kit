@@ -279,3 +279,57 @@ def test_transition_key_and_sync_marker_are_restart_safe() -> None:
     synced = mark_transition_synced(state, now_iso="2026-08-20T12:01:00Z")
     assert key == "695:abc:0:wait_for_approval"
     assert synced["last_synced_transition"] == key
+
+
+def test_observe_records_merge_state() -> None:
+    # v1.2.0 — `mergeable` and `merge_state_status` snapshot the PR's
+    # `gh pr view --json mergeable,mergeStateStatus` so the algorithm
+    # step 6.5 can route on `failure_signature="merge_conflict:1"`
+    # even after a worker restart. Defaults to "" so older callers
+    # keep working without passing the kwargs.
+    state = observe(
+        new_state(7),
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+        mergeable="MERGEABLE",
+        merge_state_status="CLEAN",
+    )
+    assert state["mergeable"] == "MERGEABLE"
+    assert state["merge_state_status"] == "CLEAN"
+
+
+def test_observe_persists_merge_state_across_iterations() -> None:
+    # A subsequent snapshot without the kwargs preserves the latest
+    # values — same semantics as `dynamic_skipped`. Mirrors the
+    # CI-judge layer's "inherited unless replaced" contract.
+    state = observe(
+        new_state(7),
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:00Z",
+        mergeable="CONFLICTING",
+        merge_state_status="DIRTY",
+    )
+    state2 = observe(
+        state,
+        head_sha="abc",
+        review_verdict="REVIEW_REQUIRED",
+        checks=[approved_check()],
+        now_epoch=1_700_000_000,
+        now_iso="2026-08-20T12:00:01Z",
+    )
+    assert state2["mergeable"] == "CONFLICTING"
+    assert state2["merge_state_status"] == "DIRTY"
+
+
+def test_state_defaults_include_empty_merge_fields() -> None:
+    # Older persisted state files (v1.0.0 / v1.1.0) load cleanly via
+    # `load_state` because `_LOOP_STATE_DEFAULTS` fills missing keys.
+    state = new_loop_state(parent_pr=7, current_pr=7)
+    assert state["mergeable"] == ""
+    assert state["merge_state_status"] == ""

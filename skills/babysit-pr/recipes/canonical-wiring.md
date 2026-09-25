@@ -64,7 +64,12 @@ pr_arg = bpc.parse_babysit_args(argv).pr
 pr_view_target = str(pr_arg) if pr_arg is not None else ""
 pr_view = subprocess.run(
     ["gh", "pr", "view", *(([pr_view_target]) if pr_view_target else []),
-     "--json", "number,state", "-q", "."],
+     # v1.2.0 — `mergeable` and `mergeStateStatus` feed the
+     # `persist_loop_snapshot()` merge-conflict classifier so the
+     # babysit step 6.5 (RESOLVE CONFLICT) can detect a CONFLICTING
+     # PR before CI wastes `MAX_ITERS` waiting on workflows that
+     # GitHub Actions silently refuses to run (issue #249).
+     "--json", "number,state,mergeable,mergeStateStatus", "-q", "."],
     capture_output=True, text=True)
 if pr_view.returncode != 0:
     print("No open PR resolved. Pass --pr N or run from a PR worktree.", file=sys.stderr)
@@ -74,6 +79,11 @@ pr_number = int(pr_snapshot["number"])
 if pr_snapshot.get("state") != "OPEN":
     print(f"PR #{pr_number} is {pr_snapshot.get('state')}; pass an open --pr N.", file=sys.stderr)
     sys.exit(1)
+# v1.2.0 — capture merge state for the snapshot classifier. Default
+# to "" so a missing field (older gh versions) does not break the
+# snapshot seam.
+pr_mergeable = (pr_snapshot.get("mergeable") or "")
+pr_merge_state = (pr_snapshot.get("mergeStateStatus") or "")
 
 # Durable control-plane wiring: snapshot before classification and persist
 # the phase before choosing wait/repair/approval actions. The repair path
@@ -102,6 +112,11 @@ loop_state = bpc.persist_loop_snapshot(
         if os.environ.get("BABYSIT_GITHUB_TRACKER_ISSUE") else None
     ),
     linear_issue=os.environ.get("BABYSIT_LINEAR_ISSUE", ""),
+    # v1.2.0 — thread merge state into the snapshot so the classifier
+    # can stamp `failure_signature="merge_conflict:1"` and route the
+    # algorithm to step 6.5 (RESOLVE CONFLICT).
+    mergeable=pr_mergeable,
+    merge_state_status=pr_merge_state,
 )
 print(f"babysit phase={loop_state.phase} strategy={loop_state.strategy}", flush=True)
 

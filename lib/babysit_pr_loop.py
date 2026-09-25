@@ -15,7 +15,7 @@ from typing import Any, Iterable, Mapping
 
 from lib.babysit_pr_reliability import classify_check
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.2.0"
 STATE_FILE = ".dev-kit/babysit-state.json"
 DEFAULT_WAKE_SECONDS = 30
 RECOVERY_WAKE_SECONDS = 300
@@ -41,6 +41,16 @@ RECOVER = "recover"
 # default value (`frozenset()`) means older persisted state files load
 # cleanly via `load_state` (which pops `schema_version` and feeds the
 # rest to `new_loop_state(**raw)`).
+#
+# v1.2.0 — `mergeable` and `merge_state_status` snapshot the PR's
+# `gh pr view --json mergeable,mergeStateStatus` reading at the
+# snapshot epoch. The classifier in `lib/babysit_pr_cli.persist_loop_snapshot`
+# threads them into a `merge_conflict:<count>` failure_signature when
+# the merge is conflicting, which the babysit-pr algorithm step 6.5
+# (RESOLVE CONFLICT) recognizes and routes to `git fetch && git merge
+# origin/<base>` rather than the normal log-fetch path. Older state
+# files (no `mergeable` / `merge_state_status` keys) load cleanly via
+# `load_state` because `_LOOP_STATE_DEFAULTS` fills the missing keys.
 _LOOP_STATE_DEFAULTS: dict[str, Any] = {
     "parent_pr": 0,
     "current_pr": 0,
@@ -59,6 +69,8 @@ _LOOP_STATE_DEFAULTS: dict[str, Any] = {
     "linear_issue": "",
     "last_synced_transition": "",
     "dynamic_skipped": frozenset(),
+    "mergeable": "",
+    "merge_state_status": "",
 }
 
 
@@ -195,6 +207,8 @@ def observe(
     now_iso: str,
     failure_signature: str = "",
     dynamic_skipped: frozenset | None = None,
+    mergeable: str = "",
+    merge_state_status: str = "",
 ) -> dict[str, Any]:
     """Apply one fresh snapshot and advance the resumable phase.
 
@@ -204,12 +218,22 @@ def observe(
     passing a frozenset replaces it. The babysit-pr SKILL flow calls
     `select_gates_dynamic()` between SNAPSHOT and CLASSIFY and threads
     the result here.
+
+    `mergeable` / `merge_state_status` (v1.2.0) snapshot the PR's
+    `gh pr view --json mergeable,mergeStateStatus` reading so a
+    CONFLICTING branch can be diagnosed across worker restarts. They
+    default to "" (no signal) so older callers keep working.
     """
     phase = classify_snapshot(
         review_verdict=review_verdict, checks=checks, now_epoch=now_epoch
     )
     epoch_bump = bool(state["head_sha"] and state["head_sha"] != head_sha)
     new_dynamic = state["dynamic_skipped"] if dynamic_skipped is None else dynamic_skipped
+    # v1.2.0 — Persist the latest merge state even when the snapshot
+    # does not surface a conflict signature (a behind-but-clean rebase
+    # should still bump the field on the next iteration).
+    new_mergeable = mergeable or state.get("mergeable", "")
+    new_merge_state = merge_state_status or state.get("merge_state_status", "")
     result = new_loop_state(
         parent_pr=state["parent_pr"],
         current_pr=state["current_pr"],
@@ -231,6 +255,8 @@ def observe(
         linear_issue=state["linear_issue"],
         last_synced_transition=state["last_synced_transition"],
         dynamic_skipped=new_dynamic,
+        mergeable=new_mergeable,
+        merge_state_status=new_merge_state,
     )
     return result
 
@@ -291,6 +317,8 @@ def record_outcome(
         linear_issue=state["linear_issue"],
         last_synced_transition=state["last_synced_transition"],
         dynamic_skipped=new_dynamic,
+        mergeable=state.get("mergeable", ""),
+        merge_state_status=state.get("merge_state_status", ""),
     )
     return result
 
@@ -329,5 +357,7 @@ def mark_transition_synced(state: Mapping[str, Any], *, now_iso: str) -> dict[st
         linear_issue=state["linear_issue"],
         last_synced_transition=transition_key(state),
         dynamic_skipped=state["dynamic_skipped"],
+        mergeable=state.get("mergeable", ""),
+        merge_state_status=state.get("merge_state_status", ""),
     )
     return result
