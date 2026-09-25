@@ -130,17 +130,17 @@ class TestSmoke(unittest.TestCase):
             self.assertEqual(r.returncode, 0, f"bash syntax error in {path}: {r.stderr.decode()}")
 
     def test_iron_laws_in_iron_laws_index(self):
-        """Iron Laws SSOT lives at iron-laws/index.md (lazy-loaded by CLAUDE.md).
+        """Iron Laws SSOT lives at rules/iron-laws.md (lazy-loaded by CLAUDE.md).
 
         Bumped from L1-L5 to L1-L8 after issue #263 (alpha-declare + alpha-location
         + prose-trim laws were added).
         """
-        laws_md = (PROJECT_ROOT / "iron-laws" / "index.md").read_text(encoding="utf-8")
-        for i in range(1, 9):
+        laws_md = (PROJECT_ROOT / "rules" / "iron-laws.md").read_text(encoding="utf-8")
+        for i in range(1, 10):
             # Iron law may be "**L1 Title**" or "**L1** Title:" — accept both forms
             self.assertTrue(
                 f"**L{i}" in laws_md or f"L{i}**" in laws_md,
-                f"L{i} missing from iron-laws/index.md",
+                f"L{i} missing from rules/iron-laws.md",
             )
 
     def test_marketplace_plugin_name(self):

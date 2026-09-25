@@ -76,8 +76,8 @@ class TestWriteProjectMd(unittest.TestCase):
         md = write_project_md.render_claude_md(self.root)
         # Pointer anchors for the four index.md files
         for path in (
-            "iron-laws/index.md",
-            "guidelines/index.md",
+            "rules/iron-laws.md",
+            "rules/guidelines.md",
             "hooks/index.md",
             "rules/index.md",
         ):
@@ -94,11 +94,11 @@ class TestWriteProjectMd(unittest.TestCase):
         md = write_project_md.render_claude_md(self.root)
         for i in range(1, 9):
             self.assertNotIn(
-                f"**L{i}**", md, f"CLAUDE.md must not inline L{i} (moved to iron-laws/index.md)"
+                f"**L{i}**", md, f"CLAUDE.md must not inline L{i} (moved to rules/iron-laws.md)"
             )
         for i in range(1, 5):
             self.assertNotIn(
-                f"**G{i}**", md, f"CLAUDE.md must not inline G{i} (moved to guidelines/index.md)"
+                f"**G{i}**", md, f"CLAUDE.md must not inline G{i} (moved to rules/guidelines.md)"
             )
 
     def test_render_claude_md_no_inline_hook_table(self):
@@ -137,14 +137,14 @@ class TestWriteProjectMd(unittest.TestCase):
     def test_render_iron_laws_index_has_all_laws(self):
         out = write_project_md.render_iron_laws_index()
         for i in range(1, 9):
-            self.assertIn(f"**L{i}**", out, f"iron-laws/index.md missing L{i}")
+            self.assertIn(f"**L{i}**", out, f"rules/iron-laws.md missing L{i}")
         self.assertIn("verification artifact", out)
         self.assertIn("MUST-8", out)
 
     def test_render_guidelines_index_has_all_guidelines(self):
         out = write_project_md.render_guidelines_index()
         for i in range(1, 5):
-            self.assertIn(f"**G{i}**", out, f"guidelines/index.md missing G{i}")
+            self.assertIn(f"**G{i}**", out, f"rules/guidelines.md missing G{i}")
         # Upstream attribution (github user/org name)
         self.assertIn("andrej-karpathy-skills", out)
 
@@ -203,10 +203,14 @@ class TestWriteProjectMd(unittest.TestCase):
 
     def test_write_writes_all_four_index_files(self):
         write_project_md.write_project_md(self.root, stage="plan")
-        for rel in ("iron-laws/index.md", "guidelines/index.md", "hooks/index.md"):
+        for rel in ("rules/iron-laws.md", "rules/guidelines.md", "hooks/index.md"):
             self.assertTrue((self.root / rel).exists(), f"missing {rel}")
-        # rules/index.md requires rules/ to exist; no rules/ → no file
-        self.assertFalse((self.root / "rules" / "index.md").exists())
+        # rules/ is auto-created by write_iron_laws_index (which now writes to
+        # rules/iron-laws.md), so rules/index.md is also written — bootstrap
+        # never leaves rules/ empty after the iron-laws move.
+        rules_index = self.root / "rules" / "index.md"
+        self.assertTrue(rules_index.exists())
+        self.assertIn("iron-laws.md", rules_index.read_text())
 
     def test_write_writes_rules_index_when_rules_dir_exists(self):
         (self.root / "rules").mkdir()
@@ -229,7 +233,7 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertNotIn("## Manifest", content)
         # CLAUDE.md itself stays a pointer doc
         claude = (self.root / "CLAUDE.md").read_text()
-        self.assertIn("iron-laws/index.md", claude)
+        self.assertIn("rules/iron-laws.md", claude)
         self.assertNotIn("### Tree (depth 4)", claude)
 
     def test_write_full_map_writes_codebase_map_doc(self):
@@ -242,7 +246,7 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertIn("## Manifest", content)
         # CLAUDE.md itself is still a pointer doc, not the map
         claude = (self.root / "CLAUDE.md").read_text()
-        self.assertIn("iron-laws/index.md", claude)
+        self.assertIn("rules/iron-laws.md", claude)
         self.assertNotIn("### Tree (depth 4)", claude)
 
     def test_write_full_map_overwrites_stub(self):
@@ -260,7 +264,7 @@ class TestWriteProjectMd(unittest.TestCase):
         write_project_md.write_project_md(self.root, stage="plan")
         write_project_md.write_project_md(self.root, stage="design")
         # Index files are also overwritten cleanly (idempotent)
-        iron = (self.root / "iron-laws" / "index.md").read_text()
+        iron = (self.root / "rules" / "iron-laws.md").read_text()
         self.assertIn("L1", iron)
         self.assertNotIn("STALE", iron)
 

@@ -100,7 +100,7 @@ counts in this rule; inspect `skills/*/SKILL.md` when needed.
 
 ## L6 skill gate — the alpha must be enforceable
 
-See `iron-laws/index.md` L6 + L7 for the rule + the `state | enforcement | analysis`
+See `iron-laws.md` L6 + L7 for the rule + the `state | enforcement | analysis`
 allow-list. This file adds only the SKILL.md-authoring specifics:
 
 - **Every new `SKILL.md` (added after `origin/main`) MUST declare

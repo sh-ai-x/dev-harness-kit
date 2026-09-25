@@ -120,7 +120,7 @@ class TestDimensionRegistry(unittest.TestCase):
         names = {d.name for d in dim_mod.group("security")}
         # 10 OWASP Top 10 + 1 separate prompt-injection (LLM01) dimension.
         # OWASP Top 10 is the symbolic surface; prompt-injection sits next
-        # to it (not as A11) per iron-laws/index.md L9.
+        # to it (not as A11) per rules/iron-laws.md L9.
         self.assertEqual(len(names), 11)
         owasp = {n for n in names if n.startswith("owasp-")}
         self.assertEqual(len(owasp), 10, f"OWASP set drifted: {sorted(owasp)}")

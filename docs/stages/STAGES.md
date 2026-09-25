@@ -7,9 +7,9 @@
 ## Stage B — Bootstrap (`/dev-kit:bootstrap`)
 
 - **Goal**: First entry into a new project, 0 → 30 min productive. Minimal setup: exactly 3 files written to a fresh repo.
-- **Must**: (a) sanity read-only audit (printed to stdout; `--persist-audit` writes `.dev-kit/sanity-report.md`) (b) CLAUDE.md written as a slim pointer document with `docs/CODEBASE-MAP.md` as the lazy-loaded codebase map (only on `--full-claude-md`) (c) `.dev-kit/.active-hooks.json` SSOT init (d) CLAUDE.md links to `iron-laws/index.md`, `guidelines/index.md`, `hooks/index.md`, and `rules/index.md` for detailed content (e) AGENTS.md shared-instruction index for Codex and other CLIs
+- **Must**: (a) sanity read-only audit (printed to stdout; `--persist-audit` writes `.dev-kit/sanity-report.md`) (b) CLAUDE.md written as a slim pointer document with `docs/CODEBASE-MAP.md` as the lazy-loaded codebase map (only on `--full-claude-md`) (c) `.dev-kit/.active-hooks.json` SSOT init (d) CLAUDE.md links to `rules/iron-laws.md`, `rules/guidelines.md`, `hooks/index.md`, and `rules/index.md` for detailed content (e) AGENTS.md shared-instruction index for Codex and other CLIs
 - **Must-Not**: modify files (sanity read-only). Modify lockfiles. Speculation. Persist hand-off file (CLAUDE.md pointer to `.dev-kit/hand-off/` is enough).
-- **AC**: On fresh repo: CLAUDE.md (slim pointer), AGENTS.md, `.dev-kit/.active-hooks.json`, `iron-laws/index.md`, `guidelines/index.md`, `hooks/index.md`, and `rules/index.md` (if `rules/` exists) all exist. CLAUDE.md is a minimal reference document; detailed content is lazy-loaded via the linked index files. `.dev-kit/` directory auto-created.
+- **AC**: On fresh repo: CLAUDE.md (slim pointer), AGENTS.md, `.dev-kit/.active-hooks.json`, `rules/iron-laws.md`, `rules/guidelines.md`, `hooks/index.md`, and `rules/index.md` (if `rules/` exists) all exist. CLAUDE.md is a minimal reference document; detailed content is lazy-loaded via the linked index files. `.dev-kit/` directory auto-created.
 - **Active Skills**: `bootstrap` (sanity + codebase-map + hook-matrix are inlined sub-stages), `write_project_md`
 - **Active Hooks**: `secret-scan`=read-only. Others OFF.
 - **Hand-off out**: §5 hand-off pointer in CLAUDE.md (no separate `.dev-kit/hand-off/` file from bootstrap)
