@@ -18,7 +18,7 @@
 
 ### Inputs (resolved at runtime, not user args)
 
-`PR_NUMBER`, `PR_STATE`, `REVIEW_VERDICT` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`), `CHECKS`, and `BRANCH` are all read via `gh pr view` / `gh pr checks` / `git rev-parse`. Target precedence is explicit `--pr N`, then an explicitly identified conversation PR, then the current branch's PR, then main-checkout candidate resolution. A conversation PR is accepted only when the current conversation explicitly established it or the immediately preceding PR-creation step returned it; it is freshly validated with `gh pr view` before use. `MAX_ITERS` is a worker watchdog, not an approval timeout; the durable state file allows a later resume. `OPERATOR_HANDLE` is `gh api /user -q .login`; `CODEOWNERS_PATH` is `.github/CODEOWNERS`; `COLLABORATORS` comes from the GitHub collaborators API. If no target is established, the skill prints a one-line message and exits 1. If the resolved `PR_STATE != OPEN`, the skill prints a one-line message and exits 1 rather than silently reporting success. It never creates a PR implicitly.
+`PR_NUMBER`, `PR_STATE`, `REVIEW_VERDICT` (`''`/`APPROVED`/`CHANGES_REQUESTED`/`REVIEW_REQUIRED`), `CHECKS`, `MERGEABLE`, `MERGE_STATE_STATUS`, and `BRANCH` are all read via `gh pr view` / `gh pr checks` / `git rev-parse`. Target precedence is explicit `--pr N`, then an explicitly identified conversation PR, then the current branch's PR, then main-checkout candidate resolution. A conversation PR is accepted only when the current conversation explicitly established it or the immediately preceding PR-creation step returned it; it is freshly validated with `gh pr view` before use. `MAX_ITERS` is a worker watchdog, not an approval timeout; the durable state file allows a later resume. `OPERATOR_HANDLE` is `gh api /user -q .login`; `CODEOWNERS_PATH` is `.github/CODEOWNERS`; `COLLABORATORS` comes from the GitHub collaborators API. If no target is established, the skill prints a one-line message and exits 1. If the resolved `PR_STATE != OPEN`, the skill prints a one-line message and exits 1 rather than silently reporting success. It never creates a PR implicitly.
 
 ### Worktree-aware execution
 
@@ -44,27 +44,28 @@ On start: `mkdir -p .dev-kit`; if `.dev-kit/babysit.lock` exists, check stalenes
 
 `gh pr checks` may report a check whose underlying workflow file was deleted server-side, staying pending indefinitely. `lib/babysit_pr_reliability.py:classify_check(check_dict, now_epoch, ghost_threshold_seconds=300)` classifies a check as a "ghost" when it has no `databaseId` (regardless of state or age), or when it has a `databaseId` but its `startedAt`/`updatedAt` is older than 300s (5 min). A check with a `databaseId` but no `startedAt`/`updatedAt` at all has no elapsed time to measure against the threshold, so it classifies as "pending" instead of "ghost" — this covers a freshly-requested check (age zero) right after a push, which would otherwise be ghosted immediately and trigger unnecessary recovery/retry logic. It still ghosts out once it ages past the threshold, because by then it carries a stale `startedAt`/`updatedAt`. This replaces the plain wait-and-retry with a surfaced "recovery-required" message instead of spinning to `MAX_ITERS`.
 
-### Algorithm (14-step loop, plus a pre-loop opt-out check)
+### Algorithm (15-step loop, plus a pre-loop opt-out check)
 
 **Step 0 — opt-out check**: if `--operator-is-only-human` was passed, this runs *before* step 1's snapshot (see "Single-operator bypass" below).
 
-1. **SNAPSHOT** — one `gh` call fetches `PR_NUMBER`, `REVIEW_VERDICT`, `CHECKS`, then calls `lib.babysit_pr_cli.persist_loop_snapshot()` to load/observe/atomically save the durable phase before diffing the cached check-state (`.dev-kit/babysit-checks.json`) via `diff_check_states()` — see "Check-state caching" below.
-2. **TERMINATE** — if `REVIEW_VERDICT == APPROVED` and every check's conclusion is in `{success, skipped, neutral}`, print "PR approved" and exit 0.
-3. **CLASSIFY** — bucket blockers into (A) CI failing, (B) CI pending → `WAIT_FOR_CHECKS`, (C) review `CHANGES_REQUESTED`, (D) `REVIEW_REQUIRED`/empty → persist `WAIT_FOR_APPROVAL` and resume (the skill cannot self-approve).
-4. **WAIT** — if any check is pending with no failures, sleep 30s and continue.
-5. **FETCH LOGS** — `gh run view <run-id> --log-failed` per failing check *whose state changed* since the last snapshot; truncate to the last 200 lines; capture exit code and first error. A failing check that is `unchanged` (same databaseId + conclusion as last iteration) is skipped — its log is already diagnosed.
-6. **DIAGNOSE** — one root cause per `changed` failing check: test failure, lint/format, type-check, secret detected (abort — never auto-remove), or review feedback.
-7. **APPLY FIX** — Edit/Write, one logical change per iteration.
+1. **SNAPSHOT** — one `gh pr view --json number,state,reviewDecision,headRefOid,mergeable,mergeStateStatus` and one `gh pr checks --json name,state,conclusion,databaseId,startedAt,updatedAt` feed `lib.babysit_pr_cli.persist_loop_snapshot()`, which loads/observes/atomically saves the durable phase before diffing the cached check-state (`.dev-kit/babysit-checks.json`) via `diff_check_states()` — see "Check-state caching" below. When `classify_merge_state(mergeable, merge_state_status)` returns `"conflicting"`, the snapshot also stamps `failure_signature="merge_conflict:1"` so step 6.5 routes to the resolver.
+2. **TERMINATE** — if `REVIEW_VERDICT == APPROVED` and every check's conclusion is in `{success, skipped, neutral}` and the merge state is not conflicting, print "PR approved" and exit 0.
+3. **CLASSIFY** — bucket blockers into (A) CI failing, (B) CI pending → `WAIT_FOR_CHECKS`, (C) review `CHANGES_REQUESTED`, (D) `REVIEW_REQUIRED`/empty → persist `WAIT_FOR_APPROVAL` and resume (the skill cannot self-approve), (E) **merge conflict** (`MERGEABLE == CONFLICTING` or `MERGE_STATE_STATUS == DIRTY`) → `REPAIRING` with `failure_signature="merge_conflict:1"`. Bucket (E) takes precedence over (A)/(B) because a CONFLICTING PR causes GitHub Actions to silently refuse all workflow runs (issue #249); the babysit must surface and resolve the conflict before any CI signal becomes meaningful.
+4. **WAIT** — if any check is pending with no failures AND no merge conflict, sleep 30s and continue.
+5. **FETCH LOGS** — `gh run view <run-id> --log-failed` per failing check *whose state changed* since the last snapshot; truncate to the last 200 lines; capture exit code and first error. A failing check that is `unchanged` (same databaseId + conclusion as last iteration) is skipped — its log is already diagnosed. Skip this step entirely when bucket (E) is active.
+6. **DIAGNOSE** — one root cause per `changed` failing check: test failure, lint/format, type-check, secret detected (abort — never auto-remove), review feedback, or merge conflict (routed to step 6.5).
+6.5 **RESOLVE CONFLICT** — only when `failure_signature` starts with `merge_conflict:`. `git fetch origin <base>` (default `main`, derived from `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`), then `git merge --no-ff --no-edit origin/<base>`. On clean merge: `git commit --no-edit` (only if the merge didn't auto-commit), run the pre-push pytest gate (`run_local_verify` via `lib/babysit_pr_cli`), push, and let step 1's next snapshot clear the conflict signature. On textual conflict: `git merge --abort` to leave the tree clean, then print the conflict file list and exit with the operator's hand-off message (auto-resolving arbitrary content conflicts violates Iron Law L2 — no fix without reproducing the bug). Never `git rebase` onto a shared branch without an explicit `--force-with-lease`; never `git reset --hard`.
+7. **APPLY FIX** — Edit/Write, one logical change per iteration. Skip when step 6.5 ran (the merge commit is the fix).
 8. **VERIFY LOCAL** (hard gate) — re-run the failing command; quote the result in the exact format `local:  <command> → <result> (exit <code>)`. On failure, do NOT commit/push — loop back to DIAGNOSE within the same iteration instead of pushing a fix that would just fail CI again ~1-10 minutes later.
 8.5 **OUTCOME** — call `lib.babysit_pr_cli.persist_loop_outcome()` after verification so strategy changes and recovery state survive worker restarts.
-9. **COMMIT** — `git add <specific paths>` of the just-modified file(s); never `git add -p` (interactive, hangs without a TTY).
-10. **PUSH** — pushes the branch (`push origin HEAD`).
+9. **COMMIT** — `git add <specific paths>` of the just-modified file(s); never `git add -p` (interactive, hangs without a TTY). When step 6.5 committed a merge, the commit already exists — skip this step.
+10. **PUSH** — pushes the branch (`push origin HEAD`). After a step-6.5 push, jump to step 12 (skip the LOG "fix" line, since the fix was the merge).
 11. **LOG** — appends one line to `.dev-kit/babysit.log`: `<ISO-8601> iter=<n> check=<name> fix=<one-line> exit=<code>`.
 12. **SLEEP** — `gh pr checks --watch` or a 20s sleep.
 13. **SAVE STATE** — overwrites `.dev-kit/babysit-checks.json` with the fresh check-state snapshot for the next iteration's diff.
 14. **INCREMENT** — `iter += 1`; on exceeding `MAX_ITERS`, falls through to the cap-fallback (print the unresolved blocker list, exit 1 — never silently retries past the cap).
 
-**Termination conditions**: approved + green → exit 0; pending checks → persist `WAIT_FOR_CHECKS`; `REVIEW_REQUIRED` → persist `WAIT_FOR_APPROVAL`; `CHANGES_REQUESTED` → apply and iterate; 3 consecutive no-information outcomes → persist `RECOVERY_REQUIRED` and wait for new evidence/resume. Only approved + green is successful completion.
+**Termination conditions**: approved + green → exit 0; pending checks → persist `WAIT_FOR_CHECKS`; `REVIEW_REQUIRED` → persist `WAIT_FOR_APPROVAL`; `CHANGES_REQUESTED` → apply and iterate; `MERGE_CONFLICT` → resolve (auto-merge the base if clean, hand off to operator otherwise); 3 consecutive no-information outcomes → persist `RECOVERY_REQUIRED` and wait for new evidence/resume. Only approved + green is successful completion.
 
 When configured with `BABYSIT_GITHUB_TRACKER_ISSUE` and `BABYSIT_LINEAR_ISSUE`, `tools/babysit_tracker_sync.py` writes one idempotent stage comment to each tracker using the transition key `PR + head SHA + context epoch + phase`. Local durable state remains authoritative during external outages.
 
@@ -116,6 +117,7 @@ Example invocation:
 - No marking a required check optional or `continue-on-error: true`.
 - No bypassing the LLM review gate (closing the PR, removing the review trigger, force-merging, marking the review check optional).
 - No workarounds that mask a root cause: `|| true`, `|| echo skipped`, raised exit thresholds, widened regexes, disabled hooks.
+- No auto-resolving textual merge conflicts — `git merge --abort` then operator hand-off when the algorithm step 6.5 hits a non-empty conflict set; the babysitter never edits conflicted hunks.
 - One PR at a time — refuses to run if `.dev-kit/babysit.lock` is already held by a live process.
 
 ## Hook alignment
@@ -129,9 +131,9 @@ All stdout/stderr output is English only.
 - [babysit-pr architecture](../architecture/2026-08-24/babysit-pr-architecture.md) — Archidraw MCP export and explanation of the bounded repair loop.
 - [ship](ship.md) — recommended next step once the loop terminates with an approved PR.
 - `hooks/lib/worktree-detect.sh` — the shared worktree discriminator this skill sources rather than reimplementing.
-- `lib/babysit_pr_cli.py` — the pure helper backing the single-operator bypass.
-- `lib/babysit_pr_reliability.py` — `is_stale_lock()` and `classify_check()`.
-- `tests/test_babysit_pr_cli.py`, `tests/test_babysit_pr_reliability.py` — pin the bypass and reliability contracts.
+- `lib/babysit_pr_cli.py` — the pure helper backing the single-operator bypass and `persist_loop_snapshot()`.
+- `lib/babysit_pr_reliability.py` — `is_stale_lock()`, `classify_check()`, and `classify_merge_state()`.
+- `tests/test_babysit_pr_cli.py`, `tests/test_babysit_pr_reliability.py`, `tests/test_babysit_pr_loop.py` — pin the bypass, reliability, and loop contracts.
 
 ---
 *Source: [`skills/babysit-pr/SKILL.md`](../../skills/babysit-pr/SKILL.md)*

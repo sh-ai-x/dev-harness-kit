@@ -726,5 +726,99 @@ class TestPersistDynamicSkipped(unittest.TestCase):
         self.assertEqual(state["dynamic_skipped"], frozenset({"review", "security"}))
 
 
+class TestPersistMergeConflict(unittest.TestCase):
+    """v1.2.0 — `persist_loop_snapshot()` reads `mergeable` /
+    `merge_state_status`, classifies via
+    `lib.babysit_pr_reliability.classify_merge_state`, and stamps the
+    failure_signature with `merge_conflict:1` when the PR is
+    CONFLICTING (so the algorithm step 6.5 routes to the resolver).
+    A subsequent CLEAN snapshot clears the prefix.
+    """
+
+    def _tmp_state_path(self) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        return tmp / "babysit-state.json"
+
+    def test_conflicting_pr_pins_merge_conflict_signature(self) -> None:
+        state_path = self._tmp_state_path()
+        state = persist_loop_snapshot(
+            parent_pr=42, head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0, now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+            mergeable="CONFLICTING",
+            merge_state_status="DIRTY",
+        )
+        self.assertEqual(state["failure_signature"], "merge_conflict:1")
+        self.assertEqual(state["mergeable"], "CONFLICTING")
+        self.assertEqual(state["merge_state_status"], "DIRTY")
+
+    def test_clean_pr_clears_merge_conflict_signature(self) -> None:
+        # The conflict was resolved between iterations (the babysitter
+        # pushed the merge, or a human rebased). The next snapshot
+        # MUST clear the prefix so a later unrelated failure does not
+        # get re-routed through the merge path.
+        state_path = self._tmp_state_path()
+        persist_loop_snapshot(
+            parent_pr=42, head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0, now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+            mergeable="CONFLICTING",
+            merge_state_status="DIRTY",
+        )
+        state = persist_loop_snapshot(
+            parent_pr=42, head_sha="def",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 2}],
+            now_epoch=1_700_000_001.0, now_iso="2026-09-16T00:00:01Z",
+            state_path=state_path,
+            mergeable="MERGEABLE",
+            merge_state_status="CLEAN",
+        )
+        self.assertEqual(state["failure_signature"], "")
+        self.assertEqual(state["mergeable"], "MERGEABLE")
+        self.assertEqual(state["merge_state_status"], "CLEAN")
+
+    def test_unknown_merge_state_preserves_existing_signature(self) -> None:
+        # When GitHub is still computing (UNKNOWN/UNKNOWN), the
+        # classifier collapses to `"unknown"` — the snapshot must
+        # NOT stamp a conflict prefix and must NOT clear a previously
+        # stamped one either (preserve the operator's signal until
+        # the next real snapshot resolves it).
+        state_path = self._tmp_state_path()
+        state = persist_loop_snapshot(
+            parent_pr=42, head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0, now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+            mergeable="UNKNOWN",
+            merge_state_status="UNKNOWN",
+        )
+        self.assertEqual(state["failure_signature"], "")
+
+    def test_existing_failure_signature_takes_precedence_over_conflict(self) -> None:
+        # Issue #249 follow-up: a CONFLICTING PR cannot run CI at all,
+        # so the merge-conflict signal dominates any other failure
+        # signature for the same head_sha. The snapshot overwrites
+        # `failure_signature` with `merge_conflict:1` so a restarted
+        # worker routes to step 6.5 instead of the failing-CI path.
+        state_path = self._tmp_state_path()
+        state = persist_loop_snapshot(
+            parent_pr=42, head_sha="abc",
+            review_verdict="REVIEW_REQUIRED",
+            checks=[{"name": "pytest", "conclusion": "success", "databaseId": 1}],
+            now_epoch=1_700_000_000.0, now_iso="2026-09-16T00:00:00Z",
+            state_path=state_path,
+            failure_signature="test_failures:3",
+            mergeable="CONFLICTING",
+            merge_state_status="DIRTY",
+        )
+        self.assertEqual(state["failure_signature"], "merge_conflict:1")
+
+
 if __name__ == "__main__":
     unittest.main()

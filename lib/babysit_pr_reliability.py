@@ -51,6 +51,14 @@ Pure-function primitives consumed by the babysit-pr skill
       re-fetching wastes a `gh run view --log-failed` round-trip per
       iteration.
 
+  classify_merge_state(mergeable, merge_state_status)
+      Classify the PR's merge state (issue #249 follow-up). Returns
+      one of "clean" | "behind" | "conflicting" | "unknown". Used by
+      the babysitter to gate §Algorithm step 6.5 (RESOLVE CONFLICT)
+      on a textual conflict signal — a CONFLICTING PR causes GitHub
+      Actions to silently refuse all workflow runs, so the babysitter
+      MUST detect and resolve before its normal CI-wait loop kicks in.
+
 All helpers are deterministic (no time-of-day randomness -- callers
 pass `now_epoch`) so regression tests can reproduce ghost / fresh-lock
 states without sleeping.
@@ -93,6 +101,15 @@ APPROVED_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
 FAILING_CONCLUSIONS = frozenset({
     "failure", "failures", "cancelled", "timed_out", "stale", "error",
 })
+
+# Merge-state values observed in `gh pr view --json mergeable` /
+# `mergeStateStatus`. Mirrors the enum documented at
+# https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request —
+# unknown values flow through as "unknown" rather than raise so a
+# GitHub schema bump doesn't break the babysitter.
+_MERGEABLE_CLEAN = frozenset({"MERGEABLE", "CLEAN"})
+_MERGEABLE_CONFLICT = frozenset({"CONFLICTING", "DIRTY"})
+_MERGE_STATE_BEHIND = frozenset({"BEHIND"})
 
 
 def _pid_alive(pid: int) -> bool:
@@ -211,6 +228,51 @@ def _epoch_from_iso(s: Any) -> float | None:
         return calendar.timegm(time.strptime(base, "%Y-%m-%dT%H:%M:%S"))
     except (ValueError, OverflowError):
         return None
+
+
+def classify_merge_state(
+    mergeable: str | None,
+    merge_state_status: str | None,
+) -> str:
+    """Classify the PR's merge state from `gh pr view --json mergeable`.
+
+    Returns one of:
+      "clean"      — branch can be merged automatically (MERGEABLE / CLEAN).
+      "behind"     — branch is BEHIND the base ref (needs rebase/merge)
+                     but has no textual conflicts. Auto-fixable by the
+                     babysitter via `git fetch && git merge`.
+      "conflicting"— branch has textual conflicts with the base ref
+                     (CONFLICTING / DIRTY). The babysitter must
+                     attempt resolution and surface remaining conflicts
+                     to the operator — auto-resolving arbitrary content
+                     conflicts violates Iron Law L2 (no fix without
+                     reproducing the bug).
+      "unknown"    — GitHub still computing, or the JSON shape changed.
+                     Treated as behind so the babysitter waits on a
+                     real signal instead of false-positively declaring
+                     conflict.
+
+    Never raises: a `None`, empty, or unrecognized enum collapses to
+    "unknown" — same fail-safe posture as `classify_check()`.
+    """
+    m = (mergeable or "").strip().upper()
+    s = (merge_state_status or "").strip().upper()
+    if not m and not s:
+        return "unknown"
+    if m in _MERGEABLE_CONFLICT or s in _MERGEABLE_CONFLICT:
+        return "conflicting"
+    if m in _MERGEABLE_CLEAN or s in _MERGEABLE_CLEAN:
+        return "clean"
+    if m in _MERGE_STATE_BEHIND or s in _MERGE_STATE_BEHIND:
+        return "behind"
+    if s == "BLOCKED":
+        # BLOCKED = required checks haven't passed yet; not a textual
+        # conflict. Treat as behind so the babysitter keeps waiting on
+        # CI rather than triggering a no-op merge attempt.
+        return "behind"
+    if s in {"UNKNOWN", "UNSTABLE"} or m in {"UNKNOWN", "UNSTABLE"}:
+        return "unknown"
+    return "unknown"
 
 
 def classify_check(

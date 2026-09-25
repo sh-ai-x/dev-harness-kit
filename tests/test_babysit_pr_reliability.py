@@ -458,5 +458,100 @@ class TestSelectGatesDynamic(unittest.TestCase):
         self.assertEqual(skipped, frozenset())
 
 
+class TestClassifyMergeState(unittest.TestCase):
+    """v1.2.0 — `classify_merge_state()` maps GitHub's `mergeable` /
+    `mergeStateStatus` enum to one of `clean | behind | conflicting |
+    unknown`. The babysit-pr loop step 6.5 (RESOLVE CONFLICT) is gated
+    on the `"conflicting"` return so a CONFLICTING PR — which GitHub
+    Actions silently refuses to run any workflow for (issue #249) —
+    surfaces before the CI-wait path burns `MAX_ITERS`.
+
+    Mirrors the fail-safe posture of `classify_check()`: any malformed
+    or unrecognized input collapses to `"unknown"` rather than raise,
+    and `"unknown"` keeps the babysitter waiting on a real signal
+    instead of false-positively declaring conflict.
+    """
+
+    def test_mergeable_conflicting_is_conflicting(self) -> None:
+        self.assertEqual(
+            bpr.classify_merge_state("CONFLICTING", "DIRTY"),
+            "conflicting",
+        )
+
+    def test_merge_state_dirty_alone_is_conflicting(self) -> None:
+        # When `mergeable` is still computing (`UNKNOWN`) but
+        # `mergeStateStatus == DIRTY`, the classifier must escalate
+        # to "conflicting" — GitHub's authoritative state field is
+        # `mergeStateStatus` for the active signal.
+        self.assertEqual(
+            bpr.classify_merge_state("UNKNOWN", "DIRTY"),
+            "conflicting",
+        )
+
+    def test_mergeable_mergeable_is_clean(self) -> None:
+        self.assertEqual(
+            bpr.classify_merge_state("MERGEABLE", "CLEAN"),
+            "clean",
+        )
+
+    def test_behind_state_is_behind(self) -> None:
+        # `mergeStateStatus == BEHIND` means the branch needs a
+        # rebase/merge but has no textual conflict — the babysitter's
+        # step 6.5 will resolve it via `git fetch && git merge`, so
+        # it's its own classification rather than colliding with
+        # `"clean"` or `"conflicting"`.
+        self.assertEqual(
+            bpr.classify_merge_state("", "BEHIND"),
+            "behind",
+        )
+
+    def test_blocked_state_is_behind_not_conflicting(self) -> None:
+        # `BLOCKED` means required checks haven't passed — no textual
+        # conflict. Must NOT trigger the merge-conflict path or the
+        # babysitter would race CI for no reason.
+        self.assertEqual(
+            bpr.classify_merge_state("", "BLOCKED"),
+            "behind",
+        )
+
+    def test_unknown_state_is_unknown_not_conflicting(self) -> None:
+        # When GitHub is still computing (`UNKNOWN`), the classifier
+        # returns `"unknown"` so the babysitter keeps waiting instead
+        # of falsely declaring a conflict.
+        self.assertEqual(
+            bpr.classify_merge_state("UNKNOWN", "UNKNOWN"),
+            "unknown",
+        )
+
+    def test_unstable_state_is_unknown(self) -> None:
+        # `UNSTABLE` (M-8 in lib/pr_verify.py) means required checks
+        # are being recomputed — collapse to "unknown" so the
+        # babysitter waits rather than triggering a no-op merge.
+        self.assertEqual(
+            bpr.classify_merge_state("", "UNSTABLE"),
+            "unknown",
+        )
+
+    def test_empty_inputs_are_unknown(self) -> None:
+        # No signal at all — must not raise.
+        self.assertEqual(bpr.classify_merge_state("", ""), "unknown")
+        self.assertEqual(bpr.classify_merge_state(None, None), "unknown")
+
+    def test_lowercase_inputs_are_normalized(self) -> None:
+        # GitHub occasionally emits lowercase enum values from older
+        # API versions; the classifier uppercases before matching.
+        self.assertEqual(
+            bpr.classify_merge_state("conflicting", "dirty"),
+            "conflicting",
+        )
+
+    def test_unknown_enum_collapses_to_unknown(self) -> None:
+        # Forward-compat: a future GitHub enum must never raise.
+        self.assertEqual(
+            bpr.classify_merge_state("WHATEVER_NEW_STATE", ""),
+            "unknown",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
