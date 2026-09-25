@@ -179,7 +179,7 @@ _OWASP_2025 = {
 
 
 # LLM01 Prompt Injection — kept SEPARATE from the OWASP Top 10 set above.
-# Rationale (iron-laws/index.md L9): the OWASP Top 10 is a stable,
+# Rationale (rules/iron-laws.md L9): the OWASP Top 10 is a stable,
 # symbolic surface; adding A11 dilutes it. Prompt injection is a
 # distinct concern (LLM-channel, not transport / app-layer) and warrants
 # its own dimension row in the security fan-out.
@@ -343,7 +343,7 @@ REGISTRY: Dict[str, Dimension] = {
 FAMILY_DEFAULTS: Dict[str, Tuple[str, ...]] = {
     "review": ("correctness", "security", "architecture"),
     # "security" fan-out: OWASP Top 10 (A01–A10) + the separate LLM01
-    # Prompt Injection dimension (iron-laws/index.md L9). The OWASP set
+    # Prompt Injection dimension (rules/iron-laws.md L9). The OWASP set
     # is filter-derived to keep the symbolic 10-row surface intact.
     "security": (*tuple(sorted(n for n in REGISTRY if n.startswith("owasp-"))), "prompt-injection"),
     "inspect": (

@@ -37,7 +37,7 @@ ${SESSION_BODY}
    the same loop across multiple turns.
 
 4. **rule_adherence** — Did the agent follow explicit rules from the
-   project's Iron Laws (L1-L8 in `iron-laws/index.md`), `AGENTS.md`, and
+   project's Iron Laws (L1-L9 in `rules/iron-laws.md`), `AGENTS.md`, and
    user-stated constraints (worktree protocol, model selection,
    one-shot commands)? 10 = strict adherence; 0 = ignored explicit
    rules repeatedly.

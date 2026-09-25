@@ -175,7 +175,7 @@ Routing (after config is set):
      codex   + single   -> spawn one sub-agent with cwd=.worktrees/<slug>
      codex   + parallel -> spawn N sub-agents each with cwd=.worktrees/<slug> + explicit task prompt
 
-Hard rules (Iron Laws: see iron-laws/index.md, L1/L3/L4/L5):
+Hard rules (Iron Laws: see rules/iron-laws.md, L1/L3/L4/L5):
   M push / commit / PR to main: forbidden
   M edit of code files in any worktree: forbidden (Tier 1 = orchestrator)
   Other worktrees are private to their T; entry is allowed ONLY for hand-off docs

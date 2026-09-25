@@ -1,7 +1,7 @@
 # Prompt-Injection Defense
 
 > Layered, deterministic defense against prompt-injection attacks
-> (iron-laws/index.md L9) — pre-gate filter + workflow-level delimiter convention.
+> (rules/iron-laws.md L9) — pre-gate filter + workflow-level delimiter convention.
 
 ## What it protects
 

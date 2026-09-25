@@ -10,8 +10,8 @@
 
 ## References
 
-- **Iron Laws** → [`iron-laws/index.md`](iron-laws/index.md) (MUST-8 SSOT)
-- **Coding guidelines** → [`guidelines/index.md`](guidelines/index.md) (Karpathy-style, abbreviated)
+- **Iron Laws** → [`rules/iron-laws.md`](rules/iron-laws.md) (MUST-8 SSOT)
+- **Coding guidelines** → [`rules/guidelines.md`](rules/guidelines.md) (Karpathy-style, abbreviated)
 - **Codebase map** → [`docs/CODEBASE-MAP.md`](docs/CODEBASE-MAP.md) (regenerate via `/dev-kit:bootstrap --full-claude-md`)
 - **Hook matrix** → [`hooks/index.md`](hooks/index.md) (MUST-13 SSOT; state in `.dev-kit/.active-hooks.json`)
 - **Scope reference** → [`docs/scopes/README.md`](docs/scopes/README.md) (user / project / local scopes + `full` / `lite` / `undev` modes)
