@@ -2,7 +2,7 @@
 # ralph_drive.sh — bash glue for /dev-kit:ralph
 #
 # Chains 4 gates + 1 attended execution phase. Reads/writes durable
-# state at every hop via python3 -m lib.ralph_state.
+# state at every hop via python3 -m lib.ralph_chain state.
 # NEVER invokes AskUserQuestion directly — that is the orchestrator's
 # job, gated by the state machine's can_ask_question() invariant.
 #
@@ -77,26 +77,26 @@ cmd_init() {
         exit 1
     fi
     require_python
-    python3 -m lib.ralph_state \
+    python3 -m lib.ralph_chain \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
-        init "$idea"
+        state init "$idea"
 }
 
 cmd_status() {
     require_python
-    python3 -m lib.ralph_state \
+    python3 -m lib.ralph_chain \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
-        show
+        state show
 }
 
 cmd_can_ask() {
     require_python
-    if python3 -m lib.ralph_state \
+    if python3 -m lib.ralph_chain \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
-        can-ask; then
+        state can-ask; then
         exit 0
     fi
     exit 2
@@ -127,10 +127,10 @@ cmd_advance() {
         exit 1
     fi
     require_python
-    python3 -m lib.ralph_state \
+    python3 -m lib.ralph_chain \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
-        transition "$target" --action "$action"
+        state transition "$target" --action "$action"
 }
 
 cmd_rewind() {
@@ -162,10 +162,10 @@ cmd_rewind() {
         exit 1
     fi
     require_python
-    python3 -m lib.ralph_state \
+    python3 -m lib.ralph_chain \
         --project-root "$PROJECT_ROOT" \
         --session "$SESSION" \
-        rewind "$target" --reason "$reason"
+        state rewind "$target" --reason "$reason"
 }
 
 cmd_run_attended() {

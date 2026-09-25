@@ -191,7 +191,7 @@ def test_promote_verifier_kind_requires_explicit_opt_in(tmp_path: Path) -> None:
     bogus_root = tmp_path / "bogus"
     bogus_root.mkdir()
     _write_runtime(bogus_root)
-    with pytest.raises(promote.PromotionError, match="verifier_kind"):
+    with pytest.raises(promote.RalphPromoteError, match="verifier_kind"):
         promote.promote(
             bogus_root,
             plan_id="demo-plan",
@@ -245,7 +245,7 @@ def test_dry_run_validates_without_writing(tmp_path: Path) -> None:
 def test_missing_step_output_fails_closed_without_partial_bundle(tmp_path: Path) -> None:
     _write_runtime(tmp_path, include_output=False)
 
-    with pytest.raises(promote.PromotionError, match="step1-output.json"):
+    with pytest.raises(promote.RalphPromoteError, match="step1-output.json"):
         promote.promote(
             tmp_path, plan_id="demo-plan", phase="0-mvp", session="run-1"
         )
@@ -255,7 +255,7 @@ def test_missing_step_output_fails_closed_without_partial_bundle(tmp_path: Path)
 def test_unsafe_plan_id_is_rejected(tmp_path: Path) -> None:
     _write_runtime(tmp_path)
 
-    with pytest.raises(promote.PromotionError, match="plan_id"):
+    with pytest.raises(promote.RalphPromoteError, match="plan_id"):
         promote.promote(
             tmp_path, plan_id="../escape", phase="0-mvp", session="run-1"
         )
@@ -302,7 +302,7 @@ def test_completion_receipt_candidate_is_validated(tmp_path: Path) -> None:
     )
     assert receipt["harness_candidate"] == "candidate-v1"
 
-    with pytest.raises(promote.InvalidIdentifierError):
+    with pytest.raises(promote.RalphPromoteError):
         promote.promote(
             tmp_path,
             plan_id="other-plan",
@@ -318,7 +318,7 @@ def test_differing_existing_destination_is_not_overwritten(tmp_path: Path) -> No
     summary = tmp_path / "docs" / "build-evidence" / "demo-plan" / "SUMMARY.md"
     summary.write_text("operator-owned record\n", encoding="utf-8")
 
-    with pytest.raises(promote.PromotionError, match="different content"):
+    with pytest.raises(promote.RalphPromoteError, match="different content"):
         promote.promote(tmp_path, plan_id="demo-plan", phase="0-mvp", session="run-1")
     assert summary.read_text(encoding="utf-8") == "operator-owned record\n"
 
@@ -330,5 +330,5 @@ def test_nonterminal_session_fails_closed(tmp_path: Path) -> None:
     state["current_stage"] = "ATTENDED_RUN"
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
-    with pytest.raises(promote.PromotionError, match="must be terminal"):
+    with pytest.raises(promote.RalphPromoteError, match="must be terminal"):
         promote.promote(tmp_path, plan_id="demo-plan", phase="0-mvp", session="run-1")

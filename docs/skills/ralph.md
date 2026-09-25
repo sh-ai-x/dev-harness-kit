@@ -18,16 +18,17 @@ forensic `last_blocked_ask` field.
 
 Two layers enforce the Ask-refusal invariant during `ATTENDED_RUN`:
 
-1. **State machine** — `lib/ralph_state.py::RalphState.can_ask_question()`
+1. **State machine** — `lib/ralph_chain.py::RalphState.can_ask_question()`
    returns `False` once `attended_lock=True`; the orchestrator raises
    `AttendedLockError` if any sub-skill tries to call
    `assert_can_ask` mid-chain.
 2. **Mechanical hook** — `hooks/ralph-attended-lock.sh` is wired as a
    `PreToolUse` matcher on `AskUserQuestion` in `hooks/hooks.json` and
    `.codex-plugin/hooks/hooks.json`. The hook reads the canonical
-   ralph_state from disk and exits 2 with a deny JSON envelope so even a
-   misbehaving sub-skill cannot surface an Ask. The hook fails OPEN on
-   toolchain-missing (the state machine remains the source of truth).
+   `ralph_chain` state from disk and exits 2 with a deny JSON envelope
+   so even a misbehaving sub-skill cannot surface an Ask. The hook
+   fails OPEN on toolchain-missing (the state machine remains the
+   source of truth).
 
 The unattended chain runs via `lib/ralph_chain.py::run_attended()`,
 which walks `BUILD → BABYSIT → SHIP` with injectable dispatch shims.
@@ -92,7 +93,7 @@ also records ordered `completed_sub_stages` evidence for the run.
 
 ## State machine
 
-Pure Python dataclass — `skills/ralph/lib/ralph_state.py`. No subprocess,
+Pure Python dataclass — `lib/ralph_chain.py::RalphState`. No subprocess,
 no `gh` at import time. Persists to `.dev-kit/ralph/<session>.json` on
 every transition via `atomic_write_text` (tmp + rename).
 
@@ -147,7 +148,7 @@ Edit-then-approve is bounded and tested:
 | 3-cycle self-fix | `lib/execute.py` MUST-37 | build's per-step sub-agent fails 3× |
 | 3-consecutive-no-progress | `skills/babysit-pr/SKILL.md` | babysit-pr polls 3× no change |
 | MAX_ITERS=1000 | `skills/babysit-pr/SKILL.md` | babysit-pr watchdog cap |
-| same-stage-repeat=2 | `lib/ralph_state.py` | sub-stage re-enters twice |
+| same-stage-repeat=2 | `lib/ralph_chain.py` | sub-stage re-enters twice |
 
 All four write `RECOVERY_REQUIRED` to the state and exit; re-invoking
 `/dev-kit:ralph` resumes from the last persisted checkpoint.
