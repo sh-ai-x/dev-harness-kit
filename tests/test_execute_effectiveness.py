@@ -84,8 +84,8 @@ def test_step_pre_spawn_enrolls_unit(root: Path, monkeypatch: pytest.MonkeyPatch
     assert "attempt_token" in ctx
     recs = _records(root)
     # Two records: enroll + observed_start.
-    assert any(r.transition == TRANSITION_ENROLL for r in recs), recs
-    assert any(r.transition == TRANSITION_OBSERVED_START for r in recs), recs
+    assert any(r["transition"] == TRANSITION_ENROLL for r in recs), recs
+    assert any(r["transition"] == TRANSITION_OBSERVED_START for r in recs), recs
     # The enrolled attempt_id is the one passed forward as the parent.
     assert ctx["attempt_token"]
 
@@ -102,11 +102,11 @@ def test_step_post_collect_records_terminal(root: Path, monkeypatch: pytest.Monk
         push=False, exit_code=0, stdout="", stderr="",
     )
     recs = _records(root)
-    assert any(r.transition == TRANSITION_OBSERVED_TERMINAL for r in recs)
-    assert any(r.transition == TRANSITION_CONTROLLER_CLOSE for r in recs)
+    assert any(r["transition"] == TRANSITION_OBSERVED_TERMINAL for r in recs)
+    assert any(r["transition"] == TRANSITION_CONTROLLER_CLOSE for r in recs)
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.counts["paired"] == 1
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["paired"] == 1
 
 
 def test_step_post_collect_records_failure(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,11 +118,11 @@ def test_step_post_collect_records_failure(root: Path, monkeypatch: pytest.Monke
         push=False, exit_code=2, stdout="", stderr="",
     )
     recs = _records(root)
-    terminals = [r for r in recs if r.transition == TRANSITION_OBSERVED_TERMINAL]
-    assert any(r.outcome == "failed" for r in terminals)
+    terminals = [r for r in recs if r["transition"] == TRANSITION_OBSERVED_TERMINAL]
+    assert any(r["outcome"] == "failed" for r in terminals)
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.ratios["success"] == 0.0
+    assert env["counts"]["closed"] == 1
+    assert env["ratios"]["success"] == 0.0
 
 
 def test_step_post_collect_records_blocked(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,11 +134,11 @@ def test_step_post_collect_records_blocked(root: Path, monkeypatch: pytest.Monke
         push=False, exit_code=0, stdout="<!-- status: blocked -->", stderr="",
     )
     recs = _records(root)
-    terminals = [r for r in recs if r.transition == TRANSITION_OBSERVED_TERMINAL]
-    assert any(r.outcome == "blocked" for r in terminals)
+    terminals = [r for r in recs if r["transition"] == TRANSITION_OBSERVED_TERMINAL]
+    assert any(r["outcome"] == "blocked" for r in terminals)
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.counts["paired"] == 1
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["paired"] == 1
 
 
 def test_collection_at_boundaries_does_not_change_workflow_exit(
@@ -159,5 +159,5 @@ def test_collection_at_boundaries_does_not_change_workflow_exit(
     assert rc == 0
     # And the envelope is built normally.
     env = collect(root)
-    assert env.readiness in (execute.READINESS_READY if hasattr(execute, "READINESS_READY") else "READY",
+    assert env["readiness"] in (execute.READINESS_READY if hasattr(execute, "READINESS_READY") else "READY",
                              "INSUFFICIENT_EVIDENCE", "READY")

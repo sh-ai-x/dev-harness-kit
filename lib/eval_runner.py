@@ -521,7 +521,7 @@ def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict)
     try:
         from effectiveness_collection import collect as _eff_collect  # noqa: WPS433 — local import
         envelope = _eff_collect(project_root)
-        measurement_envelope = envelope.to_dict()
+        measurement_envelope = envelope
     except Exception:  # noqa: BLE001
         measurement_envelope = None
     write_report(

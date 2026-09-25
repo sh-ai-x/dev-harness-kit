@@ -116,7 +116,7 @@ def _gh_fake(prs: List[Dict], issues: List[Dict], pr_checks: Dict[int, Dict] | N
 
 class ClassifyTests(unittest.TestCase):
     def test_label_takes_precedence_over_title(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="any title", body="any body",
             state="OPEN", labels=("area:hook",), created_at="",
             updated_at="", author="", url="",
@@ -125,7 +125,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "edit-admission")
 
     def test_title_pattern_for_state(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="ralph state machine bug",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -133,7 +133,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "state")
 
     def test_title_pattern_for_artifact(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="promote-phases missing",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -141,7 +141,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "artifact")
 
     def test_title_pattern_for_side_effect(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="force-push confirmation broken",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -149,7 +149,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "side-effect")
 
     def test_title_pattern_for_throughput(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="hook latency regression",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -157,7 +157,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "throughput")
 
     def test_title_pattern_for_measurement(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="token-efficiency dashboard",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -165,7 +165,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "measurement")
 
     def test_title_pattern_for_verification(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="regression test missing",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -173,7 +173,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "verification")
 
     def test_title_pattern_for_recovery(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="janitor retention bug",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -181,7 +181,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "recovery")
 
     def test_default_boundary_is_state(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="unrelated stuff",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -189,7 +189,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(poip.classify(item), "state")
 
     def test_classify_returns_string_from_boundaries(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="x", body="",
             state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -203,7 +203,7 @@ class ClassifyTests(unittest.TestCase):
 class ScoreTests(unittest.TestCase):
     def test_default_scores_match_boundary_table(self):
         # The boundary → (B, R, C) table is the public contract.
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="issue", number=1, title="worktree-guard false deny",
             body="", state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -212,7 +212,7 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(poip.score(item), (5, 4, 4))
 
     def test_wide_pr_increases_risk(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="pr", number=1, title="x", body="",
             state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -223,7 +223,7 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(risk, min(5, poip.DEFAULT_SCORES["state"][1] + 1))
 
     def test_red_checks_increase_bottleneck(self):
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="pr", number=1, title="x", body="",
             state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -235,7 +235,7 @@ class ScoreTests(unittest.TestCase):
 
     def test_scores_clamped_to_5(self):
         # A wide PR on red checks should NOT exceed 5 on either axis.
-        item = poip.OpenItem(
+        item = poip.new_open_item(
             kind="pr", number=1, title="x", body="",
             state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
@@ -251,14 +251,14 @@ class ScoreTests(unittest.TestCase):
 
 
 class RecommendDispositionTests(unittest.TestCase):
-    def _item(self, **kw) -> poip.OpenItem:
+    def _item(self, **kw) -> dict:
         defaults = dict(
             kind="pr", number=1, title="x", body="",
             state="OPEN", labels=(), created_at="",
             updated_at="", author="", url="",
         )
         defaults.update(kw)
-        return poip.OpenItem(**defaults)
+        return poip.new_open_item(**defaults)
 
     def test_reject_for_superseded_title(self):
         item = self._item(title="duplicate of #123", kind="issue")
@@ -361,7 +361,7 @@ class BucketForTests(unittest.TestCase):
 
 class ComposeYamlTests(unittest.TestCase):
     def _snapshot(self, items):
-        return poip.BacklogSnapshot(
+        return poip.new_backlog_snapshot(
             snapshot_date="2026-09-15",
             main_head_sha="abcdef1234567890",
             items=tuple(items),
@@ -369,14 +369,14 @@ class ComposeYamlTests(unittest.TestCase):
 
     def test_yaml_parses_cleanly(self):
         items = [
-            poip.OpenItem(
+            poip.new_open_item(
                 kind="issue", number=842, title="worktree-guard false deny",
                 body="Body line 1\nBody line 2", state="OPEN",
                 labels=("area:hook",), created_at="2026-09-10T00:00:00Z",
                 updated_at="2026-09-10T00:00:00Z", author="octocat",
                 url="https://example/842",
             ),
-            poip.OpenItem(
+            poip.new_open_item(
                 kind="pr", number=838, title="hygiene bundle",
                 body="", state="OPEN", labels=(),
                 created_at="2026-08-01T00:00:00Z",
@@ -384,7 +384,7 @@ class ComposeYamlTests(unittest.TestCase):
                 url="https://example/838",
                 checks_state="failure", files_count=25,
             ),
-            poip.OpenItem(
+            poip.new_open_item(
                 kind="issue", number=820, title="dashboard redesign",
                 body="", state="OPEN", labels=(),
                 created_at="2026-07-01T00:00:00Z",
@@ -426,7 +426,7 @@ class ComposeYamlTests(unittest.TestCase):
 
     def test_compose_yaml_renders_via_proposal_parser(self):
         items = [
-            poip.OpenItem(
+            poip.new_open_item(
                 kind="pr", number=842, title="worktree-guard hook",
                 body="body", state="OPEN", labels=(),
                 created_at="2026-09-10T00:00:00Z",
@@ -447,7 +447,7 @@ class ComposeYamlTests(unittest.TestCase):
 
     def test_render_html_produces_html_file(self):
         items = [
-            poip.OpenItem(
+            poip.new_open_item(
                 kind="issue", number=842, title="worktree-guard",
                 body="body", state="OPEN", labels=(),
                 created_at="2026-09-10T00:00:00Z",
@@ -499,21 +499,21 @@ class SnapshotHelpersTests(unittest.TestCase):
     def test_normalize_pr_safe(self):
         raw = _pr_raw(842, title="t", body="b", labels=["area:hook"])
         item = poip._normalize_pr_safe(raw)
-        self.assertEqual(item.kind, "pr")
-        self.assertEqual(item.number, 842)
-        self.assertEqual(item.title, "t")
-        self.assertEqual(item.body, "b")
-        self.assertEqual(item.labels, ("area:hook",))
-        self.assertEqual(item.base_ref_name, "main")
-        self.assertEqual(item.head_ref_name, "feat/example")
-        self.assertEqual(item.author, "octocat")
-        self.assertFalse(item.is_draft)
+        self.assertEqual(item["kind"], "pr")
+        self.assertEqual(item["number"], 842)
+        self.assertEqual(item["title"], "t")
+        self.assertEqual(item["body"], "b")
+        self.assertEqual(item["labels"], ("area:hook",))
+        self.assertEqual(item["base_ref_name"], "main")
+        self.assertEqual(item["head_ref_name"], "feat/example")
+        self.assertEqual(item["author"], "octocat")
+        self.assertFalse(item["is_draft"])
 
     def test_normalize_issue(self):
         raw = _issue_raw(842, title="t", body="b", labels=["area:hook"])
         item = poip._normalize_issue(raw)
-        self.assertEqual(item.kind, "issue")
-        self.assertEqual(item.labels, ("area:hook",))
+        self.assertEqual(item["kind"], "issue")
+        self.assertEqual(item["labels"], ("area:hook",))
 
     def test_fetch_pr_checks_for_success(self):
         def fake(_args):
@@ -586,10 +586,10 @@ class EndToEndTests(unittest.TestCase):
             snap = poip.snapshot_open_backlog(
                 repo_root=Path(td), gh_runner=fake,
             )
-            self.assertEqual(len(snap.prs()), 1)
-            self.assertEqual(len(snap.issues()), 1)
-            self.assertEqual(snap.prs()[0].number, 842)
-            self.assertEqual(snap.issues()[0].number, 841)
+            self.assertEqual(len(poip.prs_in_snapshot(snap)), 1)
+            self.assertEqual(len(poip.issues_in_snapshot(snap)), 1)
+            self.assertEqual(poip.prs_in_snapshot(snap)[0]["number"], 842)
+            self.assertEqual(poip.issues_in_snapshot(snap)[0]["number"], 841)
 
     def test_snapshot_populates_pr_checks(self):
         prs = [_pr_raw(842, title="worktree-guard")]
@@ -601,8 +601,8 @@ class EndToEndTests(unittest.TestCase):
             snap = poip.snapshot_open_backlog(
                 repo_root=Path(td), gh_runner=fake,
             )
-            self.assertEqual(snap.prs()[0].checks_state, "success")
-            self.assertEqual(snap.prs()[0].files_count, 4)
+            self.assertEqual(poip.prs_in_snapshot(snap)[0]["checks_state"], "success")
+            self.assertEqual(poip.prs_in_snapshot(snap)[0]["files_count"], 4)
 
     def test_snapshot_raises_on_malformed_json(self):
         def fake(_args):
@@ -628,8 +628,8 @@ class EndToEndTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with patch.object(poip, "_snapshot_date_today", return_value="2026-09-15"):
                 snap = poip.snapshot_open_backlog(repo_root=Path(td), gh_runner=fake)
-            self.assertEqual(len(snap.new_work()), 1)
-            self.assertEqual(snap.new_work()[0].number, 842)
+            self.assertEqual(len(poip.new_work_in_snapshot(snap)), 1)
+            self.assertEqual(poip.new_work_in_snapshot(snap)[0]["number"], 842)
 
 
 # ----- CLI dispatch ---------------------------------------------------------
@@ -651,11 +651,11 @@ class CliTests(unittest.TestCase):
 
     def test_main_print_yaml_skips_render(self):
         # Build a snapshot directly and feed it through main with --print-yaml.
-        snap = poip.BacklogSnapshot(
+        snap = poip.new_backlog_snapshot(
             snapshot_date="2026-09-15",
             main_head_sha="abc123",
             items=(
-                poip.OpenItem(
+                poip.new_open_item(
                     kind="issue", number=842, title="worktree-guard",
                     body="body", state="OPEN", labels=(),
                     created_at="2026-09-10T00:00:00Z",

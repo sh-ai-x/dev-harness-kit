@@ -33,7 +33,6 @@ to 0.0, no gates skipped.
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import datetime as _dt
 import fnmatch
 import hashlib
@@ -96,7 +95,7 @@ RISK_CEILING = 3.0
 # output, matching the CONFIDENCE_FLOOR / SKIP_THRESHOLD posture for
 # the other two axes.
 #
-# Doubles as the dataclass default for `GateDecision.risk_level` so
+# Doubles as the dict default for `GateDecision.risk_level` so
 # legacy cache entries written before v1.1 (no `risk_level` field) load
 # without raising TypeError, and the sentinel value keeps rule #6's
 # fail-closed veto intact for those entries.
@@ -145,65 +144,55 @@ IN_SCOPE_GATES = frozenset({"review", "security"})
 
 
 # ----------------------------------------------------------------------------
-# Dataclasses
+# Decision payloads (dicts)
 # ----------------------------------------------------------------------------
 
-@dataclasses.dataclass(frozen=True)
-class GateContext:
-    parent_pr: int
-    head_sha: str
-    iteration: int
-    diff_stat: str
-    diff_sample: str
-    pr_body: Optional[str]
-    previous_verdicts: dict          # gate_name -> Approve|Changes|Blocked|missing
-    gate_catalog: dict               # parsed .dev-kit/gates.json (top-level shape)
+_GATE_CONTEXT_DEFAULTS = {
+    "parent_pr": 0,
+    "head_sha": "",
+    "iteration": 0,
+    "diff_stat": "",
+    "diff_sample": "",
+    "pr_body": None,
+    "previous_verdicts": {},  # type: ignore[dict-item]
+    "gate_catalog": {},  # type: ignore[dict-item]
+}
+
+_GATE_DECISION_DEFAULTS = {
+    "gate_name": "",
+    "skip": False,
+    "reasoning": "",
+    "confidence": 0.0,
+    "risk_level": MISSING_RISK_LEVEL_SENTINEL,
+    "raw_score": {},
+    "audit_reason": "ok",
+}
+
+_GATE_SKIP_DECISION_DEFAULTS = {
+    "head_sha": "",
+    "decisions": (),
+    "llm_raw": {},
+    "gates_hash": "",
+    "decided_at_iso": "",
+}
 
 
-@dataclasses.dataclass(frozen=True)
-class GateDecision:
-    gate_name: str
-    skip: bool
-    reasoning: str
-    confidence: float                 # 0.0-1.0
-    # Default sentinel keeps v1.0 cache entries loadable: when a legacy
-    # JSON payload omits `risk_level`, `GateDecision(**payload)` succeeds
-    # and rule #6 still vetoes (sentinel > RISK_CEILING → skip=False).
-    risk_level: float = MISSING_RISK_LEVEL_SENTINEL  # 0.0-10.0, lower_is_better
-    raw_score: dict = dataclasses.field(default_factory=dict)
-    # A09 audit trail. Distinguishes the seven paths that can land
-    # `risk_level` on the fail-closed sentinel:
-    #   - "ok"                    — LLM returned a value in [0.0, 10.0].
-    #   - "missing_key"           — LLM response omitted `risk_level`.
-    #                               Sentinel applied at parse time.
-    #   - "coerced_response"      — combined-score OR near-max-skip
-    #                               sanity check fired; sentinel applied
-    #                               as the fail-closed reaction.
-    #   - "legacy_cache"          — `load_decision` clamped an out-of-
-    #                               range cached value, OR an empty
-    #                               `raw_score` paired with a skip-range
-    #                               `risk_level` (cache-poisoning
-    #                               signature), to the sentinel.
-    #   - "coerced_response_cache" — cache-load combined-score OR near-
-    #                               max-skip check fired; sentinel
-    #                               applied at load time.
-    #   - "llm_unavailable"       — LLM seam unreachable; emitted by
-    #                               `_no_skip_decision`'s default when
-    #                               `invoke_judge` returns empty.
-    #   - "exception_fail_closed" — exception in `select_gates`; sentinel
-    #                               applied by the top-level wrapper.
-    # Empty string is treated as "ok" (backward compat with v1.1
-    # audit JSON that did not record the field).
-    audit_reason: str = "ok"
+def new_gate_context(**overrides) -> dict:
+    out = dict(_GATE_CONTEXT_DEFAULTS)
+    out.update(overrides)
+    return out
 
 
-@dataclasses.dataclass(frozen=True)
-class GateSkipDecision:
-    head_sha: str
-    decisions: tuple                  # tuple[GateDecision, ...]
-    llm_raw: dict
-    gates_hash: str                  # SHA-256 of gates.json at decision time
-    decided_at_iso: str
+def new_gate_decision(**overrides) -> dict:
+    out = dict(_GATE_DECISION_DEFAULTS)
+    out.update(overrides)
+    return out
+
+
+def new_gate_skip_decision(**overrides) -> dict:
+    out = dict(_GATE_SKIP_DECISION_DEFAULTS)
+    out.update(overrides)
+    return out
 
 
 # ----------------------------------------------------------------------------
@@ -244,7 +233,7 @@ def hash_gates_state(root: Optional[Path] = None) -> str:
 
 
 def apply_hard_rules(
-    context: GateContext,
+    context,
     llm_decisions: list,
 ) -> list:
     """Pure: apply 6 bypass rules on top of LLM output.
@@ -261,11 +250,11 @@ def apply_hard_rules(
     out = []
     for dec in llm_decisions:
         gate_entry = (
-            (context.gate_catalog or {}).get("gates", {}).get(dec.gate_name, {})
+            (context["gate_catalog"] or {}).get("gates", {}).get(dec["gate_name"], {})
         )
-        new_skip = dec.skip
+        new_skip = dec["skip"]
         # Rule 1 — first-push-deterministic.
-        if context.iteration <= 1:
+        if context["iteration"] <= 1:
             new_skip = False
         # Rule 2 — operator override.
         if gate_entry.get("forced_run"):
@@ -278,15 +267,15 @@ def apply_hard_rules(
         # Treat empty scope for critical gates as "match everything" so
         # Rule #3 always fires for them.
         scope_globs = gate_entry.get("scope_globs") or []
-        if not scope_globs and dec.gate_name in IN_SCOPE_GATES:
+        if not scope_globs and dec["gate_name"] in IN_SCOPE_GATES:
             scope_globs = ["**"]
         if (
-            dec.gate_name in IN_SCOPE_GATES
-            and is_gate_in_scope(dec.gate_name, {**gate_entry, "scope_globs": scope_globs}, _diff_files_from_stat(context))
+            dec["gate_name"] in IN_SCOPE_GATES
+            and is_gate_in_scope(dec["gate_name"], {**gate_entry, "scope_globs": scope_globs}, _diff_files_from_stat(context))
         ):
             new_skip = False
         # Rule 4 — low-confidence veto.
-        if dec.confidence < CONFIDENCE_FLOOR:
+        if dec["confidence"] < CONFIDENCE_FLOOR:
             new_skip = False
         # Rule 5 — dynamic_eligible opt-in. The default is False, meaning
         # "do NOT let the LLM judge touch this gate". An operator who
@@ -298,16 +287,18 @@ def apply_hard_rules(
         # Rule 6 — high-risk veto. risk_level is lower_is_better (0=safe,
         # 10=dangerous); a gate with risk above the ceiling is never
         # skipped regardless of how good the other scores look.
-        if dec.risk_level > RISK_CEILING:
+        if dec["risk_level"] > RISK_CEILING:
             new_skip = False
-        if new_skip != dec.skip:
-            out.append(dataclasses.replace(dec, skip=False))
+        if new_skip != dec["skip"]:
+            new_dec = dict(dec)
+            new_dec["skip"] = False
+            out.append(new_dec)
         else:
             out.append(dec)
     return out
 
 
-def _diff_files_from_stat(context: GateContext) -> list:
+def _diff_files_from_stat(context) -> list:
     """Best-effort: extract file paths from `git diff --stat` output.
 
     Used by `apply_hard_rules` rule #3. The full diff list lives in
@@ -317,7 +308,7 @@ def _diff_files_from_stat(context: GateContext) -> list:
     the helper testable and pure.
     """
     files = []
-    for line in (context.diff_stat or "").splitlines():
+    for line in (context["diff_stat"] or "").splitlines():
         # `git diff --stat` lines look like: " path/to/file.py | 12 ++--"
         if " | " not in line:
             continue
@@ -364,13 +355,13 @@ def _audit_path(root: Path, head_sha: str) -> Path:
     return candidate
 
 
-def save_decision(decision: GateSkipDecision, root: Optional[Path] = None) -> Path:
+def save_decision(decision, root: Optional[Path] = None) -> Path:
     """Atomic-write the audit JSON. Returns the path written."""
     root = root or Path(".")
-    payload = dataclasses.asdict(decision)
+    payload = dict(decision)
     # GateDecision tuples → list for JSON compat
     payload["decisions"] = list(payload["decisions"])
-    path = _audit_path(root, decision.head_sha)
+    path = _audit_path(root, decision["head_sha"])
     atomic_write_json(path, payload)
     return path
 
@@ -402,6 +393,10 @@ def _clamp_risk_level_for_load(d: dict) -> dict:
     distinguish this path.
     """
     out = dict(d)  # do not mutate caller's dict
+    # Default audit_reason matches the dataclass default — legacy cache
+    # entries written before the field existed load with "ok".
+    if "audit_reason" not in out:
+        out["audit_reason"] = "ok"
     rl_raw = out.get("risk_level")
     rl = None
     try:
@@ -470,7 +465,7 @@ def _clamp_risk_level_for_load(d: dict) -> dict:
 def load_decision(
     head_sha: str,
     root: Optional[Path] = None,
-) -> Optional[GateSkipDecision]:
+):
     """Read cached decision or None if missing / invalidated.
 
     Invalidation: if the on-disk `gates_hash` doesn't match the
@@ -492,10 +487,10 @@ def load_decision(
     if payload.get("gates_hash") != hash_gates_state(root):
         return None
     decisions = tuple(
-        GateDecision(**_clamp_risk_level_for_load(d))
+        _clamp_risk_level_for_load(d)
         for d in payload.get("decisions", [])
     )
-    return GateSkipDecision(
+    return new_gate_skip_decision(
         head_sha=payload["head_sha"],
         decisions=decisions,
         llm_raw=payload.get("llm_raw", {}),
@@ -537,7 +532,7 @@ def prune_stale(root: Optional[Path] = None, ttl_days: int = DYNAMIC_AUDIT_TTL_D
 # LLM invocation
 # ----------------------------------------------------------------------------
 
-def build_user_prompt(context: GateContext) -> str:
+def build_user_prompt(context) -> str:
     """Render the volatile body the LLM judge sees.
 
     System prompt is built by `lib/llm_judge.call_judge` from the
@@ -545,26 +540,26 @@ def build_user_prompt(context: GateContext) -> str:
     is appended after the rubric template.
     """
     verdict_lines = []
-    for gate_name, verdict in (context.previous_verdicts or {}).items():
+    for gate_name, verdict in (context["previous_verdicts"] or {}).items():
         verdict_lines.append(f"  {gate_name}: {verdict}")
     verdicts_str = "\n".join(verdict_lines) if verdict_lines else "  (none)"
 
-    catalog_str = json.dumps(context.gate_catalog, indent=2, sort_keys=True)
+    catalog_str = json.dumps(context["gate_catalog"], indent=2, sort_keys=True)
 
     parts = [
-        f"PR #{context.parent_pr} — head_sha={context.head_sha} — iteration={context.iteration}",
+        f"PR #{context['parent_pr']} — head_sha={context['head_sha']} — iteration={context['iteration']}",
         "",
         "PREVIOUS VERDICTS:",
         verdicts_str,
         "",
         "DIFF STAT:",
-        (context.diff_stat or "").strip() or "(empty)",
+        (context["diff_stat"] or "").strip() or "(empty)",
         "",
         "DIFF SAMPLE:",
-        (context.diff_sample or "").strip()[:DIFF_SAMPLE_MAX_BYTES] or "(empty)",
+        (context["diff_sample"] or "").strip()[:DIFF_SAMPLE_MAX_BYTES] or "(empty)",
         "",
         "PR BODY:",
-        (context.pr_body or "").strip() or "(empty)",
+        (context["pr_body"] or "").strip() or "(empty)",
         "",
         "GATE CATALOG (.dev-kit/gates.json):",
         catalog_str,
@@ -575,7 +570,7 @@ def build_user_prompt(context: GateContext) -> str:
     return "\n".join(parts)
 
 
-def invoke_judge(context: GateContext, project_root: Path) -> Optional[dict]:
+def invoke_judge(context, project_root: Path) -> Optional[dict]:
     """Call the LLM judge. Returns parsed scores dict or None on failure.
 
     Mirrors `lib/push_intent_judge.py:run` invocation pattern. Loads
@@ -629,12 +624,12 @@ def invoke_judge(context: GateContext, project_root: Path) -> Optional[dict]:
 # ----------------------------------------------------------------------------
 
 def select_gates(
-    context: GateContext,
+    context,
     project_root: Optional[Path] = None,
     *,
     dry_run: bool = False,
     local: bool = False,
-) -> GateSkipDecision:
+):
     """Main entry. Run LLM judge, apply hard rules, cache + return decision.
 
     Behavior:
@@ -656,7 +651,7 @@ def select_gates(
     if local:
         from gates_state import VALID_GATE_KEYS  # local import to avoid cycle
         decisions = tuple(
-            GateDecision(
+            new_gate_decision(
                 gate_name=g,
                 skip=False,
                 reasoning="local mode: judge skipped, no LLM call",
@@ -666,8 +661,8 @@ def select_gates(
             )
             for g in VALID_GATE_KEYS
         )
-        return GateSkipDecision(
-            head_sha=context.head_sha,
+        return new_gate_skip_decision(
+            head_sha=context["head_sha"],
             decisions=decisions,
             llm_raw={"scores": {}, "raw": ""},
             gates_hash=hash_gates_state(root),
@@ -683,7 +678,7 @@ def select_gates(
     # the gate-dynamic layer cannot crash the babysit-pr loop.
     try:
         # 2. Cache hit?
-        cached = load_decision(context.head_sha, root)
+        cached = load_decision(context["head_sha"], root)
         if cached is not None:
             # Re-apply hard rules on cached decisions. Without this, a
             # cached `skip=True` from a pre-rule-#6 entry would survive
@@ -691,12 +686,12 @@ def select_gates(
             # short-circuit was the A01/A06 attack path the security
             # judge flagged. The judge is NOT re-invoked (no network);
             # the hard rules are deterministic and pure.
-            return GateSkipDecision(
-                head_sha=cached.head_sha,
-                decisions=tuple(apply_hard_rules(context, list(cached.decisions))),
-                llm_raw=cached.llm_raw,
-                gates_hash=cached.gates_hash,
-                decided_at_iso=cached.decided_at_iso,
+            return new_gate_skip_decision(
+                head_sha=cached["head_sha"],
+                decisions=tuple(apply_hard_rules(context, list(cached["decisions"]))),
+                llm_raw=cached["llm_raw"],
+                gates_hash=cached["gates_hash"],
+                decided_at_iso=cached["decided_at_iso"],
             )
 
         # 3. Invoke LLM.
@@ -779,7 +774,7 @@ def select_gates(
                 and risk_level <= RISK_CEILING
             )
             llm_decisions.append(
-                GateDecision(
+                new_gate_decision(
                     gate_name=gate_name,
                     skip=skip,
                     reasoning=f"llm: gate_skippable={skip_score:.1f} confidence_raw={confidence_raw:.1f} (normalized={confidence:.2f}) risk_level={risk_level:.1f}",
@@ -794,8 +789,8 @@ def select_gates(
         final = apply_hard_rules(context, llm_decisions)
 
         # 5. Build decision payload.
-        decision = GateSkipDecision(
-            head_sha=context.head_sha,
+        decision = new_gate_skip_decision(
+            head_sha=context["head_sha"],
             decisions=tuple(final),
             llm_raw={"scores": scores, "raw": raw.get("raw", "")},
             gates_hash=hash_gates_state(root),
@@ -829,12 +824,12 @@ def select_gates(
 
 
 def _no_skip_decision(
-    context: GateContext,
+    context,
     root: Path,
     *,
     reason: str = "llm unavailable",
     audit_reason: str = "llm_unavailable",
-) -> GateSkipDecision:
+):
     """Build a deterministic no-skip decision.
 
     `reason` controls the per-decision reasoning string; `audit_reason`
@@ -847,7 +842,7 @@ def _no_skip_decision(
     """
     from gates_state import VALID_GATE_KEYS
     decisions = tuple(
-        GateDecision(
+        new_gate_decision(
             gate_name=g,
             skip=False,
             reasoning=f"{reason}; defaulting to no-skip",
@@ -858,8 +853,8 @@ def _no_skip_decision(
         )
         for g in VALID_GATE_KEYS
     )
-    return GateSkipDecision(
-        head_sha=context.head_sha,
+    return new_gate_skip_decision(
+        head_sha=context["head_sha"],
         decisions=decisions,
         llm_raw={"scores": {}, "raw": "", "note": audit_reason},
         gates_hash=hash_gates_state(root),
@@ -923,7 +918,7 @@ def main(argv: Optional[list] = None) -> int:
 
 def _cli_select(args) -> int:
     root = Path(args.root) if args.root else Path(".")
-    ctx = GateContext(
+    ctx = new_gate_context(
         parent_pr=0,
         head_sha=args.head_sha,
         iteration=2,
@@ -935,10 +930,10 @@ def _cli_select(args) -> int:
     )
     decision = select_gates(ctx, root, dry_run=args.dry_run, local=args.local)
     payload = {
-        "head_sha": decision.head_sha,
-        "decisions": [dataclasses.asdict(d) for d in decision.decisions],
-        "gates_hash": decision.gates_hash,
-        "decided_at_iso": decision.decided_at_iso,
+        "head_sha": decision["head_sha"],
+        "decisions": [dict(d) for d in decision["decisions"]],
+        "gates_hash": decision["gates_hash"],
+        "decided_at_iso": decision["decided_at_iso"],
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
@@ -967,9 +962,9 @@ def _cli_apply(args) -> int:
     # Read current state; write back with forced_run overrides.
     state = _read_gate_catalog(root)
     overrides = {}
-    for d in decision.decisions:
-        if not d.skip and d.confidence >= CONFIDENCE_FLOOR:
-            overrides[d.gate_name] = True
+    for d in decision["decisions"]:
+        if not d["skip"] and d["confidence"] >= CONFIDENCE_FLOOR:
+            overrides[d["gate_name"]] = True
     for gate_name in overrides:
         entry = state["gates"].get(gate_name, {})
         entry["forced_run"] = True
@@ -993,11 +988,11 @@ def _cli_load(args) -> int:
         print(json.dumps({"error": "no cached decision", "head_sha": args.head_sha}))
         return 1
     payload = {
-        "head_sha": decision.head_sha,
-        "decisions": [dataclasses.asdict(d) for d in decision.decisions],
-        "gates_hash": decision.gates_hash,
-        "decided_at_iso": decision.decided_at_iso,
-        "llm_raw": decision.llm_raw,
+        "head_sha": decision["head_sha"],
+        "decisions": [dict(d) for d in decision["decisions"]],
+        "gates_hash": decision["gates_hash"],
+        "decided_at_iso": decision["decided_at_iso"],
+        "llm_raw": decision["llm_raw"],
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

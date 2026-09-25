@@ -685,7 +685,7 @@ class TestPersistDynamicSkipped(unittest.TestCase):
             state_path=state_path,
             dynamic_skipped=frozenset({"maintenance"}),
         )
-        self.assertEqual(state.dynamic_skipped, frozenset({"maintenance"}))
+        self.assertEqual(state["dynamic_skipped"], frozenset({"maintenance"}))
 
     def test_persist_loop_snapshot_omits_dynamic_skipped_preserves(self) -> None:
         # First call sets dynamic_skipped; second call (without kwarg)
@@ -706,7 +706,7 @@ class TestPersistDynamicSkipped(unittest.TestCase):
             now_epoch=1_700_000_001.0, now_iso="2026-09-16T00:00:01Z",
             state_path=state_path,
         )
-        self.assertEqual(state.dynamic_skipped, frozenset({"maintenance"}))
+        self.assertEqual(state["dynamic_skipped"], frozenset({"maintenance"}))
 
     def test_persist_loop_outcome_accepts_dynamic_skipped(self) -> None:
         state_path = self._tmp_state_path()
@@ -723,7 +723,7 @@ class TestPersistDynamicSkipped(unittest.TestCase):
             state_path=state_path,
             dynamic_skipped=frozenset({"review", "security"}),
         )
-        self.assertEqual(state.dynamic_skipped, frozenset({"review", "security"}))
+        self.assertEqual(state["dynamic_skipped"], frozenset({"review", "security"}))
 
 
 if __name__ == "__main__":
