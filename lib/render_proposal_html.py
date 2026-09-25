@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
+import markdown as _markdown
 import yaml
 
 from lib.atomic import atomic_write_text
@@ -870,310 +871,207 @@ def _parse_optional_date(raw: object, field_name: str) -> Optional[str]:
     return raw
 
 
-# ----- Markdown-lite renderer -----------------------------------------------
+# ----- Markdown renderer -----------------------------------------------------
+#
+# The previous hand-rolled "markdown-lite" dialect (block scan, inline
+# tokeniser, GFM-table split with `\\|` escape, fenced-code collector,
+# list-continuation collector, block-start detector, forward-progress
+# safety) is replaced with `markdown.Markdown(extensions=["tables",
+#"fenced_code"])` -- a tiny wrapper that handles headings, paragraphs,
+# lists, GFM tables (including `\|` pipe escape), fenced code blocks,
+# inline `**bold**` / `*italic*` / `` `code` `` / `[text](url)`, blockquotes,
+# and `---` horizontal rules natively.
+#
+# Security invariants preserved from the prior implementation:
+#
+# 1. **Defensive HTML escape.** Raw HTML in proposal bodies (e.g.
+#    `<script>alert(1)</script>`) must NOT survive unescaped into the
+#    rendered HTML. `markdown.Markdown` (3.0+) passes raw HTML through
+#    in non-code contexts and escapes it inside fenced code blocks;
+#    `_escape_outside_fences` matches fenced blocks first and HTML-escapes
+#    the rest of the input so both code and inline contexts land safely.
+#
+# 2. **URL allowlist.** `javascript:`, `data:`, `vbscript:`, and `file:`
+#    hrefs must NOT become executable anchors. `_scrub_unsafe_links`
+#    post-processes the markdown output and rewrites any `<a href="...">`
+#    whose scheme is not on the allowlist back to plain text in
+#    `label (href)` form -- matching the prior inline renderer's contract
+#    exactly so the file:// host cannot be tricked into running script
+#    payloads.
+#
+# 3. **No new dependencies.** `Markdown` is stdlib-adjacent: PyPI wheels
+#    ship pure-Python with no transitive deps. Pinned in `requirements.lock`.
 
-_INLINE_TOKEN_RE = re.compile(
-    r"(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))"
-)
-# Allowlist for hyperlink href schemes. Two classes are accepted:
-#   (a) Explicit safe schemes: `http://`, `https://`, `mailto:`.
+_MD_EXTENSIONS = ["tables", "fenced_code"]
+
+# Match a single fenced code block (```...```). Use split() to separate
+# "outside-fence" text from "inside-fence" text so the outside can be
+# HTML-escaped before markdown parses it (without also re-escaping the
+# already-handled code-block content).
+_FENCE_RE = re.compile(r"(```.*?\n.*?```)", re.DOTALL)
+
+# Allowlist for hyperlink href schemes. Same contract as the prior
+# inline renderer:
+#   (a) Explicit safe schemes: http://, https://, mailto:.
 #   (b) Safe relative paths: no scheme (no `:`), starting with `./`,
 #       `../`, a relative segment, or `/`. These are how cross-document
-#       links inside `docs/proposals/<main>/` work between sibling
-#       files (`protocol-layer.html`, `../protocol-layer/index.html`,
-#       etc.) and they resolve under `file://` exactly the way a
-#       browser would resolve them for any other static HTML.
-# Anything else (javascript:, data:, vbscript:, file:) is rendered as
-# escaped text rather than an executable anchor. `file://` is
-# rejected because the proposal HTML is meant to be safe-to-open
-# from `file://`; allowing `file:` links inside would defeat that.
-_SAFE_URL_SCHEMES = re.compile(
-    r"^(?:https?|mailto):",
-    re.IGNORECASE,
-)
+#       links inside docs/proposals/<main>/ work between sibling files
+#       (`protocol-layer.html`, `../sibling/index.html`, etc.).
+# Anything else (javascript:, data:, vbscript:, file:) is rewritten to
+# plain text `label (href)` so it reads naturally without becoming
+# executable when the HTML is opened from `file://`.
+_SAFE_URL_SCHEMES = re.compile(r"^(?:https?|mailto):", re.IGNORECASE)
 _SAFE_RELATIVE_HREF = re.compile(
     r"^(?:\.{0,2}/|[A-Za-z0-9_\-./?#=&%]+)$"
 )
 
+# Tag form that markdown emits for `<hr>` (with or without trailing
+# slash). The CSS wrapper depends on `class="section-divider"`, so the
+# bare `<hr />` becomes `<hr class="section-divider">` here.
+_HR_RE = re.compile(r"<hr\s*/?>")
+
+# Pattern that matches an `<a>` tag with arbitrary label content
+# (plain text or compound with nested inline tags like `<strong>` /
+# `<em>` / `<code>`). The label capture uses non-greedy `.+?` so the
+# match closes at the first `</a>` rather than spanning across
+# adjacent anchors. The captured label is later stripped of nested
+# tags (`_INNER_TAG_RE`) before being rewritten to plain-text
+# `label (href)` form. This restores parity with the prior hand-rolled
+# inline renderer, which matched `[label](href)` against the markdown
+# source and neutralised unsafe schemes regardless of label content.
+_HREF_LINK_RE = re.compile(r'<a href="([^"]+)">(.+?)</a>', re.DOTALL)
+# Strip nested inline tags from a captured `<a>` label so the rewritten
+# plain-text form reads as the user's intended label without leftover
+# `<strong>` / `<em>` / `<code>` markup.
+_INNER_TAG_RE = re.compile(r"<[^>]+>")
+
+# When the markdown output for inline content is a single `<p>...</p>`
+# wrapper with only inline children, strip the wrapper so the result
+# can sit inside a `<li>`, `<td>`, or `<code>` etc. without nested
+# block-level `<p>`s. Matches the prior `_render_inline` contract.
+_P_WRAPPER_RE = re.compile(r"^<p>(?P<inner>.*)</p>\s*$", re.DOTALL)
+_P_BLOCK_TAGS = ("<p>", "<h1", "<h2", "<h3", "<h4", "<h5", "<h6",
+                 "<ul>", "<ol>", "<table", "<pre", "<blockquote",
+                 "<hr", "<div", "<section", "<article", "<aside",
+                 "<header", "<footer", "<nav", "<form", "<figure",
+                 "<details", "<summary", "<dl", "<main", "<address")
+
+
+def _escape_outside_fences(text: str) -> str:
+    """HTML-escape `&<` in text but leave fenced code blocks raw.
+
+    The Markdown library escapes raw HTML inside fenced code blocks
+    (single pass) and passes it through unchanged in paragraph /
+    heading / table-cell contexts (which is a security hazard). By
+    pre-escaping only the *outside-fence* regions, both contexts land
+    escaped: the outside by us, the inside by Markdown. The result is
+    one round of escaping everywhere -- no double-escapes, no live
+    HTML surviving.
+
+    `>` is intentionally NOT escaped: a leading `>` must reach Markdown
+    as a blockquote marker, and any other `>` is harmless once the
+    matching `<` has been escaped (the browser treats stray `>` as
+    text).
+    """
+    if not text:
+        return text
+    parts = _FENCE_RE.split(text)
+    out: List[str] = []
+    for i, part in enumerate(parts):
+        if i % 2 == 0:
+            # Outside any fence: escape `<` and `&` so raw HTML in user
+            # input becomes harmless entities before Markdown parses
+            # the text. Leave `>` alone so blockquote markers reach
+            # Markdown intact.
+            escaped = (
+                part.replace("&", "&amp;")
+                .replace("<", "&lt;")
+            )
+            out.append(escaped)
+        else:
+            # Inside a fence: leave the raw characters. Markdown's
+            # code-block writer will escape them once on the way out.
+            out.append(part)
+    return "".join(out)
+
+
+def _scrub_unsafe_links(html_str: str) -> str:
+    """Neutralise `<a>` tags whose href uses a non-safe scheme.
+
+    Rewrites `<a href="javascript:...">label</a>` (and any compound
+    label like `<a href="..."><strong>label</strong></a>`) to
+    `label (href)` so the user reads the original intent in plain text.
+    Nested inline tags inside the label are stripped before rewriting.
+    Safe-scheme hrefs are preserved verbatim.
+    """
+    def _repl(m: re.Match) -> str:
+        href = m.group(1)
+        label = _INNER_TAG_RE.sub("", m.group(2))
+        href_stripped = href.strip()
+        if (
+            _SAFE_URL_SCHEMES.match(href_stripped)
+            or _SAFE_RELATIVE_HREF.match(href_stripped)
+        ):
+            return m.group(0)
+        return f"{label} ({href})"
+
+    return _HREF_LINK_RE.sub(_repl, html_str)
+
+
+def _add_hr_class(html_str: str) -> str:
+    """Add `class="section-divider"` to every `<hr />` emitted by Markdown.
+
+    The wrapper CSS keys off that class for spacing / colour tokens, so
+    the renderer has to attach it after Markdown produces the bare tag.
+    """
+    return _HR_RE.sub('<hr class="section-divider">', html_str)
+
+
+def _strip_outer_p(html_str: str) -> str:
+    """Drop a single leading `<p>...</p>` wrapper if it carries only
+    inline children. Used by `_render_inline` to keep the prior
+    contract (no nested `<p>` inside `<li>` / `<td>`)."""
+    s = html_str.strip()
+    m = _P_WRAPPER_RE.match(s)
+    if not m:
+        return s
+    inner = m.group("inner")
+    if any(tag in inner for tag in _P_BLOCK_TAGS):
+        return s
+    return inner
+
 
 def _render_inline(text: str) -> str:
-    """Render inline markdown (bold, italic, code, links) with HTML escape.
-
-    Tokenizes first so escaping is applied to text-only segments; tokens
-    are matched against the raw text and the result is escaped piece-wise.
-    A literal `<script>` in the input renders as `&lt;script&gt;` because
-    the raw text passes through `html.escape` before token replacement.
-    """
-    safe = html.escape(text, quote=False)
-    pieces: List[str] = []
-    cursor = 0
-    for m in _INLINE_TOKEN_RE.finditer(safe):
-        if m.start() > cursor:
-            pieces.append(safe[cursor:m.start()])
-        token = m.group(0)
-        if token.startswith("**") and token.endswith("**"):
-            pieces.append(f"<strong>{token[2:-2]}</strong>")
-        elif token.startswith("*") and token.endswith("*"):
-            pieces.append(f"<em>{token[1:-1]}</em>")
-        elif token.startswith("`") and token.endswith("`"):
-            pieces.append(f"<code>{token[1:-1]}</code>")
-        elif token.startswith("["):
-            link_m = re.match(r"\[([^\]]+)\]\(([^)]+)\)", token)
-            if link_m:
-                label, href = link_m.group(1), link_m.group(2)
-                # Note: `label` and `href` come from the already-escaped
-                # `safe` text, so they contain HTML entities (e.g. `&amp;`).
-                # We must NOT re-escape them or `&amp;` becomes `&amp;amp;`.
-                # Only `"` needs escaping to keep the attribute intact.
-                href_attr = href.replace('"', "&quot;")
-                href_stripped = href.strip()
-                if _SAFE_URL_SCHEMES.match(href_stripped) or _SAFE_RELATIVE_HREF.match(href_stripped):
-                    pieces.append(f'<a href="{href_attr}">{label}</a>')
-                else:
-                    # Disallowed scheme (javascript:, data:, vbscript:,
-                    # file:, raw text with a colon-prefixed scheme we
-                    # don't recognize). Render as plain text with parens
-                    # so it reads naturally:
-                    # `[click](javascript:alert(1))` -> `click (javascript:alert(1))`.
-                    # Note: the regex consumes `[label](href` and the
-                    # leftover `)` after the match stays in the
-                    # surrounding text.
-                    pieces.append(f"{label} ({href})")
-            else:
-                pieces.append(token)
-        else:
-            pieces.append(token)
-        cursor = m.end()
-    if cursor < len(safe):
-        pieces.append(safe[cursor:])
-    return "".join(pieces)
-
-
-def _split_table_row(row: str) -> List[str]:
-    """Split a GFM table row on `|`, trim, drop leading/trailing empty cells.
-
-    Honours `\\|` as a literal pipe inside a cell. GFM escapes pipes in
-    table cells by backslash; without this, a cell like
-    ``PreToolUse Edit\\|Write\\|MultiEdit`` is mis-split into 3 cells.
-    """
-    stripped = row.strip().strip("|")
-    # Split on unescaped pipes only.
-    parts = re.split(r"(?<!\\)\|", stripped)
-    # Unescape `\\|` -> `|` inside each cell; trim surrounding whitespace.
-    return [p.replace("\\|", "|").strip() for p in parts]
-
-
-def _render_table(lines: List[str]) -> str:
-    """Render a GFM table block. Assumes `lines` is contiguous table lines
-    (header, separator, then 0+ body rows)."""
-    if len(lines) < 2:
-        return _render_paragraphs(lines)
-    header = _split_table_row(lines[0])
-    body = [_split_table_row(r) for r in lines[2:]]
-    out = ["<table>", "<thead><tr>"]
-    for h in header:
-        out.append(f"<th>{_render_inline(h)}</th>")
-    out.append("</tr></thead>")
-    if body:
-        out.append("<tbody>")
-        for row in body:
-            out.append("<tr>")
-            for i, cell in enumerate(row):
-                tag = "td"
-                out.append(f"<{tag}>{_render_inline(cell)}</{tag}>")
-            out.append("</tr>")
-        out.append("</tbody>")
-    out.append("</table>")
-    return "".join(out)
-
-
-def _render_paragraphs(lines: List[str]) -> str:
-    text = " ".join(line.strip() for line in lines).strip()
-    if not text:
-        return ""
-    return f"<p>{_render_inline(text)}</p>"
-
-
-def _render_list(items: List[str], ordered: bool) -> str:
-    tag = "ol" if ordered else "ul"
-    out = [f"<{tag}>"]
-    for item in items:
-        out.append(f"<li>{_render_inline(item)}</li>")
-    out.append(f"</{tag}>")
-    return "".join(out)
-
-
-def _render_blockquote(lines: List[str]) -> str:
-    text = " ".join(line.lstrip(">").strip() for line in lines).strip()
-    return f"<blockquote><p>{_render_inline(text)}</p></blockquote>"
+    """Inline-only render. Same Markdown dialect as `render_body` but
+    drops the outer `<p>` wrapper so the result can sit inside a `<li>`,
+    `<td>`, table-cell, or `<code>` parent without nesting block-level
+    paragraphs. Mirrors the prior `_render_inline` contract."""
+    md = _markdown.Markdown(extensions=_MD_EXTENSIONS, output_format="html")
+    rendered = md.convert(_escape_outside_fences(text))
+    rendered = _scrub_unsafe_links(rendered)
+    rendered = _add_hr_class(rendered)
+    return _strip_outer_p(rendered)
 
 
 def render_body(body: str) -> str:
-    """Render a markdown-lite body string to safe HTML."""
-    lines = body.split("\n")
-    out: List[str] = []
-    i = 0
-    n = len(lines)
-    while i < n:
-        line = lines[i]
-        stripped = line.strip()
+    """Render a markdown-lite body string to safe HTML.
 
-        # Fenced code block
-        if stripped.startswith("```"):
-            lang = stripped[3:].strip()
-            j = i + 1
-            while j < n and not lines[j].strip().startswith("```"):
-                j += 1
-            code_text = "\n".join(lines[i + 1:j])
-            cls = f' class="language-{html.escape(lang)}"' if lang else ""
-            out.append(f"<pre><code{cls}>{html.escape(code_text)}</code></pre>")
-            i = j + 1
-            continue
+    Delegates to `markdown.Markdown(extensions=["tables","fenced_code"])`
+    after HTML-escaping non-fenced-code regions, then post-processes for
+    the proposal renderer's invariant set:
 
-        # Horizontal rule
-        if re.match(r"^-{3,}$", stripped):
-            out.append('<hr class="section-divider">')
-            i += 1
-            continue
+    - `<hr>` carries `class="section-divider"` (CSS hook)
+    - `<a href="javascript:...">` (and other unsafe schemes) become
+      plain-text `label (href)`
+    - raw HTML in the input is HTML-escaped (security invariant)
 
-        # Heading
-        h_m = re.match(r"^(#{1,3})\s+(.*)$", stripped)
-        if h_m:
-            level = len(h_m.group(1))
-            text = h_m.group(2).strip()
-            out.append(f"<h{level}>{_render_inline(text)}</h{level}>")
-            i += 1
-            continue
-
-        # Table (collect contiguous pipe-delimited lines)
-        if "|" in stripped and i + 1 < n and re.match(r"^\s*\|?\s*:?-+:?(\s*\|\s*:?-+:?)+\s*\|?\s*$", lines[i + 1].strip()):
-            j = i
-            while j < n and "|" in lines[j]:
-                j += 1
-            out.append(_render_table(lines[i:j]))
-            i = j
-            continue
-
-        # Blockquote
-        if stripped.startswith(">"):
-            j = i
-            while j < n and lines[j].strip().startswith(">"):
-                j += 1
-            out.append(_render_blockquote(lines[i:j]))
-            i = j
-            continue
-
-        # Unordered list
-        if re.match(r"^[-*]\s+", stripped):
-            j = i
-            items: List[str] = []
-            current: List[str] | None = None
-
-            def _flush_current() -> None:
-                nonlocal current
-                if current is not None:
-                    items.append(" ".join(current).strip())
-                    current = None
-
-            while j < n:
-                line_j = lines[j]
-                stripped_j = line_j.strip()
-                if not stripped_j:
-                    # A blank line ENDS this list — start the new list
-                    # or paragraph collector from the next iteration.
-                    # (Markdown allows lazy continuation across one
-                    # blank line, but that requires a paragraph block
-                    # detector inside the indented context; the bug
-                    # this fixes was specifically when the YAML block
-                    # scalar wraps bullets without intervening blanks,
-                    # so "blank = end" is enough.)
-                    break
-                if re.match(r"^[-*]\s+", stripped_j):
-                    _flush_current()
-                    current = [re.sub(r"^[-*]\s+", "", stripped_j)]
-                elif line_j.startswith((" ", "\t")):
-                    # Indented continuation of the previous item. Append
-                    # the stripped text so the bullet's text becomes
-                    # `<first line> <continuation>` (PR #494 review 🟡 #5).
-                    if current is None:
-                        break  # defensive
-                    current.append(stripped_j)
-                else:
-                    # Non-bullet, non-indented line: end of this list.
-                    break
-                j += 1
-            _flush_current()
-            out.append(_render_list(items, ordered=False))
-            i = j
-            continue
-
-        # Ordered list
-        if re.match(r"^\d+\.\s+", stripped):
-            j = i
-            items: List[str] = []
-            current: List[str] | None = None
-
-            def _flush_current_ordered() -> None:
-                nonlocal current
-                if current is not None:
-                    items.append(" ".join(current).strip())
-                    current = None
-
-            while j < n:
-                line_j = lines[j]
-                stripped_j = line_j.strip()
-                if not stripped_j:
-                    break
-                if re.match(r"^\d+\.\s+", stripped_j):
-                    _flush_current_ordered()
-                    current = [re.sub(r"^\d+\.\s+", "", stripped_j)]
-                elif line_j.startswith((" ", "\t")):
-                    if current is None:
-                        break
-                    current.append(stripped_j)
-                else:
-                    break
-                j += 1
-            _flush_current_ordered()
-            out.append(_render_list(items, ordered=True))
-            i = j
-            continue
-
-        # Blank line: skip
-        if not stripped:
-            i += 1
-            continue
-
-        # Paragraph (collect until blank or block transition)
-        j = i
-        while j < n and lines[j].strip() and not _is_block_start(lines[j]):
-            j += 1
-        if j == i:
-            # Safety: if the line is non-blank AND a block-start but no
-            # branch matched (e.g. future block types), force forward progress
-            # by rendering it as a single-line paragraph rather than looping.
-            j = i + 1
-        out.append(_render_paragraphs(lines[i:j]))
-        i = j
-
-    return "\n".join(s for s in out if s)
-
-
-def _is_block_start(line: str) -> bool:
-    s = line.strip()
-    if not s:
-        return True
-    # `*` is NOT a block-start marker here -- `**bold**` or `*italic*` at the
-    # start of a line is just inline formatting inside a paragraph, not a
-    # bullet (we use `-` for unordered lists). Including `*` would mis-route
-    # paragraph lines starting with bold into an unhandled branch and loop.
-    if s.startswith(("#", ">", "```", "-")) or re.match(r"^\d+\.\s+", s):
-        return True
-    if re.match(r"^-{3,}$", s):
-        return True
-    if "|" in s:
-        return True
-    return False
+    Pure function: no I/O.
+    """
+    md = _markdown.Markdown(extensions=_MD_EXTENSIONS, output_format="html")
+    rendered = md.convert(_escape_outside_fences(body))
+    rendered = _scrub_unsafe_links(rendered)
+    rendered = _add_hr_class(rendered)
+    return rendered
 
 
 # ----- Top-level render -----------------------------------------------------

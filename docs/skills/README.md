@@ -53,7 +53,6 @@ grep -lE '^user-invocable: false' skills/*/SKILL.md | wc -l   # model-invoked su
 |---|---|---|
 | [`plan`](plan.md) | `state` | Idea → `PRD.md` + `phases/<name>/` through a 5-gate loop. |
 | [`build`](build.md) | `state` | Per-step sub-agent delegation with an integrated TDD + auto-fix loop. |
-| [`build-debug`](build-debug.md) | `enforcement` | 4-phase root-cause debugging (reproduce → isolate → root cause → fix). Also auto-invoked by the model mid-build-step for the in-build self-fix loop — standalone invocation hands the root cause to `/dev-kit:plan` instead of fixing inline. |
 
 ### Review → Ship
 
@@ -128,7 +127,6 @@ step inside their parent skill's flow; you never type them directly.
 | [`babysit-pr-local`](babysit-pr-local.md) | `ship` | `state` | human |
 | [`bootstrap`](bootstrap.md) | `bootstrap` | `state` | human |
 | [`build`](build.md) | `build` | `state` | human |
-| [`build-debug`](build-debug.md) | `build` | `enforcement` | human |
 | [`bump`](bump.md) | `ship` | `state` | human |
 | [`ci-doctor`](ci-doctor.md) | `audit` | `enforcement` | human |
 | [`ci-setup`](ci-setup.md) | `bootstrap` | `enforcement` | human |

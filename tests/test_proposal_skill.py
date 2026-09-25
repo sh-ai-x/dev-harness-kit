@@ -145,6 +145,30 @@ class RenderBodyTests(unittest.TestCase):
         # Crucially, no executable href:
         self.assertNotIn('href="javascript:', out)
 
+    def test_link_unsafe_scheme_compound_label_rejected(self):
+        """Compound-label anchors (e.g. `[**click**](javascript:...)`)
+        must also be neutralised, not left as live `<a>` tags whose
+        label carries inline markup. Regression for the stdlib-swap
+        refactor where the scrubber regex required `[^<]+` for the
+        label and so skipped any anchor with nested inline tags.
+        """
+        # bold + javascript: -> plain text, no anchor
+        out = rph.render_body("[**click**](javascript:alert(1))")
+        self.assertNotIn("<a", out)
+        self.assertNotIn("<strong>", out)
+        self.assertIn("click", out)
+        self.assertIn("javascript:alert(1)", out)
+        # italic + data: -> plain text, no anchor
+        out = rph.render_body("[*emph*](data:text/html,<b>x</b>)")
+        self.assertNotIn("<a", out)
+        self.assertNotIn("<em>", out)
+        self.assertIn("emph", out)
+        # code + vbscript: -> plain text, no anchor
+        out = rph.render_body("[`run`](vbscript:msgbox(1))")
+        self.assertNotIn("<a", out)
+        self.assertNotIn("<code>", out)
+        self.assertIn("run", out)
+
     def test_link_data_scheme_rejected(self):
         out = rph.render_body("[click](data:text/html,<script>alert(1)</script>)")
         self.assertNotIn("<a", out)
