@@ -399,7 +399,7 @@ def select_gates_dynamic(
         # to evaluate rule #1 (iteration) and rule #4 (confidence).
         gate_catalog = {"gates": {}}
 
-    context = gate_dynamic.GateContext(
+    context = gate_dynamic.new_gate_context(
         parent_pr=parent_pr,
         head_sha=head_sha,
         iteration=iteration,
@@ -410,7 +410,7 @@ def select_gates_dynamic(
         gate_catalog=gate_catalog,
     )
     decision = gate_dynamic.select_gates(context, root)
-    return frozenset(d.gate_name for d in decision.decisions if d.skip)
+    return frozenset(d["gate_name"] for d in decision["decisions"] if d["skip"])
 
 
 def try_acquire_pr_lock(path: PathLike, body: str) -> bool:

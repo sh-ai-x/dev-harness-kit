@@ -30,7 +30,6 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -40,7 +39,12 @@ import yaml
 
 from lib import render_proposal_html
 from lib.atomic import atomic_write_text
-from lib.gh_cli import gh_available
+
+# gh presence + auth probe. Re-instated centralization (see lib/gh_cli.py).
+try:
+    from lib.gh_cli import _gh_available  # type: ignore
+except ImportError:
+    from gh_cli import _gh_available  # type: ignore
 
 # ----- Constants -------------------------------------------------------------
 
@@ -87,124 +91,124 @@ WIDE_PR_FILE_THRESHOLD = 20
 # ----- Data shapes -----------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class OpenItem:
-    """One open PR or issue, normalized for triage.
+# `OpenItem`, `ScoredItem`, `BacklogSnapshot` were `@dataclass(frozen=True)`
+# shapes. They are now plain dicts (issue #916): the per-field defaults
+# live in module constants and `new_*()` factories fill them in. The
+# methods/properties that used to belong to those classes moved to
+# module-level helpers (`containment_score`, `is_pr_item`,
+# `prs_in_snapshot`, `issues_in_snapshot`, `new_work_in_snapshot`) so
+# call sites read `containment_score(item, b)` instead of
+# `item.containment_score(b)`. All 15 OpenItem fields are still
+# populated; consumers must use `["key"]` (or `.get("body", "")` for
+# the one truly optional field).
 
-    `kind` is "pr" or "issue". `number`, `title`, `body` are
-    passthrough from gh. `state` is "OPEN" (open issues/PRs only —
-    closed items are filtered at snapshot time). `labels` is a tuple
-    of label names. `created_at` is ISO 8601. `updated_at` is ISO
-    8601. `author` is the login. `url` is the HTML URL. `is_draft` is
-    set for PRs. `base_ref_name`, `head_ref_name` are PR-only. For
-    issues those fields are empty. `checks_state` is one of
-    "success" / "failure" / "pending" / "none" / "" (PR-only;
-    `""` for issues). `files_count` is the PR's changed-files count
-    or 0 for issues.
+_OPEN_ITEM_DEFAULTS: Dict[str, Any] = {
+    "kind": "",
+    "number": 0,
+    "title": "",
+    "body": "",
+    "state": "OPEN",
+    "labels": (),
+    "created_at": "",
+    "updated_at": "",
+    "author": "",
+    "url": "",
+    "is_draft": False,
+    "base_ref_name": "",
+    "head_ref_name": "",
+    "checks_state": "",
+    "files_count": 0,
+}
+
+
+def new_open_item(**overrides) -> Dict[str, Any]:
+    """Build an OpenItem dict with defaults applied.
+
+    Mirrors the prior `OpenItem(...)` dataclass. `overrides` are
+    shallow-merged on top of `_OPEN_ITEM_DEFAULTS`.
     """
-
-    kind: str
-    number: int
-    title: str
-    body: str
-    state: str
-    labels: Tuple[str, ...]
-    created_at: str
-    updated_at: str
-    author: str
-    url: str
-    is_draft: bool = False
-    base_ref_name: str = ""
-    head_ref_name: str = ""
-    checks_state: str = ""
-    files_count: int = 0
-
-    def containment_score(self, boundary: str) -> int:
-        """Return the change-containment score for `boundary` (1-5).
-
-        Mirrors `DEFAULT_SCORES[b][2]`. Pass the boundary explicitly so
-        callers don't re-run `classify()` (the score rule already
-        classifies once and threads the result through).
-        """
-        return DEFAULT_SCORES.get(boundary, (3, 3, 3))[2]
-
-    @property
-    def is_pr(self) -> bool:
-        return self.kind == "pr"
+    out = dict(_OPEN_ITEM_DEFAULTS)
+    out.update(overrides)
+    return out
 
 
-@dataclass(frozen=True)
-class ScoredItem:
-    """OpenItem + the triage outputs (boundary, scores, disposition, bucket)."""
+def containment_score(item: Dict[str, Any], boundary: str) -> int:
+    """Return the change-containment score for `boundary` (1-5).
 
-    item: OpenItem
-    boundary: str
-    bottleneck: int
-    risk: int
-    containment: int
-    disposition: str
-    bucket: str
-
-    @property
-    def number(self) -> int:
-        return self.item.number
-
-    @property
-    def kind(self) -> str:
-        return self.item.kind
-
-    @property
-    def title(self) -> str:
-        return self.item.title
-
-    @property
-    def url(self) -> str:
-        return self.item.url
-
-    @property
-    def labels(self) -> Tuple[str, ...]:
-        return self.item.labels
-
-    @property
-    def checks_state(self) -> str:
-        return self.item.checks_state
-
-    @property
-    def files_count(self) -> int:
-        return self.item.files_count
-
-    @property
-    def is_draft(self) -> bool:
-        return self.item.is_draft
+    Mirrors `DEFAULT_SCORES[b][2]`. Pass the boundary explicitly so
+    callers don't re-run `classify()` (the score rule already
+    classifies once and threads the result through).
+    """
+    return DEFAULT_SCORES.get(boundary, (3, 3, 3))[2]
 
 
-@dataclass(frozen=True)
-class BacklogSnapshot:
-    """The triage-ready view of the open backlog."""
+def is_pr_item(item: Dict[str, Any]) -> bool:
+    """Return True when `item["kind"] == "pr"`."""
+    return item.get("kind") == "pr"
 
-    snapshot_date: str  # YYYY-MM-DD (Asia/Seoul)
-    main_head_sha: str
-    items: Tuple[OpenItem, ...]
 
-    def prs(self) -> Tuple[OpenItem, ...]:
-        return tuple(i for i in self.items if i.is_pr)
+_SCORED_ITEM_DEFAULTS: Dict[str, Any] = {
+    "item": None,
+    "boundary": "",
+    "bottleneck": 0,
+    "risk": 0,
+    "containment": 0,
+    "disposition": "",
+    "bucket": "",
+}
 
-    def issues(self) -> Tuple[OpenItem, ...]:
-        return tuple(i for i in self.items if not i.is_pr)
 
-    def new_work(self) -> Tuple[OpenItem, ...]:
-        cutoff = _parse_iso(self.snapshot_date + "T00:00:00+09:00")
-        threshold = cutoff - timedelta(days=NEW_WORK_WINDOW_DAYS)
-        out: List[OpenItem] = []
-        for i in self.items:
-            try:
-                created = _parse_iso(i.created_at)
-                updated = _parse_iso(i.updated_at)
-                if created >= threshold or updated >= threshold:
-                    out.append(i)
-            except Exception:
-                continue
-        return tuple(out)
+def new_scored_item(**overrides) -> Dict[str, Any]:
+    """Build a ScoredItem dict with defaults applied.
+
+    Mirrors the prior `ScoredItem(...)` dataclass. The 8 delegated
+    properties (number/kind/title/url/labels/checks_state/files_count/
+    is_draft) are gone — read them off `scored["item"]["..."]`
+    instead.
+    """
+    out = dict(_SCORED_ITEM_DEFAULTS)
+    out.update(overrides)
+    return out
+
+
+_BACKLOG_SNAPSHOT_DEFAULTS: Dict[str, Any] = {
+    "snapshot_date": "",
+    "main_head_sha": "",
+    "items": (),
+}
+
+
+def new_backlog_snapshot(**overrides) -> Dict[str, Any]:
+    """Build a BacklogSnapshot dict with defaults applied."""
+    out = dict(_BACKLOG_SNAPSHOT_DEFAULTS)
+    out.update(overrides)
+    return out
+
+
+def prs_in_snapshot(snap: Dict[str, Any]) -> Tuple[Dict[str, Any], ...]:
+    """Return the PR subset of `snap["items"]`."""
+    return tuple(i for i in snap["items"] if is_pr_item(i))
+
+
+def issues_in_snapshot(snap: Dict[str, Any]) -> Tuple[Dict[str, Any], ...]:
+    """Return the issue subset of `snap["items"]`."""
+    return tuple(i for i in snap["items"] if not is_pr_item(i))
+
+
+def new_work_in_snapshot(snap: Dict[str, Any]) -> Tuple[Dict[str, Any], ...]:
+    """Return items created or commented in the last NEW_WORK_WINDOW_DAYS."""
+    cutoff = _parse_iso(snap["snapshot_date"] + "T00:00:00+09:00")
+    threshold = cutoff - timedelta(days=NEW_WORK_WINDOW_DAYS)
+    out: List[Dict[str, Any]] = []
+    for i in snap["items"]:
+        try:
+            created = _parse_iso(i.get("created_at", ""))
+            updated = _parse_iso(i.get("updated_at", ""))
+            if created >= threshold or updated >= threshold:
+                out.append(i)
+        except Exception:
+            continue
+    return tuple(out)
 
 
 # ----- Errors ----------------------------------------------------------------
@@ -227,7 +231,7 @@ class SnapshotError(RuntimeError):
 # GhUnavailable on missing CLI / unauthenticated / non-zero exit, and
 # SnapshotError on malformed JSON.
 def _run_gh(args: List[str]) -> str:
-    gh_path, degraded = gh_available()
+    gh_path, degraded = _gh_available()
     if not gh_path:
         raise GhUnavailable(degraded or "gh unavailable")
     cp = subprocess.run(
@@ -273,12 +277,12 @@ ISSUE_LIST_FIELDS = ",".join((
 ))
 
 
-def _common_normalize(raw: Dict[str, Any], *, kind: str) -> OpenItem:
-    """Build an OpenItem from a `gh {kind} list` JSON record.
+def _common_normalize(raw: Dict[str, Any], *, kind: str) -> Dict[str, Any]:
+    """Build an OpenItem dict from a `gh {kind} list` JSON record.
 
     `kind` is `"pr"` or `"issue"`. PR-specific fields default to empty
     strings / zero counts; issue-specific fields default to PR defaults
-    via the dataclass. Both record shapes share the eight fields below
+    via `new_open_item`. Both record shapes share the eight fields below
     (number / title / body / state / labels / createdAt / updatedAt /
     author / url).
     """
@@ -290,7 +294,7 @@ def _common_normalize(raw: Dict[str, Any], *, kind: str) -> OpenItem:
     labels = tuple(
         str(label.get("name", "")) for label in (raw.get("labels") or [])
     )
-    return OpenItem(
+    return new_open_item(
         kind=kind,
         number=int(raw["number"]),
         title=str(raw.get("title", "")),
@@ -307,13 +311,13 @@ def _common_normalize(raw: Dict[str, Any], *, kind: str) -> OpenItem:
     )
 
 
-def _normalize_pr_safe(raw: Dict[str, Any]) -> OpenItem:
-    """Build an OpenItem from a PR-list JSON record."""
+def _normalize_pr_safe(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Build an OpenItem dict from a PR-list JSON record."""
     return _common_normalize(raw, kind="pr")
 
 
-def _normalize_issue(raw: Dict[str, Any]) -> OpenItem:
-    """Build an OpenItem from an issue-list JSON record."""
+def _normalize_issue(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Build an OpenItem dict from an issue-list JSON record."""
     return _common_normalize(raw, kind="issue")
 
 
@@ -386,7 +390,7 @@ _TITLE_RULES: List[Tuple[re.Pattern[str], str]] = [
 ]
 
 
-def classify(item: OpenItem) -> str:
+def classify(item: Dict[str, Any]) -> str:
     """Map an open item to its orchestrator boundary.
 
     Label rules are tried first; on no match, title/body pattern rules
@@ -394,9 +398,9 @@ def classify(item: OpenItem) -> str:
     unspecified is assumed to touch state until proven otherwise).
     """
     haystack = " ".join((
-        item.title.lower(),
-        (item.body or "").lower(),
-        " ".join(item.labels).lower(),
+        item["title"].lower(),
+        (item.get("body") or "").lower(),
+        " ".join(item.get("labels") or ()).lower(),
     ))
     for rx, boundary in _LABEL_RULES:
         if rx.search(haystack):
@@ -424,7 +428,7 @@ DEFAULT_SCORES: Dict[str, Tuple[int, int, int]] = {
 }
 
 
-def score(item: OpenItem, boundary: Optional[str] = None) -> Tuple[int, int, int]:
+def score(item: Dict[str, Any], boundary: Optional[str] = None) -> Tuple[int, int, int]:
     """Return (bottleneck, risk, containment) for `item`.
 
     A wide PR on the critical path adds +1 to risk (more files = more
@@ -434,15 +438,15 @@ def score(item: OpenItem, boundary: Optional[str] = None) -> Tuple[int, int, int
     b = boundary or classify(item)
     base = DEFAULT_SCORES.get(b, (3, 3, 3))
     bottleneck, risk, containment = base
-    if item.is_pr and item.files_count > WIDE_PR_FILE_THRESHOLD:
+    if is_pr_item(item) and item.get("files_count", 0) > WIDE_PR_FILE_THRESHOLD:
         risk = min(5, risk + 1)
-    if item.checks_state == "failure":
+    if item.get("checks_state") == "failure":
         bottleneck = min(5, bottleneck + 1)
     return (bottleneck, risk, containment)
 
 
 def recommend_disposition(
-    item: OpenItem,
+    item: Dict[str, Any],
     boundary: Optional[str] = None,
 ) -> str:
     """Pick one disposition based on the item's signature.
@@ -458,8 +462,8 @@ def recommend_disposition(
     """
     b = boundary or classify(item)
 
-    title_lower = item.title.lower()
-    body_lower = (item.body or "").lower()
+    title_lower = item["title"].lower()
+    body_lower = (item.get("body") or "").lower()
     if any(k in title_lower for k in ("duplicate of", "superseded by", "wontfix", "won't fix")):
         return "reject"
     if "duplicate" in body_lower[:200] and "/issues/" in body_lower[:200]:
@@ -467,12 +471,13 @@ def recommend_disposition(
 
     is_critical_path = b not in ("throughput", "measurement", "documentation")
 
-    if is_critical_path and item.is_pr:
-        if item.checks_state == "failure" or item.checks_state == "pending":
+    if is_critical_path and is_pr_item(item):
+        checks_state = item.get("checks_state")
+        if checks_state == "failure" or checks_state == "pending":
             return "replace"
-        if item.files_count > WIDE_PR_FILE_THRESHOLD:
+        if item.get("files_count", 0) > WIDE_PR_FILE_THRESHOLD:
             return "replace"
-        if item.containment_score(b) >= 4:
+        if containment_score(item, b) >= 4:
             return "keep"
         return "replace"
 
@@ -516,7 +521,7 @@ def snapshot_open_backlog(
     *,
     repo_root: Path,
     gh_runner: Optional[Callable[[List[str]], str]] = None,
-) -> BacklogSnapshot:
+) -> Dict[str, Any]:
     """Fetch the open PR + issue snapshot for `repo_root`.
 
     `gh_runner` defaults to `_run_gh`; tests pass a fake. The function
@@ -542,37 +547,37 @@ def snapshot_open_backlog(
     if not isinstance(prs_raw, list) or not isinstance(issues_raw, list):
         raise SnapshotError("gh list returned non-list JSON")
 
-    prs: List[OpenItem] = []
+    prs: List[Dict[str, Any]] = []
     for raw in prs_raw:
         if not isinstance(raw, dict):
             continue
         base_item = _normalize_pr_safe(raw)
-        checks, files = _fetch_pr_checks_for(base_item.number, runner)
-        prs.append(OpenItem(
-            kind=base_item.kind,
-            number=base_item.number,
-            title=base_item.title,
-            body=base_item.body,
-            state=base_item.state,
-            labels=base_item.labels,
-            created_at=base_item.created_at,
-            updated_at=base_item.updated_at,
-            author=base_item.author,
-            url=base_item.url,
-            is_draft=base_item.is_draft,
-            base_ref_name=base_item.base_ref_name,
-            head_ref_name=base_item.head_ref_name,
+        checks, files = _fetch_pr_checks_for(base_item["number"], runner)
+        prs.append(new_open_item(
+            kind=base_item["kind"],
+            number=base_item["number"],
+            title=base_item["title"],
+            body=base_item["body"],
+            state=base_item["state"],
+            labels=base_item["labels"],
+            created_at=base_item["created_at"],
+            updated_at=base_item["updated_at"],
+            author=base_item["author"],
+            url=base_item["url"],
+            is_draft=base_item["is_draft"],
+            base_ref_name=base_item["base_ref_name"],
+            head_ref_name=base_item["head_ref_name"],
             checks_state=checks,
             files_count=files,
         ))
 
-    issues: List[OpenItem] = []
+    issues: List[Dict[str, Any]] = []
     for raw in issues_raw:
         if not isinstance(raw, dict):
             continue
         issues.append(_normalize_issue(raw))
 
-    return BacklogSnapshot(
+    return new_backlog_snapshot(
         snapshot_date=snapshot_date,
         main_head_sha=main_sha,
         items=tuple(prs + issues),
@@ -601,13 +606,13 @@ def _read_main_head(repo_root: Path) -> str:
 # ----- Compose YAML ----------------------------------------------------------
 
 
-def _score_one(item: OpenItem) -> ScoredItem:
+def _score_one(item: Dict[str, Any]) -> Dict[str, Any]:
     """Compute one item's triage outputs in a single pass."""
     boundary = classify(item)
     s = score(item, boundary)
     disposition = recommend_disposition(item, boundary)
     bucket = bucket_for(boundary) if disposition != "reject" else ""
-    return ScoredItem(
+    return new_scored_item(
         item=item,
         boundary=boundary,
         bottleneck=s[0],
@@ -618,26 +623,26 @@ def _score_one(item: OpenItem) -> ScoredItem:
     )
 
 
-def compose_yaml(snapshot: BacklogSnapshot) -> Tuple[str, Dict[str, int]]:
+def compose_yaml(snapshot: Dict[str, Any]) -> Tuple[str, Dict[str, int]]:
     """Build the proposal YAML text + per-disposition counts.
 
     The output text is byte-identical for a given snapshot (modulo the
-    date field, which is `snapshot.snapshot_date`). The grammar matches
+    date field, which is `snapshot["snapshot_date"]`). The grammar matches
     what `lib/render_proposal_html.parse_proposal_yaml` accepts. The
     returned counts dict lets `main()` report the disposition
     distribution without re-running `_score_one` over the snapshot.
     """
-    scored: List[ScoredItem] = [_score_one(i) for i in snapshot.items]
+    scored: List[Dict[str, Any]] = [_score_one(i) for i in snapshot["items"]]
 
-    by_bucket: Dict[str, List[ScoredItem]] = {b: [] for b in ORDER_BUCKETS}
+    by_bucket: Dict[str, List[Dict[str, Any]]] = {b: [] for b in ORDER_BUCKETS}
     for sc in scored:
-        if sc.bucket in by_bucket:
-            by_bucket[sc.bucket].append(sc)
+        if sc["bucket"] in by_bucket:
+            by_bucket[sc["bucket"]].append(sc)
 
     disposition_counts: Dict[str, int] = {d: 0 for d in DISPOSITIONS}
     for sc in scored:
-        disposition_counts[sc.disposition] = (
-            disposition_counts.get(sc.disposition, 0) + 1
+        disposition_counts[sc["disposition"]] = (
+            disposition_counts.get(sc["disposition"], 0) + 1
         )
 
     # The proposal payload is a dict; yaml.safe_dump round-trips cleanly.
@@ -645,7 +650,7 @@ def compose_yaml(snapshot: BacklogSnapshot) -> Tuple[str, Dict[str, int]]:
         "title": "Open work priority — orchestrator-first triage",
         "status": "ready-for-review",
         "issue": 843,
-        "date": snapshot.snapshot_date,
+        "date": snapshot["snapshot_date"],
         "tags": ["long-running", "ralph", "orchestrator", "triage",
                  "github-backlog"],
         "before": {
@@ -658,7 +663,7 @@ def compose_yaml(snapshot: BacklogSnapshot) -> Tuple[str, Dict[str, int]]:
                 {"path": "docs/proposals/pending/long-running-priorities/open-work-priority.yaml",
                  "change": "Snapshot date + open-PR/issue table + per-bucket sections regenerated by /dev-kit:proposal-orch-issue-pr."},
                 {"path": "docs/proposals/pending/long-running-priorities/open-work-priority.html",
-                 "change": "Rendered HTML deliverable (via lib/render_proposal_html)."},
+                 "change": "Rendered HTML deliverable (via lib.render_proposal_html)."},
             ],
         },
         "pros": _compose_pros(),
@@ -672,24 +677,24 @@ def compose_yaml(snapshot: BacklogSnapshot) -> Tuple[str, Dict[str, int]]:
     # parse comments, but a reviewer reading the source sees when the
     # snapshot was taken and from what HEAD.
     header = (
-        f"# Snapshot date: {snapshot.snapshot_date} (Asia/Seoul)\n"
-        f"# origin/main HEAD: {snapshot.main_head_sha or 'unknown'}\n"
+        f"# Snapshot date: {snapshot['snapshot_date']} (Asia/Seoul)\n"
+        f"# origin/main HEAD: {snapshot['main_head_sha'] or 'unknown'}\n"
         f"# Generated by: /dev-kit:proposal-orch-issue-pr\n"
-        f"# Open PRs: {len(snapshot.prs())}, Open issues: {len(snapshot.issues())}\n"
+        f"# Open PRs: {len(prs_in_snapshot(snapshot))}, Open issues: {len(issues_in_snapshot(snapshot))}\n"
     )
     return (header + text, disposition_counts)
 
 
 def _compose_before_summary(
-    snapshot: BacklogSnapshot,
-    scored: List[ScoredItem],
+    snapshot: Dict[str, Any],
+    scored: List[Dict[str, Any]],
 ) -> str:
-    n_prs = len(snapshot.prs())
-    n_issues = len(snapshot.issues())
-    new = snapshot.new_work()
+    n_prs = len(prs_in_snapshot(snapshot))
+    n_issues = len(issues_in_snapshot(snapshot))
+    new = new_work_in_snapshot(snapshot)
     return (
         f"The repository has **{n_prs} open PRs** and **{n_issues} open issues** "
-        f"as of {snapshot.snapshot_date}. Newly-created work in the last "
+        f"as of {snapshot['snapshot_date']}. Newly-created work in the last "
         f"{NEW_WORK_WINDOW_DAYS} days: {len(new)} item(s). The previous triage "
         f"treated the open PR list as a merge queue — that abstraction is "
         f"wrong for an orchestrator because an orchestrator is blocked by "
@@ -703,22 +708,22 @@ def _compose_before_summary(
 
 
 def _compose_before_evidence(
-    snapshot: BacklogSnapshot,
-    scored: List[ScoredItem],
+    snapshot: Dict[str, Any],
+    scored: List[Dict[str, Any]],
     counts: Dict[str, int],
 ) -> List[str]:
     out: List[str] = [
-        f"Snapshot date: {snapshot.snapshot_date} (Asia/Seoul)",
-        f"origin/main HEAD: `{snapshot.main_head_sha or 'unknown'}`",
-        f"Open PRs: {len(snapshot.prs())}",
-        f"Open issues: {len(snapshot.issues())}",
+        f"Snapshot date: {snapshot['snapshot_date']} (Asia/Seoul)",
+        f"origin/main HEAD: `{snapshot['main_head_sha'] or 'unknown'}`",
+        f"Open PRs: {len(prs_in_snapshot(snapshot))}",
+        f"Open issues: {len(issues_in_snapshot(snapshot))}",
         "Accept-issue-not-PR rule: `/dev-kit:proposal-orch-issue-pr` issue body, step 6",
     ]
     out.extend(f"Disposition `{d}`: {n}" for d, n in counts.items())
     return out
 
 
-def _compose_after_summary(scored: List[ScoredItem]) -> str:
+def _compose_after_summary(scored: List[Dict[str, Any]]) -> str:
     return (
         "Backlog is reordered around the orchestrator's critical path. The "
         "first wave hard-stops edit-admission failures and ensures durable "
@@ -763,9 +768,9 @@ def _compose_limitations() -> List[str]:
 
 
 def _compose_sections(
-    snapshot: BacklogSnapshot,
-    scored: List[ScoredItem],
-    by_bucket: Dict[str, List[ScoredItem]],
+    snapshot: Dict[str, Any],
+    scored: List[Dict[str, Any]],
+    by_bucket: Dict[str, List[Dict[str, Any]]],
     disposition_counts: Dict[str, int],
 ) -> List[Dict[str, str]]:
     sections: List[Dict[str, str]] = []
@@ -773,12 +778,12 @@ def _compose_sections(
     sections.append({
         "title": "Snapshot summary",
         "body": (
-            f"- Snapshot date: {snapshot.snapshot_date} (Asia/Seoul)\n"
-            f"- origin/main HEAD: `{snapshot.main_head_sha or 'unknown'}`\n"
-            f"- Open PRs: **{len(snapshot.prs())}**\n"
-            f"- Open issues: **{len(snapshot.issues())}**\n"
+            f"- Snapshot date: {snapshot['snapshot_date']} (Asia/Seoul)\n"
+            f"- origin/main HEAD: `{snapshot['main_head_sha'] or 'unknown'}`\n"
+            f"- Open PRs: **{len(prs_in_snapshot(snapshot))}**\n"
+            f"- Open issues: **{len(issues_in_snapshot(snapshot))}**\n"
             f"- Newly-created work (last {NEW_WORK_WINDOW_DAYS} days): "
-            f"**{len(snapshot.new_work())}**\n"
+            f"**{len(new_work_in_snapshot(snapshot))}**\n"
             f"- Dispositions: keep={disposition_counts['keep']}, "
             f"replace={disposition_counts['replace']}, "
             f"defer={disposition_counts['defer']}, "
@@ -839,7 +844,7 @@ def _compose_sections(
     return sections
 
 
-def _render_bottleneck_table(scored: List[ScoredItem]) -> str:
+def _render_bottleneck_table(scored: List[Dict[str, Any]]) -> str:
     """Render the per-item B/R/C + disposition table."""
     lines = [
         "| Item | Boundary | B | R | C | Recommendation |",
@@ -849,42 +854,45 @@ def _render_bottleneck_table(scored: List[ScoredItem]) -> str:
     ordered = sorted(
         scored,
         key=lambda sc: (
-            bucket_index.get(sc.bucket, 99),
-            -sc.bottleneck,
-            -sc.risk,
-            sc.item.number,
+            bucket_index.get(sc["bucket"], 99),
+            -sc["bottleneck"],
+            -sc["risk"],
+            sc["item"]["number"],
         ),
     )
     for sc in ordered:
-        kind = "PR" if sc.item.is_pr else "Issue"
+        item = sc["item"]
+        kind = "PR" if is_pr_item(item) else "Issue"
         lines.append(
-            f"| [{kind} #{sc.item.number}]({sc.item.url}) | "
-            f"{sc.boundary} | {sc.bottleneck} | {sc.risk} | {sc.containment} | "
-            f"{sc.disposition} |"
+            f"| [{kind} #{item['number']}]({item['url']}) | "
+            f"{sc['boundary']} | {sc['bottleneck']} | {sc['risk']} | {sc['containment']} | "
+            f"{sc['disposition']} |"
         )
     return "\n".join(lines) + "\n"
 
 
-def _render_bucket_sections(by_bucket: Dict[str, List[ScoredItem]]) -> str:
+def _render_bucket_sections(by_bucket: Dict[str, List[Dict[str, Any]]]) -> str:
     """Render the per-bucket sections in fixed critical-path order."""
     out: List[str] = []
     for bucket in ORDER_BUCKETS:
-        items = sorted(by_bucket.get(bucket, []), key=lambda s: (-s.bottleneck, s.item.number))
+        items = sorted(by_bucket.get(bucket, []), key=lambda s: (-s["bottleneck"], s["item"]["number"]))
         out.append(f"### {bucket}\n")
         if not items:
             out.append("(no items)\n")
             continue
         for sc in items:
-            kind = "PR" if sc.item.is_pr else "Issue"
-            summary = (sc.item.body or "").splitlines()[0] if sc.item.body else ""
+            item = sc["item"]
+            kind = "PR" if is_pr_item(item) else "Issue"
+            body = item.get("body") or ""
+            summary = body.splitlines()[0] if body else ""
             out.append(
-                f"- [{kind} #{sc.item.number}]({sc.item.url}) — "
-                f"boundary `{sc.boundary}`, "
-                f"B/R/C = {sc.bottleneck}/{sc.risk}/{sc.containment}, "
-                f"disposition **{sc.disposition}**, "
-                f"checks_state `{sc.item.checks_state or 'n/a'}`, "
-                f"files={sc.item.files_count}.\n"
-                f"  - {sc.item.title}\n"
+                f"- [{kind} #{item['number']}]({item['url']}) — "
+                f"boundary `{sc['boundary']}`, "
+                f"B/R/C = {sc['bottleneck']}/{sc['risk']}/{sc['containment']}, "
+                f"disposition **{sc['disposition']}**, "
+                f"checks_state `{item.get('checks_state') or 'n/a'}`, "
+                f"files={item.get('files_count')}.\n"
+                f"  - {item['title']}\n"
                 f"  - {summary[:160]}"
             )
         out.append("")
@@ -934,26 +942,28 @@ def _render_tradeoffs() -> str:
     )
 
 
-def _render_snapshot_list(scored: List[ScoredItem]) -> str:
+def _render_snapshot_list(scored: List[Dict[str, Any]]) -> str:
     """Render the raw open-PR + open-issue list with disposition + checks."""
-    prs = sorted([sc for sc in scored if sc.item.is_pr], key=lambda s: s.item.number)
-    issues = sorted([sc for sc in scored if not sc.item.is_pr], key=lambda s: s.item.number)
+    prs = sorted([sc for sc in scored if is_pr_item(sc["item"])], key=lambda s: s["item"]["number"])
+    issues = sorted([sc for sc in scored if not is_pr_item(sc["item"])], key=lambda s: s["item"]["number"])
     lines: List[str] = []
     if prs:
         lines.append("**Open PRs:**")
         for sc in prs:
+            item = sc["item"]
             lines.append(
-                f"- [#{sc.item.number}]({sc.item.url}) — `{sc.disposition}`, "
-                f"checks_state=`{sc.item.checks_state or 'n/a'}`, "
-                f"files={sc.item.files_count}: {sc.item.title}"
+                f"- [#{item['number']}]({item['url']}) — `{sc['disposition']}`, "
+                f"checks_state=`{item.get('checks_state') or 'n/a'}`, "
+                f"files={item.get('files_count')}: {item['title']}"
             )
         lines.append("")
     if issues:
         lines.append("**Open issues:**")
         for sc in issues:
+            item = sc["item"]
             lines.append(
-                f"- [#{sc.item.number}]({sc.item.url}) — `{sc.disposition}`: "
-                f"{sc.item.title}"
+                f"- [#{item['number']}]({item['url']}) — `{sc['disposition']}`: "
+                f"{item['title']}"
             )
         lines.append("")
     if not prs and not issues:
@@ -1087,9 +1097,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print("## /dev-kit:proposal-orch-issue-pr")
     print()
-    print(f"**Snapshot date**: {snapshot.snapshot_date}")
-    print(f"**Open PRs**: {len(snapshot.prs())}")
-    print(f"**Open issues**: {len(snapshot.issues())}")
+    print(f"**Snapshot date**: {snapshot['snapshot_date']}")
+    print(f"**Open PRs**: {len(prs_in_snapshot(snapshot))}")
+    print(f"**Open issues**: {len(issues_in_snapshot(snapshot))}")
     print(f"**Bucket**: {args.bucket}")
     print(
         f"**Source**: docs/proposals/{args.bucket}/{args.main}/{args.sub}.yaml"

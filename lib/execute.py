@@ -762,7 +762,7 @@ def _step_pre_spawn(
             controller="executor",
             origin=ORIGIN_RUNTIME,
         )
-        attempt_token = enrolled.identity["attempt_id"]
+        attempt_token = enrolled["identity"]["attempt_id"]
         _eff_observe(
             root,
             run_id=run_id,

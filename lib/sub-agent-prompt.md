@@ -1,9 +1,10 @@
 <!--
   sub-agent-prompt.md — ACP canonical sub-agent hand-off template.
 
-  This is a TEMPLATE, not a discoverable skill. The leading underscore on
-  the `_acp` directory and the lack of `name:`/`category:` frontmatter
-  keep it out of the `skills/` namespace (per rules/skill-authoring.md).
+  This is a TEMPLATE, not a discoverable skill. Living in `lib/`
+  (next to acp_dispatch.py) rather than `skills/` keeps it out of the
+  slash-command namespace without needing the `_` prefix convention
+  (per rules/skill-authoring.md).
 
   The M (orchestrator) copies this template into every dispatch and
   populates all seven placeholders. tests/test_acp_hand_off.py refuses

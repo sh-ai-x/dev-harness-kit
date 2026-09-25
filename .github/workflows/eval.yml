@@ -1,0 +1,80 @@
+name: eval
+
+# Wires `lib.eval_runner` into a CI gate so the eval infrastructure
+# is exercised on every PR and push, not only by pytest tests.
+#
+# Why this exists (rationale: weak-point remediation iteration 1):
+# - `lib.eval_runner.run_eval()` + `run_golden_diff()` were reachable
+#   only via `python -m pytest tests/` — the eval system was not a
+#   real gate, just a transitive test helper.
+# - `tools/eval_gate.py` is the thin wrapper that exits non-zero when
+#   `summary.ok` is False (critical markers or removed golden cases).
+# - Without this workflow, an import error or schema drift in
+#   `lib/eval_runner` would not surface as a red CI status.
+#
+# Triggers:
+# - pull_request to main: per-PR eval gate
+# - push to main: post-merge re-baseline (catches a missed PR-side failure)
+# - nightly cron: catches drift in transcripts/goldens when no PR fires
+# - workflow_dispatch: manual rerun (e.g. after golden bump)
+#
+# Skip on bump-PRs (mirrors ci.yml pattern):
+# `chore(release): bump dev-kit to v...` triggers version-bump.yml and
+# re-touches the plugin manifest, but the eval baseline does not change
+# so the gate can be skipped.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  schedule:
+    # 03:13 UTC = 12:13 KST — off the :00/:30 stampede.
+    # See rules/session-hygiene.md Iron Law 6 for cadence rationale.
+    - cron: '13 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  eval:
+    name: eval gate (review + security + plan)
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request'
+       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v'))
+      || github.event_name == 'push'
+      || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install --quiet -r requirements.lock
+
+      - name: Run eval gate
+        # tools/eval_gate.py wraps run_eval + run_golden_diff and exits
+        # non-zero on critical markers or removed golden cases. The
+        # default mode is --dry-run (no LLM calls) — see the wrapper
+        # docstring for the rationale.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 tools/eval_gate.py
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4
+        with:
+          name: eval-reports
+          path: |
+            .dev-kit/eval-report.md
+            .dev-kit/regression-report.md
+          if-no-files-found: ignore
+          retention-days: 14

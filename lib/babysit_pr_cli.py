@@ -38,13 +38,12 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from babysit_pr_loop import (  # noqa: E402
     STATE_FILE,
-    LoopState,
     load_state,
     new_state,
     observe,
@@ -482,14 +481,14 @@ def _load_or_create_loop_state(
     *,
     current_pr: int | None = None,
     state_path: PathLike = STATE_FILE,
-) -> LoopState:
+) -> dict[str, Any]:
     """Load the durable controller state, or initialize it for this PR."""
     state = load_state(state_path)
     if state is None:
         return new_state(parent_pr, current_pr=current_pr)
-    if state.parent_pr != parent_pr:
+    if state["parent_pr"] != parent_pr:
         raise ValueError(
-            f"state belongs to PR #{state.parent_pr}, not PR #{parent_pr}"
+            f"state belongs to PR #{state['parent_pr']}, not PR #{parent_pr}"
         )
     return state
 
@@ -508,7 +507,7 @@ def persist_loop_snapshot(
     linear_issue: str = "",
     dynamic_skipped: frozenset | None = None,
     state_path: PathLike = STATE_FILE,
-) -> LoopState:
+) -> dict[str, Any]:
     """Persist one fresh GitHub snapshot and return its resumable phase.
 
     This is the production seam used by the babysit-pr orchestration layer:
@@ -525,11 +524,11 @@ def persist_loop_snapshot(
         parent_pr, current_pr=current_pr, state_path=state_path
     )
     if github_tracker_issue is not None or linear_issue:
-        state = replace(
-            state,
-            github_tracker_issue=github_tracker_issue or state.github_tracker_issue,
-            linear_issue=linear_issue or state.linear_issue,
-        )
+        state = {
+            **state,
+            "github_tracker_issue": github_tracker_issue or state["github_tracker_issue"],
+            "linear_issue": linear_issue or state["linear_issue"],
+        }
     state = observe(
         state,
         head_sha=head_sha,
@@ -554,7 +553,7 @@ def persist_loop_outcome(
     linear_issue: str = "",
     dynamic_skipped: frozenset | None = None,
     state_path: PathLike = STATE_FILE,
-) -> LoopState:
+) -> dict[str, Any]:
     """Persist repair verification evidence and the next strategy.
 
     `dynamic_skipped` (v1.1.0) — same semantics as in
@@ -564,11 +563,11 @@ def persist_loop_outcome(
         parent_pr, current_pr=current_pr, state_path=state_path
     )
     if github_tracker_issue is not None or linear_issue:
-        state = replace(
-            state,
-            github_tracker_issue=github_tracker_issue or state.github_tracker_issue,
-            linear_issue=linear_issue or state.linear_issue,
-        )
+        state = {
+            **state,
+            "github_tracker_issue": github_tracker_issue or state["github_tracker_issue"],
+            "linear_issue": linear_issue or state["linear_issue"],
+        }
     state = record_outcome(
         state, outcome=outcome, now_iso=now_iso,
         dynamic_skipped=dynamic_skipped,

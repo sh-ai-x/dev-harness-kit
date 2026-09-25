@@ -7,15 +7,17 @@ disposable projection, strict per-root locking and fsync durability.
 
 Public surface:
 
-* :class:`Envelope` — v1 result envelope (counts / ratio / readiness /
-  cutoff).
-* :class:`Store` — file-locked operations over the journal + projection.
 * :func:`enroll` / :func:`observe` / :func:`collect` / :func:`probe` —
   high-level helpers used by ``lib/execute.py`` and the SessionStart /
   Stop / SessionEnd hooks. Each helper is best-effort: collection
   errors never change the workflow exit code.
 * :func:`_cli` — ``python -m lib.effectiveness_collection
   {enroll,observe,collect,probe,status}`` driver used by hook scripts.
+
+Records and envelopes are plain dicts (no dataclass wrappers); the
+diagnostic surface used to live on ``Record.attr`` /
+``Envelope.attr`` attribute access — replaced with ``["attr"]`` key
+access on the dict returned by each helper or :func:`_iter_records`.
 
 Design rules (re-stated for grep):
 
@@ -41,7 +43,6 @@ import os
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -138,6 +139,22 @@ ALL_READINESS: Tuple[str, ...] = (
     READINESS_READY,
     READINESS_COVERAGE_BELOW_POLICY,
 )
+
+# Module-level defaults — the dataclass-era ``Store.adapter_capabilities``
+# and ``Store.policy`` instance fields, hoisted so tests can rely on
+# them without instantiating a Store.
+_DEFAULT_ADAPTER_CAPABILITIES: Dict[str, bool] = {
+    "session_enroll": True,
+    "session_close": True,
+    "executor_enroll": True,
+    "executor_close": True,
+}
+
+_DEFAULT_POLICY: Dict[str, Any] = {
+    "runtime_coverage": DEFAULT_RUNTIME_COVERAGE,
+    "ci_coverage": 1.0,
+    "ci_origin": ORIGIN_CI_PROBE,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -285,122 +302,45 @@ def _record_hash(
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Record + envelope dataclasses
-# ---------------------------------------------------------------------------
+def _normalize_record(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Lift a raw JSON-decoded record into a normalized dict (keys + types)."""
+    return {
+        "schema_version": int(raw["schema_version"]),
+        "record_id": str(raw["record_id"]),
+        "prev_hash": str(raw["prev_hash"]),
+        "transition": str(raw["transition"]),
+        "identity": {k: str(v) for k, v in raw["identity"].items()},
+        "outcome": str(raw["outcome"]),
+        "payload": dict(raw.get("payload") or {}),
+        "ts": str(raw["ts"]),
+        "record_hash": str(raw["record_hash"]),
+    }
 
 
-@dataclass
-class Record:
-    """One journal entry. ``record_hash`` chains from the previous record's hash."""
-
-    schema_version: int
-    record_id: str
-    prev_hash: str
-    transition: str
-    identity: Dict[str, str]
-    outcome: str
-    payload: Dict[str, Any]
-    ts: str
-    record_hash: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "record_id": self.record_id,
-            "prev_hash": self.prev_hash,
-            "transition": self.transition,
-            "identity": dict(self.identity),
-            "outcome": self.outcome,
-            "payload": dict(self.payload),
-            "ts": self.ts,
-            "record_hash": self.record_hash,
-        }
-
-    @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "Record":
-        return cls(
-            schema_version=int(raw["schema_version"]),
-            record_id=str(raw["record_id"]),
-            prev_hash=str(raw["prev_hash"]),
-            transition=str(raw["transition"]),
-            identity={k: str(v) for k, v in raw["identity"].items()},
-            outcome=str(raw["outcome"]),
-            payload=dict(raw.get("payload") or {}),
-            ts=str(raw["ts"]),
-            record_hash=str(raw["record_hash"]),
-        )
-
-
-@dataclass
-class Envelope:
-    """v1 measurement envelope — the projection's public shape."""
-
-    schema_version: int
-    contract_version: str
-    root_id: str
-    origin: str
-    collected_at: str
-    cutoff: str
-    journal_seq: int
-    journal_hash: str
-    adapter_capabilities: Dict[str, bool]
-    policy: Dict[str, Any]
-    retention_floor: str
-    counts: Dict[str, int]
-    ratios: Dict[str, Optional[float]]
-    readiness: str
-    findings: List[str]
-    quality_availability: Dict[str, str]
-    bounded_errors: List[str]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "contract_version": self.contract_version,
-            "root_id": self.root_id,
-            "origin": self.origin,
-            "collected_at": self.collected_at,
-            "cutoff": self.cutoff,
-            "journal_seq": self.journal_seq,
-            "journal_hash": self.journal_hash,
-            "adapter_capabilities": dict(self.adapter_capabilities),
-            "policy": dict(self.policy),
-            "retention_floor": self.retention_floor,
-            "counts": dict(self.counts),
-            "ratios": dict(self.ratios),
-            "readiness": self.readiness,
-            "findings": list(self.findings),
-            "quality_availability": dict(self.quality_availability),
-            "bounded_errors": list(self.bounded_errors),
-        }
-
-    @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "Envelope":
-        return cls(
-            schema_version=int(raw["schema_version"]),
-            contract_version=str(raw["contract_version"]),
-            root_id=str(raw["root_id"]),
-            origin=str(raw["origin"]),
-            collected_at=str(raw["collected_at"]),
-            cutoff=str(raw["cutoff"]),
-            journal_seq=int(raw["journal_seq"]),
-            journal_hash=str(raw["journal_hash"]),
-            adapter_capabilities={
-                k: bool(v) for k, v in raw.get("adapter_capabilities", {}).items()
-            },
-            policy=dict(raw.get("policy") or {}),
-            retention_floor=str(raw["retention_floor"]),
-            counts={k: int(v) for k, v in raw.get("counts", {}).items()},
-            ratios={
-                k: (None if v is None else float(v))
-                for k, v in raw.get("ratios", {}).items()
-            },
-            readiness=str(raw["readiness"]),
-            findings=list(raw.get("findings") or []),
-            quality_availability=dict(raw.get("quality_availability") or {}),
-            bounded_errors=list(raw.get("bounded_errors") or []),
-        )
+def _build_record(
+    prev_hash: str,
+    transition: str,
+    identity: Dict[str, str],
+    outcome: str,
+    payload: Dict[str, Any],
+    record_id: str,
+    ts: str,
+) -> Dict[str, Any]:
+    """Build the on-disk + in-memory record dict with the chain hash."""
+    r_hash = _record_hash(
+        prev_hash, transition, identity, outcome, payload, record_id
+    )
+    return {
+        "schema_version": ENVELOPE_SCHEMA_VERSION,
+        "record_id": record_id,
+        "prev_hash": prev_hash,
+        "transition": transition,
+        "identity": dict(identity),
+        "outcome": outcome,
+        "payload": dict(payload),
+        "ts": ts,
+        "record_hash": r_hash,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -476,13 +416,30 @@ class _FileLock:
 # ---------------------------------------------------------------------------
 
 
-def _iter_records(root: Path) -> Iterable[Record]:
+def _read_tail_record(path: Path) -> Optional[Dict[str, Any]]:
+    """Return the last record dict in a segment (or None). Skips malformed lines."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    last: Optional[Dict[str, Any]] = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            last = _normalize_record(json.loads(line))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return last
+
+
+def _iter_records(root: Path) -> Iterable[Dict[str, Any]]:
     """Yield every record across all journal segments, oldest first.
 
     Malformed or truncated lines are skipped silently here; the journal
-    repair path inside :meth:`Store.append` owns the recovery story.
-    The caller (:meth:`Store.collect`) wraps this iterator and tracks
-    errors separately.
+    repair path inside :func:`append_record` owns the recovery story.
+    The caller (:func:`collect_envelope`) wraps this iterator and
+    tracks errors separately.
     """
     base = _journal_dir(root)
     if not base.is_dir():
@@ -496,23 +453,48 @@ def _iter_records(root: Path) -> Iterable[Record]:
             if not line.strip():
                 continue
             try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            try:
-                yield Record.from_dict(data)
-            except (KeyError, TypeError, ValueError):
+                yield _normalize_record(json.loads(line))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 continue
 
 
-def _read_cache(root: Path) -> Optional[Envelope]:
+def _read_cache(root: Path) -> Optional[Dict[str, Any]]:
+    """Read the cached envelope (a plain dict) if present and parseable."""
     path = _cache_path(root)
     if not path.is_file():
         return None
     try:
-        return Envelope.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        return _normalize_envelope(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
+
+
+def _normalize_envelope(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Lift a raw JSON-decoded envelope into a normalized dict (keys + types)."""
+    return {
+        "schema_version": int(raw["schema_version"]),
+        "contract_version": str(raw["contract_version"]),
+        "root_id": str(raw["root_id"]),
+        "origin": str(raw["origin"]),
+        "collected_at": str(raw["collected_at"]),
+        "cutoff": str(raw["cutoff"]),
+        "journal_seq": int(raw["journal_seq"]),
+        "journal_hash": str(raw["journal_hash"]),
+        "adapter_capabilities": {
+            k: bool(v) for k, v in raw.get("adapter_capabilities", {}).items()
+        },
+        "policy": dict(raw.get("policy") or {}),
+        "retention_floor": str(raw["retention_floor"]),
+        "counts": {k: int(v) for k, v in raw.get("counts", {}).items()},
+        "ratios": {
+            k: (None if v is None else float(v))
+            for k, v in raw.get("ratios", {}).items()
+        },
+        "readiness": str(raw["readiness"]),
+        "findings": list(raw.get("findings") or []),
+        "quality_availability": dict(raw.get("quality_availability") or {}),
+        "bounded_errors": list(raw.get("bounded_errors") or []),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +502,7 @@ def _read_cache(root: Path) -> Optional[Envelope]:
 # ---------------------------------------------------------------------------
 
 
-def _reduce_unit(records: Sequence[Record]) -> Dict[str, Any]:
+def _reduce_unit(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Reduce one unit's records into a summary used by ``collect()``.
 
     Returns a dict with: ``enrolled`` (bool), ``observed_start`` (bool),
@@ -543,15 +525,15 @@ def _reduce_unit(records: Sequence[Record]) -> Dict[str, Any]:
             "enrollment_day": None,
         }
     first = records[0]
-    identity = first.identity
-    enrolled = any(r.transition == TRANSITION_ENROLL for r in records)
+    identity = first["identity"]
+    enrolled = any(r["transition"] == TRANSITION_ENROLL for r in records)
     observed_start = any(
-        r.transition == TRANSITION_OBSERVED_START for r in records
+        r["transition"] == TRANSITION_OBSERVED_START for r in records
     )
     terminals: List[Tuple[str, str]] = [
-        (r.transition, r.outcome)
+        (r["transition"], r["outcome"])
         for r in records
-        if r.transition
+        if r["transition"]
         in (
             TRANSITION_OBSERVED_TERMINAL,
             TRANSITION_CONTROLLER_CLOSE,
@@ -570,7 +552,7 @@ def _reduce_unit(records: Sequence[Record]) -> Dict[str, Any]:
                 conflicting.append((transition, outcome))
             for transition, outcome in ctrl_finals:
                 conflicting.append((transition, outcome))
-    enrollment_day = _enrollment_day(records[0].ts) if enrolled else None
+    enrollment_day = _enrollment_day(records[0]["ts"]) if enrolled else None
     return {
         "enrolled": enrolled,
         "observed_start": observed_start,
@@ -584,469 +566,447 @@ def _reduce_unit(records: Sequence[Record]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Store
+# Journal I/O helpers (formerly Store statics)
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class Store:
-    """File-locked store. All public methods acquire the per-root lock."""
-
-    root: Path
-    origin: str = ORIGIN_RUNTIME
-    policy: Dict[str, Any] = field(
-        default_factory=lambda: {
-            "runtime_coverage": DEFAULT_RUNTIME_COVERAGE,
-            "ci_coverage": 1.0,
-            "ci_origin": ORIGIN_CI_PROBE,
-        }
-    )
-    adapter_capabilities: Dict[str, bool] = field(
-        default_factory=lambda: {
-            "session_enroll": True,
-            "session_close": True,
-            "executor_enroll": True,
-            "executor_close": True,
-        }
-    )
-
-    # ----- low-level journal write -----
-
-    def append(
-        self,
-        transition: str,
-        identity: Dict[str, str],
-        outcome: str,
-        payload: Optional[Dict[str, Any]] = None,
-        ts: Optional[str] = None,
-    ) -> Record:
-        """Append one record to the journal. Strict: validates identity +
-        transition + outcome, computes hash chain, fsyncs, repairs a
-        truncated tail under lock, rotates at
-        :data:`SEGMENT_ROTATE_BYTES`, and emits ``COLLECTION_ERROR`` (via
-        the store's caller — see :meth:`_safe_append`) on disk full /
-        permission failure.
-        """
-        _validate_transition(transition)
-        _validate_identity(identity)
-        _validate_outcome(transition, outcome)
-        if ts is None:
-            ts = _now_utc_iso()
-        payload = dict(payload or {})
-
-        journal = _journal_dir(self.root)
-        journal.mkdir(parents=True, exist_ok=True)
-        day = _enrollment_day(ts)
-        segment = journal / f"journal-{day}.jsonl"
-        record_id = _new_record_id()
-
-        with _FileLock(_lock_path(self.root)):
-            # Determine the previous record (the most recent across all
-            # segments). Carrying prev_hash across the day boundary is
-            # intentional — the chain is a true linear log, not a
-            # per-day sealed file.
-            prev_hash = "0" * 64
-            segs = sorted(_journal_dir(self.root).glob("journal-*.jsonl"))
-            for prev in segs:
-                if prev.name > segment.name:
-                    break
-                tail_record = self._read_tail_record(prev)
-                if tail_record is not None:
-                    prev_hash = tail_record.record_hash
-            r_hash = _record_hash(
-                prev_hash, transition, identity, outcome, payload, record_id
-            )
-            record = Record(
-                schema_version=ENVELOPE_SCHEMA_VERSION,
-                record_id=record_id,
-                prev_hash=prev_hash,
-                transition=transition,
-                identity=dict(identity),
-                outcome=outcome,
-                payload=payload,
-                ts=ts,
-                record_hash=r_hash,
-            )
-            # Repair: if the current segment ends with a partial line
-            # (writer crashed before fsync), drop the partial bytes
-            # and record a bounded corruption finding. We never
-            # silently skip interior corruption — only the very last
-            # line.
-            self._repair_truncated_tail(segment)
-            line = json.dumps(record.to_dict(), sort_keys=True, ensure_ascii=False) + "\n"
-            self._append_line(segment, line)
-            # Rotate check: if this segment crossed the cap, the next
-            # append will create a new day-segment. We do NOT split
-            # mid-record; the rotation check fires after the append
-            # so the line is always intact.
-            if segment.stat().st_size >= SEGMENT_ROTATE_BYTES:
-                pass
-        return record
-
-    @staticmethod
-    def _read_tail_record(path: Path) -> Optional[Record]:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            return None
-        last: Optional[Record] = None
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                last = Record.from_dict(json.loads(line))
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-        return last
-
-    @staticmethod
-    def _repair_truncated_tail(path: Path) -> None:
-        """Drop a truncated trailing line, if any. Never touches interior."""
-        try:
-            with path.open("rb+") as f:
-                f.seek(0, os.SEEK_END)
-                pos = f.tell()
-                if pos == 0:
+def _repair_truncated_tail(path: Path) -> None:
+    """Drop a truncated trailing line, if any. Never touches interior."""
+    try:
+        with path.open("rb+") as f:
+            f.seek(0, os.SEEK_END)
+            pos = f.tell()
+            if pos == 0:
+                return
+            # Walk back to the last newline.
+            f.seek(pos - 1)
+            buf = f.read(1)
+            while buf and buf != b"\n":
+                if f.tell() <= 1:
                     return
-                # Walk back to the last newline.
-                f.seek(pos - 1)
+                f.seek(f.tell() - 2, os.SEEK_SET)
                 buf = f.read(1)
-                while buf and buf != b"\n":
-                    if f.tell() <= 1:
-                        return
-                    f.seek(f.tell() - 2, os.SEEK_SET)
-                    buf = f.read(1)
-                tail = f.read(pos - f.tell())
-                if tail.strip():
-                    f.seek(f.tell())
-                    f.truncate()
+            tail = f.read(pos - f.tell())
+            if tail.strip():
+                f.seek(f.tell())
+                f.truncate()
+    except OSError:
+        return
+
+
+def _append_line(path: Path, line: str) -> None:
+    """Append + flush + fsync a single line. POSIX-only contract."""
+    with path.open("a", encoding="utf-8") as f:
+        f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _prune_locked(root: Path) -> None:
+    """Prune the oldest fully-closed cohorts until we are under the cap.
+
+    Caller holds the per-root lock. The proposal mandates: prune whole
+    oldest closed cohorts first; segments with unresolved units are
+    protected; if protected data plus the next record exceeds the cap,
+    return ``COLLECTION_ERROR`` (the caller attaches that to
+    ``bounded_errors``).
+    """
+    journal = _journal_dir(root)
+    if not journal.is_dir():
+        return
+    segments = sorted(journal.glob("journal-*.jsonl"))
+    if not segments:
+        return
+    unresolved_segments: set = set()
+    for seg in segments:
+        try:
+            for line in seg.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    r = _normalize_record(json.loads(line))
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if r["transition"] == TRANSITION_ENROLL:
+                    unresolved_segments.add(_enrollment_day(r["ts"]))
         except OSError:
-            return
-
-    @staticmethod
-    def _append_line(path: Path, line: str) -> None:
-        """Append + flush + fsync a single line. POSIX-only contract."""
-        with path.open("a", encoding="utf-8") as f:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
-
-    # ----- collect / projection -----
-
-    def collect(
-        self,
-        *,
-        coverage_threshold: Optional[float] = None,
-        now: Optional[str] = None,
-    ) -> Envelope:
-        """Build (or rebuild) the projection envelope from the journal.
-
-        Pure read under lock; publication goes through
-        :func:`atomic_write_json` for the same durability contract as
-        the rest of the system. The function never raises — it returns
-        an envelope whose ``readiness`` and ``bounded_errors`` describe
-        whatever went wrong. Callers inspect ``envelope.readiness`` and
-        surface the result accordingly.
-        """
-        cutoff = now or _now_utc_iso()
-        bounded: List[str] = []
-        findings: List[str] = []
-        envelope: Envelope
-        try:
-            with _FileLock(_lock_path(self.root)):
-                try:
-                    self._prune_locked()
-                except OSError as exc:
-                    bounded.append(f"prune_failed: {exc!s}")
-                records = list(_iter_records(self.root))
-                # Hash chain integrity: walk the records and confirm
-                # prev_hash matches. We only record findings, never
-                # reject the whole journal (interior corruption is
-                # rare and we still want a partial result).
-                last_hash = "0" * 64
-                seq = 0
-                for r in records:
-                    if r.prev_hash != last_hash:
-                        findings.append(
-                            f"hash_chain_break@seq={seq}: expected {last_hash[:8]}, got {r.prev_hash[:8]}"
-                        )
-                        # Snap to the actual prev_hash so subsequent
-                        # records do not all fire the same finding.
-                        last_hash = r.prev_hash
-                    else:
-                        last_hash = r.record_hash
-                    seq += 1
-                envelope = self._reduce_envelope(
-                    records,
-                    cutoff=cutoff,
-                    journal_seq=seq,
-                    journal_hash=last_hash,
-                    coverage_threshold=coverage_threshold,
-                    findings=findings,
-                    bounded=bounded,
-                )
-                try:
-                    atomic_write_json(_cache_path(self.root), envelope.to_dict())
-                except (OSError, ValueError, TypeError) as exc:
-                    bounded.append(f"cache_write_failed: {exc!s}")
-        except CollectionError as exc:
-            envelope = self._build_collection_error(
-                cutoff=cutoff,
-                journal_seq=0,
-                journal_hash="0" * 64,
-                message=f"lock_timeout: {exc!s}",
-                coverage_threshold=coverage_threshold,
-            )
-        if envelope.readiness == READINESS_COLLECTION_ERROR:
-            try:
-                atomic_write_json(_cache_path(self.root), envelope.to_dict())
-            except (OSError, ValueError, TypeError):
-                pass
-        return envelope
-
-    def _build_collection_error(
-        self,
-        *,
-        cutoff: str,
-        journal_seq: int,
-        journal_hash: str,
-        message: str,
-        coverage_threshold: Optional[float],
-    ) -> Envelope:
-        threshold = (
-            coverage_threshold
-            if coverage_threshold is not None
-            else self.policy["runtime_coverage"]
-        )
-        return Envelope(
-            schema_version=ENVELOPE_SCHEMA_VERSION,
-            contract_version=ENVELOPE_CONTRACT,
-            root_id=str(self.root),
-            origin=self.origin,
-            collected_at=cutoff,
-            cutoff=cutoff,
-            journal_seq=journal_seq,
-            journal_hash=journal_hash,
-            adapter_capabilities=dict(self.adapter_capabilities),
-            policy={"coverage_threshold": threshold},
-            retention_floor=cutoff[:10].replace("-", ""),
-            counts={},
-            ratios={},
-            readiness=READINESS_COLLECTION_ERROR,
-            findings=[],
-            quality_availability={},
-            bounded_errors=[message],
-        )
-
-    def _reduce_envelope(
-        self,
-        records: Sequence[Record],
-        *,
-        cutoff: str,
-        journal_seq: int,
-        journal_hash: str,
-        coverage_threshold: Optional[float],
-        findings: List[str],
-        bounded: List[str],
-    ) -> Envelope:
-        units: Dict[str, List[Record]] = {}
-        for r in records:
-            uid = _canonical_unit_id(r.identity)
-            units.setdefault(uid, []).append(r)
-        reductions: Dict[str, Dict[str, Any]] = {
-            uid: _reduce_unit(rs) for uid, rs in units.items()
-        }
-        enrolled_count = sum(1 for r in reductions.values() if r["enrolled"])
-        closed_count = sum(1 for r in reductions.values() if r["closed"])
-        unresolved_count = enrolled_count - closed_count
-        paired_count = sum(
-            1
-            for r in reductions.values()
-            if r["enrolled"] and r["observed_start"] and r["closed"]
-        )
-        distinct_units = len(reductions)
-        missing_start = sum(
-            1
-            for r in reductions.values()
-            if r["enrolled"] and r["closed"] and not r["observed_start"]
-        )
-        # Missing terminal = enrolled but never closed. The proposal
-        # marks a unit "closed" as soon as ANY terminal-style
-        # transition lands, so missing_terminal is exactly the
-        # enrolled-not-closed set.
-        missing_terminal = sum(
-            1
-            for r in reductions.values()
-            if r["enrolled"] and not r["closed"]
-        )
-        conflicting_terminal = sum(1 for r in reductions.values() if r["conflicting"])
-        unexpected_units = distinct_units - enrolled_count
-        coverage = (
-            None
-            if closed_count == 0
-            else (paired_count / closed_count) if closed_count else None
-        )
-        success_count = 0
-        for r in reductions.values():
-            for transition, outcome in r["terminals"]:
-                if (
-                    transition == TRANSITION_OBSERVED_TERMINAL
-                    and outcome in SUCCESS_OUTCOMES
-                ):
-                    success_count += 1
-                    break
-        success_ratio = (
-            None
-            if paired_count == 0
-            else success_count / paired_count
-        )
-        retention_floor = (
-            records[0].ts[:10].replace("-", "")
-            if records
-            else cutoff[:10].replace("-", "")
-        )
-        # Readiness ladder (ordered — first match wins).
-        threshold = (
-            coverage_threshold
-            if coverage_threshold is not None
-            else self.policy["runtime_coverage"]
-        )
-        if bounded:
-            readiness = READINESS_COLLECTION_ERROR
-        elif conflicting_terminal or unexpected_units:
-            readiness = READINESS_DEGRADED
-        elif enrolled_count == 0:
-            readiness = READINESS_NO_OPPORTUNITY
-        elif unresolved_count > 0 or missing_start > 0 or missing_terminal > 0:
-            readiness = READINESS_INSUFFICIENT_EVIDENCE
-        elif coverage is not None and coverage < threshold:
-            readiness = READINESS_COVERAGE_BELOW_POLICY
-        else:
-            readiness = READINESS_READY
-        quality_availability = {
-            "prevention": "unavailable",
-            "first_pass": "unavailable",
-            "recovery": "unavailable",
-            "learning": "unavailable",
-            "stability": "unavailable",
-        }
-        counts = {
-            "enrolled": enrolled_count,
-            "closed": closed_count,
-            "unresolved": unresolved_count,
-            "paired": paired_count,
-            "missing_start": missing_start,
-            "missing_terminal": missing_terminal,
-            "conflicting_terminal": conflicting_terminal,
-            "unexpected_units": unexpected_units,
-            "success": success_count,
-            "distinct_units": distinct_units,
-        }
-        ratios = {
-            "coverage": coverage,
-            "success": success_ratio,
-        }
-        return Envelope(
-            schema_version=ENVELOPE_SCHEMA_VERSION,
-            contract_version=ENVELOPE_CONTRACT,
-            root_id=str(self.root),
-            origin=self.origin,
-            collected_at=cutoff,
-            cutoff=cutoff,
-            journal_seq=journal_seq,
-            journal_hash=journal_hash,
-            adapter_capabilities=dict(self.adapter_capabilities),
-            policy={"coverage_threshold": threshold},
-            retention_floor=retention_floor,
-            counts=counts,
-            ratios=ratios,
-            readiness=readiness,
-            findings=findings,
-            quality_availability=quality_availability,
-            bounded_errors=bounded,
-        )
-
-    # ----- retention / pruning -----
-
-    def _prune_locked(self) -> None:
-        """Prune the oldest fully-closed cohorts until we are under the cap.
-
-        Holds the per-root lock. The proposal mandates: prune whole
-        oldest closed cohorts first; segments with unresolved units
-        are protected; if protected data plus the next record exceeds
-        the cap, return ``COLLECTION_ERROR`` (the caller attaches that
-        to ``bounded_errors``).
-        """
-        journal = _journal_dir(self.root)
-        if not journal.is_dir():
-            return
-        segments = sorted(journal.glob("journal-*.jsonl"))
-        if not segments:
-            return
-        unresolved_segments: set = set()
-        for seg in segments:
-            try:
-                for line in seg.read_text(encoding="utf-8").splitlines():
-                    if not line.strip():
-                        continue
-                    try:
-                        r = Record.from_dict(json.loads(line))
-                    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                        continue
-                    if r.transition == TRANSITION_ENROLL:
-                        unresolved_segments.add(_enrollment_day(r.ts))
-            except OSError:
-                continue
-        total = sum((seg.stat().st_size for seg in segments if seg.exists()), 0)
+            continue
+    total = sum((seg.stat().st_size for seg in segments if seg.exists()), 0)
+    if total <= JOURNAL_TOTAL_CAP_BYTES:
+        return
+    cutoff_day = (
+        datetime.now(timezone.utc) - timedelta(days=RETENTION_CLOSED_DAYS)
+    ).strftime("%Y%m%d")
+    for seg in segments:
         if total <= JOURNAL_TOTAL_CAP_BYTES:
-            return
-        cutoff_day = (
-            datetime.now(timezone.utc) - timedelta(days=RETENTION_CLOSED_DAYS)
-        ).strftime("%Y%m%d")
-        for seg in segments:
-            if total <= JOURNAL_TOTAL_CAP_BYTES:
-                break
-            day = seg.name.replace("journal-", "").replace(".jsonl", "")
-            if day in unresolved_segments:
-                continue
-            if day >= cutoff_day:
-                continue
-            try:
-                size = seg.stat().st_size
-                seg.unlink()
-                total -= size
-            except OSError as exc:
-                raise CollectionError(f"prune_failed: {exc!s}")
-        if total > JOURNAL_TOTAL_CAP_BYTES:
-            raise CollectionError(
-                f"journal_budget_exceeded: {total} bytes; protected segments prevent pruning"
-            )
-
-    # ----- capability probe -----
-
-    def probe(self) -> Dict[str, Any]:
-        """Return adapter capability + freshness metadata for CI/UI consumers.
-
-        Never raises. A runtime that lacks ``session_enroll`` reports
-        ``adapter_capabilities.session_enroll=False`` rather than
-        failing the probe — the consumer decides what to do.
-        """
+            break
+        day = seg.name.replace("journal-", "").replace(".jsonl", "")
+        if day in unresolved_segments:
+            continue
+        if day >= cutoff_day:
+            continue
         try:
-            with _FileLock(_lock_path(self.root)):
-                records = list(_iter_records(self.root))
-        except CollectionError:
-            records = []
-        last_ts = records[-1].ts if records else None
-        return {
-            "schema_version": ENVELOPE_SCHEMA_VERSION,
-            "contract_version": ENVELOPE_CONTRACT,
-            "root_id": str(self.root),
-            "origin": self.origin,
-            "adapter_capabilities": dict(self.adapter_capabilities),
-            "journal_seq": len(records),
-            "last_record_ts": last_ts,
-            "measured_at": _now_utc_iso(),
-        }
+            size = seg.stat().st_size
+            seg.unlink()
+            total -= size
+        except OSError as exc:
+            raise CollectionError(f"prune_failed: {exc!s}")
+    if total > JOURNAL_TOTAL_CAP_BYTES:
+        raise CollectionError(
+            f"journal_budget_exceeded: {total} bytes; protected segments prevent pruning"
+        )
+
+
+# ---------------------------------------------------------------------------
+# append_record (module function — formerly Store.append)
+# ---------------------------------------------------------------------------
+
+
+def append_record(
+    root: Path,
+    transition: str,
+    identity: Dict[str, str],
+    outcome: str,
+    payload: Optional[Dict[str, Any]] = None,
+    ts: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Append one record to the journal. Strict: validates identity +
+    transition + outcome, computes hash chain, fsyncs, repairs a
+    truncated tail under lock, rotates at :data:`SEGMENT_ROTATE_BYTES`,
+    and emits ``COLLECTION_ERROR`` (via the store's caller — see
+    :func:`_safe_append`) on disk full / permission failure.
+    """
+    _validate_transition(transition)
+    _validate_identity(identity)
+    _validate_outcome(transition, outcome)
+    if ts is None:
+        ts = _now_utc_iso()
+    payload = dict(payload or {})
+
+    journal = _journal_dir(root)
+    journal.mkdir(parents=True, exist_ok=True)
+    day = _enrollment_day(ts)
+    segment = journal / f"journal-{day}.jsonl"
+    record_id = _new_record_id()
+
+    with _FileLock(_lock_path(root)):
+        # Determine the previous record (the most recent across all
+        # segments). Carrying prev_hash across the day boundary is
+        # intentional — the chain is a true linear log, not a
+        # per-day sealed file.
+        prev_hash = "0" * 64
+        segs = sorted(_journal_dir(root).glob("journal-*.jsonl"))
+        for prev in segs:
+            if prev.name > segment.name:
+                break
+            tail_record = _read_tail_record(prev)
+            if tail_record is not None:
+                prev_hash = tail_record["record_hash"]
+        record = _build_record(
+            prev_hash, transition, identity, outcome, payload, record_id, ts
+        )
+        # Repair: if the current segment ends with a partial line
+        # (writer crashed before fsync), drop the partial bytes and
+        # record a bounded corruption finding. We never silently skip
+        # interior corruption — only the very last line.
+        _repair_truncated_tail(segment)
+        line = json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n"
+        _append_line(segment, line)
+        # Rotate check: if this segment crossed the cap, the next
+        # append will create a new day-segment. We do NOT split
+        # mid-record; the rotation check fires after the append so
+        # the line is always intact.
+        if segment.stat().st_size >= SEGMENT_ROTATE_BYTES:
+            pass
+    return record
+
+
+# ---------------------------------------------------------------------------
+# collect_envelope (module function — formerly Store.collect)
+# ---------------------------------------------------------------------------
+
+
+def _build_collection_error(
+    *,
+    root: Path,
+    origin: str,
+    cutoff: str,
+    journal_seq: int,
+    journal_hash: str,
+    message: str,
+    coverage_threshold: Optional[float],
+    threshold: float,
+    adapter_capabilities: Dict[str, bool],
+) -> Dict[str, Any]:
+    return {
+        "schema_version": ENVELOPE_SCHEMA_VERSION,
+        "contract_version": ENVELOPE_CONTRACT,
+        "root_id": str(root),
+        "origin": origin,
+        "collected_at": cutoff,
+        "cutoff": cutoff,
+        "journal_seq": journal_seq,
+        "journal_hash": journal_hash,
+        "adapter_capabilities": dict(adapter_capabilities),
+        "policy": {"coverage_threshold": threshold},
+        "retention_floor": cutoff[:10].replace("-", ""),
+        "counts": {},
+        "ratios": {},
+        "readiness": READINESS_COLLECTION_ERROR,
+        "findings": [],
+        "quality_availability": {},
+        "bounded_errors": [message],
+    }
+
+
+def _reduce_envelope(
+    root: Path,
+    records: Sequence[Dict[str, Any]],
+    *,
+    origin: str,
+    cutoff: str,
+    journal_seq: int,
+    journal_hash: str,
+    coverage_threshold: Optional[float],
+    findings: List[str],
+    bounded: List[str],
+    adapter_capabilities: Dict[str, bool],
+) -> Dict[str, Any]:
+    units: Dict[str, List[Dict[str, Any]]] = {}
+    for r in records:
+        uid = _canonical_unit_id(r["identity"])
+        units.setdefault(uid, []).append(r)
+    reductions: Dict[str, Dict[str, Any]] = {
+        uid: _reduce_unit(rs) for uid, rs in units.items()
+    }
+    enrolled_count = sum(1 for r in reductions.values() if r["enrolled"])
+    closed_count = sum(1 for r in reductions.values() if r["closed"])
+    unresolved_count = enrolled_count - closed_count
+    paired_count = sum(
+        1
+        for r in reductions.values()
+        if r["enrolled"] and r["observed_start"] and r["closed"]
+    )
+    distinct_units = len(reductions)
+    missing_start = sum(
+        1
+        for r in reductions.values()
+        if r["enrolled"] and r["closed"] and not r["observed_start"]
+    )
+    # Missing terminal = enrolled but never closed. The proposal marks
+    # a unit "closed" as soon as ANY terminal-style transition lands,
+    # so missing_terminal is exactly the enrolled-not-closed set.
+    missing_terminal = sum(
+        1
+        for r in reductions.values()
+        if r["enrolled"] and not r["closed"]
+    )
+    conflicting_terminal = sum(1 for r in reductions.values() if r["conflicting"])
+    unexpected_units = distinct_units - enrolled_count
+    coverage = (
+        None
+        if closed_count == 0
+        else (paired_count / closed_count) if closed_count else None
+    )
+    success_count = 0
+    for r in reductions.values():
+        for transition, outcome in r["terminals"]:
+            if (
+                transition == TRANSITION_OBSERVED_TERMINAL
+                and outcome in SUCCESS_OUTCOMES
+            ):
+                success_count += 1
+                break
+    success_ratio = (
+        None
+        if paired_count == 0
+        else success_count / paired_count
+    )
+    retention_floor = (
+        records[0]["ts"][:10].replace("-", "")
+        if records
+        else cutoff[:10].replace("-", "")
+    )
+    # Readiness ladder (ordered — first match wins).
+    threshold = (
+        coverage_threshold
+        if coverage_threshold is not None
+        else _DEFAULT_POLICY["runtime_coverage"]
+    )
+    if bounded:
+        readiness = READINESS_COLLECTION_ERROR
+    elif conflicting_terminal or unexpected_units:
+        readiness = READINESS_DEGRADED
+    elif enrolled_count == 0:
+        readiness = READINESS_NO_OPPORTUNITY
+    elif unresolved_count > 0 or missing_start > 0 or missing_terminal > 0:
+        readiness = READINESS_INSUFFICIENT_EVIDENCE
+    elif coverage is not None and coverage < threshold:
+        readiness = READINESS_COVERAGE_BELOW_POLICY
+    else:
+        readiness = READINESS_READY
+    quality_availability = {
+        "prevention": "unavailable",
+        "first_pass": "unavailable",
+        "recovery": "unavailable",
+        "learning": "unavailable",
+        "stability": "unavailable",
+    }
+    counts = {
+        "enrolled": enrolled_count,
+        "closed": closed_count,
+        "unresolved": unresolved_count,
+        "paired": paired_count,
+        "missing_start": missing_start,
+        "missing_terminal": missing_terminal,
+        "conflicting_terminal": conflicting_terminal,
+        "unexpected_units": unexpected_units,
+        "success": success_count,
+        "distinct_units": distinct_units,
+    }
+    ratios = {
+        "coverage": coverage,
+        "success": success_ratio,
+    }
+    return {
+        "schema_version": ENVELOPE_SCHEMA_VERSION,
+        "contract_version": ENVELOPE_CONTRACT,
+        "root_id": str(root),
+        "origin": origin,
+        "collected_at": cutoff,
+        "cutoff": cutoff,
+        "journal_seq": journal_seq,
+        "journal_hash": journal_hash,
+        "adapter_capabilities": dict(adapter_capabilities),
+        "policy": {"coverage_threshold": threshold},
+        "retention_floor": retention_floor,
+        "counts": counts,
+        "ratios": ratios,
+        "readiness": readiness,
+        "findings": findings,
+        "quality_availability": quality_availability,
+        "bounded_errors": bounded,
+    }
+
+
+def collect_envelope(
+    root: Path,
+    *,
+    origin: str = ORIGIN_RUNTIME,
+    adapter_capabilities: Dict[str, bool] = _DEFAULT_ADAPTER_CAPABILITIES,
+    coverage_threshold: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Build (or rebuild) the projection envelope from the journal.
+
+    Pure read under lock; publication goes through
+    :func:`atomic_write_json` for the same durability contract as the
+    rest of the system. The function never raises — it returns an
+    envelope whose ``readiness`` and ``bounded_errors`` describe
+    whatever went wrong. Callers inspect ``envelope["readiness"]`` and
+    surface the result accordingly.
+    """
+    cutoff = _now_utc_iso()
+    bounded: List[str] = []
+    findings: List[str] = []
+    envelope: Dict[str, Any]
+    threshold = (
+        coverage_threshold
+        if coverage_threshold is not None
+        else _DEFAULT_POLICY["runtime_coverage"]
+    )
+    try:
+        with _FileLock(_lock_path(root)):
+            try:
+                _prune_locked(root)
+            except OSError as exc:
+                bounded.append(f"prune_failed: {exc!s}")
+            records = list(_iter_records(root))
+            # Hash chain integrity: walk the records and confirm
+            # prev_hash matches. We only record findings, never reject
+            # the whole journal (interior corruption is rare and we
+            # still want a partial result).
+            last_hash = "0" * 64
+            seq = 0
+            for r in records:
+                if r["prev_hash"] != last_hash:
+                    findings.append(
+                        f"hash_chain_break@seq={seq}: expected {last_hash[:8]}, got {r['prev_hash'][:8]}"
+                    )
+                    # Snap to the actual prev_hash so subsequent
+                    # records do not all fire the same finding.
+                    last_hash = r["prev_hash"]
+                else:
+                    last_hash = r["record_hash"]
+                seq += 1
+            envelope = _reduce_envelope(
+                root,
+                records,
+                origin=origin,
+                cutoff=cutoff,
+                journal_seq=seq,
+                journal_hash=last_hash,
+                coverage_threshold=coverage_threshold,
+                findings=findings,
+                bounded=bounded,
+                adapter_capabilities=adapter_capabilities,
+            )
+            try:
+                atomic_write_json(_cache_path(root), envelope)
+            except (OSError, ValueError, TypeError) as exc:
+                bounded.append(f"cache_write_failed: {exc!s}")
+    except CollectionError as exc:
+        envelope = _build_collection_error(
+            root=root,
+            origin=origin,
+            cutoff=cutoff,
+            journal_seq=0,
+            journal_hash="0" * 64,
+            message=f"lock_timeout: {exc!s}",
+            coverage_threshold=coverage_threshold,
+            threshold=threshold,
+            adapter_capabilities=adapter_capabilities,
+        )
+    if envelope["readiness"] == READINESS_COLLECTION_ERROR:
+        try:
+            atomic_write_json(_cache_path(root), envelope)
+        except (OSError, ValueError, TypeError):
+            pass
+    return envelope
+
+
+# ---------------------------------------------------------------------------
+# probe_caps (module function — formerly Store.probe)
+# ---------------------------------------------------------------------------
+
+
+def probe_caps(
+    root: Path,
+    *,
+    origin: str = ORIGIN_RUNTIME,
+    adapter_capabilities: Dict[str, bool] = _DEFAULT_ADAPTER_CAPABILITIES,
+) -> Dict[str, Any]:
+    """Return adapter capability + freshness metadata for CI/UI consumers.
+
+    Never raises. A runtime that lacks ``session_enroll`` reports
+    ``adapter_capabilities.session_enroll=False`` rather than failing
+    the probe — the consumer decides what to do.
+    """
+    try:
+        with _FileLock(_lock_path(root)):
+            records = list(_iter_records(root))
+    except CollectionError:
+        records = []
+    last_ts = records[-1]["ts"] if records else None
+    return {
+        "schema_version": ENVELOPE_SCHEMA_VERSION,
+        "contract_version": ENVELOPE_CONTRACT,
+        "root_id": str(root),
+        "origin": origin,
+        "adapter_capabilities": dict(adapter_capabilities),
+        "journal_seq": len(records),
+        "last_record_ts": last_ts,
+        "measured_at": _now_utc_iso(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1102,13 +1062,13 @@ def enroll(
     controller: str = "executor",
     origin: str = ORIGIN_RUNTIME,
     payload: Optional[Dict[str, Any]] = None,
-) -> Record:
+) -> Dict[str, Any]:
     """Enroll a measurement unit. Idempotent on (run, workflow, subject, attempt)."""
     root_id = _root_id_for(root)
     if attempt_id is None:
         attempt_id = _attempt_id(controller)
-    store = Store(root=Path(root), origin=origin)
-    return store.append(
+    return append_record(
+        Path(root),
         TRANSITION_ENROLL,
         _identity_dict(
             root_id,
@@ -1135,7 +1095,7 @@ def observe(
     outcome: str,
     origin: str = ORIGIN_RUNTIME,
     payload: Optional[Dict[str, Any]] = None,
-) -> Record:
+) -> Dict[str, Any]:
     """Record an observed lifecycle event. ``transition`` must be one of
     :data:`TRANSITION_OBSERVED_START` / :data:`TRANSITION_OBSERVED_TERMINAL`
     / :data:`TRANSITION_CONTROLLER_CLOSE` /
@@ -1150,8 +1110,8 @@ def observe(
     ):
         raise CollectionError(f"observe() rejects transition {transition!r}")
     root_id = _root_id_for(root)
-    store = Store(root=Path(root), origin=origin)
-    return store.append(
+    return append_record(
+        Path(root),
         transition,
         _identity_dict(
             root_id,
@@ -1172,15 +1132,21 @@ def collect(
     *,
     origin: str = ORIGIN_RUNTIME,
     coverage_threshold: Optional[float] = None,
-) -> Envelope:
+) -> Dict[str, Any]:
     """Build the projection envelope. Never raises."""
-    store = Store(root=Path(root), origin=origin)
-    return store.collect(coverage_threshold=coverage_threshold)
+    return collect_envelope(
+        Path(root),
+        origin=origin,
+        coverage_threshold=coverage_threshold,
+    )
 
 
-def probe(root: Path, *, origin: str = ORIGIN_RUNTIME) -> Dict[str, Any]:
-    store = Store(root=Path(root), origin=origin)
-    return store.probe()
+def probe(
+    root: Path,
+    *,
+    origin: str = ORIGIN_RUNTIME,
+) -> Dict[str, Any]:
+    return probe_caps(Path(root), origin=origin)
 
 
 # ---------------------------------------------------------------------------
@@ -1202,7 +1168,7 @@ def _cli_enroll(args: argparse.Namespace) -> int:
     except CollectionError as exc:
         print(f"COLLECTION_ERROR enroll: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({"record_id": record.record_id, "attempt_id": record.identity["attempt_id"]}))
+    print(json.dumps({"record_id": record["record_id"], "attempt_id": record["identity"]["attempt_id"]}))
     return 0
 
 
@@ -1221,7 +1187,7 @@ def _cli_observe(args: argparse.Namespace) -> int:
     except CollectionError as exc:
         print(f"COLLECTION_ERROR observe: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({"record_id": record.record_id}))
+    print(json.dumps({"record_id": record["record_id"]}))
     return 0
 
 
@@ -1235,10 +1201,10 @@ def _cli_collect(args: argparse.Namespace) -> int:
     except CollectionError as exc:
         print(f"COLLECTION_ERROR collect: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(envelope.to_dict()))
-    if envelope.readiness == READINESS_COLLECTION_ERROR:
+    print(json.dumps(envelope))
+    if envelope["readiness"] == READINESS_COLLECTION_ERROR:
         return 2
-    if args.gate_ci and envelope.readiness not in (READINESS_READY,):
+    if args.gate_ci and envelope["readiness"] not in (READINESS_READY,):
         # CI uses origin=ci-probe; the expected population is known
         # and a non-READY envelope (DEGRADED, INSUFFICIENT_EVIDENCE,
         # etc.) MUST fail the gate so the test job surfaces it.
@@ -1256,14 +1222,14 @@ def _cli_status(args: argparse.Namespace) -> int:
     """Print the cached envelope if fresh, otherwise build one."""
     cache = _read_cache(args.root)
     if cache is not None and not args.refresh:
-        print(json.dumps(cache.to_dict()))
+        print(json.dumps(cache))
         return 0
     try:
         envelope = collect(args.root, origin=args.origin)
     except CollectionError as exc:
         print(f"COLLECTION_ERROR: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(envelope.to_dict()))
+    print(json.dumps(envelope))
     return 0
 
 

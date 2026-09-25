@@ -543,7 +543,7 @@ def _tally_and_emit(project_root: Path, results: List[CaseResult], config: Dict)
     try:
         from effectiveness_collection import collect as _eff_collect  # noqa: WPS433 — local import
         envelope = _eff_collect(project_root)
-        measurement_envelope = envelope.to_dict()
+        measurement_envelope = envelope
     except Exception:  # noqa: BLE001
         measurement_envelope = None
     write_report(
@@ -1021,6 +1021,13 @@ def _golden_index(project_root: Path) -> Dict[str, Dict]:
         dim = data.get("dim", "")
         cid = data.get("case_id", "")
         if not dim or not cid:
+            continue
+        # Goldens for non-eval dims (e.g. maintenance-* used by
+        # lib/maintenance_gate.py) live in eval/golden/ but are not
+        # part of run_eval's case set. Without this filter, run_golden_diff
+        # reports them as `removed` and the gate fails even when nothing
+        # regressed. Skip them so each gate only diffs its own scope.
+        if dim not in SUPPORTED_DIMS:
             continue
         out[f"{dim}/{cid}"] = data
     return out

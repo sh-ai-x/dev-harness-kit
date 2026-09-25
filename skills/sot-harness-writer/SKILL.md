@@ -106,7 +106,7 @@ generated_by: sot-harness-writer
 ```
 
 ` `status: held` is emitted when the decision set fails
-`SOTDecisionSet.validate()` (e.g. a round was skipped, a `reject`
+`validate_sot_decision_set()` (e.g. a round was skipped, a `reject`
 came without a reason, or a `customize` came without
 `customize_text`). Re-run `/dev-kit:sot-harness-writer` to complete
 the missing rounds.

@@ -77,11 +77,11 @@ def test_stop_event_only_requests_collect(worktree_with_lib: Path) -> None:
     from effectiveness_collection import _iter_records
     recs = list(_iter_records(root))
     # No controller_close / controller_final emitted by Stop.
-    assert not any(r.transition == TRANSITION_CONTROLLER_CLOSE for r in recs)
-    assert not any(r.transition == TRANSITION_CONTROLLER_FINAL for r in recs)
+    assert not any(r["transition"] == TRANSITION_CONTROLLER_CLOSE for r in recs)
+    assert not any(r["transition"] == TRANSITION_CONTROLLER_FINAL for r in recs)
     # Unit is still unresolved.
     env = collect(root)
-    assert env.counts["closed"] == 0
+    assert env["counts"]["closed"] == 0
 
 
 def test_session_end_closes_unit(worktree_with_lib: Path) -> None:
@@ -94,11 +94,11 @@ def test_session_end_closes_unit(worktree_with_lib: Path) -> None:
     assert res.returncode == 0, res.stderr
     from effectiveness_collection import _iter_records
     recs = list(_iter_records(root))
-    assert any(r.transition == TRANSITION_CONTROLLER_CLOSE for r in recs)
-    assert any(r.transition == TRANSITION_OBSERVED_TERMINAL for r in recs)
+    assert any(r["transition"] == TRANSITION_CONTROLLER_CLOSE for r in recs)
+    assert any(r["transition"] == TRANSITION_OBSERVED_TERMINAL for r in recs)
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.counts["paired"] == 1
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["paired"] == 1
 
 
 def test_multiple_stops_do_not_close(worktree_with_lib: Path) -> None:
@@ -112,10 +112,10 @@ def test_multiple_stops_do_not_close(worktree_with_lib: Path) -> None:
         assert res.returncode == 0, res.stderr
     from effectiveness_collection import _iter_records
     recs = list(_iter_records(root))
-    closes = [r for r in recs if r.transition == TRANSITION_CONTROLLER_CLOSE]
+    closes = [r for r in recs if r["transition"] == TRANSITION_CONTROLLER_CLOSE]
     assert len(closes) == 0
     env = collect(root)
-    assert env.counts["closed"] == 0
+    assert env["counts"]["closed"] == 0
 
 
 def test_concurrent_sessions_do_not_infer_closure(worktree_with_lib: Path) -> None:
@@ -134,10 +134,10 @@ def test_concurrent_sessions_do_not_infer_closure(worktree_with_lib: Path) -> No
     res = _run_hook(cwd=root, payload={"session_id": "s1", "cwd": str(root), "hook_event_name": "Stop"})
     assert res.returncode == 0, res.stderr
     env = collect(root)
-    assert env.counts["closed"] == 0
+    assert env["counts"]["closed"] == 0
     # SessionEnd on s1 closes s1; s2 stays open.
     res = _run_hook(cwd=root, payload={"session_id": "s1", "cwd": str(root), "hook_event_name": "SessionEnd"})
     assert res.returncode == 0, res.stderr
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.counts["unresolved"] == 1
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["unresolved"] == 1

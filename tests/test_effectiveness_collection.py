@@ -41,8 +41,7 @@ from effectiveness_collection import (  # noqa: E402
     TRANSITION_OBSERVED_START,
     TRANSITION_OBSERVED_TERMINAL,
     CollectionError,
-    Envelope,
-    Store,
+    append_record,
     collect,
     enroll,
     measurement_dir,
@@ -94,9 +93,9 @@ def _close_one(root: Path, *, outcome: str = "completed", attempt: str = "a-1",
 
 def test_enroll_creates_journal_segment(root: Path) -> None:
     rec = enroll(root, run_id="r", workflow_id="w", subject_id="s:1", attempt_id="a1")
-    assert rec.transition == TRANSITION_ENROLL
-    assert rec.outcome == "enrolled"
-    assert rec.identity["subject_id"] == "s:1"
+    assert rec["transition"] == TRANSITION_ENROLL
+    assert rec["outcome"] == "enrolled"
+    assert rec["identity"]["subject_id"] == "s:1"
     segs = list(measurement_dir(root).joinpath("journal").glob("journal-*.jsonl"))
     assert len(segs) == 1
     assert segs[0].stat().st_size > 0
@@ -108,32 +107,32 @@ def test_observe_records_each_transition(root: Path) -> None:
                 transition=TRANSITION_OBSERVED_START, outcome="started")
     t = observe(root, run_id="r", workflow_id="w", subject_id="s", attempt_id="a",
                 transition=TRANSITION_OBSERVED_TERMINAL, outcome="completed")
-    assert s.transition == TRANSITION_OBSERVED_START
-    assert t.transition == TRANSITION_OBSERVED_TERMINAL
-    assert s.prev_hash != t.prev_hash  # chain advances
+    assert s["transition"] == TRANSITION_OBSERVED_START
+    assert t["transition"] == TRANSITION_OBSERVED_TERMINAL
+    assert s["prev_hash"] != t["prev_hash"]  # chain advances
 
 
 def test_collect_envelope_shape(root: Path) -> None:
     _close_one(root)
     env = collect(root)
-    assert isinstance(env, Envelope)
-    assert env.schema_version == ENVELOPE_SCHEMA_VERSION
-    assert env.contract_version == ENVELOPE_CONTRACT
-    assert env.origin == ORIGIN_RUNTIME
-    assert env.counts["enrolled"] == 1
-    assert env.counts["closed"] == 1
-    assert env.counts["paired"] == 1
-    assert env.counts["missing_start"] == 0
-    assert env.counts["missing_terminal"] == 0
-    assert env.readiness in ALL_READINESS
+    assert isinstance(env, dict)
+    assert env["schema_version"] == ENVELOPE_SCHEMA_VERSION
+    assert env["contract_version"] == ENVELOPE_CONTRACT
+    assert env["origin"] == ORIGIN_RUNTIME
+    assert env["counts"]["enrolled"] == 1
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["paired"] == 1
+    assert env["counts"]["missing_start"] == 0
+    assert env["counts"]["missing_terminal"] == 0
+    assert env["readiness"] in ALL_READINESS
 
 
 def test_collect_ready_when_paired(root: Path) -> None:
     _close_one(root)
     env = collect(root)
-    assert env.readiness == READINESS_READY
-    assert env.ratios["coverage"] == 1.0
-    assert env.ratios["success"] == 1.0
+    assert env["readiness"] == READINESS_READY
+    assert env["ratios"]["coverage"] == 1.0
+    assert env["ratios"]["success"] == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -145,33 +144,33 @@ def test_observed_start_without_terminal_stays_unresolved(root: Path) -> None:
     observe(root, run_id="r", workflow_id="w", subject_id="s", attempt_id="a",
             transition=TRANSITION_OBSERVED_START, outcome="started")
     env = collect(root)
-    assert env.counts["enrolled"] == 1
-    assert env.counts["closed"] == 0
-    assert env.counts["missing_terminal"] == 1
-    assert env.readiness in (READINESS_INSUFFICIENT_EVIDENCE,)
+    assert env["counts"]["enrolled"] == 1
+    assert env["counts"]["closed"] == 0
+    assert env["counts"]["missing_terminal"] == 1
+    assert env["readiness"] in (READINESS_INSUFFICIENT_EVIDENCE,)
 
 
 def test_missing_terminal_visible_against_enrollment(root: Path) -> None:
     enroll(root, run_id="r", workflow_id="w", subject_id="s", attempt_id="a")
     env = collect(root)
-    assert env.counts["enrolled"] == 1
-    assert env.counts["closed"] == 0
-    assert env.counts["missing_terminal"] == 1
+    assert env["counts"]["enrolled"] == 1
+    assert env["counts"]["closed"] == 0
+    assert env["counts"]["missing_terminal"] == 1
 
 
 def test_failed_outcome_is_a_valid_closure(root: Path) -> None:
     _close_one(root, outcome="failed")
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.counts["paired"] == 1
-    assert env.ratios["success"] == 0.0  # not a successful closure
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["paired"] == 1
+    assert env["ratios"]["success"] == 0.0  # not a successful closure
 
 
 def test_blocked_outcome_is_a_valid_closure(root: Path) -> None:
     _close_one(root, outcome="blocked")
     env = collect(root)
-    assert env.counts["closed"] == 1
-    assert env.counts["paired"] == 1
+    assert env["counts"]["closed"] == 1
+    assert env["counts"]["paired"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -204,8 +203,8 @@ def test_hash_chain_integrity(root: Path) -> None:
             transition=TRANSITION_OBSERVED_TERMINAL, outcome="completed")
     env = collect(root)
     # No break findings on a well-formed journal.
-    assert env.findings == []
-    assert env.readiness == READINESS_READY
+    assert env["findings"] == []
+    assert env["readiness"] == READINESS_READY
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +220,9 @@ def test_incremental_equals_full_replay(root: Path) -> None:
     _close_one(root, attempt="a-2", subject="s2")
     first = collect(root)
     second = collect(root)
-    assert first.counts == second.counts
-    assert first.ratios == second.ratios
-    assert first.readiness == second.readiness
+    assert first["counts"] == second["counts"]
+    assert first["ratios"] == second["ratios"]
+    assert first["readiness"] == second["readiness"]
 
 
 # ---------------------------------------------------------------------------
@@ -239,10 +238,9 @@ def test_protected_unresolved_segment_not_pruned(tmp_path: Path, monkeypatch: py
     """
     # Enroll with a far-past timestamp (still valid ISO).
     past = "2020-01-01T00:00:00.000Z"
-    root_id = str(root(tmp_path).resolve()) if False else str(tmp_path.resolve())  # noqa: F841
-    # Direct Store.append with explicit ts (bypasses helper defaults).
-    store = Store(root=tmp_path)
-    store.append(
+    # Direct append_record with explicit ts (bypasses helper defaults).
+    append_record(
+        tmp_path,
         TRANSITION_ENROLL,
         {
             "root_id": str(tmp_path.resolve()),
@@ -258,15 +256,15 @@ def test_protected_unresolved_segment_not_pruned(tmp_path: Path, monkeypatch: py
         ts=past,
     )
     # Now fill up to the cap. We don't want to write 64 MiB in a unit
-    # test; we patch the prune method to a no-op and assert the
+    # test; we patch the prune function to a no-op and assert the
     # segment still exists after collect().
-    monkeypatch.setattr(Store, "_prune_locked", lambda self: None)
+    monkeypatch.setattr("effectiveness_collection._prune_locked", lambda root: None)
     env = collect(tmp_path)
     # Segment still present.
     segs = list(measurement_dir(tmp_path).joinpath("journal").glob("journal-*.jsonl"))
     assert any("20200101" in s.name for s in segs)
-    assert env.counts["enrolled"] >= 1
-    assert env.counts["closed"] == 0
+    assert env["counts"]["enrolled"] >= 1
+    assert env["counts"]["closed"] == 0
 
 
 def test_constants_match_proposal() -> None:
@@ -374,8 +372,8 @@ def test_cache_loss_rebuild_from_journal(root: Path) -> None:
     cache.unlink()
     # Second collect → cache rebuilt, identical state.
     env = collect(root)
-    assert env.readiness == READINESS_READY
-    assert env.counts["paired"] == first.counts["paired"]
+    assert env["readiness"] == READINESS_READY
+    assert env["counts"]["paired"] == first["counts"]["paired"]
     # And a fresh cache exists again.
     assert cache.is_file()
 
@@ -393,8 +391,8 @@ def test_conflicting_terminal_is_a_finding(root: Path) -> None:
     observe(root, run_id="r", workflow_id="w", subject_id="s", attempt_id="a",
             transition=TRANSITION_CONTROLLER_FINAL, outcome="failed")
     env = collect(root)
-    assert env.counts["conflicting_terminal"] == 1
-    assert env.readiness == READINESS_DEGRADED
+    assert env["counts"]["conflicting_terminal"] == 1
+    assert env["readiness"] == READINESS_DEGRADED
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +402,7 @@ def test_conflicting_terminal_is_a_finding(root: Path) -> None:
 def test_ci_origin_label_in_envelope(root: Path) -> None:
     _close_one(root)
     env = collect(root, origin=ORIGIN_CI_PROBE)
-    assert env.origin == ORIGIN_CI_PROBE
+    assert env["origin"] == ORIGIN_CI_PROBE
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +431,6 @@ def test_concurrent_writers_serialise(root: Path) -> None:
         t.join()
     assert errors == []
     env = collect(root)
-    assert env.counts["enrolled"] == 8
-    assert env.counts["closed"] == 8
-    assert env.counts["paired"] == 8
+    assert env["counts"]["enrolled"] == 8
+    assert env["counts"]["closed"] == 8
+    assert env["counts"]["paired"] == 8

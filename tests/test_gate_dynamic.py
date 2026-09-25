@@ -54,7 +54,7 @@ def _make_ctx(**overrides):
         },
     )
     base.update(overrides)
-    return gate_dynamic.GateContext(**base)
+    return gate_dynamic.new_gate_context(**base)
 
 
 class TestIsGateInScope(unittest.TestCase):
@@ -93,27 +93,27 @@ class TestHardRules(unittest.TestCase):
     def test_forced_run_bypasses_llm_skip(self) -> None:
         ctx = _make_ctx(iteration=2)
         llm_decisions = [
-            gate_dynamic.GateDecision("review", skip=True, reasoning="r",
-                                      confidence=0.9, risk_level=0.0, raw_score={}),
+            gate_dynamic.new_gate_decision(gate_name="review", skip=True, reasoning="r",
+                                            confidence=0.9, risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         # review has forced_run=True (per fixture) AND is in scope of
         # "lib/**" AND diff touches lib/. Hard rule #2 kicks in.
-        review = next(d for d in out if d.gate_name == "review")
-        self.assertFalse(review.skip)
+        review = next(d for d in out if d["gate_name"] == "review")
+        self.assertFalse(review["skip"])
 
     def test_iteration_1_no_skip(self) -> None:
         # First push is always deterministic — no gates skipped
         # regardless of LLM verdict.
         ctx = _make_ctx(iteration=1)
         llm_decisions = [
-            gate_dynamic.GateDecision(gate_name=n, skip=True, reasoning="r",
-                                      confidence=0.9, risk_level=0.0, raw_score={})
+            gate_dynamic.new_gate_decision(gate_name=n, skip=True, reasoning="r",
+                                             confidence=0.9, risk_level=0.0, raw_score={})
             for n in ("review", "security", "maintenance")
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         self.assertEqual(
-            [d.gate_name for d in out if d.skip],
+            [d["gate_name"] for d in out if d["skip"]],
             [],
         )
 
@@ -132,12 +132,12 @@ class TestHardRules(unittest.TestCase):
             },
         )
         llm_decisions = [
-            gate_dynamic.GateDecision(gate_name=n, skip=True, reasoning="r",
-                                      confidence=0.9, risk_level=0.0, raw_score={})
+            gate_dynamic.new_gate_decision(gate_name=n, skip=True, reasoning="r",
+                                             confidence=0.9, risk_level=0.0, raw_score={})
             for n in ("review", "security", "maintenance")
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
-        skipped = {d.gate_name for d in out if d.skip}
+        skipped = {d["gate_name"] for d in out if d["skip"]}
         self.assertIn("maintenance", skipped)
         self.assertNotIn("review", skipped)
         self.assertNotIn("security", skipped)
@@ -145,75 +145,72 @@ class TestHardRules(unittest.TestCase):
     def test_confidence_below_threshold_no_skip(self) -> None:
         ctx = _make_ctx(iteration=2)
         llm_decisions = [
-            gate_dynamic.GateDecision("maintenance", skip=True,
-                                      reasoning="r", confidence=0.5,
-                                      risk_level=0.0, raw_score={}),
+            gate_dynamic.new_gate_decision(gate_name="maintenance", skip=True,
+                                            reasoning="r", confidence=0.5,
+                                            risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
-        maint = next(d for d in out if d.gate_name == "maintenance")
-        self.assertFalse(maint.skip)
+        maint = next(d for d in out if d["gate_name"] == "maintenance")
+        self.assertFalse(maint["skip"])
 
     def test_missing_confidence_fails_safe(self) -> None:
         # confidence=0.0 (LLM didn't emit it) must default to "don't skip".
         ctx = _make_ctx(iteration=2)
         llm_decisions = [
-            gate_dynamic.GateDecision("maintenance", skip=True,
-                                      reasoning="r", confidence=0.0,
-                                      risk_level=0.0, raw_score={}),
+            gate_dynamic.new_gate_decision(gate_name="maintenance", skip=True,
+                                            reasoning="r", confidence=0.0,
+                                            risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
-        maint = next(d for d in out if d.gate_name == "maintenance")
-        self.assertFalse(maint.skip)
+        maint = next(d for d in out if d["gate_name"] == "maintenance")
+        self.assertFalse(maint["skip"])
 
     def test_dynamic_eligible_false_no_skip(self) -> None:
         # Rule #5 (security review LLM01-M2): an operator who leaves
         # `dynamic_eligible` at the default (False) expects the gate to be
         # immune to LLM-driven skips. Even if the LLM judge emits skip=True,
         # the orchestrator must override to skip=False.
-        # GateContext is frozen — use dataclasses.replace to override
-        # gate_catalog with explicit dynamic_eligible=False.
-        from dataclasses import replace
-        ctx = replace(
-            _make_ctx(iteration=2),
-            gate_catalog={
-                "gates": {
-                    "maintenance": {"scope_globs": ["lib/**"], "dynamic_eligible": False},
-                },
+        # GateContext is a dict — copy and override gate_catalog with
+        # explicit dynamic_eligible=False.
+        ctx = _make_ctx(iteration=2)
+        ctx["gate_catalog"] = {
+            "gates": {
+                "maintenance": {"scope_globs": ["lib/**"], "dynamic_eligible": False},
             },
-        )
+        }
         llm_decisions = [
-            gate_dynamic.GateDecision("maintenance", skip=True,
-                                      reasoning="r", confidence=0.9,
-                                      risk_level=0.0, raw_score={}),
+            gate_dynamic.new_gate_decision(gate_name="maintenance", skip=True,
+                                            reasoning="r", confidence=0.9,
+                                            risk_level=0.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
-        maint = next(d for d in out if d.gate_name == "maintenance")
-        self.assertFalse(maint.skip)
+        maint = next(d for d in out if d["gate_name"] == "maintenance")
+        self.assertFalse(maint["skip"])
 
     def test_high_risk_veto_no_skip(self) -> None:
         # Rule 6: risk_level > RISK_CEILING (3.0) → skip=False even when
         # gate_skippable and confidence are both high.
         ctx = _make_ctx(iteration=2)
         llm_decisions = [
-            gate_dynamic.GateDecision("maintenance", skip=True,
-                                      reasoning="r", confidence=0.9,
-                                      risk_level=5.0, raw_score={}),
+            gate_dynamic.new_gate_decision(gate_name="maintenance", skip=True,
+                                            reasoning="r", confidence=0.9,
+                                            risk_level=5.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
-        maint = next(d for d in out if d.gate_name == "maintenance")
-        self.assertFalse(maint.skip)
+        maint = next(d for d in out if d["gate_name"] == "maintenance")
+        self.assertFalse(maint["skip"])
 
     def test_low_risk_allows_skip(self) -> None:
         # risk_level below the floor AND high skip/confidence scores → skip.
         ctx = _make_ctx(iteration=2)
         llm_decisions = [
-            gate_dynamic.GateDecision("maintenance", skip=True,
-                                      reasoning="r", confidence=0.9,
-                                      risk_level=2.0, raw_score={}),
+            gate_dynamic.new_gate_decision(gate_name="maintenance", skip=True,
+                                            reasoning="r", confidence=0.9,
+                                            risk_level=2.0, raw_score={}),
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
-        maint = next(d for d in out if d.gate_name == "maintenance")
-        self.assertTrue(maint.skip)
+        maint = next(d for d in out if d["gate_name"] == "maintenance")
+        self.assertTrue(maint["skip"])
 
     def test_critical_gate_empty_scope_still_vetoed(self) -> None:
         # Security review LLM01-M1: review/security with empty scope_globs
@@ -230,14 +227,14 @@ class TestHardRules(unittest.TestCase):
             },
         )
         llm_decisions = [
-            gate_dynamic.GateDecision(gate_name=n, skip=True,
-                                      reasoning="r", confidence=0.9,
-                                      risk_level=0.0, raw_score={})
+            gate_dynamic.new_gate_decision(gate_name=n, skip=True,
+                                             reasoning="r", confidence=0.9,
+                                             risk_level=0.0, raw_score={})
             for n in ("review", "security")
         ]
         out = gate_dynamic.apply_hard_rules(ctx, llm_decisions)
         for d in out:
-            self.assertFalse(d.skip, f"Rule #3 should veto {d.gate_name} on empty scope")
+            self.assertFalse(d["skip"], f"Rule #3 should veto {d['gate_name']} on empty scope")
 
     def test_risk_ceiling_polarity_pinned(self) -> None:
         """A-1 fix: pin the polarity of the risk ceiling (renamed
@@ -258,33 +255,33 @@ class TestHardRules(unittest.TestCase):
 
         # risk > ceiling → veto
         ctx = _make_ctx(iteration=2)
-        d_above = gate_dynamic.GateDecision(
-            "maintenance", skip=True, reasoning="r", confidence=0.9,
+        d_above = gate_dynamic.new_gate_decision(
+            gate_name="maintenance", skip=True, reasoning="r", confidence=0.9,
             risk_level=ceiling + 1.0, raw_score={},
         )
         out_above = gate_dynamic.apply_hard_rules(ctx, [d_above])
         self.assertFalse(
-            out_above[0].skip,
+            out_above[0]["skip"],
             f"risk={ceiling + 1.0} (above ceiling={ceiling}) must veto",
         )
         # risk == ceiling → no veto
-        d_equal = gate_dynamic.GateDecision(
-            "maintenance", skip=True, reasoning="r", confidence=0.9,
+        d_equal = gate_dynamic.new_gate_decision(
+            gate_name="maintenance", skip=True, reasoning="r", confidence=0.9,
             risk_level=ceiling, raw_score={},
         )
         out_equal = gate_dynamic.apply_hard_rules(ctx, [d_equal])
         self.assertTrue(
-            out_equal[0].skip,
+            out_equal[0]["skip"],
             f"risk={ceiling} (at ceiling) must NOT veto — boundary case",
         )
         # risk < ceiling → no veto
-        d_below = gate_dynamic.GateDecision(
-            "maintenance", skip=True, reasoning="r", confidence=0.9,
+        d_below = gate_dynamic.new_gate_decision(
+            gate_name="maintenance", skip=True, reasoning="r", confidence=0.9,
             risk_level=ceiling - 1.0, raw_score={},
         )
         out_below = gate_dynamic.apply_hard_rules(ctx, [d_below])
         self.assertTrue(
-            out_below[0].skip,
+            out_below[0]["skip"],
             f"risk={ceiling - 1.0} (below ceiling) must NOT veto",
         )
 
@@ -311,7 +308,7 @@ class TestInvokeJudgeTemperature(unittest.TestCase):
                  patch.object(gate_dynamic.llm_judge, "format_prompt", return_value="system"), \
                  patch.object(gate_dynamic.llm_judge, "call_judge", return_value={"scores": {}}) as mock_call:
                 gate_dynamic.invoke_judge(
-                    gate_dynamic.GateContext(
+                    gate_dynamic.new_gate_context(
                         parent_pr=0,
                         head_sha="abc",
                         iteration=2,
@@ -365,7 +362,7 @@ class TestHashGatesState(unittest.TestCase):
 
 
 class TestDecisionIO(unittest.TestCase):
-    def _make_decision(self, **overrides) -> gate_dynamic.GateSkipDecision:
+    def _make_decision(self, **overrides):
         # Default `gates_hash=""` matches the round-trip case where no
         # `.dev-kit/gates.json` exists in the test target — the
         # `test_load_invalidates_on_gates_hash_mismatch` test
@@ -373,16 +370,16 @@ class TestDecisionIO(unittest.TestCase):
         base = dict(
             head_sha="abc123",
             decisions=(
-                gate_dynamic.GateDecision("maintenance", skip=True,
-                                          reasoning="r", confidence=0.9,
-                                          risk_level=0.0, raw_score={}),
+                gate_dynamic.new_gate_decision(gate_name="maintenance", skip=True,
+                                                reasoning="r", confidence=0.9,
+                                                risk_level=0.0, raw_score={}),
             ),
             llm_raw={"scores": {}, "raw": ""},
             gates_hash="",
             decided_at_iso="2026-09-16T00:00:00Z",
         )
         base.update(overrides)
-        return gate_dynamic.GateSkipDecision(**base)
+        return gate_dynamic.new_gate_skip_decision(**base)
 
     def test_save_load_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -392,8 +389,8 @@ class TestDecisionIO(unittest.TestCase):
             self.assertTrue(path.exists())
             loaded = gate_dynamic.load_decision("abc123", target)
             self.assertIsNotNone(loaded)
-            self.assertEqual(loaded.head_sha, decision.head_sha)
-            self.assertEqual(loaded.gates_hash, decision.gates_hash)
+            self.assertEqual(loaded["head_sha"], decision["head_sha"])
+            self.assertEqual(loaded["gates_hash"], decision["gates_hash"])
 
     def test_load_returns_none_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -434,9 +431,9 @@ class TestDecisionIO(unittest.TestCase):
                     (audit_dir / "abc.json").write_text(json.dumps(payload))
                     loaded = gate_dynamic.load_decision("abc", target)
                 self.assertIsNotNone(loaded)
-                dec = loaded.decisions[0]
+                dec = loaded["decisions"][0]
                 self.assertEqual(
-                    dec.risk_level,
+                    dec["risk_level"],
                     gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
                     f"out-of-range risk_level={bad_value!r} must be "
                     f"clamped to MISSING_RISK_LEVEL_SENTINEL",
@@ -473,7 +470,7 @@ class TestDecisionIO(unittest.TestCase):
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
         self.assertEqual(
-            loaded.decisions[0].risk_level,
+            loaded["decisions"][0]["risk_level"],
             gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
             "non-numeric risk_level must be clamped to sentinel, "
             "not raise TypeError",
@@ -530,18 +527,18 @@ class TestDecisionIO(unittest.TestCase):
             (audit_dir / "abc.json").write_text(json.dumps(legacy_payload))
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
-        dec = loaded.decisions[0]
+        dec = loaded["decisions"][0]
         # Dataclass property: legacy entry gets the sentinel default.
-        self.assertEqual(dec.risk_level, gate_dynamic.MISSING_RISK_LEVEL_SENTINEL)
-        self.assertGreater(dec.risk_level, gate_dynamic.RISK_CEILING)
+        self.assertEqual(dec["risk_level"], gate_dynamic.MISSING_RISK_LEVEL_SENTINEL)
+        self.assertGreater(dec["risk_level"], gate_dynamic.RISK_CEILING)
         # Security invariant: after apply_hard_rules, the rule #6 veto
         # must override the cached `skip=True` to `skip=False`. This is
         # what `select_gates` now relies on when it re-applies hard
         # rules on cache hits (closes the A01/A06 short-circuit path).
         ctx = _make_ctx(head_sha="abc", iteration=2)
-        applied = gate_dynamic.apply_hard_rules(ctx, list(loaded.decisions))
+        applied = gate_dynamic.apply_hard_rules(ctx, list(loaded["decisions"]))
         self.assertFalse(
-            applied[0].skip,
+            applied[0]["skip"],
             "legacy cache entry must fail closed after apply_hard_rules "
             "(rule #6 veto); this is the security invariant the previous "
             "test version failed to pin.",
@@ -592,7 +589,7 @@ class TestSelectGates(unittest.TestCase):
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
             self.assertEqual(
-                [d.gate_name for d in decision.decisions if d.skip],
+                [d["gate_name"] for d in decision["decisions"] if d["skip"]],
                 [],
             )
 
@@ -608,7 +605,7 @@ class TestSelectGates(unittest.TestCase):
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
             self.assertEqual(
-                [d.gate_name for d in decision.decisions if d.skip],
+                [d["gate_name"] for d in decision["decisions"] if d["skip"]],
                 [],
             )
 
@@ -638,7 +635,7 @@ class TestSelectGates(unittest.TestCase):
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
             self.assertEqual(
-                [d.gate_name for d in decision.decisions if d.skip],
+                [d["gate_name"] for d in decision["decisions"] if d["skip"]],
                 [],
             )
 
@@ -690,12 +687,12 @@ class TestSelectGates(unittest.TestCase):
             raw_cached = gate_dynamic.load_decision("abc", target)
             self.assertIsNotNone(raw_cached)
             expected = gate_dynamic.apply_hard_rules(
-                ctx, list(raw_cached.decisions),
+                ctx, list(raw_cached["decisions"]),
             )
             # Pre-compute the raw cached skips — used as a sanity
             # check that the test scenario actually distinguishes
             # pre-fix from post-fix behavior.
-            raw_skips = [d.skip for d in raw_cached.decisions]
+            raw_skips = [d["skip"] for d in raw_cached["decisions"]]
             # Patch the LLM seam — cache hit path must NOT invoke the
             # judge (this also pins that the fix doesn't accidentally
             # re-run the judge on cache hits).
@@ -723,7 +720,7 @@ class TestSelectGates(unittest.TestCase):
             # picks a different cached payload.
             self.assertNotEqual(
                 raw_skips,
-                [d.skip for d in expected],
+                [d["skip"] for d in expected],
                 "test scenario invariant: raw cached skip must differ "
                 "from apply_hard_rules result, else the test cannot "
                 "distinguish pre-fix from post-fix behavior",
@@ -732,8 +729,8 @@ class TestSelectGates(unittest.TestCase):
             # `apply_hard_rules(ctx, cached.decisions)`, NOT the raw
             # cached tuple.
             self.assertEqual(
-                [d.skip for d in decision.decisions],
-                [d.skip for d in expected],
+                [d["skip"] for d in decision["decisions"]],
+                [d["skip"] for d in expected],
                 "cache-hit decisions must equal apply_hard_rules(...) "
                 "of the raw cached decisions (re-application invariant)",
             )
@@ -773,16 +770,16 @@ class TestSelectGates(unittest.TestCase):
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
             # Combined-score >= 17 must trigger the coercion upgrade.
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertEqual(
-                maint.risk_level,
+                maint["risk_level"],
                 gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
                 "combined-score coerced triple (skip=8.5, risk=1.5) "
                 "must upgrade risk_level to the sentinel so rule 6 fires",
             )
             self.assertFalse(
-                maint.skip,
+                maint["skip"],
                 "sub-extreme coerced triple must not skip the gate",
             )
 
@@ -814,10 +811,10 @@ class TestSelectGates(unittest.TestCase):
                 }),
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertTrue(
-                maint.skip,
+                maint["skip"],
                 "legitimate skip (skip=7, risk=3, combined=14) must "
                 "survive — combined-score sanity check is not allowed "
                 "to over-trigger",
@@ -858,17 +855,17 @@ class TestSelectGates(unittest.TestCase):
                 decision = gate_dynamic.select_gates(ctx, target)
             # No gate may be skipped on a coerced response.
             self.assertEqual(
-                [d.gate_name for d in decision.decisions if d.skip],
+                [d["gate_name"] for d in decision["decisions"] if d["skip"]],
                 [],
                 "coerced-response triple (skip=10, risk=0) must fail "
                 "closed — no gate skipped",
             )
             # The sanity check must upgrade risk_level to the sentinel
             # so rule #6 fires (not some other silent gate).
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertEqual(
-                maint.risk_level,
+                maint["risk_level"],
                 gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
                 "coerced-response triple must upgrade risk_level to "
                 "the sentinel so rule #6 fires",
@@ -905,10 +902,10 @@ class TestSelectGates(unittest.TestCase):
                 }),
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertTrue(
-                maint.skip,
+                maint["skip"],
                 "non-coerced moderate skip (skip=8 risk=2 conf=7) "
                 "must skip — sanity check is not allowed to over-trigger",
             )
@@ -941,10 +938,10 @@ class TestSelectGates(unittest.TestCase):
                 }),
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertEqual(
-                maint.audit_reason,
+                maint["audit_reason"],
                 "coerced_response",
                 "audit_reason must record the coerced-response path "
                 "distinctly from 'missing_key' / 'legacy_cache'",
@@ -972,17 +969,17 @@ class TestSelectGates(unittest.TestCase):
                 decision = gate_dynamic.select_gates(ctx, target)
             # All gates must be skip=False (the no-skip fallback).
             self.assertEqual(
-                [d.gate_name for d in decision.decisions if d.skip],
+                [d["gate_name"] for d in decision["decisions"] if d["skip"]],
                 [],
                 "exception in select_gates body must fail closed "
                 "to no-skip decision (A10)",
             )
             # Reasoning string should mark the exception path distinctly.
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertIn(
                 "exception",
-                maint.reasoning,
+                maint["reasoning"],
                 "no-skip fallback reasoning must mark the exception "
                 "path distinctly (S-1 fix)",
             )
@@ -1016,10 +1013,10 @@ class TestSelectGates(unittest.TestCase):
             )
             # audit_reason must distinguish exception fail-closed
             # from llm-unavailable (default).
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertEqual(
-                maint.audit_reason,
+                maint["audit_reason"],
                 "exception_fail_closed",
                 "audit_reason must mark the exception-fail-closed "
                 "path distinctly",
@@ -1070,15 +1067,15 @@ class TestSelectGates(unittest.TestCase):
             (audit_dir / "abc.json").write_text(json.dumps(payload))
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
-        dec = loaded.decisions[0]
+        dec = loaded["decisions"][0]
         self.assertEqual(
-            dec.risk_level,
+            dec["risk_level"],
             gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
             "poisoned cache with combined-score >= 17 must be "
             "clamped to sentinel at load time (S2)",
         )
         self.assertEqual(
-            dec.audit_reason,
+            dec["audit_reason"],
             "coerced_response_cache",
             "coerced-response cache-load path must be tagged "
             "distinctly so operators can tell it apart from "
@@ -1105,6 +1102,7 @@ class TestSelectGates(unittest.TestCase):
                     # risk_level in range; combined-score = 14
                     # (below 17). Legitimate skip survives.
                     "risk_level": 3.0,
+                    "audit_reason": "ok",
                     "raw_score": {
                         "gate_skippable": 7,
                         "confidence": 8,
@@ -1122,15 +1120,15 @@ class TestSelectGates(unittest.TestCase):
             (audit_dir / "abc.json").write_text(json.dumps(payload))
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
-        dec = loaded.decisions[0]
+        dec = loaded["decisions"][0]
         self.assertEqual(
-            dec.risk_level,
+            dec["risk_level"],
             3.0,
             "legitimate skip (combined=14) must survive cache load "
             "without coercion upgrade",
         )
         self.assertEqual(
-            dec.audit_reason,
+            dec["audit_reason"],
             "ok",
             "legitimate-skip cache load must retain 'ok' audit_reason",
         )
@@ -1168,23 +1166,23 @@ class TestSelectGates(unittest.TestCase):
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
             # Near-max-skip check must trigger the coercion upgrade.
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertEqual(
-                maint.risk_level,
+                maint["risk_level"],
                 gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
                 "near-max-skip coerced triple (skip=9.99, risk=3.0) "
                 "must upgrade risk_level to the sentinel so rule 6 fires",
             )
             self.assertEqual(
-                maint.audit_reason,
+                maint["audit_reason"],
                 "coerced_response",
                 "near-max-skip coerced-response must be tagged "
                 "distinctly so operators can tell it apart from "
                 "missing_key / legacy_cache / coerced_response_cache",
             )
             self.assertFalse(
-                maint.skip,
+                maint["skip"],
                 "near-max-skip coerced triple must not skip the gate",
             )
 
@@ -1218,16 +1216,16 @@ class TestSelectGates(unittest.TestCase):
                 }),
             ):
                 decision = gate_dynamic.select_gates(ctx, target)
-            maint = next(d for d in decision.decisions
-                         if d.gate_name == "maintenance")
+            maint = next(d for d in decision["decisions"]
+                         if d["gate_name"] == "maintenance")
             self.assertEqual(
-                maint.audit_reason,
+                maint["audit_reason"],
                 "ok",
                 "legitimate high-skip / low-risk response must not be "
                 "tagged as coerced",
             )
             self.assertTrue(
-                maint.skip,
+                maint["skip"],
                 "legitimate (skip=8, risk=2) must survive both the "
                 "combined-score and near-max-skip checks",
             )
@@ -1272,15 +1270,15 @@ class TestSelectGates(unittest.TestCase):
             (audit_dir / "abc.json").write_text(json.dumps(payload))
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
-        dec = loaded.decisions[0]
+        dec = loaded["decisions"][0]
         self.assertEqual(
-            dec.risk_level,
+            dec["risk_level"],
             gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
             "poisoned cache with near-max-skip signature must be "
             "clamped to sentinel at load time (S3)",
         )
         self.assertEqual(
-            dec.audit_reason,
+            dec["audit_reason"],
             "coerced_response_cache",
             "near-max-skip cache-load path must be tagged "
             "distinctly",
@@ -1323,15 +1321,15 @@ class TestSelectGates(unittest.TestCase):
             (audit_dir / "abc.json").write_text(json.dumps(payload))
             loaded = gate_dynamic.load_decision("abc", target)
         self.assertIsNotNone(loaded)
-        dec = loaded.decisions[0]
+        dec = loaded["decisions"][0]
         self.assertEqual(
-            dec.risk_level,
+            dec["risk_level"],
             gate_dynamic.MISSING_RISK_LEVEL_SENTINEL,
             "poisoned cache with empty raw_score + skip-range risk "
             "must be clamped to sentinel at load time (S4)",
         )
         self.assertEqual(
-            dec.audit_reason,
+            dec["audit_reason"],
             "legacy_cache",
             "empty-raw_score cache-load defense-in-depth must be "
             "tagged as legacy_cache",
@@ -1392,7 +1390,7 @@ class TestInteractiveDefault(unittest.TestCase):
                                 __import__("os").environ[k] = v
             # The decision is computed without blocking.
             self.assertIsNotNone(decision)
-            self.assertEqual(decision.head_sha, "abc123def")
+            self.assertEqual(decision["head_sha"], "abc123def")
 
 
 if __name__ == "__main__":

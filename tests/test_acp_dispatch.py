@@ -17,7 +17,7 @@ Closes #282. Verifies:
 Each test uses a throwaway git repo (init + linked worktree) so the
 `git worktree add` call in `ACPDispatcher._cut_worktree` runs against a
 real `.git` directory without polluting the host repo. The canonical
-template is copied into the throwaway repo at `skills/_acp/`
+template is copied into the throwaway repo at `lib/`
 so the dispatcher reads it from its expected relative path.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ from lib.acp_dispatch import (  # noqa: E402  (sys.path tweak above)
     parse_pr_spec,
 )
 
-REPO_TEMPLATE = ROOT / "skills" / "_acp" / "sub-agent-prompt.md"
+REPO_TEMPLATE = ROOT / "lib" / "sub-agent-prompt.md"
 
 
 def _init_throwaway_repo() -> "tempfile.TemporaryDirectory":
@@ -62,10 +62,10 @@ def _init_throwaway_repo() -> "tempfile.TemporaryDirectory":
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "init"], check=True)
     # Seed the template at the canonical relative path so the dispatcher
     # finds it without an explicit --template override.
-    template_dest = root / "skills" / "_acp"
+    template_dest = root / "lib"
     template_dest.mkdir(parents=True, exist_ok=True)
     shutil.copy(REPO_TEMPLATE, template_dest / "sub-agent-prompt.md")
-    subprocess.run(["git", "-C", str(root), "add", "skills"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "lib"], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "seed template"], check=True)
     # Create a file:// origin so worktree-add's origin/main resolves.
     origin_dir = root.parent / f"{root.name}-origin"
