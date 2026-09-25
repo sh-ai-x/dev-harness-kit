@@ -44,7 +44,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # (38 -> 39).
 # Removed skills/research-plan-build/SKILL.md; build-debug/SKILL.md
 # absorbed its standalone-entry role in place instead of adding a new
-# skill (40 -> 39).
+# skill (40 -> 39). build-debug itself was deleted by the
+# prune/build-debug PR (49 = 50 minus skills/build-debug/SKILL.md).
 # Added skills/evidence-plan/SKILL.md (research -> proposal.html
 # (human confirms) -> /dev-kit:plan hand-off) (39 -> 40).
 # Added skills/sync-version/SKILL.md (pre-push auto-sync primitive,
