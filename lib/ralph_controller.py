@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-from lib.ralph_state import RalphState
+from lib.ralph_chain import RalphState
 from lib.trace_log import append_event, new_event_id
 
 SCHEMA_VERSION = 1

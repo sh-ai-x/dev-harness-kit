@@ -58,5 +58,4 @@ if str(_TOPLEVEL_LIB) not in _sys.path:
     _sys.path.insert(0, str(_TOPLEVEL_LIB))
 
 from lib.ralph_chain import *  # noqa: E402, F401, F403
-from lib.ralph_state import *  # noqa: E402, F401, F403
-from lib.ralph_state import RalphState  # noqa: E402, F401
+from lib.ralph_chain import RalphState  # noqa: E402, F401

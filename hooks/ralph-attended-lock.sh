@@ -3,11 +3,14 @@
 # refusal during /dev-kit:ralph ATTENDED_RUN.
 #
 # Wires the state-machine `attended_lock` invariant into the host's
-# tool-use gate. Per skills/ralph/SKILL.md and lib/ralph_state.py (promoted
-# from skills/ralph/lib/ in inspect-pass4 finding a1) the
-# invariant is already enforced at the state-machine layer; this hook
-# is the *mechanical* complement so even a misbehaving sub-skill or
-# a model invocation that ignores the prose contract cannot call
+# tool-use gate. Per skills/ralph/SKILL.md and lib/ralph_chain.py
+# (which inlines the state machine after the
+# refactor/ralph-babysit-collapse collapse; previously
+# lib/ralph_state.py, promoted from skills/ralph/lib/ in inspect-pass4
+# finding a1, then collapsed into lib/ralph_chain.py) the invariant
+# is already enforced at the state-machine layer; this hook is the
+# *mechanical* complement so even a misbehaving sub-skill or a model
+# invocation that ignores the prose contract cannot call
 # AskUserQuestion once SHIP_CONFIRM_GATE → ATTENDED_RUN has crossed.
 #
 # Matcher wired in hooks/hooks.json:
@@ -60,29 +63,31 @@ command -v python3 >/dev/null 2>&1 || {
 STATE_FILE="${PROJECT_ROOT}/.dev-kit/ralph/${RALPH_SESSION:-default}.json"
 [ -f "$STATE_FILE" ] || exit 0
 
-# Resolve the ralph_state module location. The hook sits under
-# <repo>/hooks/ralph-attended-lock.sh; the lib is at
-# <repo>/lib/ralph_state.py. Derive the lib path from
-# the hook's own location (BASH_SOURCE) so the hook works whether or
+# Resolve the ralph_chain module location (the state machine is
+# inlined there after the refactor/ralph-babysit-collapse collapse).
+# The hook sits under <repo>/hooks/ralph-attended-lock.sh; the lib
+# is at <repo>/lib/ralph_chain.py. Derive the lib path from the
+# hook's own location (BASH_SOURCE) so the hook works whether or
 # not PROJECT_ROOT happens to be the dev-kit repo root.
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RALPH_LIB="${HOOK_DIR%/hooks}/lib"
-if [ ! -f "${RALPH_LIB}/ralph_state.py" ]; then
+if [ ! -f "${RALPH_LIB}/ralph_chain.py" ]; then
   # Fallback: assume PROJECT_ROOT is the dev-kit repo root (canonical
   # install path).
   RALPH_LIB="${PROJECT_ROOT}/lib"
 fi
-[ -f "${RALPH_LIB}/ralph_state.py" ] || {
-  echo "[ralph-attended-lock] WARN: ralph_state.py not found at ${RALPH_LIB}; mechanical Ask-refusal disabled." >&2
+[ -f "${RALPH_LIB}/ralph_chain.py" ] || {
+  echo "[ralph-attended-lock] WARN: ralph_chain.py not found at ${RALPH_LIB}; mechanical Ask-refusal disabled." >&2
   exit 0
 }
 
-# Import ralph_state via PYTHONPATH so we use the same module the
-# orchestrator uses. Paths are passed via env vars (RALPH_STATE_FILE,
-# RALPH_PROJECT_ROOT) instead of bash heredoc interpolation — a
-# defence-in-depth guard against future code that reads RALPH_SESSION
-# from an untrusted source (PR title, branch name, etc.) and might
-# contain a `"` or `\` that would corrupt the embedded Python.
+# Import ralph_chain (state machine inlined) via PYTHONPATH so we use
+# the same module the orchestrator uses. Paths are passed via env vars
+# (RALPH_STATE_FILE, RALPH_PROJECT_ROOT) instead of bash heredoc
+# interpolation — a defence-in-depth guard against future code that
+# reads RALPH_SESSION from an untrusted source (PR title, branch
+# name, etc.) and might contain a `"` or `\` that would corrupt the
+# embedded Python.
 STATE_JSON=$(PYTHONPATH="${RALPH_LIB}" \
   RALPH_STATE_FILE="${STATE_FILE}" \
   RALPH_PROJECT_ROOT="${PROJECT_ROOT}" \
@@ -90,7 +95,7 @@ STATE_JSON=$(PYTHONPATH="${RALPH_LIB}" \
 import json, os, sys
 from pathlib import Path
 try:
-    import ralph_state as rs  # type: ignore
+    import ralph_chain as rs  # type: ignore — state machine inlined
     p = Path(os.environ["RALPH_STATE_FILE"])
     root = Path(os.environ["RALPH_PROJECT_ROOT"]).resolve()
     state = rs.RalphState.load(root, p.stem)
@@ -124,6 +129,6 @@ fi
 # names the state-machine invariant so the LLM can recover (delete the
 # AskUserQuestion call, take the auto-decision branch).
 SESSION=$(echo "$STATE_JSON" | jq -r '.session // "default"')
-printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"RALPH ATTENDED_LOCK: AskUserQuestion is forbidden while ralph session=%s is at stage=%s with attended_lock=%s. Crossed the one-way SHIP_CONFIRM_GATE -> ATTENDED_RUN boundary; the chain auto-decides instead. Drop this AskUserQuestion call and continue the unattended chain (lib/ralph_chain.py run_attended)."}}\n' \
+printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"RALPH ATTENDED_LOCK: AskUserQuestion is forbidden while ralph session=%s is at stage=%s with attended_lock=%s. Crossed the one-way SHIP_CONFIRM_GATE -> ATTENDED_RUN boundary; the chain auto-decides instead. Drop this AskUserQuestion call and continue the unattended chain (python3 -m lib.ralph_chain run-attended)."}}\n' \
   "$SESSION" "$STAGE" "$LOCK" >&2
 exit 2

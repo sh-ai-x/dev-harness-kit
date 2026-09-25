@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 
 import pytest
+from lib import ralph_chain as ralph_state
 from lib import ralph_controller
-from lib import ralph_state
 
 
 def _attended_state(root: Path, session: str = "ralph") -> None:

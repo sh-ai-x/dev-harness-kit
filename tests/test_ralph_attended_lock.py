@@ -75,7 +75,7 @@ def _write_state(project_root: Path, *, attended_lock: bool, current_stage: str)
     """Construct a real RalphState on disk via the canonical module."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(LIB_DIR))
-    import ralph_state as rs  # type: ignore  # noqa: E402
+    import ralph_chain as rs  # type: ignore  # noqa: E402 — state machine inlined
 
     state = rs.RalphState(
         session="default",
@@ -306,7 +306,7 @@ def test_alt_session_lock_denies(project_root: Path):
     must still deny. Tests the env-var path through the hook."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(LIB_DIR))
-    import ralph_state as rs  # type: ignore  # noqa: E402
+    import ralph_chain as rs  # type: ignore  # noqa: E402 — state machine inlined
 
     state = rs.RalphState(
         session="foo",
@@ -325,7 +325,7 @@ def test_alt_session_unlocked_passes(project_root: Path):
     passes. The hook operates on the named session only."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(LIB_DIR))
-    import ralph_state as rs  # type: ignore  # noqa: E402
+    import ralph_chain as rs  # type: ignore  # noqa: E402 — state machine inlined
 
     rs.RalphState(
         session="default",
