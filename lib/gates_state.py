@@ -39,9 +39,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from atomic import atomic_write_json  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .atomic import atomic_write_json  # type: ignore
+except ImportError:
+    from atomic import atomic_write_json  # type: ignore
 
 # gh presence + auth probe. Centralized in lib/gh_cli.py (re-instated after
 # the YAGNI sweep; 4 inlined copies across ci_doctor / ci_setup /

@@ -20,9 +20,8 @@ Discovery (filename-glob discriminator):
 
 Validation (typed ``handoff_kind`` discriminator):
 
-- ``parse_yaml_frontmatter(text)`` — tiny YAML-subset parser.
-  Returns ``dict`` or ``None`` (no frontmatter). Raises
-  ``ValueError`` on malformed input.
+- ``parse_yaml_frontmatter(text)`` — yaml.safe_load over the fenced
+  frontmatter block. Returns ``dict`` or ``None`` (no frontmatter).
 - ``validate_interview_handoff(path)`` — verifies the file carries
   ``handoff_kind: interview`` plus a known 5-field status
   (``ok | best-effort | user-acknowledged | held``). Returns
@@ -72,7 +71,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
+
+import yaml
 
 # ----- filename-shape discriminators (the first line of defence) -----
 
@@ -111,26 +112,31 @@ PATH_ERROR = "error"
 
 
 # --------------------------------------------------------------------------- #
-# YAML-subset frontmatter parser
+# YAML frontmatter parser
 # --------------------------------------------------------------------------- #
 
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
-def parse_yaml_frontmatter(text: str) -> Optional[dict]:
-    """Extract a flat string→string frontmatter dict.
+def parse_yaml_frontmatter(text: str) -> Optional[dict[str, Any]]:
+    """Extract the frontmatter block via yaml.safe_load.
 
-    Accepts the leading ``---\\n...\\n---\\n`` fence only. Values are
-    stripped of surrounding quotes. Returns ``None`` when no
-    frontmatter is present (including the "opened but never closed"
-    case — treat malformed input as "no frontmatter" so the caller
-    can decide between fail-closed and a soft skip).
+    Accepts the leading ``---\\n...\\n---\\n`` fence only. Returns
+    ``None`` when no frontmatter is present (including the "opened
+    but never closed" case — treat malformed input as "no
+    frontmatter" so the caller can decide between fail-closed and
+    a soft skip).
 
-    A deliberately tiny subset: keys are flat strings, values are
-    strings (no nested types, no list support). The plan/interview/SOT
-    contracts only use flat string fields; a real YAML library would
-    pull in PyYAML for nothing useful here.
+    Values are coerced to ``str`` to preserve the prior hand-rolled
+    parser's flat-string contract. The plan/interview/SOT validators
+    in this module (`validate_interview_handoff`,
+    `validate_sot_handoff`) compare ``handoff_kind`` / ``status``
+    against string constants, and the old parser already coerced
+    every value to string. Keeping that contract here avoids a
+    silent caller-AUDIT drift where a numeric-looking
+    ``handoff_kind`` would now compare as ``None != 'interview'``
+    instead of ``'' != 'interview'`` (review #920 round-3 VM-2).
     """
     if not text.startswith("---"):
         return None
@@ -138,20 +144,10 @@ def parse_yaml_frontmatter(text: str) -> Optional[dict]:
     if m is None:
         return None
     block = m.group(1)
-    out: dict = {}
-    for line in block.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if ":" not in stripped:
-            continue
-        key, _, value = stripped.partition(":")
-        value = value.strip()
-        # Strip a single layer of matching surrounding quotes.
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-            value = value[1:-1]
-        out[key.strip()] = value
-    return out
+    parsed = yaml.safe_load(block)
+    if not isinstance(parsed, dict):
+        return None
+    return {k: str(v) for k, v in parsed.items()}
 
 
 # --------------------------------------------------------------------------- #

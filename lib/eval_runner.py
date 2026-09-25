@@ -27,25 +27,47 @@ import argparse
 import hashlib
 import json
 import logging
-import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).parent))
-import llm_judge  # type: ignore
-from atomic import atomic_write_json, now_iso  # noqa: E402
-
-from lib.eval import (  # noqa: E402  -- single SSOT after PR-E extraction
-    CaseResult,
-    RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
-    _coerce_score,
-    exception_rot,
-    mock_drift_warning,
-    mock_skipped,
-    real_result,
-)
-from lib.harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working. Single block —
+# the fallback uses FLAT imports only; if the relative branch failed
+# ``lib`` is not a package, so ``from lib.X`` would also fail (review
+# #920 round-2: prior version mixed ``from atomic`` with
+# ``from lib.eval`` in the same except, structurally broken). The
+# `noqa: I001` on each except-branch import opts out of the
+# sort-import rule because the parenthesized `from eval import (...)`
+# block interleaved with simple imports triggers a contradiction
+# between the project .ruff.toml config and the CI-pinned ruff
+# 0.15.16 (review #920 round-6).
+try:
+    from . import llm_judge  # type: ignore
+    from .atomic import atomic_write_json, now_iso  # type: ignore
+    from .eval import (  # type: ignore  -- single SSOT after PR-E extraction
+        CaseResult,
+        RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
+        _coerce_score,
+        exception_rot,
+        mock_drift_warning,
+        mock_skipped,
+        real_result,
+    )
+    from .harness_effectiveness import build_report as build_effectiveness_report  # type: ignore
+except ImportError:
+    import llm_judge  # type: ignore  # noqa: E402, I001
+    from atomic import atomic_write_json, now_iso  # noqa: E402, I001
+    from eval import (  # noqa: E402, I001  -- single SSOT after PR-E extraction
+        CaseResult,
+        RubricRegistry,  # noqa: F401  -- re-exported; tests reference eval_runner.RubricRegistry
+        _coerce_score,
+        exception_rot,
+        mock_drift_warning,
+        mock_skipped,
+        real_result,
+    )
+    from harness_effectiveness import build_report as build_effectiveness_report  # noqa: E402, I001
 
 logger = logging.getLogger(__name__)
 

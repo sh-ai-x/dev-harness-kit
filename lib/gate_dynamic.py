@@ -43,11 +43,18 @@ import time
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import gates_state  # noqa: E402
-import llm_judge  # noqa: E402
-from atomic import atomic_write_json  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from . import (
+        gates_state,  # type: ignore
+        llm_judge,  # type: ignore
+    )
+    from .atomic import atomic_write_json  # type: ignore
+except ImportError:
+    import gates_state  # noqa: E402
+    import llm_judge  # noqa: E402
+    from atomic import atomic_write_json  # noqa: E402
 
 # Module-level logger for S1 (silent-exception fix). The wrapper
 # `select_gates` body must `logger.exception(...)` on any failure

@@ -10,17 +10,26 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atomic import (  # noqa: E402
-    atomic_write_json,
-    atomic_write_text,
-    now_iso,
-    read_json_or_default,
-)
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working. Same pattern as
+# `lib/active_hooks_codec.py` and `lib/ci_setup.py`.
+try:
+    from .atomic import (  # type: ignore
+        atomic_write_json,
+        atomic_write_text,
+        now_iso,
+        read_json_or_default,
+    )
+except ImportError:
+    from atomic import (  # type: ignore
+        atomic_write_json,
+        atomic_write_text,
+        now_iso,
+        read_json_or_default,
+    )
 
 SCHEMA_VERSION = "1.0.0"
 

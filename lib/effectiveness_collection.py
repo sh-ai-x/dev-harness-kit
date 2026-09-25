@@ -51,7 +51,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # does not itself provide locking or fsync durability, so we hold the
 # journal lock for the duration of any cache write and we flush/fsync
 # the cache fd before the os.replace.
-from atomic import atomic_write_json  # noqa: E402 — lib is on sys.path
+#
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .atomic import atomic_write_json  # type: ignore
+except ImportError:
+    from atomic import atomic_write_json  # type: ignore
 
 # ---------------------------------------------------------------------------
 # Schema + constants

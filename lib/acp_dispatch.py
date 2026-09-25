@@ -34,8 +34,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .git_worktree import cut_worktree  # type: ignore
+except ImportError:
+    from git_worktree import cut_worktree  # type: ignore  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants — single source of truth, mirror docs/architecture/acp-harness.md §3.2.

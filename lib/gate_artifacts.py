@@ -10,10 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import gates_state  # noqa: E402
-from atomic import atomic_write_json  # noqa: E402
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from . import gates_state  # type: ignore
+    from .atomic import atomic_write_json  # type: ignore
+except ImportError:
+    import gates_state  # noqa: E402
+    from atomic import atomic_write_json  # noqa: E402
 
 MANIFEST_REL_PATH = Path(".dev-kit") / "gate-artifacts.json"
 MANAGED_BY = "dev-kit:gate-artifacts"

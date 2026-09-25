@@ -30,9 +30,10 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -47,7 +48,7 @@ except ImportError:
 
 # ----- Constants -------------------------------------------------------------
 
-KST = timezone(timedelta(hours=9))
+KST = ZoneInfo("Asia/Seoul")
 
 # Orchestrator boundaries (issue #843 step 3).
 BOUNDARIES: Tuple[str, ...] = (

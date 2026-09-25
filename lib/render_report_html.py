@@ -13,10 +13,11 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Dict, Iterator, List, Tuple
+from zoneinfo import ZoneInfo
 
-KST = timezone(timedelta(hours=9))
+KST = ZoneInfo("Asia/Seoul")
 
 # Verdict -> CSS class. Used for both evaluation (OK / DRIFT_WARNING / ROT /
 # SKIPPED) and inspect (Critical / Major drift / Minor drift / Healthy).

@@ -25,24 +25,44 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atomic import atomic_write_json, now_iso  # noqa: E402
-from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
-from effectiveness_collection import (  # noqa: E402 — bounded journal + projection
-    ORIGIN_RUNTIME,
-)
-from effectiveness_collection import (
-    collect as _eff_collect,
-)
-from effectiveness_collection import (
-    enroll as _eff_enroll,
-)
-from effectiveness_collection import (
-    observe as _eff_observe,
-)
-from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
-from harness_mode_state import resolved_gate  # noqa: E402 — workflow-fast-mode-lean gate resolution
-from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
+# Dual-import so consumer installs that ship `lib/*.py` flat (no
+# `__init__.py` in the consumer `lib/`) keep working.
+try:
+    from .atomic import atomic_write_json, now_iso  # type: ignore
+    from .dispatch_classifier import classify  # type: ignore  # top-level (no cycle)
+    from .effectiveness_collection import (  # type: ignore  # bounded journal + projection
+        ORIGIN_RUNTIME,
+    )
+    from .effectiveness_collection import (  # type: ignore
+        collect as _eff_collect,
+    )
+    from .effectiveness_collection import (  # type: ignore
+        enroll as _eff_enroll,
+    )
+    from .effectiveness_collection import (  # type: ignore
+        observe as _eff_observe,
+    )
+    from .git_worktree import cut_worktree  # type: ignore  # canonical helper (issue #310)
+    from .harness_mode_state import resolved_gate  # type: ignore  # workflow-fast-mode-lean gate resolution
+    from .trace_log import append_event, new_event_id, now_utc  # type: ignore  # additive effectiveness evidence
+except ImportError:
+    from atomic import atomic_write_json, now_iso  # noqa: E402
+    from dispatch_classifier import classify  # noqa: E402 — top-level (no cycle)
+    from effectiveness_collection import (  # noqa: E402 — bounded journal + projection
+        ORIGIN_RUNTIME,
+    )
+    from effectiveness_collection import (  # noqa: E402
+        collect as _eff_collect,
+    )
+    from effectiveness_collection import (  # noqa: E402
+        enroll as _eff_enroll,
+    )
+    from effectiveness_collection import (  # noqa: E402
+        observe as _eff_observe,
+    )
+    from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
+    from harness_mode_state import resolved_gate  # noqa: E402 — workflow-fast-mode-lean gate resolution
+    from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
 
 SCHEMA_VERSION = "1.0.0"
 # Sub-agent stdout marker. If the per-step `claude -p` emits this line, the
