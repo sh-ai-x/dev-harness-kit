@@ -21,6 +21,14 @@ The parser recognizes GitHub's standard close-keywords (`close`/`closes`/`closed
 - **`\b` word boundary** on the ref group keeps `foo#bar` slugs from triggering a numeric-issue match.
 - **Keyword inside the regex span** (named group `kw`) — a look-back approach loses keywords at offset 0; capturing the keyword in the match span keeps the parser's behavior consistent at the start of the body/title.
 
+## v1.1.1 pre-check (no-checkout fast path)
+
+Before `actions/checkout`, the job runs a `Pre-check refs` step that reads `github.event.pull_request.title` + `github.event.pull_request.body` (no fetch needed) and runs `grep -ciE` against the same regex the Python parser uses. If zero matches, the step publishes `has_refs=false` and exits 0; the `if:` gates on `checkout` / `Detect audit-trail label` / `Parse + check issue states` then skip them entirely.
+
+- **Saves** ~5 s of runner time + sparse-checkout materialization on PRs whose title+body reference no GitHub issue.
+- **Title included** — a ref that lives only in the PR title (e.g. `Closes #12 — fix the wiring`) still triggers the full gate. A body-only pre-check would have silently skipped the audit-trail contract for title-only refs.
+- **Safe superset** — the pre-check regex is a strict superset of `tools/issue_sync._REFERENCE_RE`; it catches refs in code blocks / HTML comments that the Python parser strips. Over-matches just trigger a checkout + a no-ref real-parse that exits 0. Under-matches would skip the gate on a real ref, which is the correctness regression `tests/test_issue_sync_workflow_pre_check.py` pins against.
+
 ## Running locally
 
 ```bash
