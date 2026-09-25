@@ -34,7 +34,7 @@ RESEARCH_GATE → PROPOSAL_GATE → PLAN_GATE → SHIP_CONFIRM_GATE → ATTENDED
 After SHIP_CONFIRM_GATE exits Approve, the chain enters **ATTENDED_RUN**
 with `attended_lock=True`. From that point forward, the orchestrator
 refuses every `AskUserQuestion` invocation at the state-machine layer
-(`skills/ralph/lib/ralph_state.py::RalphState.can_ask_question()`).
+(`lib/ralph_chain.py::RalphState.can_ask_question()`; the state machine was inlined into `ralph_chain` after the `refactor/ralph-babysit-collapse` collapse).
 This is an invariant, not convention.
 
 ## The 4 gates + 1 attended execution
@@ -87,7 +87,7 @@ After SHIP_CONFIRM_GATE approves and `attended_lock` flips to True,
 the chain MUST walk the unattended execution phase without ever
 calling `AskUserQuestion`. Two layers enforce this:
 
-### Layer 1 — state machine invariant (`lib/ralph_state.py`)
+### Layer 1 — state machine invariant (`lib/ralph_chain.py::RalphState`)
 
 `RalphState.can_ask_question()` returns False once `attended_lock=True`
 or `current_stage=ATTENDED_RUN`. The orchestrator MUST call
@@ -99,7 +99,7 @@ machine records `last_blocked_ask` for forensics.
 
 `hooks/hooks.json` wires the AskUserQuestion matcher to
 `hooks/ralph-attended-lock.sh`. The hook reads
-`.dev-kit/ralph/<session>.json` via the canonical `ralph_state`
+`.dev-kit/ralph/<session>.json` via the canonical `ralph_chain`
 module and exits 2 with a deny JSON envelope whenever
 `attended_lock=True` or `current_stage=ATTENDED_RUN`. Toolchain-missing
 fails OPEN with a stderr WARN — the state-machine layer still enforces
@@ -167,7 +167,7 @@ that bypasses subprocess and returns a successful SHIP-owned
 USER_MERGE_REQUIRED landing; useful for state-machine smoke tests without spawning
 babysit-pr. `tests/test_ralph_chain.py::test_cli_dry_run_*` pins this.
 
-## State machine — `skills/ralph/lib/ralph_state.py`
+## State machine — `lib/ralph_chain.py::RalphState`
 
 Pure Python dataclass. No subprocess at import time. Persists to
 `.dev-kit/ralph/<session>.json` on every transition via
@@ -187,11 +187,11 @@ GATE_ORDER = [RESEARCH_GATE, PROPOSAL_GATE, PLAN_GATE,
 CLI:
 
 ```bash
-python3 -m lib.ralph_state --project-root . init "add a hello-world skill"
-python3 -m lib.ralph_state --project-root . show
-python3 -m lib.ralph_state --project-root . transition PLAN_GATE --action "user approved proposal"
-python3 -m lib.ralph_state --project-root . rewind PROPOSAL_GATE --reason "user edits ambiguity A2"
-python3 -m lib.ralph_state --project-root . can-ask  # exits 0 if Ask allowed, 1 if locked
+python3 -m lib.ralph_chain --project-root . state init "add a hello-world skill"
+python3 -m lib.ralph_chain --project-root . state show
+python3 -m lib.ralph_chain --project-root . state transition PLAN_GATE --action "user approved proposal"
+python3 -m lib.ralph_chain --project-root . state rewind PROPOSAL_GATE --reason "user edits ambiguity A2"
+python3 -m lib.ralph_chain --project-root . state can-ask  # exits 0 if Ask allowed, 1 if locked
 ```
 
 ## Linear is OUT OF SCOPE
@@ -254,7 +254,7 @@ The runtime contract is intentionally smaller than the surrounding proposal:
 The formulas and thresholds live in
 `docs/observability/meta-harness-metrics.md`; fault classification lives in
 `docs/observability/meta-harness-fault-triage.md`. The state machine in
-`skills/ralph/lib/ralph_state.py` remains the authority for attended lock and
+`lib/ralph_chain.py::RalphState` remains the authority for attended lock and
 terminal transitions.
 
 ## What this skill does NOT do

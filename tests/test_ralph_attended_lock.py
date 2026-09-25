@@ -7,7 +7,7 @@ otherwise.
 
 The hook reads stdin for the PreToolUse payload (matching all other
 dev-kit hooks) and inspects ``.dev-kit/ralph/<session>.json`` via the
-canonical ``ralph_state`` module. Tests construct a real state file
+canonical ``ralph_chain`` module. Tests construct a real state file
 on disk so the hook's PYTHONPATH-based import path is exercised.
 """
 
@@ -23,7 +23,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks" / "ralph-attended-lock.sh"
-# lib/ is the canonical SSOT surface for ralph_state (promoted 2026-09-23,
+# lib/ is the canonical SSOT surface for ralph_chain (promoted 2026-09-23,
 # inspect-pass4 finding a1). The skills/ralph/lib/ path is now a
 # backwards-compat shim — tests use the top-level lib/ path directly.
 LIB_DIR = ROOT / "lib"
@@ -75,7 +75,7 @@ def _write_state(project_root: Path, *, attended_lock: bool, current_stage: str)
     """Construct a real RalphState on disk via the canonical module."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(LIB_DIR))
-    import ralph_state as rs  # type: ignore  # noqa: E402
+    import ralph_chain as rs  # type: ignore  # noqa: E402 — state machine inlined
 
     state = rs.RalphState(
         session="default",
@@ -306,7 +306,7 @@ def test_alt_session_lock_denies(project_root: Path):
     must still deny. Tests the env-var path through the hook."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(LIB_DIR))
-    import ralph_state as rs  # type: ignore  # noqa: E402
+    import ralph_chain as rs  # type: ignore  # noqa: E402 — state machine inlined
 
     state = rs.RalphState(
         session="foo",
@@ -325,7 +325,7 @@ def test_alt_session_unlocked_passes(project_root: Path):
     passes. The hook operates on the named session only."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(LIB_DIR))
-    import ralph_state as rs  # type: ignore  # noqa: E402
+    import ralph_chain as rs  # type: ignore  # noqa: E402 — state machine inlined
 
     rs.RalphState(
         session="default",
