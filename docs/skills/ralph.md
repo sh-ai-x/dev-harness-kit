@@ -25,9 +25,10 @@ Two layers enforce the Ask-refusal invariant during `ATTENDED_RUN`:
 2. **Mechanical hook** — `hooks/ralph-attended-lock.sh` is wired as a
    `PreToolUse` matcher on `AskUserQuestion` in `hooks/hooks.json` and
    `.codex-plugin/hooks/hooks.json`. The hook reads the canonical
-   ralph_state from disk and exits 2 with a deny JSON envelope so even a
-   misbehaving sub-skill cannot surface an Ask. The hook fails OPEN on
-   toolchain-missing (the state machine remains the source of truth).
+   `ralph_chain` state from disk and exits 2 with a deny JSON envelope
+   so even a misbehaving sub-skill cannot surface an Ask. The hook
+   fails OPEN on toolchain-missing (the state machine remains the
+   source of truth).
 
 The unattended chain runs via `lib/ralph_chain.py::run_attended()`,
 which walks `BUILD → BABYSIT → SHIP` with injectable dispatch shims.

@@ -13,23 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-# Reliability knobs — inlined here from lib/babysit_pr_reliability.py.
-# The reliability helpers (is_stale_lock, classify_check, build_check_state,
-# diff_check_states, read_pr_lock_body, select_gates_dynamic,
-# try_acquire_pr_lock) stay in lib/babysit_pr_reliability.py because
-# `bin/babysit-pr-local.sh` and the babysit-pr SKILL body still import
-# them; only the constants are inlined here so this loop module is
-# self-contained for the values it consumes.
-_RELIABILITY_KNOBS: dict = {
-    "LOCK_TTL_SECONDS": 1800,
-    "GHOST_CHECK_THRESHOLD_SECONDS": 300,
-    "APPROVED_CONCLUSIONS": frozenset({"success", "skipped", "neutral"}),
-    "FAILING_CONCLUSIONS": frozenset({
-        "failure", "failures", "cancelled", "timed_out", "stale", "error",
-    }),
-}
-
-from babysit_pr_reliability import classify_check  # noqa: E402
+from lib.babysit_pr_reliability import classify_check
 
 SCHEMA_VERSION = "1.0.0"
 STATE_FILE = ".dev-kit/babysit-state.json"

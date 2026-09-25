@@ -7,7 +7,7 @@ otherwise.
 
 The hook reads stdin for the PreToolUse payload (matching all other
 dev-kit hooks) and inspects ``.dev-kit/ralph/<session>.json`` via the
-canonical ``ralph_state`` module. Tests construct a real state file
+canonical ``ralph_chain`` module. Tests construct a real state file
 on disk so the hook's PYTHONPATH-based import path is exercised.
 """
 
@@ -23,7 +23,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks" / "ralph-attended-lock.sh"
-# lib/ is the canonical SSOT surface for ralph_state (promoted 2026-09-23,
+# lib/ is the canonical SSOT surface for ralph_chain (promoted 2026-09-23,
 # inspect-pass4 finding a1). The skills/ralph/lib/ path is now a
 # backwards-compat shim — tests use the top-level lib/ path directly.
 LIB_DIR = ROOT / "lib"

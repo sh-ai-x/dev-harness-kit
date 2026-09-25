@@ -2,7 +2,7 @@
 
 # ruff: noqa: I001  # isort's first-party detection breaks under pre-commit's
 # staged-checkout. The promotion to lib/ (inspect-pass4 finding a1) puts
-# ralph_state on the canonical first-party surface.
+# ralph_chain on the canonical first-party surface.
 from __future__ import annotations
 
 import json

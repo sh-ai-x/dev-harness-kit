@@ -5,9 +5,9 @@
 # Wires the state-machine `attended_lock` invariant into the host's
 # tool-use gate. Per skills/ralph/SKILL.md and lib/ralph_chain.py
 # (which inlines the state machine after the
-# refactor/ralph-babysit-collapse collapse; previously
-# lib/ralph_state.py, promoted from skills/ralph/lib/ in inspect-pass4
-# finding a1, then collapsed into lib/ralph_chain.py) the invariant
+# refactor/ralph-babysit-collapse collapse; promoted from
+# skills/ralph/lib/ in inspect-pass4 finding a1, then collapsed into
+# lib/ralph_chain.py) the invariant
 # is already enforced at the state-machine layer; this hook is the
 # *mechanical* complement so even a misbehaving sub-skill or a model
 # invocation that ignores the prose contract cannot call
