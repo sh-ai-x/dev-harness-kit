@@ -146,7 +146,7 @@ root cause of every symptom in <code>docs/architecture/acp-harness.md</code> §1
 <strong>Reader</strong>: T / L (the single dispatched agent).
 <strong>Location</strong>: <code>&lt;orch_worktree&gt;/.dev-kit/round-&lt;descriptor&gt;/dispatches/&lt;branch&gt;.md</code>.</p>
 <p>The envelope is the dispatch prompt itself — a copy of the canonical
-template at <code>.claude/skills/_acp/sub-agent-prompt.md</code> with all seven
+template at <code>.claude/lib/sub-agent-prompt.md</code> with all seven
 placeholders resolved:</p>
 <table>
 <thead>
@@ -244,7 +244,7 @@ on <code>handoffs.md</code>.</p>
 cut + lock pattern. It owns:</p>
 <ol>
 <li><strong>Read the canonical template</strong> from
-<code>.claude/skills/_acp/sub-agent-prompt.md</code> (override via
+<code>.claude/lib/sub-agent-prompt.md</code> (override via
 <code>--template</code>).</li>
 <li><strong>Fill the seven placeholders</strong> in input order, raising
 <code>ValueError</code> on any missing value. Mirrors the
@@ -356,7 +356,7 @@ spawn follow-up PRs.</li>
 <h2>8. Related</h2>
 <ul>
 <li><code>docs/architecture/acp-harness.md</code> — ACP design SSOT (§1–§6).</li>
-<li><code>.claude/skills/_acp/sub-agent-prompt.md</code> — canonical dispatch template.</li>
+<li><code>.claude/lib/sub-agent-prompt.md</code> — canonical dispatch template.</li>
 <li><code>hooks/acp-tier-assert.sh</code> — tier-assertion lint (this PR).</li>
 <li><code>hooks/acp-cwd-discipline.sh</code> — cwd-discipline hook (sibling PR).</li>
 <li><code>hooks/worktree-guard.sh</code> — pre-existing worktree rule; layered on top of.</li>

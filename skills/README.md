@@ -2,7 +2,7 @@
 
 This index lists every skill shipped by the `dev-kit` plugin. Click into any skill to read its full `SKILL.md`; every `SKILL.md` has a back-link at the top to return here.
 
-**51 skills** across 13 categories (49 human-invocable, 2 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
+**50 skills** across 13 categories (48 human-invocable, 2 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
 
 ## By category
 
@@ -48,7 +48,6 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`guard-mode`](guard-mode/SKILL.md) | `state` | Session-scoped on/off toggle for the tdd-guard, worktree-guard, and git-guard hard-block hooks. |
 | [`harness-mode`](harness-mode/SKILL.md) | `state` | Session-scoped local-hook mode picker — fast (all optional local hooks off), full (default, all on), or custom (interactive per-local-hook picker via AskUserQuestion). |
 | [`linear`](linear/SKILL.md) | `state` | Optional Linear task tracker. Reconcile the current repository task with a canonical project and non-duplicate issue. Auto-syncs on every Claude Code edit when configured. Owner-gated auto-triggers also fire on worktree… |
-| [`sync-version`](sync-version/SKILL.md) | `state` | DEPRECATED. The GitHub Merge Queue now owns version sync at merge time; this skill is a no-op wrapper around bin/sync-version.sh that preserves the CLI surface for callers that haven't migrated yet. See docs/proposals/r… |
 | [`team`](team/SKILL.md) | `state` | Read or write the team collaboration toggle (DEV_KIT_TEAM on|off). Default OFF, independent of DEV_KIT_MODE. When ON, team roles/dependency-aware planning is enabled and .dev-kit/ stays tracked in git. |
 
 ### `design` (7)
@@ -171,7 +170,6 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 44 | [`skill-usage`](skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
 | 45 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
 | 46 | [`status`](status/SKILL.md) | `status` | `state` | human |
-| 47 | [`sync-version`](sync-version/SKILL.md) | `config` | `state` | human |
 | 48 | [`team`](team/SKILL.md) | `config` | `state` | human |
 | 49 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
 | 50 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |

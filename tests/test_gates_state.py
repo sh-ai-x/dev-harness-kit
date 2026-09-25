@@ -72,6 +72,119 @@ class TestConstants(unittest.TestCase):
         self.assertFalse(gates_state.is_valid_gate_name("ci"))
 
 
+class TestOnDiskSSOT(unittest.TestCase):
+    """`.dev-kit/gates.json` is the SSOT the operator reads.
+
+    Without these tests, the on-disk file could silently drift from the
+    code defaults (`lib.gates_state.DEFAULT_GATES`) or from the schema
+    version (`SCHEMA_VERSION`). Either drift would mean the file the team
+    sees disagrees with the file the code reads — exactly the
+    silent-divergence problem the SSOT pattern exists to prevent.
+
+    Note: `.dev-kit/` is gitignored in the dev-kit repo itself, so the
+    file is generated locally (by `lib.gates_state init`) and verified
+    against the code on every test run. In consumer repos that do
+    commit `.dev-kit/`, this same test acts as a drift detector
+    against the committed file.
+    """
+
+    GATES_JSON = PROJECT_ROOT / ".dev-kit" / "gates.json"
+
+    def setUp(self) -> None:
+        """Bootstrap the on-disk SSOT if missing so the tests can run
+        in a fresh checkout (CI's `actions/checkout` leaves `.dev-kit/`
+        empty because the path is gitignored in the dev-kit repo).
+
+        `lib.gates_state._init_synthesize` is the same code path that
+        powers the `init` subcommand — using it here means the test
+        fixture is byte-identical to what an operator running
+        `python -m lib.gates_state init` would get.
+        """
+        if not self.GATES_JSON.exists():
+            self.GATES_JSON.parent.mkdir(parents=True, exist_ok=True)
+            payload = gates_state._init_synthesize(PROJECT_ROOT)
+            self.GATES_JSON.write_text(
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            self.addCleanup(self.GATES_JSON.unlink)
+
+    def test_gates_json_exists_and_parses(self) -> None:
+        """The committed `.dev-kit/gates.json` must exist and round-trip
+        through `read_state` without raising `ValidationError`.
+
+        Reading (rather than re-parsing) means the test exercises the
+        same path `lib.gates_state` consumers use at runtime — a parse
+        bug or a stale `gates.json` left over from a removed gate will
+        fail here exactly as it would in `/dev-kit:gate-select show`.
+        """
+        self.assertTrue(
+            self.GATES_JSON.exists(),
+            f"{self.GATES_JSON}: setUp should have bootstrapped it",
+        )
+        # Will raise gates_state.ValidationError on shape violation.
+        state = gates_state.read_state(self.GATES_JSON.parent.parent)
+        self.assertIn("schema_version", state)
+        self.assertEqual(state["schema_version"], gates_state.SCHEMA_VERSION)
+        self.assertIn("gates", state)
+        self.assertEqual(set(state["gates"].keys()), gates_state.BUILTIN_GATE_KEYS)
+
+    def test_schema_version_pin_matches_on_disk(self) -> None:
+        """The on-disk `schema_version` must equal the code constant.
+
+        Catches: a developer bumping `SCHEMA_VERSION` in code without
+        re-syncing the committed `gates.json` (or vice versa). Either
+        side alone would set up a partial upgrade where the file parses
+        one schema and the code reads another.
+        """
+        self.assertTrue(
+            self.GATES_JSON.exists(),
+            f"{self.GATES_JSON}: setUp should have bootstrapped it",
+        )
+        raw = json.loads(self.GATES_JSON.read_text(encoding="utf-8"))
+        self.assertEqual(
+            raw.get("schema_version"),
+            gates_state.SCHEMA_VERSION,
+            "on-disk schema_version drifted from lib/gates_state.py:SCHEMA_VERSION. "
+            "Re-run `python -m lib.gates_state init` and commit, or update "
+            "SCHEMA_VERSION to match the committed file.",
+        )
+
+    def test_default_gates_match_on_disk(self) -> None:
+        """Each built-in gate in the code's `DEFAULT_GATES` must appear
+        in the on-disk file with the same `workflow` + `var` keys.
+
+        The `enabled` flag is intentionally NOT pinned here — operators
+        toggle that, and a `False` value is the legitimate steady state
+        for a disabled gate. The structural keys (workflow filename, GH
+        variable name) cannot legitimately drift without breaking the
+        GH `if:` conditions that read those vars, so we pin them.
+        """
+        self.assertTrue(
+            self.GATES_JSON.exists(),
+            f"{self.GATES_JSON}: setUp should have bootstrapped it",
+        )
+        raw = json.loads(self.GATES_JSON.read_text(encoding="utf-8"))
+        on_disk_gates = raw.get("gates", {})
+        for gate_key, default_entry in gates_state.DEFAULT_GATES.items():
+            self.assertIn(
+                gate_key, on_disk_gates,
+                f"gate {gate_key!r} in DEFAULT_GATES but missing from "
+                f"{self.GATES_JSON}",
+            )
+            file_entry = on_disk_gates[gate_key]
+            self.assertEqual(
+                file_entry.get("workflow"), default_entry["workflow"],
+                f"gates.{gate_key}.workflow drifted: file="
+                f"{file_entry.get('workflow')!r}, code={default_entry['workflow']!r}",
+            )
+            self.assertEqual(
+                file_entry.get("var"), default_entry["var"],
+                f"gates.{gate_key}.var drifted: file="
+                f"{file_entry.get('var')!r}, code={default_entry['var']!r}",
+            )
+
+
 class TestApplyDefaults(unittest.TestCase):
     """`apply_defaults` is the pure transform `read_state` runs on disk content."""
 
@@ -714,7 +827,7 @@ class TestDetectOwnerRepoBodyEquivalence(unittest.TestCase):
             self._normalize(gates_state.detect_owner_repo),
             self._normalize(ci_setup.detect_owner_repo),
             "lib/gates_state.py:detect_owner_repo drifted from lib/ci_setup.py:detect_owner_repo; "
-            "consolidate into lib/gh_cli.py or sync by hand.",
+            "consolidate or sync by hand.",
         )
 
 
@@ -775,7 +888,7 @@ class TestSync(unittest.TestCase):
             )
             gates_state.write_state({"schema_version": "1.0.0", "gates": {}}, target)
             # Stub gh availability + subprocess for `gh variable set`.
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 with mock.patch.object(gates_state, "_sync_one", return_value=(True, "")) as m:
                     result = gates_state.sync(root=target)
             self.assertEqual(result["gh_path"], "/fake/gh")
@@ -787,7 +900,7 @@ class TestSync(unittest.TestCase):
 
     def test_sync_degraded_when_gh_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            with mock.patch.object(gates_state, "gh_available", return_value=(None, "gh not on PATH")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=(None, "gh not on PATH")):
                 result = gates_state.sync(root=Path(td))
             self.assertIsNone(result["gh_path"])
             self.assertIn("gh not on PATH", result["degraded"])
@@ -807,7 +920,7 @@ class TestSync(unittest.TestCase):
             def fake_sync(gh, repo, gate, body, *, timeout=10):
                 return (gate != "security", "boom" if gate == "security" else "")
 
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 with mock.patch.object(gates_state, "_sync_one", side_effect=fake_sync):
                     result = gates_state.sync(root=target)
             self.assertTrue(result["results"]["review"]["ok"])
@@ -820,7 +933,7 @@ class TestSync(unittest.TestCase):
             __import__("subprocess").run(
                 ["git", "-C", td, "init", "-q"], capture_output=True, check=True
             )
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 result = gates_state.sync(root=Path(td))
             self.assertEqual(result["gh_path"], "/fake/gh")
             self.assertIn("no github remote", result["degraded"])

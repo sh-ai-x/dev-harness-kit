@@ -86,20 +86,15 @@ except ImportError:
         def runners_from_gates(*args, **kwargs):  # type: ignore[no-redef]
             return None
 
-# Centralized gh-CLI presence + auth probe (inspect 2026-08-27 dup-6)
-# lives at `lib/gh_cli.py`. `lib/install.sh:53-55` copies every `lib/*.py`
-# to consumer repos, so a real install always takes the `lib.` branch.
-# The minimal fixture at `tests/test_ci_setup.py::
-# test_import_succeeds_without_hooks_manifest` also stages `gh_cli.py`
-# as a flat sibling (no `lib/` package prefix), so the bare-`gh_cli`
-# branch resolves there too. With both paths satisfied by the fixture,
-# the inline reimplementation that was previously the 3-file fallback
-# is gone — there is exactly one `gh_available` body in the tree
-# (issue #834 round-3 MAJOR).
+# Centralized gh-CLI presence + auth probe. Re-instated after the YAGNI
+# sweep (PR #915) — inlining produced 4 byte-identical 13-line copies
+# across ci_doctor / ci_setup / gates_state / proposal_orch_issue_pr,
+# exactly the duplication the original lib/gh_cli.py docstring warned
+# against. See lib/gh_cli.py.
 try:
-    from lib.gh_cli import gh_available  # type: ignore
+    from lib.gh_cli import _gh_available  # type: ignore
 except ImportError:
-    from gh_cli import gh_available  # type: ignore
+    from gh_cli import _gh_available  # type: ignore
 
 # Plugin root (resolved via __file__ so the module is location-independent).
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -505,7 +500,7 @@ def _read_ci_provider_via_gh() -> tuple[str, str]:
     are caught and surfaced as degraded messages using the exception
     *type* name only (the full repr can include fragments of argv).
     """
-    gh, degraded = gh_available(timeout=10)
+    gh, degraded = _gh_available(timeout=10)
     if not gh:
         return "", degraded or "gh not on PATH"
     try:

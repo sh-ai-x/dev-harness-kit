@@ -34,7 +34,7 @@ root cause of every symptom in `docs/architecture/acp-harness.md` §1.
 **Location**: `<orch_worktree>/.dev-kit/round-<descriptor>/dispatches/<branch>.md`.
 
 The envelope is the dispatch prompt itself — a copy of the canonical
-template at `skills/_acp/sub-agent-prompt.md` with all seven
+template at `lib/sub-agent-prompt.md` with all seven
 placeholders resolved:
 
 | Placeholder | Resolved from |
@@ -118,7 +118,7 @@ on `handoffs.md`.
 cut + lock pattern. It owns:
 
 1. **Read the canonical template** from
-   `skills/_acp/sub-agent-prompt.md` (override via
+   `lib/sub-agent-prompt.md` (override via
    `--template`).
 2. **Fill the seven placeholders** in input order, raising
    `ValueError` on any missing value. Mirrors the
@@ -215,7 +215,7 @@ existing project rules that ACP layers on top of.
 ## 8. Related
 
 - `docs/architecture/acp-harness.md` — ACP design SSOT (§1–§6).
-- `skills/_acp/sub-agent-prompt.md` — canonical dispatch template.
+- `lib/sub-agent-prompt.md` — canonical dispatch template.
 - `hooks/acp-tier-assert.sh` — tier-assertion lint (this PR).
 - `hooks/acp-cwd-discipline.sh` — cwd-discipline hook (sibling PR).
 - `hooks/worktree-guard.sh` — pre-existing worktree rule; layered on top of.

@@ -212,8 +212,7 @@ def score_interview_ambiguity(answers: Dict[str, str]) -> Dict:
             "status":          str,    # ok | held | best-effort | user-acknowledged | rejected
         }
 
-    Status decision matrix (matches ``lib/interview_rubrics/default.yaml``
-    + the MUST-15 plan pattern):
+    Status decision matrix (MUST-15 plan pattern):
       - ``ok``             iff validate_5_field(valid=True)
       - ``held``           iff any field is missing (zero-evidence fields fail-closed)
       - ``best-effort``    iff >= 3 fields present + clear, but at least one is ambiguous

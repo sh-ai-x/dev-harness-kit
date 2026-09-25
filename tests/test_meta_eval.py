@@ -196,3 +196,122 @@ def test_case_meta_result_to_dict_includes_failures() -> None:
     assert d["status"] == "failed"
     assert d["actual_per_dim"] == {"D1_outcome": 5}
     assert d["failures"] == []
+
+
+# ---------------------------------------------------------------------------
+# Self-tests (weak-point remediation iteration 1, D2)
+#
+# These tests verify the meta-eval layer's own behavior so a regression in
+# the evaluator itself surfaces as a failing pytest, not a silent drift.
+# They guard against:
+#   - a golden case whose expected verdict stops being checked (silent no-op)
+#   - the eval system silently swallowing all cases when the cases dir is
+#     empty (would mask fixture path drift in CI)
+# ---------------------------------------------------------------------------
+
+
+def test_meta_eval_sensitivity_to_expected_verdict_change(tmp_path: Path) -> None:
+    """A flipped expected verdict must cause the meta-eval to mark the case
+    failed when the eval pipeline's actual verdict still disagrees.
+
+    This is the core sensitivity contract: if editing `expected.verdict` in
+    a golden case has no effect on the report, the eval pipeline is no
+    longer checking that field — and our "the eval infrastructure works"
+    claim becomes hollow.
+
+    The test does NOT assume what the clean-worktree actual verdict is
+    (OK / DRIFT_WARNING / other) — that depends on the rubric and may
+    legitimately change. It only pins the contrast: an expected verdict
+    matching the actual must pass; an expected verdict that disagrees
+    with the actual must trigger a `verdict_mismatch` failure.
+    """
+    wt = tmp_path / "wt"
+    (wt / "lib").mkdir(parents=True)
+    (wt / "tests").mkdir(parents=True)
+    (wt / "lib" / "x.py").write_text("def x(): return 1\n")
+    (wt / "tests" / "test_x.py").write_text("def test_ok(): assert True\n")
+
+    # First pass: read what the pipeline actually emits for this worktree,
+    # then write that as the expected. The case must pass.
+    probe_dir = tmp_path / "cases_probe"
+    probe_dir.mkdir()
+    (probe_dir / "01.json").write_text(json.dumps({
+        "case_id": "sensitivity-probe",
+        "dim": "agent-behavior",
+        "worktree_path": str(wt),
+        "expected": {"verdict": "OK"},  # any verdict; we just want actual
+    }))
+    probe_report = run_meta_eval(probe_dir)
+    actual_verdict = probe_report.cases[0].actual_verdict
+    assert actual_verdict, "probe run produced no actual_verdict"
+
+    # Second pass: write the actual verdict as expected — must pass.
+    baseline_dir = tmp_path / "cases_baseline"
+    baseline_dir.mkdir()
+    (baseline_dir / "01.json").write_text(json.dumps({
+        "case_id": "sensitivity-baseline",
+        "dim": "agent-behavior",
+        "worktree_path": str(wt),
+        "expected": {"verdict": actual_verdict},
+    }))
+    baseline_report = run_meta_eval(baseline_dir)
+    assert baseline_report.total == 1
+    assert baseline_report.cases[0].status == "passed", (
+        f"baseline (expected=actual) should pass; got "
+        f"{baseline_report.cases[0].to_dict()}"
+    )
+
+    # Third pass: flip expected to a verdict guaranteed to disagree (ROT).
+    # Must trigger verdict_mismatch failure.
+    flipped_dir = tmp_path / "cases_flipped"
+    flipped_dir.mkdir()
+    (flipped_dir / "01.json").write_text(json.dumps({
+        "case_id": "sensitivity-flipped",
+        "dim": "agent-behavior",
+        "worktree_path": str(wt),
+        "expected": {"verdict": "ROT"},
+    }))
+    flipped_report = run_meta_eval(flipped_dir)
+    assert flipped_report.total == 1
+    case = flipped_report.cases[0]
+    assert case.status == "failed", (
+        f"flipping expected verdict must trigger failure; got {case.to_dict()}"
+    )
+    rule_ids = {f.rule for f in (case.failures or [])}
+    assert "verdict_mismatch" in rule_ids, (
+        f"expected verdict_mismatch rule; got rules={rule_ids}"
+    )
+
+
+def test_meta_eval_empty_cases_dir_returns_empty_not_error(tmp_path: Path) -> None:
+    """An empty cases dir must return an empty report, NOT crash.
+
+    Guards against the regression where the eval pipeline swallows cases
+    silently — if `discover_cases` returns [] and the runner reports
+    `total=0`, the CI eval gate would pass on a broken fixture path
+    with no signal. This test pins both the count AND the absence of
+    error/exception status.
+    """
+    cases_dir = tmp_path / "empty_cases"
+    cases_dir.mkdir()
+    report = run_meta_eval(cases_dir)
+    assert report.total == 0
+    assert report.passed == 0
+    assert report.failed == 0
+    assert report.errored == 0
+    assert report.all_passed is True  # vacuously true; gate should NOT block
+    assert list(report.cases) == []
+
+
+def test_meta_eval_missing_cases_dir_returns_empty_not_error(tmp_path: Path) -> None:
+    """A nonexistent cases dir is the same as empty — graceful degradation.
+
+    The previous test pinned the empty-dir behavior. This one pins the
+    missing-dir behavior so a CI misconfiguration (wrong path, fresh
+    clone without fixtures) does not crash the eval gate.
+    """
+    missing = tmp_path / "does_not_exist"
+    report = run_meta_eval(missing)
+    assert report.total == 0
+    assert report.errored == 0
+    assert report.all_passed is True

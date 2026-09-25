@@ -34,29 +34,31 @@ from pathlib import Path
 
 # Dual-import shim (inspect 2026-08-27 dup-5): centralized in
 # `lib/dual_import.py` so the same try/except dance is not hand-copied
-# in 4 places.
-from lib.dual_import import from_dual
+# in 4 places. Inlined per issue #915 — the helper is now gone, see
+# lib/ci_doctor.py for the matching inline.
+try:
+    from lib.ci_setup import (  # type: ignore
+        EXPECTED_PATHS,
+        MARKER_REL,
+        _compute_template_shas,
+        _resolve_prior_marker,
+        _sha256_file,
+        plugin_version,
+    )
+except ImportError:
+    from ci_setup import (  # type: ignore
+        EXPECTED_PATHS,
+        MARKER_REL,
+        _compute_template_shas,
+        _resolve_prior_marker,
+        _sha256_file,
+        plugin_version,
+    )
 
-(
-    EXPECTED_PATHS,
-    MARKER_REL,
-    _compute_template_shas,
-    _resolve_prior_marker,
-    _sha256_file,
-    plugin_version,
-) = from_dual(
-    "ci_setup",
-    [
-        "EXPECTED_PATHS",
-        "MARKER_REL",
-        "_compute_template_shas",
-        "_resolve_prior_marker",
-        "_sha256_file",
-        "plugin_version",
-    ],
-)
-
-(atomic_write_json,) = from_dual("atomic", ["atomic_write_json"])
+try:
+    from lib.atomic import atomic_write_json  # type: ignore
+except ImportError:
+    from atomic import atomic_write_json  # type: ignore
 
 
 # Sentinel installed_dev_kit_version when the marker predates the version

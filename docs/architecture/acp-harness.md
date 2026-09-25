@@ -69,7 +69,7 @@ where:
 
 ### 3.1 Canonical template
 
-The canonical sub-agent prompt template lives at `skills/_acp/sub-agent-prompt.md`. The leading underscore on `_acp` distinguishes it as a *private template directory*, not a discoverable skill (project skill rules: `rules/skill-authoring.md`).
+The canonical sub-agent prompt template lives at `lib/sub-agent-prompt.md`. Living in `lib/` (next to `acp_dispatch.py`) rather than `skills/` keeps it out of the slash-command namespace (project skill rules: `rules/skill-authoring.md`).
 
 ### 3.2 Mandatory placeholders (the seven)
 
@@ -89,7 +89,7 @@ Every dispatch MUST populate all seven placeholders. The hand-off lint (`tests/t
 
 `tests/test_acp_hand_off.py` enforces:
 
-- The template file exists at `skills/_acp/sub-agent-prompt.md`.
+- The template file exists at `lib/sub-agent-prompt.md`.
 - The template's frontmatter (if any) declares it is a template, not a skill (no `name:`/`category:` matching the `skills/<name>/SKILL.md` shape).
 - All seven placeholders are present as literal `<NAME>` strings.
 - A redacted sample dispatch (provided in the test fixture) parses and resolves every placeholder against a stub orch-worktree.
@@ -201,7 +201,7 @@ Each acceptance-criterion bullet from issue #274 maps to one future implementati
 | AC bullet (issue #274) | Future PR (one each, narrow scope) | Touches |
 |---|---|---|
 | Tier-cognition assertion in `tests/test_skill_governance.py` (L6 enforcement) | `feat(acp-tier-assert): lint hook + governance test` | `hooks/acp-tier-assert.sh`, `hooks/hooks.json`, `tests/test_acp_tier_assert.py`, `tests/test_skill_governance.py` |
-| Hand-off template + tests | `feat(acp-hand-off): canonical template + lint` | `skills/_acp/sub-agent-prompt.md` (template scaffold only — the template ships with this design issue), `tests/test_acp_hand_off.py` |
+| Hand-off template + tests | `feat(acp-hand-off): canonical template + lint` | `lib/sub-agent-prompt.md` (template scaffold only — the template ships with this design issue), `tests/test_acp_hand_off.py` |
 | `bin/version-slot` script + tests | `feat(acp-version-slot): standalone allocator + pre-push gate` | `bin/version-slot`, `tests/test_version_slot.py`, `hooks/git-guard.sh` (paired pre-push rule) |
 | `hooks/acp-cwd-discipline.sh` + tests | `feat(acp-cwd-discipline): bash-scoped worktree resolver` | `hooks/acp-cwd-discipline.sh`, `hooks/hooks.json`, `tests/test_acp_cwd.py` |
 | `docs/deterministic-harness.md` updated with ACP sections | `docs(acp): merge into deterministic-harness.md` | `docs/deterministic-harness.md` (renames `docs/architecture/acp-harness.md`; pulls §1–§6 into the umbrella doc; adds force-push safety and lock-isolation sections) |

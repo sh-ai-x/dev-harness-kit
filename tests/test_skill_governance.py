@@ -25,7 +25,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 ALLOWED_ALPHAS = frozenset({"state", "enforcement", "analysis"})
-PRIVATE_SKILL_DIRS = frozenset({"_acp"})
+PRIVATE_SKILL_DIRS = frozenset()
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:

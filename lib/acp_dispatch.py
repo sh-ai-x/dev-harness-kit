@@ -9,7 +9,7 @@ note summarizing the T's read-only scope.
 This module owns:
 
   * `ACPDispatcher` — fills the seven placeholders in the canonical
-    template at `skills/_acp/sub-agent-prompt.md`, runs a parallel
+    template at `lib/sub-agent-prompt.md`, runs a parallel
     `git worktree add` loop (mirroring `hooks/worktree-auto-cut.sh:247-269`),
     and writes each dispatch envelope to disk.
   * `DispatchResult` — value object returned per PR; the M reads these
@@ -18,7 +18,7 @@ This module owns:
     `(branch_slug, task_summary)` tuples for the dispatcher's input list.
 
 Reuses (do not duplicate):
-  * `skills/_acp/sub-agent-prompt.md` (canonical template)
+  * `lib/sub-agent-prompt.md` (canonical template)
   * `hooks/worktree-auto-cut.sh:247-269` (cut + boot + envelope pattern)
   * `hooks/lib/worktree-detect.sh` (`worktree_detect` helper)
   * `hooks/acp-tier-assert.sh`, `hooks/acp-cwd-discipline.sh`
@@ -55,7 +55,7 @@ SEVEN_PLACEHOLDERS: tuple[str, ...] = (
 )
 
 # Default template path (relative to repo root).
-DEFAULT_TEMPLATE_PATH = Path("skills/_acp/sub-agent-prompt.md")
+DEFAULT_TEMPLATE_PATH = Path("lib/sub-agent-prompt.md")
 
 
 
@@ -174,7 +174,7 @@ def _read_template(template_path: Path) -> str:
     if not template_path.is_file():
         raise FileNotFoundError(
             f"ACP template not found at {template_path}. "
-            f"Expected at skills/_acp/sub-agent-prompt.md relative to repo root."
+            f"Expected at lib/sub-agent-prompt.md relative to repo root."
         )
     return template_path.read_text(encoding="utf-8")
 
@@ -230,7 +230,7 @@ class ACPDispatcher:
         dispatching.
     template_path : Path | None
         Override the canonical template path. Defaults to
-        `skills/_acp/sub-agent-prompt.md` relative to `repo_root`.
+        `lib/sub-agent-prompt.md` relative to `repo_root`.
     dry_run : bool
         When True, no `git worktree add` runs and no envelope file is
         written — only the rendered envelopes are returned so the M can
