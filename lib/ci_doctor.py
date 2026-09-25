@@ -48,6 +48,7 @@ from lib.ci_setup import (
     required_secrets_for_provider,
 )
 from lib.ci_workflow_diag import run_diagnostics as _run_wf_diagnostics
+from lib.ci_workflow_yaml import read_workflow
 from lib.gh_cli import _gh_available
 
 # ci_update may be absent in this checkout (the plugin is its own dev
@@ -268,7 +269,6 @@ def _check_branch_protection(target: Path, source_repo: bool) -> Check:
     required, degraded = _fetch_required_status_checks(repo)
     if degraded:
         return Check("branch policy", "SKIP", degraded)
-    from lib.ci_workflow_yaml import read_workflow
     review = target / ".github" / "workflows" / "review.yml"
     if not review.is_file():
         return Check("branch policy", "INFO", "review.yml not present; nothing to compare")

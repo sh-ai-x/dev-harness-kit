@@ -189,18 +189,6 @@ def _safe_getenv(name: str) -> str:
     return os.environ.get(name, "").strip().lower()
 
 
-def check_provider_consistency(target: Path, check_provider_consistency_fn,
-                               Check: CheckFactory) -> "object":
-    """Issue #712: surface `.env` vs `vars.CI_REVIEW_PROVIDER` drift."""
-    try:
-        status, message = check_provider_consistency_fn(target)
-    except Exception as e:  # pragma: no cover
-        return Check(label="CI_REVIEW_PROVIDER consistency", state="SKIP",
-                     detail=f"check_provider_consistency errored: {type(e).__name__}")
-    state = {"OK": "PASS", "WARN": "WARN", "SKIP": "SKIP", "FAIL": "FAIL"}.get(status, "SKIP")
-    return Check(label="CI_REVIEW_PROVIDER consistency", state=state, detail=message)
-
-
 def check_secrets(target: Path, provider: str | None, source_repo: bool,
                  consumer_only_secrets: frozenset[str],
                  detect_owner_repo_fn, list_repo_secrets_fn,

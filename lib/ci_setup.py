@@ -339,46 +339,17 @@ POST_INSTALL_CHECKLIST: tuple[tuple[str, str], ...] = (
 )
 
 
-# Provider-aware required-secret catalog (issue #212-B1/B2). Loaded
-# from `.dev-kit/provider-secrets.json` so consumers can edit the catalog
-# without touching Python. The fallback dict (used when the JSON file
-# is missing — e.g. inside a 3-file fixture) keeps the canonical three
-# providers documented here as a single source of truth.
-_PROVIDER_SECRETS_FALLBACK: dict[str, tuple[tuple[str, str], ...]] = {
+# Provider-aware required-secret catalog (issue #212-B1/B2). The
+# canonical catalog is inlined in this module — keeping it Python-side
+# means it lives next to its consumer (`required_secrets_for_provider`)
+# and travels with the plugin source tree. The previous `.json` loader
+# always fell through to the fallback dict on disk, so inlining makes
+# the SSOT explicit without removing consumer override hooks.
+PROVIDER_SECRETS: dict[str, tuple[tuple[str, str], ...]] = {
     "minimax": (("MINIMAX_API_KEY", "MiniMax provider API key"),),
     "anthropic": (("ANTHROPIC_API_KEY", "Anthropic API key (claude-code-action opt-in)"),),
     "deepseek": (("DEEPSEEK_API_KEY", "DeepSeek provider API key"),),
 }
-
-
-def _load_provider_secrets() -> dict[str, tuple[tuple[str, str], ...]]:
-    """Read `.dev-kit/provider-secrets.json`; fall back to the in-code map.
-
-    Catalog lookups (`PROVIDER_SECRETS[provider]`) are read-only after
-    load; never mutated.
-    """
-    src = Path(__file__).resolve().parent.parent / ".dev-kit" / "provider-secrets.json"
-    try:
-        raw = src.read_text(encoding="utf-8")
-    except OSError:
-        return {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
-    providers = payload.get("providers") if isinstance(payload, dict) else None
-    if not isinstance(providers, dict):
-        return {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
-    out: dict[str, tuple[tuple[str, str], ...]] = {}
-    for name, items in providers.items():
-        if not isinstance(name, str) or not isinstance(items, list):
-            continue
-        pairs = tuple((str(s), str(d)) for s, d in (item if isinstance(item, list) else () for item in items))
-        out[name] = pairs
-    return out or {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
-
-
-PROVIDER_SECRETS: dict[str, tuple[tuple[str, str], ...]] = _load_provider_secrets()
 
 # Consumer install always needs the dev-harness-kit PAT. The skill body
 # resolves the provider via `read_provider()` (env + `.env`) and merges
@@ -1119,7 +1090,7 @@ def _is_already_installed(
     target: Path,
     marker_path: Path,
     force: bool,
-    paths_to_check: tuple[str, ...] = EXPECTED_PATHS,
+    paths_to_check: Sequence[str] = EXPECTED_PATHS,
 ) -> bool:
     """Presence-based no-op check: marker exists AND every path in
     `paths_to_check` is present. With `force=True` always returns False.
@@ -1153,7 +1124,7 @@ def _copy_all_templates(
     target: Path,
     force: bool,
     report: InstallReport,
-    paths_to_copy: tuple[str, ...] = EXPECTED_PATHS,
+    paths_to_copy: Sequence[str] = EXPECTED_PATHS,
 ) -> None:
     """Copy each EXPECTED_PATHS template into target + chmod shell scripts.
 

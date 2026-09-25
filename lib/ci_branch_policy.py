@@ -10,10 +10,7 @@ Caller passes the `Check` factory.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 from typing import Callable
-
-from lib.ci_workflow_yaml import read_workflow
 
 CheckFactory = Callable[..., "object"]
 
@@ -52,44 +49,3 @@ def fetch_required_status_checks(gh_available_fn, repo: str) -> tuple[set[str], 
     if not names2:
         return set(), "no contexts found"
     return names2, ""
-
-
-def check_branch_protection(target: Path, source_repo: bool,
-                            gh_available_fn, detect_owner_repo_fn,
-                            Check: CheckFactory) -> "object":
-    """WARN on branch-policy vs review.yml job-name mismatch; SKIP/INFO otherwise."""
-    if source_repo:
-        return Check(label="branch policy", state="INFO",
-                     detail="source repo: branch policy not audited")
-    repo = detect_owner_repo_fn(target)
-    if not repo:
-        return Check(label="branch policy", state="SKIP",
-                     detail="no GitHub remote on origin")
-    required, degraded = fetch_required_status_checks(gh_available_fn, repo)
-    if degraded:
-        return Check(label="branch policy", state="SKIP", detail=degraded)
-    review = target / ".github" / "workflows" / "review.yml"
-    if not review.is_file():
-        return Check(label="branch policy", state="INFO",
-                     detail="review.yml not present; nothing to compare")
-    raw, shape, err = read_workflow(review.parent, review.name)
-    if raw is None:
-        return Check(label="branch policy", state="INFO", detail=err)
-    assert shape is not None
-    if shape.parse_error or not shape.jobs:
-        return Check(label="branch policy", state="INFO",
-                     detail=f"could not extract review.yml job names: "
-                            f"{shape.parse_error or 'no jobs'}")
-    job_names = {j.name for j in shape.jobs if j.name}
-    if not job_names:
-        return Check(label="branch policy", state="INFO",
-                     detail="review.yml jobs lack `name:` — bare-key matching required")
-    missing = sorted(required - job_names)
-    extra = sorted(job_names - required)
-    if not missing and not extra:
-        return Check(label="branch policy", state="PASS",
-                     detail=f"required={sorted(required)}  workflow={sorted(job_names)}")
-    return Check(label="branch policy", state="WARN",
-                 detail=f"required-vs-workflow mismatch: "
-                        f"required but not emitted by any review job={missing}; "
-                        f"emitted by review but not required={extra}")

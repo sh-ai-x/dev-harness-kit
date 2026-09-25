@@ -53,32 +53,3 @@ def fetch_open_pr_state(target: Path, gh_available_fn,
         return json.loads(cp.stdout), ""
     except json.JSONDecodeError as e:
         return {}, f"gh pr view JSON parse error: {e}"
-
-
-def check_open_pr(target: Path, gh_available_fn, Check: CheckFactory) -> list["object"]:
-    """CONFLICTING → FAIL; UNKNOWN → WARN; MERGEABLE → PASS; otherwise INFO."""
-    data, degraded = fetch_open_pr_state(target, gh_available_fn, Check)
-    if degraded:
-        return [Check(label="open PR state", state="SKIP", detail=degraded)]
-    rows: list["object"] = []
-    mergeable = data.get("mergeable", "")
-    if mergeable == "CONFLICTING":
-        rows.append(Check(label="open PR mergeable", state="FAIL",
-            detail=("open PR has merge conflicts with main — CI will not run. "
-                    "Run: git fetch origin main && git merge origin/main")))
-    elif mergeable == "UNKNOWN":
-        rows.append(Check(label="open PR mergeable", state="WARN",
-            detail="GitHub still computing merge state — re-run /dev-kit:ci-doctor in 30s"))
-    elif mergeable == "MERGEABLE":
-        rows.append(Check(label="open PR mergeable", state="PASS", detail="no conflicts"))
-    else:
-        rows.append(Check(label="open PR mergeable", state="INFO",
-            detail=f"unrecognized mergeable value: {mergeable!r}"))
-    if data.get("isDraft"):
-        rows.append(Check(label="open PR draft", state="INFO",
-            detail="PR is a draft — required checks gated until marked ready for review"))
-    if data.get("title", "").startswith("chore(release): bump dev-kit to v"):
-        rows.append(Check(label="open PR title", state="INFO",
-            detail=("bump-PR — ci/review/security explicitly skip per "
-                    "templates/ci/.github/workflows/ci.yml")))
-    return rows
