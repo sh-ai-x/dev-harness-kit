@@ -121,7 +121,7 @@ remain fully enforced regardless of guard-mode state.
 - `hooks/session-start-guard-mode-reset.sh` — the SessionStart policy hook.
 - `hooks/tdd-guard.sh`, `hooks/worktree-guard.sh`, `hooks/git-guard.sh` — the hooks this skill bypasses.
 - `skills/harness-mode/SKILL.md` — the sibling skill for the *optional* local hooks this skill does not touch.
-- `iron-laws/index.md` (L1), `rules/git-workflow.md` (worktree isolation) — the rules each guard enforces.
+- `rules/iron-laws.md` (L1), `rules/git-workflow.md` (worktree isolation) — the rules each guard enforces.
 
 ## Next step
 

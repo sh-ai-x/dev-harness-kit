@@ -5,8 +5,8 @@ write_project_md.py — CLAUDE.md + AGENTS.md + index.md atomic writer (SSOT, MU
 CLAUDE.md is a minimal pointer document. Detailed content lives in dedicated
 index files, generated alongside CLAUDE.md:
 
-  iron-laws/index.md  — Iron Laws (MUST-8 SSOT)
-  guidelines/index.md — Behavioral coding guidelines (Karpathy-style, abbreviated)
+  rules/iron-laws.md  — Iron Laws (MUST-8 SSOT)
+  rules/guidelines.md — Behavioral coding guidelines (Karpathy-style, abbreviated)
   hooks/index.md      — Hook matrix + hook shell reference (MUST-13 SSOT)
   rules/index.md      — Shared rules (only if rules/ exists)
   docs/CODEBASE-MAP.md — Full codebase tree (only on --full-claude-md)
@@ -314,7 +314,7 @@ def _summarize_rule(path: Path) -> str:
 
 
 def render_iron_laws_index() -> str:
-    """iron-laws/index.md body — MUST-8 SSOT, 8 laws with descriptions."""
+    """rules/iron-laws.md body — MUST-8 SSOT, 8 laws with descriptions."""
     items = "\n".join(f"- **L{i+1}**: {law}" for i, law in enumerate(IRON_LAWS))
     return (
         "# Iron Laws (SSOT — MUST-8)\n"
@@ -328,7 +328,7 @@ def render_iron_laws_index() -> str:
 
 
 def render_guidelines_index() -> str:
-    """guidelines/index.md body — Karpathy-style behavioral guidelines, abbreviated.
+    """rules/guidelines.md body — Karpathy-style behavioral guidelines, abbreviated.
 
     Stable; not project-specific. Mirrors upstream guidance:
     https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md
@@ -411,15 +411,15 @@ def _render_hook_shell_reference() -> str:
 
 
 def write_iron_laws_index(project_root: Path) -> Path:
-    """Atomic write iron-laws/index.md. Always writes (universal SSOT)."""
-    path = project_root / "iron-laws" / "index.md"
+    """Atomic write rules/iron-laws.md. Always writes (universal SSOT)."""
+    path = project_root / "rules" / "iron-laws.md"
     atomic_write_text(path, render_iron_laws_index())
     return path
 
 
 def write_guidelines_index(project_root: Path) -> Path:
-    """Atomic write guidelines/index.md. Always writes (universal guidance)."""
-    path = project_root / "guidelines" / "index.md"
+    """Atomic write rules/guidelines.md. Always writes (universal guidance)."""
+    path = project_root / "rules" / "guidelines.md"
     atomic_write_text(path, render_guidelines_index())
     return path
 
@@ -472,8 +472,8 @@ def render_claude_md(
     `write_project_md(full_map=True)`.
     """
     refs = [
-        "- **Iron Laws** → [`iron-laws/index.md`](iron-laws/index.md) (MUST-8 SSOT)",
-        "- **Coding guidelines** → [`guidelines/index.md`](guidelines/index.md) (Karpathy-style, abbreviated)",
+        "- **Iron Laws** → [`rules/iron-laws.md`](rules/iron-laws.md) (MUST-8 SSOT)",
+        "- **Coding guidelines** → [`rules/guidelines.md`](rules/guidelines.md) (Karpathy-style, abbreviated)",
         "- **Codebase map** → [`docs/CODEBASE-MAP.md`](docs/CODEBASE-MAP.md) "
         "(regenerate via `/dev-kit:bootstrap --full-claude-md`)",
         "- **Hook matrix** → [`hooks/index.md`](hooks/index.md) (MUST-13 SSOT; state in `.dev-kit/.active-hooks.json`)",
@@ -487,8 +487,8 @@ def render_claude_md(
 def write_project_md(project_root: Path, *, full_map: bool = False, stage: str = "bootstrap") -> Path:
     """Atomic write CLAUDE.md + AGENTS.md + the four index.md files.
 
-    Always writes: CLAUDE.md, AGENTS.md (symlink), iron-laws/index.md,
-    guidelines/index.md, hooks/index.md. Conditionally writes:
+    Always writes: CLAUDE.md, AGENTS.md (symlink), rules/iron-laws.md,
+    rules/guidelines.md, hooks/index.md. Conditionally writes:
     rules/index.md (only when `rules/` exists), docs/CODEBASE-MAP.md
     (only when `full_map=True`).
     """
@@ -520,7 +520,7 @@ if __name__ == "__main__":
     root = Path(args.project_root).resolve()
     p = write_project_md(root, full_map=args.full_claude_md, stage=args.stage)
     print(f"wrote {p}")
-    for sub in ("iron-laws/index.md", "guidelines/index.md", "hooks/index.md", "AGENTS.md"):
+    for sub in ("rules/iron-laws.md", "rules/guidelines.md", "hooks/index.md", "AGENTS.md"):
         print(f"wrote {root / sub}")
     if (root / "rules").is_dir():
         print(f"wrote {root / 'rules' / 'index.md'}")

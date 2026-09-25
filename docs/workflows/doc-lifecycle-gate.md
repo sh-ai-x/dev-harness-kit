@@ -83,5 +83,5 @@ Per proposal §롤백, revert this gate if any of:
 - `tests/test_doc_lifecycle.py` — regression cases.
 - `skills/docs-maintenance/SKILL.md` — the LLM staleness heuristic
   this gate replaced (now a 1-line pointer).
-- `iron-laws/index.md` — L7 (`알파는 모델이 스스로 부과할 수 없는 부분에 쓴다`).
+- `rules/iron-laws.md` — L7 (`알파는 모델이 스스로 부과할 수 없는 부분에 쓴다`).
 - `docs/proposals/okf-adoption/` — proposal, design record.
