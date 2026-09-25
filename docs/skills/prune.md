@@ -27,7 +27,7 @@
 
 3. **REPORT (Phase 3).** Renders the merged finding set (Phase 1 candidates plus Phase 2 dependent annotations) into `.dev-kit/hand-off/prune-target-report.md`. Each finding block carries file, line, severity, confidence, title, tl;dr, scenario, and a Fix line with the deletion command. The verdict follows the engine's Healthy / Critical / Major drift / Minor drift scale. In `--target <feat>` mode the report file is suffixed `prune-target-<feat>-report.md` so multiple target sweeps don't clobber each other.
 
-4. **VERIFY (Phase 4).** Runs the full test suite (the project's standard runner — `pytest`, `npm test`, `go test ./...`, etc.). On green, hand off to `/dev-kit:ship` or `/dev-kit:status`. On red, the skill refuses to declare success and routes to `/dev-kit:build-debug` for systematic reproduction — no deletion is final until the suite is green post-deletion. In `--target` mode, Phase 4 runs unconditionally even when no candidates were deleted.
+4. **VERIFY (Phase 4).** Runs the full test suite (the project's standard runner — `pytest`, `npm test`, `go test ./...`, etc.). On green, hand off to `/dev-kit:ship` or `/dev-kit:status`. On red, the skill refuses to declare success and routes to `mattpocock-skills:diagnosing-bugs` for systematic reproduction — no deletion is final until the suite is green post-deletion. In `--target` mode, Phase 4 runs unconditionally even when no candidates were deleted.
 
 `--target <feat>` resolution rules: `<feat>` must resolve to a phase name, a directory under `skills/`, or a Python module under `lib/` — unresolvable names fail with exit 2. The sweep restricts scope (`paths=[<feat>-root]`) so off-feature findings are dropped at parse time (see `_is_in_scope` in `runner.py`). The DEPENDENTS phase becomes mandatory in this mode, since single-target deletions are more likely to have undeclared callers than project-wide sweeps.
 
@@ -59,7 +59,7 @@ The full suite must run in under 10 minutes. There are no version-gated precondi
 
 - [refactor](refactor.md) — the rewrite counterpart; `prune` deletes, `refactor` rewrites.
 - [refactor](refactor.md) — rewrite pipeline; explicitly contrasted as "prune deletes."
-- [build-debug](build-debug.md) — where a red Phase 4 verify routes for systematic reproduction.
+- `mattpocock-skills:diagnosing-bugs` — where a red Phase 4 verify routes for systematic reproduction (replaces the deleted `/dev-kit:build-debug`).
 - `lib/analysis_core.runner.run_analysis` (`mode="delete"`) — the shared engine backing both Phase 1 and Phase 2.
 - `python3 -m lib.analysis_core --delete --target <feat>` — the Phase 2 dependents walker (CLI entry into `lib/analysis_core/__main__.py`).
 - `/dev-kit:ship`, `/dev-kit:status` — the next steps once all 4 phases are green.
