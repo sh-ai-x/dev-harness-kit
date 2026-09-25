@@ -102,111 +102,109 @@ _TEMPLATES_ROOT = _PLUGIN_ROOT / "templates" / "ci"
 _HOOKS_ROOT = _PLUGIN_ROOT / "hooks"  # single source of truth for hook files
 _TOOLS_ROOT = _PLUGIN_ROOT / "tools"  # single source of truth for bundled CLI tools
 
-# Consumer-specific files installed into the target repo. Hook files are
-# appended from the canonical `hooks/` tree below; do not hand-maintain a
-# second hook inventory here.
-_CI_PATHS_BEFORE_HOOKS: tuple[str, ...] = (
-    # CI workflows + scripts
-    ".github/workflows/ci.yml",
-    ".github/workflows/auto-fix-pr.yml",
-    # Issue #823: review.yml + security.yml are independent workflows.
-    # gate-select's `review only` pick installs ONLY review.yml; the
-    # `review + security` pick installs both. The security job + its own
-    # severity gate live in security.yml (was bundled in review.yml
-    # pre-#823). ci-setup --force copies each present template.
-    ".github/workflows/review.yml",
-    ".github/workflows/security.yml",
-    # issue #834: maintenance.yml ships as a consumer template so the
-    # maintenance gate is one of the three first-class CI gates the
-    # operator can toggle via `.dev-kit/gates.json` + `gate-select
-    # enable/disable`. The local `.github/workflows/maintenance.yml`
-    # is the source-of-truth copy.
-    ".github/workflows/maintenance.yml",
-    # Provider selection is env-based: locally `.env:CI_REVIEW_PROVIDER`
-    # (managed via `bin/set-provider.sh <provider>`, gitignored, per-user),
-    # in CI `vars.CI_REVIEW_PROVIDER` (per-repo, set via `gh variable set`).
-    # There is intentionally NO tracked provider file — the same repo can
-    # be used by different operators with different providers.
-    ".githooks/pre-push",
-    "scripts/validate.py",
-    "scripts/test.sh",
-    "scripts/branch-policy.sh",
-    "scripts/ci-local.sh",
-    # Verdict extractor (issue #244, boilerplate-web PR #17/#19): reads
-    # anthropics/claude-code-action@v1's claude-execution-output.json so
-    # the review/security post-steps don't grep PR comments (which would
-    # resurrect stale "Verdict: Changes Requested" comments from prior
-    # pushes and re-introduce deterministic gate flapping).
-    "scripts/extract-verdict.py",
-    # Comment-derived verdict fallback (issue #625): when the agent's
-    # output file is missing/unparseable (provider=minimax returns a
-    # wrapper-format envelope that the parser above can't read), this
-    # helper recovers the verdict from the most recent claude-prefixed
-    # PR comment, filtered by createdAt > cutoff to avoid resurrecting
-    # stale verdicts from prior pushes. Lives next to review.yml so the
-    # workflow can `python3 ${{ github.workspace }}/.github/workflows/
-    # _verdict_from_comment.py` without an extra consumer-side install
-    # step.
-    ".github/workflows/_verdict_from_comment.py",
-)
+# Single source of truth for the install layout. The two `install` lists
+# sandwich the dynamic `hooks/` tree; `executable.static` is the hardcoded
+# shell-script set +x'd after install, supplemented at materialization time
+# by every `hooks/*.sh` path emitted by `_canonical_hook_paths()`.
+WORKFLOWS: dict[str, dict[str, list[str]]] = {
+    "install": {
+        "before_hooks": [
+            # CI workflows + scripts
+            ".github/workflows/ci.yml",
+            ".github/workflows/auto-fix-pr.yml",
+            # Issue #823: review.yml + security.yml are independent workflows.
+            # The `review only` gate-select pick installs ONLY review.yml;
+            # `review + security` installs both. ci-setup --force copies each.
+            ".github/workflows/review.yml",
+            ".github/workflows/security.yml",
+            # issue #834: maintenance.yml ships as a consumer template so the
+            # maintenance gate is one of three first-class CI gates.
+            ".github/workflows/maintenance.yml",
+            # Provider selection is env-based (locally `.env`, in CI
+            # `vars.CI_REVIEW_PROVIDER`). No tracked provider file — see
+            # `bin/set-provider.sh`.
+            ".githooks/pre-push",
+            "scripts/validate.py",
+            "scripts/test.sh",
+            "scripts/branch-policy.sh",
+            "scripts/ci-local.sh",
+            # Verdict extractor (issue #244): reads claude-execution-output.json
+            # so post-steps don't grep PR comments.
+            "scripts/extract-verdict.py",
+            # Comment-derived verdict fallback (issue #625): recovers verdict
+            # from the most recent claude-prefixed PR comment when output is
+            # unreadable (provider=minimax returns a wrapper envelope).
+            ".github/workflows/_verdict_from_comment.py",
+        ],
+        "after_hooks": [
+            ".claude/rules/git-workflow.md",
+            "tests/test_worktree_guard.py",
+            "tests/test_review_yml_isolation.py",
+            "tests/test_extract_verdict.py",
+            # Runtime-artifact gitignore fragment (issue #202), merged
+            # into a marked block so consumer-owned lines are preserved.
+            ".gitignore",
+            # /dev-kit:skill-usage CLI + helpers. Commands shell out by bare
+            # relative path; without these the consumer gets "No such file or
+            # directory" on /dev-kit:skill-usage.
+            "tools/skill_usage.py",
+            "tools/skill_usage_normalize.py",
+            "tools/skill_usage_render.py",
+            "tools/portability_check.py",
+            "tools/loop_engine.py",
+            # /dev-kit:babysit-pr-local entrypoints (issue #619).
+            "bin/babysit-pr-local.sh",
+            "bin/review-local.sh",
+            "bin/set-provider.sh",
+            # lib/ helpers actually imported by bin/review-local.sh.
+            "lib/review_local_lib.sh",
+            "lib/plugin_cache_refresh.sh",
+            "lib/maintenance_gate.py",
+            "lib/atomic.py",
+            "lib/__init__.py",
+            # Linear auto-registration entrypoints. Every Linear hook
+            # guards on the presence of tools/linear_sync.py + friends;
+            # without these in WORKFLOWS the consumer's first hook fire
+            # raises ModuleNotFoundError. Invoked via `python3 <path>`,
+            # so no +x entry needed.
+            "tools/_repo_name.py",
+            "tools/linear_sync.py",
+            "tools/linear_pr_sync.py",
+        ],
+    },
+    "executable": {
+        "static": [
+            ".githooks/pre-push",
+            "scripts/test.sh",
+            "scripts/branch-policy.sh",
+            "scripts/ci-local.sh",
+            "scripts/extract-verdict.py",
+            "scripts/validate.py",
+            "tools/skill_usage.py",
+            "tools/portability_check.py",
+            "tools/loop_engine.py",
+            # /dev-kit:babysit-pr-local entrypoints (issue #619) — must be
+            # +x so the consumer can invoke them by relative path from
+            # anywhere (cwd-independent, per bin/review-local.sh's
+            # REPO_ROOT-from-git derivation).
+            "bin/babysit-pr-local.sh",
+            "bin/review-local.sh",
+            "bin/set-provider.sh",
+            # lib/ bash helpers sourced by EXPECTED_PATHS hooks/scripts. +x
+            # is cheap insurance in case any future caller invokes them
+            # as a CLI rather than via `source`.
+            "lib/review_local_lib.sh",
+            "lib/plugin_cache_refresh.sh",
+        ],
+    },
+}
 
-# Keep the hook payload between consumer files and the remaining canonical
-# assets. Named groups make the ordering boundary explicit without a fragile
-# numeric slice that could silently move when a template is added.
-_CI_PATHS_AFTER_HOOKS: tuple[str, ...] = (
-    ".claude/rules/git-workflow.md",
-    "tests/test_worktree_guard.py",
-    "tests/test_review_yml_isolation.py",
-    "tests/test_extract_verdict.py",
-    # Runtime-artifact gitignore fragment (issue #202). Installed via a
-    # marked-block merge so consumer-owned lines outside the block are
-    # preserved across --force refreshes.
-    ".gitignore",
-    # /dev-kit:skill-usage's CLI + its two helper modules. Commands shell
-    # out to these by a bare relative path (`python3 tools/skill_usage.py`)
-    # because ${CLAUDE_PLUGIN_ROOT} does not expand inside command markdown
-    # bodies (anthropics/claude-code#9354). Without these in EXPECTED_PATHS,
-    # any consumer that only ran ci-setup/bootstrap-full (never cloned
-    # dev-harness-kit itself) got "No such file or directory" on
-    # /dev-kit:skill-usage.
-    "tools/skill_usage.py",
-    "tools/skill_usage_normalize.py",
-    "tools/skill_usage_render.py",
-    # Read-only portability and long-running loop entrypoints. These are
-    # shipped with CI setup so a consumer does not need the plugin checkout.
-    "tools/portability_check.py",
-    "tools/loop_engine.py",
-    # /dev-kit:babysit-pr-local entrypoints (issue #619). The local
-    # mirror invokes these by relative path from the consumer repo;
-    # ci-setup previously installed neither bin/ nor lib/ so consumers
-    # had to manually cp from the plugin cache.
-    "bin/babysit-pr-local.sh",
-    "bin/review-local.sh",
-    "bin/set-provider.sh",
-    # lib/ helpers actually imported by bin/review-local.sh. The rest of
-    # lib/ is plugin-internal and intentionally not shipped.
-    "lib/review_local_lib.sh",  # bash, sourced by bin/review-local.sh:77
-    # bash, sourced by hooks/plugin-cache-refresh.sh AND bin/devkit-refresh.sh
-    # (cross-tree helper -- lives at top-level lib/ rather than hooks/lib/).
-    "lib/plugin_cache_refresh.sh",
-    "lib/maintenance_gate.py",  # Python, invoked by bin/review-local.sh:96,439
-    "lib/atomic.py",            # Python, dep of lib/maintenance_gate.py
-    "lib/__init__.py",          # Python package marker (already exists at repo root)
-    # Linear auto-registration entrypoints. Every Linear hook
-    # (hooks/linear-*.sh, hooks/worktree-auto-cut.sh) guards on the
-    # presence of tools/linear_sync.py; without these in EXPECTED_PATHS,
-    # consumer repos after ci-setup would silently bail at that guard
-    # and never sync — issues land in the wrong project (or never land).
-    # linear_pr_sync.py is the GH-Actions-driven companion (workflow
-    # picks it up via sparse-checkout). tools/_repo_name.py is the
-    # shared helper both scripts `from _repo_name import ...` — without
-    # it in EXPECTED_PATHS the consumer's first hook fire raises
-    # ModuleNotFoundError. All three are invoked via `python3 <path>`
-    # so they do NOT need +x (no entry in EXECUTABLE_PATHS).
-    "tools/_repo_name.py",
-    "tools/linear_sync.py",
-    "tools/linear_pr_sync.py",
-)
+
+# Public surface: the install lists are exposed as lazy tuples (same
+# `for rel in EXPECTED_PATHS:` API as before). Tests reach in for the
+# raw `_CI_PATHS_BEFORE_HOOKS` tuple — keep that alias too.
+_CI_PATHS_BEFORE_HOOKS: tuple[str, ...] = tuple(WORKFLOWS["install"]["before_hooks"])
+_CI_PATHS_AFTER_HOOKS: tuple[str, ...] = tuple(WORKFLOWS["install"]["after_hooks"])
 
 
 def _canonical_hook_paths() -> tuple[str, ...]:
@@ -291,32 +289,13 @@ EXPECTED_PATHS: _LazyTuple = _LazyTuple(
     lambda: _CI_PATHS_BEFORE_HOOKS + _canonical_hook_paths() + _CI_PATHS_AFTER_HOOKS
 )
 
-# Files that need the executable bit after install.
+# Files that need the executable bit after install. Static set comes from
+# WORKFLOWS["executable"]["static"]; dynamic set is every hooks/*.sh emitted
+# by the canonical-hook enumeration.
 EXECUTABLE_PATHS: _LazyTuple = _LazyTuple(
-    lambda: (
-        ".githooks/pre-push",
-        "scripts/test.sh",
-        "scripts/branch-policy.sh",
-        "scripts/ci-local.sh",
-        "scripts/extract-verdict.py",
-        "scripts/validate.py",
-        "tools/skill_usage.py",
-        "tools/portability_check.py",
-        "tools/loop_engine.py",
-        # /dev-kit:babysit-pr-local entrypoints (issue #619). These must be
-        # +x so the consumer can invoke them by relative path from anywhere
-        # (cwd-independent, per bin/review-local.sh's REPO_ROOT-from-git
-        # derivation).
-        "bin/babysit-pr-local.sh",
-        "bin/review-local.sh",
-        "bin/set-provider.sh",
-        # lib/ bash helpers sourced by EXPECTED_PATHS hooks/scripts. +x is
-        # cheap insurance in case any future caller invokes them as a CLI
-        # rather than via `source`.
-        "lib/review_local_lib.sh",
-        "lib/plugin_cache_refresh.sh",
-        *[path for path in EXPECTED_PATHS
-          if path.startswith("hooks/") and path.endswith(".sh")],
+    lambda: tuple(WORKFLOWS["executable"]["static"]) + tuple(
+        path for path in EXPECTED_PATHS
+        if path.startswith("hooks/") and path.endswith(".sh")
     )
 )
 
@@ -360,22 +339,46 @@ POST_INSTALL_CHECKLIST: tuple[tuple[str, str], ...] = (
 )
 
 
-# Provider-aware required-secret catalog (issue #212-B1/B2). Each
-# provider carries its own API-key secret name. `DEV_KIT_GITHUB_TOKEN`
-# is the consumer-install precondition and is added regardless of provider.
-# Keep keys lowercase + values human-readable so the skill body can render
-# the checklist in plain English.
-PROVIDER_SECRETS: dict[str, tuple[tuple[str, str], ...]] = {
-    "minimax": (
-        ("MINIMAX_API_KEY", "MiniMax provider API key"),
-    ),
-    "anthropic": (
-        ("ANTHROPIC_API_KEY", "Anthropic API key (claude-code-action opt-in)"),
-    ),
-    "deepseek": (
-        ("DEEPSEEK_API_KEY", "DeepSeek provider API key"),
-    ),
+# Provider-aware required-secret catalog (issue #212-B1/B2). Loaded
+# from `.dev-kit/provider-secrets.json` so consumers can edit the catalog
+# without touching Python. The fallback dict (used when the JSON file
+# is missing — e.g. inside a 3-file fixture) keeps the canonical three
+# providers documented here as a single source of truth.
+_PROVIDER_SECRETS_FALLBACK: dict[str, tuple[tuple[str, str], ...]] = {
+    "minimax": (("MINIMAX_API_KEY", "MiniMax provider API key"),),
+    "anthropic": (("ANTHROPIC_API_KEY", "Anthropic API key (claude-code-action opt-in)"),),
+    "deepseek": (("DEEPSEEK_API_KEY", "DeepSeek provider API key"),),
 }
+
+
+def _load_provider_secrets() -> dict[str, tuple[tuple[str, str], ...]]:
+    """Read `.dev-kit/provider-secrets.json`; fall back to the in-code map.
+
+    Catalog lookups (`PROVIDER_SECRETS[provider]`) are read-only after
+    load; never mutated.
+    """
+    src = Path(__file__).resolve().parent.parent / ".dev-kit" / "provider-secrets.json"
+    try:
+        raw = src.read_text(encoding="utf-8")
+    except OSError:
+        return {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
+    providers = payload.get("providers") if isinstance(payload, dict) else None
+    if not isinstance(providers, dict):
+        return {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
+    out: dict[str, tuple[tuple[str, str], ...]] = {}
+    for name, items in providers.items():
+        if not isinstance(name, str) or not isinstance(items, list):
+            continue
+        pairs = tuple((str(s), str(d)) for s, d in (item if isinstance(item, list) else () for item in items))
+        out[name] = pairs
+    return out or {k: tuple(v) for k, v in _PROVIDER_SECRETS_FALLBACK.items()}
+
+
+PROVIDER_SECRETS: dict[str, tuple[tuple[str, str], ...]] = _load_provider_secrets()
 
 # Consumer install always needs the dev-harness-kit PAT. The skill body
 # resolves the provider via `read_provider()` (env + `.env`) and merges
@@ -1443,148 +1446,20 @@ def _print_post_install_checklist(target_dir: Path) -> None:
     print("Verify: bash scripts/ci-local.sh")
 
 
-# Patterns of known-bad install artifacts that the lint pass surfaces.
-# Each entry: (path, substring, explanation). The lint is best-effort and
-# never raises; matches become `InstallReport.warnings` entries so the
-# skill body can print them in the summary table and the user can act on
-# them (typically by re-running with `--force` to refresh the template).
-_KNOWN_STALE_PATTERNS: tuple[tuple[str, str, str], ...] = (
-    (
-        ".github/workflows/review.yml",
-        # Pre-0.1.3 gate hard-failed in pull_request mode on missing verdicts
-        # while defaulting to Approve in workflow_dispatch mode. Internal
-        # inconsistency that produced spurious CI failures on PRs whose
-        # /dev-kit:* agents did not post a verdict comment.
-        "Re-run via workflow_dispatch if needed",
-        "stale pull_request hard-fail gate in review.yml -- the gate used to exit 1 with "
-        "'Missing verdict' whenever the /dev-kit:* agents skipped posting a verdict comment, "
-        "even though the gate's own documented intent (lines 354-358) tolerates missing "
-        "verdicts and the workflow_dispatch branch already defaulted to Approve. Re-run with "
-        "`--force` to refresh the template; the patched gate defaults missing verdicts to "
-        "Approve with a ::warning:: in both event modes.",
-    ),
-    (
-        ".github/workflows/review.yml",
-        # Issue #726: pre-fix gate hard-failed whenever
-        # verdict_source=needs-fallback-bootstrap-pr, contradicting its own
-        # documented fallback contract (the extract-verdict step had already
-        # posted a synthetic 'Verdict: Approve' tagged with that source).
-        # The post-fix gate tolerates the bootstrap case on BOTH sides
-        # (AND on R_SOURCE and S_SOURCE) and falls through to the rank/case
-        # logic; install-broken signatures (default-approve-no-file,
-        # parse-failed-no-verdict, missing source, mixed bootstrap+ran)
-        # still hard-fail (issue #212-C1). The remediation text below
-        # ('Merge this PR's workflow changes to main first.') only appears
-        # in the OLD broken bootstrap-path; the post-fix non-bootstrap
-        # branch uses a different remediation block.
-        "Merge this PR's workflow changes to main first.",
-        "stale bootstrap-PR hard-fail gate in review.yml (issue #726) -- the gate "
-        "used to exit 1 with 'Merge this PR's workflow changes to main first' "
-        "whenever the anthropics/claude-code-action@v1 anti-recursion guard "
-        "skipped both review and security on a PR that modifies "
-        ".github/workflows/*. The fallback contract posts a synthesized "
-        "'Verdict: Approve' tagged verdict_source=needs-fallback-bootstrap-pr; "
-        "the pre-fix gate contradicted this by hard-failing on agent_ran=false. "
-        "Re-run with `--force` to refresh the template; the patched gate tolerates "
-        "the BOTH-bootstrap case via an AND on R_SOURCE+S_SOURCE and falls "
-        "through to the rank/case logic. Mixed or non-bootstrap signatures still "
-        "hard-fail (issue #212-C1 install-broken protection preserved).",
-    ),
-)
-
-
-# Workflow files checked for `#`-inside-block-scalar anti-pattern
-# (issue #219 Bug 1). YAML literal block scalars (`if: |`) and folded
-# block scalars (`if: >`) treat every indented line, including `#`-prefixed
-# comments, as part of the expression string passed to GitHub's expression
-# parser. `#` is not valid in an expression, so the parser refuses to
-# compile the workflow -> startup failure on every push. The lint pass
-# scans each file's parsed YAML for `if:` blocks whose values contain
-# `#`-prefixed lines and reports the first such occurrence.
-_IF_BLOCK_SCALAR_WORKFLOWS: tuple[str, ...] = (
-    ".github/workflows/auto-fix-pr.yml",
-    ".github/workflows/review.yml",
-    ".github/workflows/ci.yml",
-)
-
-
-def _lint_if_block_scalar_hashes(content: str, rel: str) -> List[str]:
-    """Return one warning string per `#`-prefixed line inside any
-    `if: |` / `if: >` block scalar in `content`, else [].
-
-    The check is YAML-aware: only literal/folded block scalars under `if:`
-    (or `if` at any depth — e.g. `jobs.<name>.if`) count. `#` lines inside
-    `run:` shell-script blocks or `prompt:` markdown blocks are fine — those
-    go through bash / markdown parsers, not the GitHub expression parser.
-    """
-    # Lazy import: PyYAML is only needed for the lint path; the install
-    # path (install_ci_config / read_provider / plugin_version) must not
-    # require it.
-    import yaml  # type: ignore
-    out: List[str] = []
-    try:
-        doc = yaml.safe_load(content)
-    except yaml.YAMLError:
-        # A YAML syntax error in a workflow file is already surfaced by
-        # GitHub's UI; the lint pass is for the more subtle `#`-in-block
-        # pattern. Skip files that don't even parse as YAML.
-        return out
-
-    def _scan(node: object, path: str) -> None:
-        if isinstance(node, dict):
-            for k, v in node.items():
-                child_path = f"{path}.{k}" if path else str(k)
-                if k == "if" and isinstance(v, str) and "\n" in v:
-                    bad = [
-                        ln for ln in v.splitlines()
-                        if ln.lstrip().startswith("#")
-                    ]
-                    if bad:
-                        out.append(
-                            f"{rel}: {child_path}: `#`-prefixed line inside "
-                            f"`if:` block scalar breaks GitHub Actions "
-                            f"expression parser (issue #219 Bug 1). "
-                            f"Move the comment ABOVE `if:`. "
-                            f"First offender: {bad[0]!r}"
-                        )
-                        return
-                _scan(v, child_path)
-        elif isinstance(node, list):
-            for i, v in enumerate(node):
-                _scan(v, f"{path}[{i}]")
-
-    _scan(doc, "")
-    return out
-
-
-def lint_installed_workflows(target_dir: Path) -> List[str]:
-    """Scan installed EXPECTED_PATHS for known-stale patterns.
-
-    Returns one human-readable finding per match. Lint output is
-    advisory; the install itself never blocks on it.
-    """
-    out: List[str] = []
-    target = Path(target_dir).resolve()
-    for rel, needle, explain in _KNOWN_STALE_PATTERNS:
-        p = target / rel
-        if not p.is_file():
-            continue
-        try:
-            content = p.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if needle in content:
-            out.append(f"{rel}: {explain}")
-    for rel in _IF_BLOCK_SCALAR_WORKFLOWS:
-        p = target / rel
-        if not p.is_file():
-            continue
-        try:
-            content = p.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        out.extend(_lint_if_block_scalar_hashes(content, rel))
-    return out
+# Patterns of known-bad install artifacts + `#`-in-block-scalar lint logic
+# live in `lib/ci_setup_lint.py`. Re-exported here for backwards compatibility
+# (the install path calls `lint_installed_workflows(target)` and tests
+# reference `ci_setup.lint_installed_workflows` directly).
+# Dual-import (`.ci_setup_lint` then bare `ci_setup_lint`) mirrors the
+# `atomic` / `read_env_key` / `gates_state` / `gh_cli` shims above so the
+# 3-file flat-bundle fixture in
+# `tests/test_ci_setup.py::test_import_succeeds_without_hooks_manifest`
+# keeps working (it stages `ci_setup.py` next to `ci_setup_lint.py` in
+# a tmpdir with no `__init__.py` and exercises bare-import resolution).
+try:
+    from .ci_setup_lint import lint_installed_workflows  # type: ignore
+except ImportError:
+    from ci_setup_lint import lint_installed_workflows  # type: ignore
 
 
 def _self_test() -> int:
