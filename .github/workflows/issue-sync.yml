@@ -51,7 +51,52 @@ jobs:
       issues: read
       pull-requests: read
     steps:
+      - name: Pre-check refs (skip job if PR has none)
+        # v1.1.1: short-circuit BEFORE checkout when the PR body
+        # references no GitHub issue. The PR's `body` is available
+        # via `github.event.pull_request.body` (no fetch needed), so
+        # we can decide without spinning up `actions/checkout` +
+        # sparse-checkout + audit-trail label detection + the full
+        # `tools/issue_sync.py pre-push` round-trip. The downstream
+        # `if: steps.pre_check_refs.outputs.has_refs == 'true'` gates
+        # the checkout + parse + verify chain; a no-ref PR exits 0 in
+        # <2 s and never materializes `tools/issue_sync.py` from disk.
+        #
+        # The regex mirrors `tools/issue_sync.py:_REF_PATTERN`:
+        # optional close/reference keyword (`Closes` / `Fixes` /
+        # `Resolves` / `Issue` / `Related to` / etc., case-insensitive)
+        # followed by `owner/repo#N` or `#N` with a word boundary.
+        # The pre-check is a strict superset of the tool's matches —
+        # it also catches refs in code blocks / HTML comments that
+        # `_strip_code_and_comments` strips out of the real parse.
+        # That's safe: a "false positive" here just triggers a
+        # checkout + a no-ref real-parse that exits 0 anyway. The
+        # only effect of a false positive is a few seconds of extra
+        # runner time, never a regression in correctness.
+        id: pre_check_refs
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          REF_RE='((close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved|issue|ref|refs|reference|references|see|part of|related to|tracking)[[:space:]]+)?(([A-Za-z0-9]([A-Za-z0-9-]{0,38}))/([A-Za-z0-9._-]{1,100}))?#[0-9]+\b'
+          # Mirror `tools/issue_sync.py:parse_references` which concatenates
+          # title + body before scanning. v1.1.1 fix: PR title carries refs
+          # (e.g. "Closes #12 — fix wiring") and a body-only pre-check
+          # would falsely short-circuit, leaving the audit-trail / stale-ref
+          # check disabled for that PR. A newline separator avoids any
+          # `#N<sep>#M` concatenation across the two fields.
+          COUNT=$(printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | grep -ciE "$REF_RE" || true)
+          if [ "$COUNT" = "0" ]; then
+            echo "::notice title=issue-sync::PR title + body references no GitHub issue; sync check skipped before checkout (ref_count=0)."
+            echo "has_refs=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "pre_check_refs: found $COUNT reference candidate(s) in title+body; proceeding to checkout + parse."
+            echo "has_refs=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: checkout
+        if: steps.pre_check_refs.outputs.has_refs == 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Disable credential persistence so a PR-controlled parser
@@ -71,6 +116,7 @@ jobs:
           sparse-checkout: tools/issue_sync.py
 
       - name: Detect audit-trail label
+        if: steps.pre_check_refs.outputs.has_refs == 'true'
         # When the PR carries the `audit-trail` label (PR #829's
         # actual failure mode — the body uses `Issue #N` for closed
         # refs to preserve the historical audit trail), the gate
@@ -90,6 +136,7 @@ jobs:
           fi
 
       - name: Parse + check issue states
+        if: steps.pre_check_refs.outputs.has_refs == 'true'
         # v1.1.0 (issue #833, PR #832): the bash loop is replaced by
         # the `pre-push` subcommand of `tools/issue_sync.py`. Single
         # source of truth between this remote gate and the local
