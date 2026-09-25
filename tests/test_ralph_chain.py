@@ -23,7 +23,7 @@ LIB_DIR = ROOT / "lib"  # promoted from skills/ralph/lib/ in
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(LIB_DIR))
 
-import ralph_state as rs  # noqa: E402, I001
+import ralph_chain as rs  # noqa: E402, I001 — state machine inlined here
 import ralph_chain as rc  # noqa: E402, I001
 
 

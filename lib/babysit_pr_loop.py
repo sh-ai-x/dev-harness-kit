@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from babysit_pr_reliability import classify_check
+from lib.babysit_pr_reliability import classify_check
 
 SCHEMA_VERSION = "1.0.0"
 STATE_FILE = ".dev-kit/babysit-state.json"

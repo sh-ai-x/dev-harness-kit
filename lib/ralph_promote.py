@@ -26,12 +26,15 @@ VALID_STATUSES = {"unimplemented", "pending", "in_progress", "completed", "error
 TERMINAL_STAGES = {"DONE", "RECOVERY_REQUIRED", "USER_MERGE_REQUIRED"}
 
 
-class PromotionError(ValueError):
-    """Raised when the source bundle is incomplete or unsafe to publish."""
+class RalphPromoteError(ValueError):
+    """Raised when the source bundle is incomplete, unsafe to publish, or
+    contains an unsafe identifier.
 
-
-class InvalidIdentifierError(PromotionError):
-    """Raised for an unsafe round, plan, phase, or session identifier."""
+    Consolidated from the prior ``PromotionError`` + ``InvalidIdentifierError``
+    pair (two-class hierarchy collapsed in refactor/ralph-babysit-collapse;
+    the subclass distinction carried no semantic value for callers — every
+    raise site already bubbled into a single CLI exit code).
+    """
 
 
 @dataclass(frozen=True)
@@ -55,7 +58,7 @@ class _StepEvidence:
 
 def _validate_identifier(value: str, label: str) -> str:
     if not value or IDENTIFIER_RE.fullmatch(value) is None:
-        raise InvalidIdentifierError(
+        raise RalphPromoteError(
             f"{label} must be one safe path segment using letters, digits, '.', '_' or '-'")
     return value
 
@@ -70,7 +73,7 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 def _reject_symlink(path: Path, label: str) -> None:
     if path.is_symlink():
-        raise PromotionError(f"refusing symlink {label}: {path}")
+        raise RalphPromoteError(f"refusing symlink {label}: {path}")
 
 
 def _reject_symlink_components(project_root: Path, path: Path, label: str) -> None:
@@ -78,7 +81,7 @@ def _reject_symlink_components(project_root: Path, path: Path, label: str) -> No
     try:
         relative = path.relative_to(project_root)
     except ValueError as exc:
-        raise PromotionError(f"{label} must be inside --project-root: {path}") from exc
+        raise RalphPromoteError(f"{label} must be inside --project-root: {path}") from exc
     current = project_root
     for component in relative.parts:
         current /= component
@@ -88,11 +91,11 @@ def _reject_symlink_components(project_root: Path, path: Path, label: str) -> No
 def _read_regular(path: Path, label: str) -> bytes:
     _reject_symlink(path, label)
     if not path.is_file():
-        raise PromotionError(f"required {label} is missing: {path}")
+        raise RalphPromoteError(f"required {label} is missing: {path}")
     try:
         return path.read_bytes()
     except OSError as exc:
-        raise PromotionError(f"cannot read {label}: {path}: {exc}") from exc
+        raise RalphPromoteError(f"cannot read {label}: {path}: {exc}") from exc
 
 
 def _read_json(path: Path, label: str) -> dict[str, Any]:
@@ -100,9 +103,9 @@ def _read_json(path: Path, label: str) -> dict[str, Any]:
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PromotionError(f"invalid JSON in {label}: {path}") from exc
+        raise RalphPromoteError(f"invalid JSON in {label}: {path}") from exc
     if not isinstance(value, dict):
-        raise PromotionError(f"{label} must contain a JSON object: {path}")
+        raise RalphPromoteError(f"{label} must contain a JSON object: {path}")
     return value
 
 
@@ -110,7 +113,7 @@ def _validate_schema_version(data: dict[str, Any], label: str, path: Path) -> No
     version = data.get("schema_version")
     if version in (1, "1", "1.0.0"):
         return
-    raise PromotionError(f"{label} has unsupported schema_version at {path}")
+    raise RalphPromoteError(f"{label} has unsupported schema_version at {path}")
 
 
 def _safe_runtime_path(project_root: Path, round_name: str) -> Path:
@@ -119,16 +122,16 @@ def _safe_runtime_path(project_root: Path, round_name: str) -> Path:
     _reject_symlink_components(project_root, candidate, "runtime directory")
     resolved = candidate.resolve()
     if not _is_relative_to(resolved, project_root):
-        raise PromotionError("runtime directory must be inside --project-root")
+        raise RalphPromoteError("runtime directory must be inside --project-root")
     if not candidate.is_dir():
-        raise PromotionError(f"runtime directory is missing: {candidate}")
+        raise RalphPromoteError(f"runtime directory is missing: {candidate}")
     return resolved
 
 
 def _discover_phase(runtime_dir: Path, phase: str | None) -> str:
     phases_dir = runtime_dir / "phases"
     if not phases_dir.is_dir():
-        raise PromotionError(f"runtime phases directory is missing: {phases_dir}")
+        raise RalphPromoteError(f"runtime phases directory is missing: {phases_dir}")
     if phase is not None:
         return _validate_identifier(phase, "phase")
 
@@ -139,7 +142,7 @@ def _discover_phase(runtime_dir: Path, phase: str | None) -> str:
     )
     if len(candidates) != 1:
         detail = ", ".join(candidates) if candidates else "none"
-        raise PromotionError(
+        raise RalphPromoteError(
             f"phase is ambiguous; pass --phase explicitly (candidates: {detail})")
     return _validate_identifier(candidates[0], "phase")
 
@@ -149,50 +152,50 @@ def _validate_step_output(
 ) -> None:
     _validate_schema_version(data, "step output", path)
     if data.get("phase") != phase or data.get("step") != step:
-        raise PromotionError(f"step output has mismatched identity at {path}")
+        raise RalphPromoteError(f"step output has mismatched identity at {path}")
     exit_code = data.get("exit_code")
     if isinstance(exit_code, bool) or not isinstance(exit_code, int):
-        raise PromotionError(f"step output has invalid exit_code at {path}")
+        raise RalphPromoteError(f"step output has invalid exit_code at {path}")
     duration = data.get("duration_seconds")
     if isinstance(duration, bool) or not isinstance(duration, (int, float)):
-        raise PromotionError(f"step output has invalid duration_seconds at {path}")
+        raise RalphPromoteError(f"step output has invalid duration_seconds at {path}")
     if duration < 0:
-        raise PromotionError(f"step output has negative duration_seconds at {path}")
+        raise RalphPromoteError(f"step output has negative duration_seconds at {path}")
     if not isinstance(data.get("timestamp"), str) or not data["timestamp"].strip():
-        raise PromotionError(f"step output has no timestamp at {path}")
+        raise RalphPromoteError(f"step output has no timestamp at {path}")
     for key in ("stdout", "stderr"):
         if key in data and not isinstance(data[key], str):
-            raise PromotionError(f"step output field {key!r} must be text at {path}")
+            raise RalphPromoteError(f"step output field {key!r} must be text at {path}")
 
 
 def _load_steps(runtime_dir: Path, phase: str) -> tuple[_StepEvidence, ...]:
     phase_dir = runtime_dir / "phases" / phase
     _reject_symlink(phase_dir, "phase directory")
     if not phase_dir.is_dir():
-        raise PromotionError(f"phase directory is missing: {phase_dir}")
+        raise RalphPromoteError(f"phase directory is missing: {phase_dir}")
     index_path = phase_dir / "index.json"
     index = _read_json(index_path, "phase index")
     _validate_schema_version(index, "phase index", index_path)
     if index.get("phase") not in (None, phase):
-        raise PromotionError(f"phase index has mismatched phase at {index_path}")
+        raise RalphPromoteError(f"phase index has mismatched phase at {index_path}")
     raw_steps = index.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
-        raise PromotionError(f"phase index must contain a non-empty steps list: {index_path}")
+        raise RalphPromoteError(f"phase index must contain a non-empty steps list: {index_path}")
 
     steps: list[_StepEvidence] = []
     seen: set[int] = set()
     for entry in raw_steps:
         if not isinstance(entry, dict):
-            raise PromotionError(f"phase index contains a non-object step: {index_path}")
+            raise RalphPromoteError(f"phase index contains a non-object step: {index_path}")
         number = entry.get("step")
         if isinstance(number, bool) or not isinstance(number, int) or number < 0:
-            raise PromotionError(f"phase index contains an invalid step number: {index_path}")
+            raise RalphPromoteError(f"phase index contains an invalid step number: {index_path}")
         if number in seen:
-            raise PromotionError(f"phase index contains duplicate step {number}: {index_path}")
+            raise RalphPromoteError(f"phase index contains duplicate step {number}: {index_path}")
         seen.add(number)
         status = entry.get("status")
         if not isinstance(status, str) or status not in VALID_STATUSES:
-            raise PromotionError(f"phase index contains invalid status for step {number}: {index_path}")
+            raise RalphPromoteError(f"phase index contains invalid status for step {number}: {index_path}")
         plan_path = phase_dir / f"step{number}.md"
         output_path = phase_dir / f"step{number}-output.json"
         _read_regular(plan_path, f"step {number} plan")
@@ -215,16 +218,16 @@ def _load_state(project_root: Path, session: str) -> dict[str, Any]:
     state_path = project_root / ".dev-kit" / "ralph" / f"{session}.json"
     state = _read_json(state_path, "Ralph session state")
     if state.get("session") != session:
-        raise PromotionError(f"Ralph session state does not match --session: {state_path}")
+        raise RalphPromoteError(f"Ralph session state does not match --session: {state_path}")
     current_stage = state.get("current_stage")
     if not isinstance(current_stage, str) or current_stage not in TERMINAL_STAGES:
-        raise PromotionError(
+        raise RalphPromoteError(
             f"Ralph session must be terminal before promotion (got {current_stage!r})")
     for key in ("last_action", "next_action"):
         if key in state and not isinstance(state[key], str):
-            raise PromotionError(f"Ralph session state field {key!r} must be text")
+            raise RalphPromoteError(f"Ralph session state field {key!r} must be text")
     if "blockers" in state and not isinstance(state["blockers"], list):
-        raise PromotionError("Ralph session state field 'blockers' must be a list")
+        raise RalphPromoteError("Ralph session state field 'blockers' must be a list")
     return state
 
 
@@ -426,7 +429,7 @@ def _completion_receipt(
     Returns ``(receipt_bytes, manifest_bytes, artifact_hash)``.
     """
     if verifier_kind not in {"declared", "independent"}:
-        raise PromotionError(
+        raise RalphPromoteError(
             f"verifier_kind must be 'declared' or 'independent'; got {verifier_kind!r}"
         )
     all_exit_zero = all(step.output["exit_code"] == 0 for step in steps)
@@ -488,7 +491,7 @@ def _existing_files(destination: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for path in destination.rglob("*"):
         if path.is_symlink():
-            raise PromotionError(f"refusing symlink in evidence destination: {path}")
+            raise RalphPromoteError(f"refusing symlink in evidence destination: {path}")
         if path.is_file():
             files[str(path.relative_to(destination))] = path.read_bytes()
     return files
@@ -499,12 +502,12 @@ def _publish(destination: Path, expected: dict[str, bytes]) -> None:
     destination_root.mkdir(parents=True, exist_ok=True)
     _reject_symlink(destination_root, "evidence parent")
     if destination.exists() and not destination.is_dir():
-        raise PromotionError(f"evidence destination is not a directory: {destination}")
+        raise RalphPromoteError(f"evidence destination is not a directory: {destination}")
     _reject_symlink(destination, "evidence destination")
 
     if destination.exists():
         if _existing_files(destination) != expected:
-            raise PromotionError(
+            raise RalphPromoteError(
                 f"evidence destination already exists with different content: {destination}")
         return
 
@@ -519,7 +522,7 @@ def _publish(destination: Path, expected: dict[str, bytes]) -> None:
         os.replace(stage, destination)
         stage = None
     except OSError as exc:
-        raise PromotionError(f"could not publish evidence bundle: {exc}") from exc
+        raise RalphPromoteError(f"could not publish evidence bundle: {exc}") from exc
     finally:
         if stage is not None and stage.exists():
             shutil.rmtree(stage)
@@ -549,7 +552,7 @@ def promote(
     round_name = _validate_identifier(round_name, "round")
     harness_candidate = _validate_identifier(harness_candidate, "harness_candidate")
     if verifier_kind not in {"declared", "independent"}:
-        raise PromotionError(
+        raise RalphPromoteError(
             f"verifier_kind must be 'declared' or 'independent'; got {verifier_kind!r}"
         )
     runtime = _safe_runtime_path(project_root, round_name)
@@ -629,10 +632,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             verifier_kind=args.verifier_kind,
             dry_run=args.dry_run,
         )
-    except InvalidIdentifierError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    except PromotionError as exc:
+    except RalphPromoteError as exc:
+        # Restore the prior exit-code contract: identifier-validation
+        # failures (`_validate_identifier`) return 1; bundle-validation
+        # and other promotion failures return 2. After the exception
+        # hierarchy collapsed (refactor/ralph-babysit-collapse) both
+        # raised RalphPromoteError, so we discriminate by message
+        # prefix — uniquely emitted by `_validate_identifier` at the
+        # path `_validate_identifier(value, label) → raise
+        # RalphPromoteError(f"{label} must be one safe path segment
+        # using letters, digits, '.', '_' or '-'")`.
+        msg = str(exc)
+        if msg.endswith("must be one safe path segment using letters, digits, '.', '_' or '-'"):
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:

@@ -71,7 +71,7 @@ holds the canonical record.
 ## What this template is NOT
 
 - It is NOT the canonical state. The canonical state is
-  `.dev-kit/ralph/<session>.json` and `lib/ralph_state.py` is the
+  `.dev-kit/ralph/<session>.json` and `lib/ralph_chain.py::RalphState` is the
   authoritative mutator. This template is an operator-readable view.
 - It is NOT a replacement for `templates/progress.log.md`. The cross-
   task log records per-session progress across many Ralph runs; this
