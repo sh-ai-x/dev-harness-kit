@@ -5,7 +5,7 @@
 #
 # Patterns are detection-only; the deliverable is the marker, not the fix.
 # Iron Law #4 prohibits these tokens in committed code (see
-# iron-laws/index.md line 8).
+# rules/iron-laws.md line 8).
 #
 # KO patterns are kept literal (no POSIX class wrappers) so they match
 # directly under Python re without locale-dependent collation issues.

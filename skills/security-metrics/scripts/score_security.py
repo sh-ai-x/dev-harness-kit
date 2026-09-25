@@ -34,7 +34,7 @@ NAMES = {
 # count stays at 10 (matching OWASP's symbolic surface). Deducts when
 # the repo handles untrusted text (WebFetch / gh pr view / sub-agent
 # output) without either a static pre-filter or the <untrusted>
-# delimiter convention (iron-laws/index.md L9).
+# delimiter convention (rules/iron-laws.md L9).
 PROMPT_injection = Category(code="LLM01", name="Prompt Injection (LLM01)")
 
 
@@ -177,7 +177,7 @@ def scan(root: Path) -> list[Category]:
     # LLM01 Prompt Injection (separate row in the scorecard — see NAMES).
     # Deducts when the repo ingests untrusted text but lacks BOTH
     # (a) the static pre-filter and (b) the <untrusted> delimiter
-    # convention (iron-laws/index.md L9). The same scorecard also
+    # convention (rules/iron-laws.md L9). The same scorecard also
     # surfaces on its own row so dashboards / alert routing can target
     # it independently of the OWASP set.
     has_static_filter = any(path.name == "prompt_injection_scan.py" for path in all_files)
