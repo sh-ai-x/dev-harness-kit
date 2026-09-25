@@ -930,16 +930,20 @@ _SAFE_RELATIVE_HREF = re.compile(
 # bare `<hr />` becomes `<hr class="section-divider">` here.
 _HR_RE = re.compile(r"<hr\s*/?>")
 
-# Pattern that matches an `<a>` tag whose entire label is plain text
-# (no inline child tags like `<strong>` or `<em>`). Unsafe-scheme scrub
-# only applies to this shape so that compound links like
-# `[**bold**](javascript:...)` -- which markdown emits as
-# `<a href="javascript:..."><strong>bold</strong></a>` -- are left
-# intact (the href attribute is still text, the scheme still unsafe,
-# but the label carries HTML the regex must not tear out). The
-# conservative behaviour: only neutralise `<a>` tags whose label is
-# purely text. Compound-label `<a>` tags pass through unaltered.
-_HREF_LINK_RE = re.compile(r'<a href="([^"]+)">([^<]+)</a>')
+# Pattern that matches an `<a>` tag with arbitrary label content
+# (plain text or compound with nested inline tags like `<strong>` /
+# `<em>` / `<code>`). The label capture uses non-greedy `.+?` so the
+# match closes at the first `</a>` rather than spanning across
+# adjacent anchors. The captured label is later stripped of nested
+# tags (`_INNER_TAG_RE`) before being rewritten to plain-text
+# `label (href)` form. This restores parity with the prior hand-rolled
+# inline renderer, which matched `[label](href)` against the markdown
+# source and neutralised unsafe schemes regardless of label content.
+_HREF_LINK_RE = re.compile(r'<a href="([^"]+)">(.+?)</a>', re.DOTALL)
+# Strip nested inline tags from a captured `<a>` label so the rewritten
+# plain-text form reads as the user's intended label without leftover
+# `<strong>` / `<em>` / `<code>` markup.
+_INNER_TAG_RE = re.compile(r"<[^>]+>")
 
 # When the markdown output for inline content is a single `<p>...</p>`
 # wrapper with only inline children, strip the wrapper so the result
@@ -994,15 +998,15 @@ def _escape_outside_fences(text: str) -> str:
 def _scrub_unsafe_links(html_str: str) -> str:
     """Neutralise `<a>` tags whose href uses a non-safe scheme.
 
-    Rewrites `<a href="javascript:...">label</a>` to `label (href)` so
-    the user reads the original intent in plain text. Compound-label
-    `<a>` tags (with `<strong>` / `<em>` / `<code>` children) are
-    intentionally left alone -- the regex requires `[^<]+` for the
-    label, so they never match. Safe-scheme hrefs are preserved.
+    Rewrites `<a href="javascript:...">label</a>` (and any compound
+    label like `<a href="..."><strong>label</strong></a>`) to
+    `label (href)` so the user reads the original intent in plain text.
+    Nested inline tags inside the label are stripped before rewriting.
+    Safe-scheme hrefs are preserved verbatim.
     """
     def _repl(m: re.Match) -> str:
         href = m.group(1)
-        label = m.group(2)
+        label = _INNER_TAG_RE.sub("", m.group(2))
         href_stripped = href.strip()
         if (
             _SAFE_URL_SCHEMES.match(href_stripped)
