@@ -209,7 +209,7 @@ contract pinned here.</p>
 </ul>
 <h2>3. Hand-off format</h2>
 <h3>3.1 Canonical template</h3>
-<p>The canonical sub-agent prompt template lives at <code>.claude/skills/_acp/sub-agent-prompt.md</code>. The leading underscore on <code>_acp</code> distinguishes it as a <em>private template directory</em>, not a discoverable skill (project skill rules: <code>rules/skill-authoring.md</code>).</p>
+<p>The canonical sub-agent prompt template lives at <code>.claude/lib/sub-agent-prompt.md</code>. The leading underscore on <code>_acp</code> distinguishes it as a <em>private template directory</em>, not a discoverable skill (project skill rules: <code>rules/skill-authoring.md</code>).</p>
 <h3>3.2 Mandatory placeholders (the seven)</h3>
 <p>Every dispatch MUST populate all seven placeholders. The hand-off lint (<code>tests/test_acp_hand_off.py</code>) refuses any dispatch prompt missing one.</p>
 <table>
@@ -261,7 +261,7 @@ contract pinned here.</p>
 <h3>3.3 Test surface</h3>
 <p><code>tests/test_acp_hand_off.py</code> enforces:</p>
 <ul>
-<li>The template file exists at <code>.claude/skills/_acp/sub-agent-prompt.md</code>.</li>
+<li>The template file exists at <code>.claude/lib/sub-agent-prompt.md</code>.</li>
 <li>The template's frontmatter (if any) declares it is a template, not a skill (no <code>name:</code>/<code>category:</code> matching the <code>skills/&lt;name&gt;/SKILL.md</code> shape).</li>
 <li>All seven placeholders are present as literal <code>&lt;NAME&gt;</code> strings.</li>
 <li>A redacted sample dispatch (provided in the test fixture) parses and resolves every placeholder against a stub orch-worktree.</li>
@@ -395,7 +395,7 @@ contract pinned here.</p>
 <tr>
   <td>Hand-off template + tests</td>
   <td><code>feat(acp-hand-off): canonical template + lint</code></td>
-  <td><code>.claude/skills/_acp/sub-agent-prompt.md</code> (template scaffold only — the template ships with this design issue), <code>tests/test_acp_hand_off.py</code></td>
+  <td><code>.claude/lib/sub-agent-prompt.md</code> (template scaffold only — the template ships with this design issue), <code>tests/test_acp_hand_off.py</code></td>
 </tr>
 <tr>
   <td><code>bin/version-slot</code> script + tests</td>

@@ -827,7 +827,7 @@ class TestDetectOwnerRepoBodyEquivalence(unittest.TestCase):
             self._normalize(gates_state.detect_owner_repo),
             self._normalize(ci_setup.detect_owner_repo),
             "lib/gates_state.py:detect_owner_repo drifted from lib/ci_setup.py:detect_owner_repo; "
-            "consolidate into lib/gh_cli.py or sync by hand.",
+            "consolidate or sync by hand.",
         )
 
 
@@ -888,7 +888,7 @@ class TestSync(unittest.TestCase):
             )
             gates_state.write_state({"schema_version": "1.0.0", "gates": {}}, target)
             # Stub gh availability + subprocess for `gh variable set`.
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 with mock.patch.object(gates_state, "_sync_one", return_value=(True, "")) as m:
                     result = gates_state.sync(root=target)
             self.assertEqual(result["gh_path"], "/fake/gh")
@@ -900,7 +900,7 @@ class TestSync(unittest.TestCase):
 
     def test_sync_degraded_when_gh_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            with mock.patch.object(gates_state, "gh_available", return_value=(None, "gh not on PATH")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=(None, "gh not on PATH")):
                 result = gates_state.sync(root=Path(td))
             self.assertIsNone(result["gh_path"])
             self.assertIn("gh not on PATH", result["degraded"])
@@ -920,7 +920,7 @@ class TestSync(unittest.TestCase):
             def fake_sync(gh, repo, gate, body, *, timeout=10):
                 return (gate != "security", "boom" if gate == "security" else "")
 
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 with mock.patch.object(gates_state, "_sync_one", side_effect=fake_sync):
                     result = gates_state.sync(root=target)
             self.assertTrue(result["results"]["review"]["ok"])
@@ -933,7 +933,7 @@ class TestSync(unittest.TestCase):
             __import__("subprocess").run(
                 ["git", "-C", td, "init", "-q"], capture_output=True, check=True
             )
-            with mock.patch.object(gates_state, "gh_available", return_value=("/fake/gh", "")):
+            with mock.patch.object(gates_state, "_gh_available", return_value=("/fake/gh", "")):
                 result = gates_state.sync(root=Path(td))
             self.assertEqual(result["gh_path"], "/fake/gh")
             self.assertIn("no github remote", result["degraded"])

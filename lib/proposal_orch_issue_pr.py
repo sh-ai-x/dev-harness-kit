@@ -39,7 +39,12 @@ import yaml
 
 from lib import render_proposal_html
 from lib.atomic import atomic_write_text
-from lib.gh_cli import gh_available
+
+# gh presence + auth probe. Re-instated centralization (see lib/gh_cli.py).
+try:
+    from lib.gh_cli import _gh_available  # type: ignore
+except ImportError:
+    from gh_cli import _gh_available  # type: ignore
 
 # ----- Constants -------------------------------------------------------------
 
@@ -226,7 +231,7 @@ class SnapshotError(RuntimeError):
 # GhUnavailable on missing CLI / unauthenticated / non-zero exit, and
 # SnapshotError on malformed JSON.
 def _run_gh(args: List[str]) -> str:
-    gh_path, degraded = gh_available()
+    gh_path, degraded = _gh_available()
     if not gh_path:
         raise GhUnavailable(degraded or "gh unavailable")
     cp = subprocess.run(
