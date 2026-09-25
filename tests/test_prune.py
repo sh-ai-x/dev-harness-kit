@@ -121,8 +121,8 @@ class TestPruneSchema(unittest.TestCase):
             "Phase 4 must run the full suite (not just the changed path)",
         )
         self.assertRegex(
-            block, r"build-debug",
-            "Phase 4 must route failures to /dev-kit:build-debug for systematic repro",
+            block, r"mattpocock|diagnosing-bugs",
+            "Phase 4 must route failures to mattpocock-skills:diagnosing-bugs for systematic repro",
         )
 
     def test_never_calls_rm_directly(self):

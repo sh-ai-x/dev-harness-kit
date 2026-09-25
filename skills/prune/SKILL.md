@@ -35,7 +35,7 @@ re-runs one phase. `--dry-run` defaults ON for first pass.
        ↓ quoted: dependents report path + user ack
 [3/4] REPORT       → write .dev-kit/hand-off/prune-target-report.md (NEW)
        ↓ quoted: report path + finding count + verdict
-[4/4] VERIFY       → run full suite, fail → /dev-kit:build-debug (NEW)
+[4/4] VERIFY       → run full suite, fail → mattpocock-skills:diagnosing-bugs (NEW)
        ↓ quoted: full suite exit code + test count
 ```
 
@@ -91,13 +91,13 @@ each other.
 Run the full test suite (the project's standard runner — `pytest`,
 `npm test`, `go test ./...`, etc.). On green, hand off to `/dev-kit:ship`
 or `/dev-kit:status`. On red, the skill refuses to declare success and
-routes to `/dev-kit:build-debug` for systematic reproduction. No
+routes to `mattpocock-skills:diagnosing-bugs` for systematic reproduction. No
 deletion is final until the suite is green post-deletion.
 
 ```
 [4/4] VERIFY       → <project test runner>
        → quoted: full suite exit code + test count
-       → on red: /dev-kit:build-debug
+       → on red: mattpocock-skills:diagnosing-bugs
 ```
 
 ## `--target <feat>` flag

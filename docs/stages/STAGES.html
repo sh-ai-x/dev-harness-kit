@@ -123,10 +123,10 @@ body {
 <h2>Stage 3 — Build (<code>/dev-kit:build</code>)</h2>
 <ul>
 <li><strong>Goal</strong>: Per-step code completion per <code>phases/&lt;name&gt;/step&lt;N&gt;.md</code> + regression GREEN.</li>
-<li><strong>Must</strong>: (a) Follow <code>phases/&lt;name&gt;/step&lt;N&gt;.md</code> exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via <code>build-debug</code>). (d) 2-commit protocol (feat + chore).</li>
+<li><strong>Must</strong>: (a) Follow <code>phases/&lt;name&gt;/step&lt;N&gt;.md</code> exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via <code>mattpocock-skills:diagnosing-bugs</code>). (d) 2-commit protocol (feat + chore).</li>
 <li><strong>Must-Not</strong>: Speculate on AC (&quot;should work&quot;, &quot;probably fine&quot;). Delete <code>output.json</code>. Batch multiple changes.</li>
 <li><strong>AC</strong>: All steps <code>status=completed</code>. <code>pytest</code> exit code 0 + count quoted. 2-commit protocol followed.</li>
-<li><strong>Active Skills</strong>: <code>build</code>, <code>build-debug</code> (the per-step harness runner, test-first discipline, and completion evidence live in <code>lib/execute.py</code>, <code>lib/methodology/</code>, and the active hooks; prune's 3-pass sweep is inlined into <code>prune</code>)</li>
+<li><strong>Active Skills</strong>: <code>build</code> (the per-step harness runner, test-first discipline, and completion evidence live in <code>lib/execute.py</code>, <code>lib/methodology/</code>, and the active hooks; prune's 3-pass sweep is inlined into <code>prune</code>. Bug investigation during build uses <code>mattpocock-skills:diagnosing-bugs</code>.)</li>
 <li><strong>Active Hooks</strong>: <code>tdd-guard</code>, <code>bash-guard</code>, <code>secret-scan</code>, <code>slop-detector</code>, <code>stop-verify</code> — all ON</li>
 <li><strong>Sub-agent</strong>: Phase 3 (planned). Currently sequential-only.</li>
 <li><strong>Hand-off out</strong>: <code>build→review.md</code></li>
