@@ -218,4 +218,4 @@ All stdout/stderr messages in **English only**.
 
 ## Next step
 
-After a passing run (no `ROT` components), hand off to `/dev-kit:status` to confirm the eval cycle is green. After a `ROT` component, triage via `/dev-kit:build-debug` on the affected producer (the reducer emits the `finding` string; the producer is the TraceLog emitter responsible for that evidence class). For the full eval pass instead, use `/dev-kit:evaluate` unchanged.
+After a passing run (no `ROT` components), hand off to `/dev-kit:status` to confirm the eval cycle is green. After a `ROT` component, triage via `mattpocock-skills:diagnosing-bugs` on the affected producer (the reducer emits the `finding` string; the producer is the TraceLog emitter responsible for that evidence class). For the full eval pass instead, use `/dev-kit:evaluate` unchanged.

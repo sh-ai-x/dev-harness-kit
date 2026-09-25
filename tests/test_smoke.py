@@ -44,7 +44,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # (38 -> 39).
 # Removed skills/research-plan-build/SKILL.md; build-debug/SKILL.md
 # absorbed its standalone-entry role in place instead of adding a new
-# skill (40 -> 39).
+# skill (40 -> 39). build-debug itself was deleted by the
+# prune/build-debug PR (49 = 50 minus skills/build-debug/SKILL.md).
 # Added skills/evidence-plan/SKILL.md (research -> proposal.html
 # (human confirms) -> /dev-kit:plan hand-off) (39 -> 40).
 # Added skills/sync-version/SKILL.md (pre-push auto-sync primitive,
@@ -59,7 +60,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
 # feat/team-toggle: +1 for the `team` skill (DEV_KIT_TEAM toggle, orthogonal
 # to DEV_KIT_MODE). Mirrors `mode` shape; see skills/team/SKILL.md.
-SKILL_COUNT = 50  # 52 minus {skills/valuate, skills/sync-version}/SKILL.md
+SKILL_COUNT = 49  # 50 minus skills/build-debug/SKILL.md (prune/build-debug PR)
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

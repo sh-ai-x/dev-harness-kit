@@ -37,10 +37,10 @@
 ## Stage 3 — Build (`/dev-kit:build`)
 
 - **Goal**: Per-step code completion per `phases/<name>/step<N>.md` + regression GREEN.
-- **Must**: (a) Follow `phases/<name>/step<N>.md` exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via `build-debug`). (d) 2-commit protocol (feat + chore).
+- **Must**: (a) Follow `phases/<name>/step<N>.md` exactly. (b) Run AC commands and quote output. (c) Bug → reproduce → root-cause → regression test → minimal fix (4-phase debug via `mattpocock-skills:diagnosing-bugs`). (d) 2-commit protocol (feat + chore).
 - **Must-Not**: Speculate on AC ("should work", "probably fine"). Delete `output.json`. Batch multiple changes.
 - **AC**: All steps `status=completed`. `pytest` exit code 0 + count quoted. 2-commit protocol followed.
-- **Active Skills**: `build`, `build-debug` (the per-step harness runner, test-first discipline, and completion evidence live in `lib/execute.py`, `lib/methodology/`, and the active hooks; prune's 3-pass sweep is inlined into `prune`)
+- **Active Skills**: `build` (the per-step harness runner, test-first discipline, and completion evidence live in `lib/execute.py`, `lib/methodology/`, and the active hooks; prune's 3-pass sweep is inlined into `prune`. Bug investigation during build uses `mattpocock-skills:diagnosing-bugs`.)
 - **Active Hooks**: `tdd-guard`, `bash-guard`, `secret-scan`, `slop-detector`, `stop-verify` — all ON
 - **Sub-agent**: Phase 3 (planned). Currently sequential-only.
 - **Hand-off out**: `build→review.md`

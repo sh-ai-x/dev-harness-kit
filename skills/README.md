@@ -2,7 +2,7 @@
 
 This index lists every skill shipped by the `dev-kit` plugin. Click into any skill to read its full `SKILL.md`; every `SKILL.md` has a back-link at the top to return here.
 
-**50 skills** across 13 categories (48 human-invocable, 2 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
+**49 skills** across 13 categories (48 human-invocable, 1 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
 
 ## By category
 
@@ -30,12 +30,11 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`ci-setup`](ci-setup/SKILL.md) | `enforcement` | Install dev-kit's reusable CI workflow templates into a target project. Idempotent via `.dev-kit/ci-config.json` presence, no version gate. Hand-off to /dev-kit:build. |
 | [`ci-update`](ci-update/SKILL.md) | `state` | Detect + selectively apply drift between installed CI templates and current dev-kit source. 4-state per-file classification with backup-before-overwrite. |
 
-### `build` (4)
+### `build` (3)
 
 | Skill | α | Description |
 |---|---|---|
 | [`build`](build/SKILL.md) | `state` | 0-arg. Per-step sub-agent delegation + self-fix loop (MUST-36~38). Uses harness-runner engine. TDD + verify + debug integrated. |
-| [`build-debug`](build-debug/SKILL.md) | `enforcement` | 4-phase systematic debugging. No fix proposal before Phase 1 (reproduce) completes (MUST-L2). Root-cause-first Iron Law. Standalone invocation hands the root cause to /dev-kit:plan instead of fixing inline. |
 | [`prune`](prune/SKILL.md) | `analysis` | 0-arg slop-removal chain. One slash wraps inspect → 3-pass delete sweep → review. Gated phases for deleting AI slop and dead features (not refactoring). |
 | [`refactor`](refactor/SKILL.md) | `analysis` | 0-arg cleanup chain. One slash wraps inspect -> cleanup -> review. 3 gated phases with quoted exit codes between each. |
 
@@ -44,13 +43,14 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | Skill | α | Description |
 |---|---|---|
 | [`config`](config/SKILL.md) | `state` | skill + hook + methodology picker (multiSelect). |
+| [`gate-artifacts`](gate-artifacts/SKILL.md) | `enforcement` | Create or delete managed GitHub Actions gate artifacts backed by gates.json. |
 | [`gate-select`](gate-select/SKILL.md) | `state` | Unified 3-dimension picker for project / session / AI-judge gates. Reads .dev-kit/gates.json + .dev-kit/ci-config.json + .dev-kit/harness-mode.session.json and dispatches writes through `python -m lib.gates_state ...`. |
 | [`guard-mode`](guard-mode/SKILL.md) | `state` | Session-scoped on/off toggle for the tdd-guard, worktree-guard, and git-guard hard-block hooks. |
 | [`harness-mode`](harness-mode/SKILL.md) | `state` | Session-scoped local-hook mode picker — fast (all optional local hooks off), full (default, all on), or custom (interactive per-local-hook picker via AskUserQuestion). |
 | [`linear`](linear/SKILL.md) | `state` | Optional Linear task tracker. Reconcile the current repository task with a canonical project and non-duplicate issue. Auto-syncs on every Claude Code edit when configured. Owner-gated auto-triggers also fire on worktree… |
 | [`team`](team/SKILL.md) | `state` | Read or write the team collaboration toggle (DEV_KIT_TEAM on|off). Default OFF, independent of DEV_KIT_MODE. When ON, team roles/dependency-aware planning is enabled and .dev-kit/ stays tracked in git. |
 
-### `design` (7)
+### `design` (6)
 
 | Skill | α | Description |
 |---|---|---|
@@ -65,8 +65,8 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 
 | Skill | α | Description |
 |---|---|---|
-| [`evaluate`](evaluate/SKILL.md) | `enforcement` | 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting four harness-effectiveness components plus the nested measurement… |
-| [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `enforcement` | 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the four-component (prevention / first-pass / recovery / measurement-integrity) scorecard as JSON + a one-line sta… |
+| [`evaluate`](evaluate/SKILL.md) | `enforcement` | 0-arg eval extension. Replays transcripts and consumes workflow evidence against registered rubrics, preserving legacy Agent Behavior D1–D7 and reporting five harness-effectiveness components plus the nested measurement… |
+| [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `enforcement` | 0-arg harness-effectiveness report. Wraps `lib.harness_effectiveness.build_report` and prints the four-component (prevention / first-pass / recovery / measurement-integrity) scorecard as JSON + a one-line status verdict… |
 
 ### `mode` (1)
 
@@ -128,19 +128,19 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 2 | [`babysit-pr-local`](babysit-pr-local/SKILL.md) | `ship` | `state` | human |
 | 3 | [`bootstrap`](bootstrap/SKILL.md) | `bootstrap` | `state` | human |
 | 4 | [`build`](build/SKILL.md) | `build` | `state` | human |
-| 5 | [`build-debug`](build-debug/SKILL.md) | `build` | `enforcement` | human |
-| 6 | [`bump`](bump/SKILL.md) | `ship` | `state` | human |
-| 7 | [`ci-doctor`](ci-doctor/SKILL.md) | `audit` | `enforcement` | human |
-| 8 | [`ci-setup`](ci-setup/SKILL.md) | `bootstrap` | `enforcement` | human |
-| 9 | [`ci-triage`](ci-triage/SKILL.md) | `audit` | `enforcement` | human |
-| 10 | [`ci-update`](ci-update/SKILL.md) | `bootstrap` | `state` | human |
-| 11 | [`code-viz`](code-viz/SKILL.md) | `audit` | `state` | human |
-| 12 | [`codex-cache-update`](codex-cache-update/SKILL.md) | `shortcuts` | `analysis` | human |
-| 13 | [`config`](config/SKILL.md) | `config` | `state` | human |
-| 14 | [`cost-gate`](cost-gate/SKILL.md) | `audit` | `enforcement` | human |
-| 15 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `audit` | `analysis` | human |
-| 16 | [`evaluate`](evaluate/SKILL.md) | `eval` | `enforcement` | human |
-| 17 | [`evidence-plan`](evidence-plan/SKILL.md) | `design` | `state` | human |
+| 5 | [`bump`](bump/SKILL.md) | `ship` | `state` | human |
+| 6 | [`ci-doctor`](ci-doctor/SKILL.md) | `audit` | `enforcement` | human |
+| 7 | [`ci-setup`](ci-setup/SKILL.md) | `bootstrap` | `enforcement` | human |
+| 8 | [`ci-triage`](ci-triage/SKILL.md) | `audit` | `enforcement` | human |
+| 9 | [`ci-update`](ci-update/SKILL.md) | `bootstrap` | `state` | human |
+| 10 | [`code-viz`](code-viz/SKILL.md) | `audit` | `state` | human |
+| 11 | [`codex-cache-update`](codex-cache-update/SKILL.md) | `shortcuts` | `analysis` | human |
+| 12 | [`config`](config/SKILL.md) | `config` | `state` | human |
+| 13 | [`cost-gate`](cost-gate/SKILL.md) | `audit` | `enforcement` | human |
+| 14 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `audit` | `analysis` | human |
+| 15 | [`evaluate`](evaluate/SKILL.md) | `eval` | `enforcement` | human |
+| 16 | [`evidence-plan`](evidence-plan/SKILL.md) | `design` | `state` | human |
+| 17 | [`gate-artifacts`](gate-artifacts/SKILL.md) | `config` | `enforcement` | human |
 | 18 | [`gate-select`](gate-select/SKILL.md) | `config` | `state` | human |
 | 19 | [`guard-mode`](guard-mode/SKILL.md) | `config` | `state` | human |
 | 20 | [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `eval` | `enforcement` | human |
@@ -170,7 +170,7 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | 44 | [`skill-usage`](skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
 | 45 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
 | 46 | [`status`](status/SKILL.md) | `status` | `state` | human |
-| 48 | [`team`](team/SKILL.md) | `config` | `state` | human |
-| 49 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
-| 50 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
+| 47 | [`team`](team/SKILL.md) | `config` | `state` | human |
+| 48 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
+| 49 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
 

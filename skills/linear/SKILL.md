@@ -260,7 +260,7 @@ A stale or wrong issue id in the hand-off file can never cause a duplicate or a 
 
 ## Workflow callers
 
-When called by `plan`, `build`, `build-debug`, or `refactor`, perform this workflow once at the start of that skill and return a compact result:
+When called by `plan`, `build`, or `refactor`, perform this workflow once at the start of that skill and return a compact result:
 
 ```text
 LINEAR_OK: project=<name> issue=<identifier> action=<reused|created> status=<state>
@@ -278,4 +278,4 @@ When a PR exists, add its URL to the matching issue and update the issue status 
 
 ## Next step
 
-After direct reconciliation, continue with the requested workflow, usually `/dev-kit:plan`, `/dev-kit:build`, `/dev-kit:build-debug`, or `/dev-kit:refactor`.
+After direct reconciliation, continue with the requested workflow, usually `/dev-kit:plan`, `/dev-kit:build`, or `/dev-kit:refactor`.

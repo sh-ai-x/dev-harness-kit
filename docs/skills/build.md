@@ -85,7 +85,6 @@ Template behavior is validated by `tests/test_long_running_templates.py` (struct
 
 ## Related
 
-- [build-debug](build-debug.md) — invoked when a step's sub-agent needs systematic debugging.
 - `tdd-guard` and `stop-verify` — deterministic hook enforcement for test-first edits and completion evidence.
 - `/dev-kit:review` and `/dev-kit:security`, then `/dev-kit:ship` — the next stages after `build` completes.
 - `lib/execute.py` — the harness-runner engine this skill wraps.
