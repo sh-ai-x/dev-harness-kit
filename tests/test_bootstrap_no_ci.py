@@ -1,5 +1,4 @@
 """Spec §Testing strategy: bootstrap with N to the ci-setup prompt."""
-
 from pathlib import Path
 
 
@@ -22,30 +21,8 @@ def test_bootstrap_no_ci_prompt_documented():
         "unavailable-features list must include /dev-kit:ci-doctor and /dev-kit:bump"
 
 
-def test_bootstrap_docs_mirror_yN_default():
-    """skills/bootstrap/SKILL.md must mirror the [y/N] flip.
-
-    PR #786 flipped ci-setup from default Y to default N. Two locations in
-    the English consumer doc missed the update and still claimed "default is Y"
-    — operators got contradictory defaults between the prompt literal (`[y/N]`)
-    and the Usage table ("default is Y"). This test catches a re-flip or a
-    re-merge that reintroduces the drift. (Korean .ko.md translation was
-    retired 2026-09 — see PR 895.)
-    """
-    from pathlib import Path
-    repo = Path(__file__).parent.parent
-
-    # English doc: line 39 ("Usage" row) must NOT say "default is Y"; line 22
-    # already says "Default is N" -- assert no contradiction.
-    en = (repo / "skills/bootstrap/SKILL.md").read_text()
-    assert "Also install CI templates (ci-setup)? [y/N]" in en, \
-        "skills/bootstrap/SKILL.md must pin the [y/N] ci-setup prompt (line 22)"
-    # Forbid the legacy phrase on the (0-arg) row (line 39) -- that row claims
-    # "default is Y on both", which contradicts line 22 / line 40.
-    en_usage_block = en.split("## Usage", 1)[1].split("## ", 1)[0]
-    assert "default is Y" not in en_usage_block, \
-        "skills/bootstrap/SKILL.md Usage table must drop 'default is Y' (PR #786 flipped to N)"
-    # Forbid the Y-default claim in the opening paragraph (line 7).
-    en_intro = en.split("## When to use it", 1)[0]
-    assert "With Y (default)" not in en_intro and "Y (default), end state" not in en_intro, \
-        "skills/bootstrap/SKILL.md intro must drop 'With Y (default)' claim"
+# Mirror-fidelity test for the docs/skills/bootstrap.md mirror was
+# dropped with the mirror collapse in the docs-skills-mirror PR.
+# The mirror no longer exists, so the drift assertion is moot;
+# the structural sections it asserted against (`## Usage`,
+# `## When to use it`) lived only in the deleted mirror doc.
