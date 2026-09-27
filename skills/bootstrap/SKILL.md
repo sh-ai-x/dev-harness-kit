@@ -11,7 +11,7 @@ disallowed-tools: Agent WebFetch
 model: opus
 disable-model-invocation: false
 ---
-> [← Skills index](../../README.md) · Detailed reference: [skills/bootstra/SKILL.mdp.md](../../skills/bootstra/SKILL.mdp.md)
+> [← Skills index](../../README.md) · Detailed reference: [skills/bootstrap/SKILL.md](../../skills/bootstrap/SKILL.md)
 
 # `/dev-kit:bootstrap`
 
@@ -85,4 +85,4 @@ The unavailable-features list is printed; add CI later with
 The final hand-off is `/dev-kit:build <first-feature>` (or
 `/dev-kit:plan` for an idea that needs a PRD). For the full stage audit,
 template list, git-default details, and output matrix, read
-[`skills/bootstra/SKILL.mdp.md`](../../skills/bootstra/SKILL.mdp.md).
+[`skills/bootstrap/SKILL.md`](../../skills/bootstrap/SKILL.md).

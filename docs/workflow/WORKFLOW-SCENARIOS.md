@@ -146,8 +146,8 @@ is nothing to verify against, which is the whole point of the harness.
 
 - [`docs/stages/STAGES.md`](../stages/STAGES.md) — the full per-stage spec (what
   each of bootstrap / plan / build / review / security / ship must do).
-- [`skills/buil/SKILL.mdd.md`](../skills/build.md) — the Build skill in detail.
-- [`skills/lo/SKILL.mdg.md`](../skills/log.md) — optional local telemetry for
+- [`skills/build/SKILL.md`](../skills/build.md) — the Build skill in detail.
+- [`skills/log/SKILL.md`](../skills/log.md) — optional local telemetry for
   token and skill-usage analysis.
 - Main [`README.md`](../../README.md) — install, quickstart, and the short
   version of these scenarios.

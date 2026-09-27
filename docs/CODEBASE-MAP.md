@@ -10,4 +10,4 @@
 
 - `bin/worktree-remove-safe.sh` + `tools/worktree_cleanup.py` — cleanup-safe
   archival wrapper for `git worktree remove`. See
-  [`skills/lo/SKILL.mdg.md`](skills/log.md) §"Cleanup-safe worktree removal".
+  [`skills/log/SKILL.md`](skills/log.md) §"Cleanup-safe worktree removal".

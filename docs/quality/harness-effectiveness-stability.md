@@ -220,6 +220,6 @@ existing consumer on day one.
 - `tests/test_harness_stability.py` — 14 contract tests.
 - `skills/harness-effectiveness/SKILL.md` — operator-facing wrapper around the
   same reducer.
-- `skills/harness-effectivenes/SKILL.mds.md` — operator-facing wrapper doc for
+- `skills/harness-effectiveness/SKILL.md` — operator-facing wrapper doc for
   the harness-effectiveness skill. Was a 5-component doc at issue #663
   time; tightened to 4 components in the follow-up amendment.

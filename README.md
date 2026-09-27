@@ -177,71 +177,71 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:bootstrap`](skills/bootstra/SKILL.mdp.md) | First entry on a fresh repo — writes `CLAUDE.md`, `AGENTS.md`, and the hook config. |
+| [`/dev-kit:bootstrap`](skills/bootstrap/SKILL.md) | First entry on a fresh repo — writes `CLAUDE.md`, `AGENTS.md`, and the hook config. |
 | [`/dev-kit:bootstrap` (with ci-setup prompt) | `bootstrap` **and** `ci-setup` in one shot — the usual new-project starting point. |
-| [`/dev-kit:ci-setup`](skills/ci-setu/SKILL.mdp.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
-| [`/dev-kit:ci-doctor`](skills/ci-docto/SKILL.mdr.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
+| [`/dev-kit:ci-setup`](skills/ci-setup/SKILL.md) | Installs dev-kit's CI workflows and hooks into your repo so PRs run the same checks. |
+| [`/dev-kit:ci-doctor`](skills/ci-doctor/SKILL.md) | Read-only check: "is my CI set up right — would the next PR pass?" |
 | [`/dev-kit:mode`](skills/mode/SKILL.md) | Pick / show the active `DEV_KIT_MODE` (`full` / `lite` / `undev`). The single switch that gates which hooks and skills run. |
 | [`/dev-kit:team`](skills/team/SKILL.md) | Toggle team collaboration (`DEV_KIT_TEAM` on / off): operator roles, dependency-aware plans, and whether `.dev-kit/` is tracked. Orthogonal to `DEV_KIT_MODE`. |
 | [`/dev-kit:gate-select`](skills/gate-select/SKILL.md) | One picker for all three gate dimensions — project (CI workflows), session (local hooks), AI-judge. `show` reads current state; `pick` dispatches to the right installer. |
 | [`/dev-kit:gate-artifacts`](skills/gate-artifacts/SKILL.md) | Create/delete managed custom GitHub Actions gate artifacts backed by `.dev-kit/gates.json`. |
 | [`/dev-kit:harness-mode`](skills/harness-mode/SKILL.md) | Session-scoped local-hook mode — `fast` (optional hooks off), `full` (default), or `custom` per-hook picker. |
 | [`/dev-kit:guard-mode`](skills/guard-mode/SKILL.md) | Session-scoped on/off switch for the two hard-block hooks (`tdd-guard`, `worktree-guard`). |
-| [`/dev-kit:linear`](skills/linea/SKILL.mdr.md) | Optional Linear tracker sync — reconciles the current task with a canonical project + non-duplicate issue. |
+| [`/dev-kit:linear`](skills/linear/SKILL.md) | Optional Linear tracker sync — reconciles the current task with a canonical project + non-duplicate issue. |
 
 ### Planning and building
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:evidence-plan`](skills/evidence-pla/SKILL.mdn.md) | Front-door to a non-trivial idea — cited research, HTML proposal (you confirm), hand-off to `/dev-kit:plan`. Never invokes `/dev-kit:build`. |
-| [`/dev-kit:plan`](skills/pla/SKILL.mdn.md) | Turns an idea into `PRD.md` + a step-by-step build checklist. |
-| [`/dev-kit:build`](skills/buil/SKILL.mdd.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
-| [`/dev-kit:proposal`](skills/proposa/SKILL.mdl.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
+| [`/dev-kit:evidence-plan`](skills/evidence-plan/SKILL.md) | Front-door to a non-trivial idea — cited research, HTML proposal (you confirm), hand-off to `/dev-kit:plan`. Never invokes `/dev-kit:build`. |
+| [`/dev-kit:plan`](skills/plan/SKILL.md) | Turns an idea into `PRD.md` + a step-by-step build checklist. |
+| [`/dev-kit:build`](skills/build/SKILL.md) | Works through the checklist one step at a time, writing tests and code and verifying each step. |
+| [`/dev-kit:proposal`](skills/proposal/SKILL.md) | Renders a `docs/proposals/<bucket>/<main>/<sub>.yaml` to a self-contained HTML page with before/after + pros/cons/limitations. |
 | [`/dev-kit:proposal-orch-issue-pr`](skills/proposal-orch-issue-pr/SKILL.md) | 0-arg orchestrator-first GitHub backlog triage. Gathers open PRs + issues, scores (Bottleneck / Risk / Change containment), orders by orchestrator critical path, and writes a proposal YAML + HTML via `/dev-kit:proposal`. |
-| [`/dev-kit:interview`](skills/intervie/SKILL.mdw.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
+| [`/dev-kit:interview`](skills/interview/SKILL.md) | 5-field safety-contract interview that gates plan emission — the questions `/dev-kit:plan` must have answers to before it writes a PRD. |
 
 ### End-to-end autonomous
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:ralph`](skills/ralp/SKILL.mdh.md) | Single slash that takes a 1-line idea through 4 user-approval gates (research → proposal → plan → ship-confirm) and then runs build/babysit-pr/ship **unattended** (`attended_lock` is a state-machine invariant that forbids AskUserQuestion mid-run). Linear is OUT OF SCOPE. Each gate supports Approve / Edit-then-approve (rewinds to that gate) / Abort. |
+| [`/dev-kit:ralph`](skills/ralph/SKILL.md) | Single slash that takes a 1-line idea through 4 user-approval gates (research → proposal → plan → ship-confirm) and then runs build/babysit-pr/ship **unattended** (`attended_lock` is a state-machine invariant that forbids AskUserQuestion mid-run). Linear is OUT OF SCOPE. Each gate supports Approve / Edit-then-approve (rewinds to that gate) / Abort. |
 
 ### Getting a PR over the line
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:babysit-pr`](skills/babysit-p/SKILL.mdr.md) | Watches your open PR, fixes failing checks, pushes, repeats until CI is green and review approves. |
-| [`/dev-kit:babysit-pr-local`](skills/babysit-pr-loca/SKILL.mdl.md) | Same algorithm, but the LLM-judge verdict loop runs locally via `bin/review-local.sh` — use when GH-Actions minutes are exhausted. |
-| [`/dev-kit:pr-verify`](skills/pr-verif/SKILL.mdy.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI / LLM-judge still running" false positive. |
-| [`/dev-kit:bump`](skills/bum/SKILL.mdp.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
-| [`/dev-kit:sync-version`](skills/sync-versio/SKILL.mdn.md) | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically. |
-| [`/dev-kit:maintenance`](skills/maintenanc/SKILL.mde.md) | Code-sanity gate (CC-1..8 / OE-1..8 / VM-1..4). Fires in `review.yml` and locally via `/dev-kit:review-local`; verdict maps `>=8.0` → Approve, `5.0..7.99` → Changes Requested, `<5.0` → Blocked. |
+| [`/dev-kit:babysit-pr`]() | Watches your open PR, fixes failing checks, pushes, repeats until CI is green and review approves. |
+| [`/dev-kit:babysit-pr-local`](skills/babysit-pr-local/SKILL.md) | Same algorithm, but the LLM-judge verdict loop runs locally via `bin/review-local.sh` — use when GH-Actions minutes are exhausted. |
+| [`/dev-kit:pr-verify`](skills/pr-verify/SKILL.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI / LLM-judge still running" false positive. |
+| [`/dev-kit:bump`](skills/bump/SKILL.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
+| [`/dev-kit:sync-version`]() | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically. |
+| [`/dev-kit:maintenance`](skills/maintenance/SKILL.md) | Code-sanity gate (CC-1..8 / OE-1..8 / VM-1..4). Fires in `review.yml` and locally via `/dev-kit:review-local`; verdict maps `>=8.0` → Approve, `5.0..7.99` → Changes Requested, `<5.0` → Blocked. |
 | [`/dev-kit:review-local`](skills/review-local/SKILL.md) | Local equivalent of the GH-Actions review workflow — runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`. Full playbook in [`docs/local-ci.md`](docs/local-ci.md). |
 
 ### Keeping the project healthy
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:inspect`](skills/inspec/SKILL.mdt.md) | Read-only whole-codebase health scan (dead code, duplication, smells) → one report. |
-| [`/dev-kit:refactor`](skills/refacto/SKILL.mdr.md) | 3-phase cleanup chain — `inspect → cleanup → review` with quoted exit codes between each gate. |
-| [`/dev-kit:prune`](skills/prun/SKILL.mde.md) | Slop-removal chain — `inspect → 3-pass delete sweep → review`. Reaches for AI slop or dead features (not refactored). |
-| [`/dev-kit:status`](skills/statu/SKILL.mds.md) | HOTL visualization — current loop progress, cumulative cycles, hand-off chain, eval score on one screen. |
-| [`/dev-kit:code-viz`](skills/code-vi/SKILL.mdz.md) | Generic plugin-architecture visualizer — multi-level views + domain pillar map + per-skill workflows to one self-contained HTML page. |
-| [`/dev-kit:security-metrics`](skills/security-metric/SKILL.mds.md) | Deterministic 0–100 OWASP A01–A10 scorecard with Markdown evidence table. Triage metric before `/dev-kit:security`. |
-| [`/dev-kit:token-analyzer`](skills/token-analyze/SKILL.mdr.md) | Shows where your Claude Code / Codex token spend is going, as an HTML dashboard. |
-| [`/dev-kit:cost-gate`](skills/cost-gat/SKILL.mde.md) | Live session spend + two-line commit-trailer block. Read-only, never blocks. |
-| [`/dev-kit:research`](skills/researc/SKILL.mdh.md) | Every factual claim you write either cites a source or gets removed. |
-| [`/dev-kit:docs-maintenance`](skills/docs-maintenanc/SKILL.mde.md) | Audits stale docs and refreshes the README without baking in facts that go out of date. |
-| [`/dev-kit:ci-triage`](skills/ci-triag/SKILL.mde.md) | Triages failing GitHub Actions runs across recent commits, deduplicates against a persisted case store. |
-| [`/dev-kit:log`](skills/lo/SKILL.mdg.md) | Turns session logging on/off — feeds `token-analyzer` and `skill-usage`. |
+| [`/dev-kit:inspect`](skills/inspect/SKILL.md) | Read-only whole-codebase health scan (dead code, duplication, smells) → one report. |
+| [`/dev-kit:refactor`](skills/refactor/SKILL.md) | 3-phase cleanup chain — `inspect → cleanup → review` with quoted exit codes between each gate. |
+| [`/dev-kit:prune`](skills/prune/SKILL.md) | Slop-removal chain — `inspect → 3-pass delete sweep → review`. Reaches for AI slop or dead features (not refactored). |
+| [`/dev-kit:status`](skills/status/SKILL.md) | HOTL visualization — current loop progress, cumulative cycles, hand-off chain, eval score on one screen. |
+| [`/dev-kit:code-viz`](skills/code-viz/SKILL.md) | Generic plugin-architecture visualizer — multi-level views + domain pillar map + per-skill workflows to one self-contained HTML page. |
+| [`/dev-kit:security-metrics`](skills/security-metrics/SKILL.md) | Deterministic 0–100 OWASP A01–A10 scorecard with Markdown evidence table. Triage metric before `/dev-kit:security`. |
+| [`/dev-kit:token-analyzer`](skills/token-analyzer/SKILL.md) | Shows where your Claude Code / Codex token spend is going, as an HTML dashboard. |
+| [`/dev-kit:cost-gate`](skills/cost-gate/SKILL.md) | Live session spend + two-line commit-trailer block. Read-only, never blocks. |
+| [`/dev-kit:research`](skills/research/SKILL.md) | Every factual claim you write either cites a source or gets removed. |
+| [`/dev-kit:docs-maintenance`](skills/docs-maintenance/SKILL.md) | Audits stale docs and refreshes the README without baking in facts that go out of date. |
+| [`/dev-kit:ci-triage`](skills/ci-triage/SKILL.md) | Triages failing GitHub Actions runs across recent commits, deduplicates against a persisted case store. |
+| [`/dev-kit:log`](skills/log/SKILL.md) | Turns session logging on/off — feeds `token-analyzer` and `skill-usage`. |
 | [`/dev-kit:skill-usage`](skills/skill-usage/SKILL.md) | Shows which skills you actually use, and how much — useful for pruning. |
-| [`/dev-kit:sot-harness-writer`](skills/sot-harness-write/SKILL.mdr.md) | Interview-based Single Source of Truth harness document writer — hands off to `/dev-kit:plan`. |
-| [`/dev-kit:evaluate`](skills/evaluat/SKILL.mde.md) | LLM-judge eval across registered rubrics + the four-component harness-effectiveness report. Programmatic gate after any harness change. |
-| [`/dev-kit:harness-effectiveness`](skills/harness-effectivenes/SKILL.mds.md) | The four-component scorecard (prevention / first-pass / recovery / measurement-integrity) standalone — sub-second, zero API spend. |
-| [`/dev-kit:prune-propose`](skills/prune-propos/SKILL.mde.md) | Usage-telemetry dump + per-skill delete proposal, each deletion approved explicitly. The evidence step before `/dev-kit:prune`. |
+| [`/dev-kit:sot-harness-writer`](skills/sot-harness-writer/SKILL.md) | Interview-based Single Source of Truth harness document writer — hands off to `/dev-kit:plan`. |
+| [`/dev-kit:evaluate`](skills/evaluate/SKILL.md) | LLM-judge eval across registered rubrics + the four-component harness-effectiveness report. Programmatic gate after any harness change. |
+| [`/dev-kit:harness-effectiveness`](skills/harness-effectiveness/SKILL.md) | The four-component scorecard (prevention / first-pass / recovery / measurement-integrity) standalone — sub-second, zero API spend. |
+| [`/dev-kit:prune-propose`](skills/prune-propose/SKILL.md) | Usage-telemetry dump + per-skill delete proposal, each deletion approved explicitly. The evidence step before `/dev-kit:prune`. |
 | [`/dev-kit:worktree-prune`](skills/worktree-prune/SKILL.md) | Counts registered worktrees, lists them oldest-first by branch-tip age, removes the N oldest behind a y/N gate. |
-| [`/dev-kit:llm-refresh`](skills/llm-refres/SKILL.mdh.md) | Refreshes `docs/llm-info/<provider>.json` from each vendor's official pricing page. Diff-then-commit, never silent. |
-| [`/dev-kit:codex-cache-update`](skills/codex-cache-updat/SKILL.mde.md) | Refreshes the Codex marketplace checkout + versioned plugin cache when `plugin marketplace upgrade` reports "up to date" but the files are stale. |
+| [`/dev-kit:llm-refresh`](skills/llm-refresh/SKILL.md) | Refreshes `docs/llm-info/<provider>.json` from each vendor's official pricing page. Diff-then-commit, never silent. |
+| [`/dev-kit:codex-cache-update`](skills/codex-cache-update/SKILL.md) | Refreshes the Codex marketplace checkout + versioned plugin cache when `plugin marketplace upgrade` reports "up to date" but the files are stale. |
 
 For the complete list (grouped by category, one-line summary each), see
 [`skills/README.md`](skills/README.md) — or just type `/dev-kit:` and
@@ -483,7 +483,7 @@ hand-edited installed files — it overwrites local customizations, so review th
 diff first.
 
 When dev-kit ships new or fixed templates after your initial install, reach for
-[`/dev-kit:ci-update`](skills/ci-updat/SKILL.mde.md) instead of `--force` — it
+[`/dev-kit:ci-update`](skills/ci-update/SKILL.md) instead of `--force` — it
 classifies each shipped file as `new` / `updated` / `consumer_modified` /
 `diverged` (plus `unchanged`), with backup-before-overwrite and no destructive
 blind-apply. Full contract in [`docs/quality/ci-update.md`](docs/quality/ci-update.md).
@@ -573,7 +573,7 @@ is the canonical table.
 evaluation and adds a workflow-native harness-effectiveness report (five
 components: prevention, first-pass, recovery, learning, measurement integrity).
 Missing evidence is reported explicitly rather than inferred. Details in
-[`skills/evaluat/SKILL.mde.md`](skills/evaluat/SKILL.mde.md), rationale in
+[`skills/evaluate/SKILL.md`](skills/evaluate/SKILL.md), rationale in
 `docs/adr/ADR-0022-eval-agent-behavior.md`.
 
 **Codex compatibility** — the same skills and hooks run under Codex CLI via a
@@ -628,7 +628,7 @@ python3 skills/security-metrics/scripts/score_security.py . \
 The scorecard is a **triage metric, not a certification**. Use `/dev-kit:security`
 for the full evidence-backed OWASP review before a release or major refactor.
 Full scoring details, rules per category, and limitation list live in
-[`skills/security-metric/SKILL.mds.md`](skills/security-metric/SKILL.mds.md).
+[`skills/security-metrics/SKILL.md`](skills/security-metrics/SKILL.md).
 
 ---
 

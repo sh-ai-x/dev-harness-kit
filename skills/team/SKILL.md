@@ -111,7 +111,7 @@ DEV_KIT_TEAM=on claude
 
 - [`docs/scopes/modes.md`](../../docs/scopes/modes.md) — team toggle
   table (orthogonal to mode)
-- [`skills/tea/SKILL.mdm.md`](../../skills/tea/SKILL.mdm.md) — operator-facing
+- [`skills/team/SKILL.md`](../../skills/team/SKILL.md) — operator-facing
   reference
 - [`hooks/lib/team-resolve.sh`](../../hooks/lib/team-resolve.sh) —
   single source of truth for resolution logic
