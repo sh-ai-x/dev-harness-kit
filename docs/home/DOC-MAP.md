@@ -25,7 +25,7 @@ Markdown-only.
 | Linear PR sync (PR-event → Linear state) | — | [`docs/tools/LINEAR-PR-SYNC.md`](../tools/LINEAR-PR-SYNC.md) | `.github/workflows/linear-pr-sync.yml` + `tools/linear_pr_sync.py`; non-blocking, drafts skipped |
 | ACP dispatch (M-tier architecture) | [`docs/architecture/ACP-DISPATCH.html`](../architecture/ACP-DISPATCH.html) | [`docs/architecture/ACP-DISPATCH.md`](../architecture/ACP-DISPATCH.md) | How Model-tier agents find and dispatch to Capability-tier skills |
 | ACP (Agent Coordination Protocol) | [`docs/architecture/acp-harness.html`](../architecture/acp-harness.html) | [`docs/architecture/acp-harness.md`](../architecture/acp-harness.md) | The wire-format ACP uses to talk between agents |
-| Skill reference | — | [`docs/skills/README.md`](../skills/README.md) | All skills with category + α classification |
+| Skill reference | — | [`skills/README.md`](../skills/README.md) | All skills with category + α classification |
 | Workflow scenarios (interrupt / skip) | — | [`docs/workflow/WORKFLOW-SCENARIOS.md`](../workflow/WORKFLOW-SCENARIOS.md) | What to do when plan→build stops, plan drifts mid-build, etc. |
 | Token efficiency + research | — | [`docs/observability/token-efficiency.md`](../observability/token-efficiency.md) | The "every claim cites its source / cost" bundle |
 | Metric & gate skills | — | [`docs/observability/metrics.md`](../observability/metrics.md) | The five skill families that emit a number you can act on — `maintenance` (gate), `ci-doctor` (pre-flight), `security-metrics` (static triage), `evaluate` (post-hoc judge), `harness-effectiveness` (sub-second reducer) |

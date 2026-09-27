@@ -242,7 +242,7 @@ Each gate can also be opt-in for the dynamic layer via `set`:
 /dev-kit:gate-select set review forced_run true
 ```
 
-See `docs/skills/gate-dynamic.md` for the full reference (hard rules,
+See `skills/gate-dynami/SKILL.mdc.md` for the full reference (hard rules,
 cache invalidation, audit-trail shape, interactive mode).
 
 ## `classify` / `route` — actor-aware PR routing

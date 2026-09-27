@@ -61,7 +61,7 @@ after:
       change: 'deterministic evidence report만 입력받아 해석/variance를 평가하는 prompt를 추가한다.'
     - path: tests/test_harness_effectiveness.py
       change: 'evidence normalization, metric denominator, missing evidence, score contract, legacy compatibility를 검증한다.'
-    - path: docs/skills/evaluate.md
+    - path: skills/evaluat/SKILL.mde.md
       change: 'workflow-native evidence와 5개 score 사용법을 기존 evaluate 문서에 통합한다.'
     - path: docs/stages/STAGES.md
       change: '각 stage의 evidence producer와 evaluate consumer 관계를 추가한다.'

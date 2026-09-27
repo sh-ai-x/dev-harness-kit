@@ -11,11 +11,11 @@ disallowed-tools: WebFetch
 model: opus
 user-invocable: true
 ---
-> [← Skills index](../../README.md) · Algorithm SSOT: [docs/skills/babysit-pr.md](../../docs/skills/babysit-pr.md)
+> [← Skills index](../../README.md) · Algorithm SSOT: [skills/babysit-p/SKILL.mdr.md](../../skills/babysit-p/SKILL.mdr.md)
 
 # `/dev-kit:babysit-pr`
 
-Before acting, read `docs/skills/babysit-pr.md`; it contains the complete
+Before acting, read `skills/babysit-p/SKILL.mdr.md`; it contains the complete
 algorithm, state schema, tracker behavior, and operator bypass contract. This
 file keeps the invocation and non-negotiable safety gates visible to the
 orchestrator.

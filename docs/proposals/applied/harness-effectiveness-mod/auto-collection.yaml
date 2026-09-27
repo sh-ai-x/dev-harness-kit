@@ -61,7 +61,7 @@ after:
       change: 'Expose the measurement envelope separately from the existing harness_effectiveness result. Keep legacy reducer behavior and output unchanged.'
     - path: skills/harness-effectiveness/SKILL.md
       change: 'Refresh incremental measurement and show counts, readiness and cutoff. Explicit diagnostic invocation may also run the existing legacy reducer, clearly identified.'
-    - path: docs/skills/harness-effectiveness.md
+    - path: skills/harness-effectivenes/SKILL.mds.md
       change: 'Document one journal, rebuildable cache, evidence horizon, runtime capability matrix and measurable performance acceptance budgets.'
     - path: .github/workflows/ci.yml
       change: 'Add real production-adapter probes to the existing test job and always publish bounded evidence artifacts and a summary; ordinary CI exit status is the gate.'

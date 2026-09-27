@@ -379,7 +379,7 @@ sections:
 
       1. **PR 1 — lib/verify_harness.py** (Tier 0, no runner wiring).
          `tests/test_verify_harness.py`; `verification` field documented
-         in `docs/skills/plan.md`.
+         in `skills/pla/SKILL.mdn.md`.
          Verify: `pytest tests/test_verify_harness.py -q`.
       2. **PR 2 — lib/evidence_ledger.py** + `/dev-kit:status` wiring.
          Atomic write/read/resume, cumulative counter across sessions,
@@ -451,7 +451,7 @@ sections:
         own cost.
       - The prompt-text self-fix removal ships in the same PR as the
         Tier 0 orchestrator loop — never separately.
-      - `docs/skills/plan.md` is updated so the machine gate (Tier 0 +
+      - `skills/pla/SKILL.mdn.md` is updated so the machine gate (Tier 0 +
         Tier 1 agreement) is the one `completed` decision; status
         markers become advisory. No second SSOT.
       - Non-goal: fault-injection scenario harness for D6 (separate

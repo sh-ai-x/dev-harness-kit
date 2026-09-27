@@ -82,7 +82,7 @@ bin/review-local.sh --pr 123 --dynamic-skip
 Propagate from `bin/babysit-pr-local.sh` via `BABYSIT_DYNAMIC_SKIP=1`
 (opt-in; default OFF). The audit trail lives at
 `.dev-kit/gate-dynamic/<head_sha>.json`. See
-[`docs/skills/gate-dynamic.md`](skills/gate-dynamic.md) for the full
+[`skills/gate-dynami/SKILL.mdc.md`](skills/gate-dynamic.md) for the full
 reference.
 
 ### Provider setup

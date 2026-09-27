@@ -23,7 +23,7 @@ def test_bootstrap_no_ci_prompt_documented():
 
 
 def test_bootstrap_docs_mirror_yN_default():
-    """docs/skills/bootstrap.md must mirror the [y/N] flip.
+    """skills/bootstra/SKILL.mdp.md must mirror the [y/N] flip.
 
     PR #786 flipped ci-setup from default Y to default N. Two locations in
     the English consumer doc missed the update and still claimed "default is Y"
@@ -37,15 +37,15 @@ def test_bootstrap_docs_mirror_yN_default():
 
     # English doc: line 39 ("Usage" row) must NOT say "default is Y"; line 22
     # already says "Default is N" -- assert no contradiction.
-    en = (repo / "docs/skills/bootstrap.md").read_text()
+    en = (repo / "skills/bootstra/SKILL.mdp.md").read_text()
     assert "Also install CI templates (ci-setup)? [y/N]" in en, \
-        "docs/skills/bootstrap.md must pin the [y/N] ci-setup prompt (line 22)"
+        "skills/bootstra/SKILL.mdp.md must pin the [y/N] ci-setup prompt (line 22)"
     # Forbid the legacy phrase on the (0-arg) row (line 39) -- that row claims
     # "default is Y on both", which contradicts line 22 / line 40.
     en_usage_block = en.split("## Usage", 1)[1].split("## ", 1)[0]
     assert "default is Y" not in en_usage_block, \
-        "docs/skills/bootstrap.md Usage table must drop 'default is Y' (PR #786 flipped to N)"
+        "skills/bootstra/SKILL.mdp.md Usage table must drop 'default is Y' (PR #786 flipped to N)"
     # Forbid the Y-default claim in the opening paragraph (line 7).
     en_intro = en.split("## When to use it", 1)[0]
     assert "With Y (default)" not in en_intro and "Y (default), end state" not in en_intro, \
-        "docs/skills/bootstrap.md intro must drop 'With Y (default)' claim"
+        "skills/bootstra/SKILL.mdp.md intro must drop 'With Y (default)' claim"

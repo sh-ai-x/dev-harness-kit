@@ -188,5 +188,6 @@ would weaken the core guarantees:
 - Looking for the architectural decisions behind specific choices?
   [`docs/adr/`](../adr/) holds the full ADR series.
 - Looking for one specific stage? [`docs/stages/STAGES.md`](../stages/STAGES.md)
-  pins the stage spec; the per-skill pages live under
-  [`docs/skills/`](../skills/).
+  pins the stage spec; the per-skill contract for every skill is in
+  its `skills/<name>/SKILL.md` (or browse the auto-generated
+  [`skills/README.md`](../../skills/README.md)).

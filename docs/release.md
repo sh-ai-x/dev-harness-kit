@@ -2,7 +2,7 @@
 
 This document is the **single source of truth** for how dev-harness-kit's
 release machinery works. Other docs (e.g. `docs/reverts/2026-08-02-revert-eval-prs.md`,
-`docs/skills/bump.md`, `skills/sync-version/SKILL.md`) link here instead of
+`skills/bum/SKILL.mdp.md`, `skills/sync-version/SKILL.md`) link here instead of
 re-stating the flow.
 
 For the why and the alternatives considered, see
@@ -84,7 +84,7 @@ and (per PR Conflict Detector) is what makes merge queue slow.
 
 ### Bumping a version manually (operator-only)
 
-`/dev-kit:bump` (`docs/skills/bump.md`) still works as before. It
+`/dev-kit:bump` (`skills/bum/SKILL.mdp.md`) still works as before. It
 opens a `chore(release): bump dev-kit to v...` PR; when the queue
 merges that PR, `version-bump.yml`'s `merge_group` handler detects
 the title and SKIPS the bump step (tag still runs) so we don't
@@ -143,6 +143,6 @@ Internal:
 
 - [`docs/proposals/release/plugin-version-bump-via-merge-queue.yaml`](proposals/release/plugin-version-bump-via-merge-queue.yaml) — the proposal
 - [`docs/reverts/2026-08-02-revert-eval-prs.md`](reverts/2026-08-02-revert-eval-prs.md) — the maintainer's pre-existing flag that the version-bump workflow was a workaround
-- [`docs/skills/bump.md`](skills/bump.md) — the skill whose race-recovery paragraph becomes obsolete after this lands
+- [`skills/bum/SKILL.mdp.md`](skills/bump.md) — the skill whose race-recovery paragraph becomes obsolete after this lands
 - [`.github/workflows/version-bump.yml`](.github/workflows/version-bump.yml) — the workflow that moved from `pull_request: closed` to `merge_group`
 - [`.github/workflows/merge-queue-ready-check.yml`](.github/workflows/merge-queue-ready-check.yml) — the new required check for the queue
