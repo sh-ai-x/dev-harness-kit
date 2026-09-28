@@ -164,18 +164,18 @@ jobs:
         run: |
           if [ "$MISSING" = "true" ]; then
             BODY="<!-- dev-kit:cost-gate -->
-### cost-gate: telemetry missing
+            ### cost-gate: telemetry missing
 
-No \`Cost-gate:\` trailers found in the PR's commit range. Run
-\`/dev-kit:cost-gate --footer\` in each contributing session and append
-the two-line block to your commit messages so this gate can aggregate.
-"
+            No \`Cost-gate:\` trailers found in the PR's commit range. Run
+            \`/dev-kit:cost-gate --footer\` in each contributing session and append
+            the two-line block to your commit messages so this gate can aggregate.
+            "
           else
             BODY="<!-- dev-kit:cost-gate -->
-### cost-gate: cumulative session cost \$$TOTAL
+            ### cost-gate: cumulative session cost \$$TOTAL
 
-Threshold: \$20.00. When total >= \$20.00 the \`cost-flag\` label is applied.
-"
+            Threshold: \$20.00. When total >= \$20.00 the \`cost-flag\` label is applied.
+            "
           fi
           # Upsert: edit existing comment if present, else create.
           # `--paginate` ensures we search ALL comments, not just page 1
