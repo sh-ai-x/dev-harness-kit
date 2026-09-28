@@ -131,17 +131,18 @@ jobs:
       - name: Read decision
         id: decision
         run: |
-          python3 -c "
+          python3 - <<'PYEOF'
           import json
           s = json.load(open('.dev-kit/.cost-gate/state.json'))
           apply = s['status'] == 'warn' and s['totals']['cost_usd'] >= s['thresholds_usd']['pr_flag']
           missing = bool(s['warnings']) and 'missing telemetry' in s['warnings'][0]
-          print(f\"apply={apply}  missing_telemetry={missing}  total=\\${s['totals']['cost_usd']:.2f}\")
-          with open('$GITHUB_OUTPUT', 'a') as f:
-              f.write(f\"apply={'true' if apply else 'false'}\n\")
-              f.write(f\"missing={'true' if missing else 'false'}\n\")
-              f.write(f\"total={s['totals']['cost_usd']:.2f}\n\")
-          "
+          total = s['totals']['cost_usd']
+          print(f"apply={apply}  missing_telemetry={missing}  total=${total:.2f}")
+          with open(__import__('os').environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"apply={'true' if apply else 'false'}\n")
+              f.write(f"missing={'true' if missing else 'false'}\n")
+              f.write(f"total={total:.2f}\n")
+          PYEOF
 
       - name: Apply label when over threshold
         if: steps.decision.outputs.apply == 'true'
@@ -164,18 +165,18 @@ jobs:
         run: |
           if [ "$MISSING" = "true" ]; then
             BODY="<!-- dev-kit:cost-gate -->
-### cost-gate: telemetry missing
+            ### cost-gate: telemetry missing
 
-No \`Cost-gate:\` trailers found in the PR's commit range. Run
-\`/dev-kit:cost-gate --footer\` in each contributing session and append
-the two-line block to your commit messages so this gate can aggregate.
-"
+            No \`Cost-gate:\` trailers found in the PR's commit range. Run
+            \`/dev-kit:cost-gate --footer\` in each contributing session and append
+            the two-line block to your commit messages so this gate can aggregate.
+            "
           else
             BODY="<!-- dev-kit:cost-gate -->
-### cost-gate: cumulative session cost \$$TOTAL
+            ### cost-gate: cumulative session cost \$$TOTAL
 
-Threshold: \$20.00. When total >= \$20.00 the \`cost-flag\` label is applied.
-"
+            Threshold: \$20.00. When total >= \$20.00 the \`cost-flag\` label is applied.
+            "
           fi
           # Upsert: edit existing comment if present, else create.
           # `--paginate` ensures we search ALL comments, not just page 1
