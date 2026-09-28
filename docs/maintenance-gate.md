@@ -19,8 +19,7 @@ rules on every PR:
    | Doc | Status |
    |---|---|
    | `README.md` (top level) | **MANDATORY** — the check passes on this file alone |
-   | `docs/skills/README.md` (English) | good practice, not a substitute |
-   | n/a (commands/ removed) | n/a |
+   | n/a (secondary removed) | n/a — `_SECONDARY_REGISTRY_DOCS` is empty after the `docs/skills/` mirror collapse |
    | `skills/README.md` | never counts — auto-generated |
 
    OR carry the `docs-not-required:` marker.
@@ -31,10 +30,10 @@ rules on every PR:
    registry docs. That made the gate satisfiable without the root README
    ever learning the skill existed — which is exactly what happened:
 
-   - `/dev-kit:gate-select` (#786) touched only `docs/skills/README.md`.
-     The gate passed. The root README had zero mentions of the skill,
-     and `docs/skills/README.md`'s own row admitted "consumer docs land
-     in a follow-up PR" that never came.
+   - `/dev-kit:gate-select` (#786) touched only the now-removed
+     `docs/skills/README.md`. The gate passed. The root README had zero
+     mentions of the skill, and the mirror's own row admitted "consumer
+     docs land in a follow-up PR" that never came.
    - `guard-mode` (#787), `worktree-prune` (#788), and `harness-mode`
      reached `main` the same way.
 
@@ -74,10 +73,12 @@ rules on every PR:
   new skill/command, so the two entry points cannot drift; the registry
   failure surfaces ahead of the generic path-level one (more
   actionable).
-- `_PRIMARY_REGISTRY_DOC` (`"README.md"`) is the mandatory doc;
-  `_SECONDARY_REGISTRY_DOCS` are named in the failure message so an
-  operator who updated `docs/skills/README.md` is told their work
-  counted for something but does not exempt them.
+- `_PRIMARY_REGISTRY_DOC` (`"README.md"`) is the mandatory doc.
+  `_SECONDARY_REGISTRY_DOCS` is currently `frozenset()` (empty); the set
+  stays in the API so a future secondary doc can be registered in one
+  place. The failure message names the first new skill/command and the
+  mandatory doc so an operator can fix the gate failure without
+  re-reading the workflow.
 - `.github/workflows/maintenance.yml` extracts `<changeType>\t<path>`
   per file via `gh pr view --json files --jq '.files[] |
   [.changeType, .path] | @tsv'`. The bash loop reads

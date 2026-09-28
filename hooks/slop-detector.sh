@@ -188,7 +188,7 @@ emit() {
   if [ "$total" -gt 50 ]; then
     echo "[slop-detector]   (+$((total-50)) more unique matches hidden; severity count already reflects every match)" >&2
   fi
-  echo "[slop-detector] If intentional, ignore. Otherwise delete the phrases." >&2
+  echo "[slop-detector] AI slop detected. If intentional, ignore; otherwise remove the offending phrases from this edit." >&2
 }
 
 body=""
