@@ -32,7 +32,7 @@ sections:
       for #507's server-side branch protection and may be obsolete after this
       revert chain lands."
 
-      The maintainer also wrote `docs/skills/bump.md` describing a manual
+      The maintainer also wrote `skills/bump/SKILL.md` describing a manual
       `/dev-kit:bump` skill, which exists "for race recovery — redoing an
       orphaned bump locally after the workflow leaves a tip without a PR,
       and for cutting an explicit pre-PR release candidate." That skill
@@ -210,7 +210,7 @@ sections:
       - [docs/reverts/2026-08-02-revert-eval-prs.md line 23](../../../reverts/2026-08-02-revert-eval-prs.md) —
         internal: maintainer already flagged version-bump workflow as a
         workaround
-      - [docs/skills/bump.md](../../../skills/bump.md) —
+      - [skills/bump/SKILL.md](../../../skills/bump.md) —
         internal: skill exists only because the workflow is racy
       - [`.github/workflows/version-bump.yml`](../../../.github/workflows/version-bump.yml) —
         current implementation being migrated

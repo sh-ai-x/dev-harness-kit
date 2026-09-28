@@ -216,4 +216,4 @@ without implying an execution order.
 
 For the live contract (frontmatter fields, generator invocation, and how the
 visualizer handles new skill types), see
-[`docs/skills/code-viz.md`](../skills/code-viz.md).
+[`skills/code-viz/SKILL.md`](../skills/code-viz.md).

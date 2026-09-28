@@ -197,7 +197,7 @@ LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
              Default OFF — the LLM-judge layer can occasionally flap and
              babysit-pr's tolerance for flapping is low. Enable for
              clean-WIP PRs where you trust the LLM to skip gates
-             appropriately. See `docs/skills/gate-dynamic.md` for the
+             appropriately. See `skills/gate-dynamic/SKILL.md` for the
              hard rules + audit trail.
              - exit 0 → Approve (loop terminates next iteration)
              - exit 1 → Changes Requested / Blocked / parse failure
@@ -437,102 +437,44 @@ violates MUST-L3.
 
 ## Visual status surface
 
-Two independent surfaces exist; do not conflate them.
-
-**HTML live viewer (auto-wired, real-time)** -- step 4L above already
-does this on every iteration: the wrapper ensures
-`bin/review-local-server.py` is running and opens
-`http://127.0.0.1:8765/pr/<N>?autostart=1` in the operator's browser
-(once per PR per hour). The page is a **read-only mirror** of
-`bin/review-local-server.py`'s `/pr/<N>/tail` SSE route -- it
-follows `.dev-kit/babysit-pr-local-live.log` (the file the wrapper
-already `tee`s its own `review-local.sh` run into) and NEVER spawns
-a second verdict pipeline. There is intentionally no Start / Stop
-button on the page (issue #769): clicking one would spawn a
-duplicate `bin/review-local.sh` (and a second round of `claude -p`
-API spend) alongside the babysit session already running. To run a
-one-shot local review manually, use `bin/review-local.sh --pr N`
-from a terminal. See `docs/tools/review-local-html-viewer.md` for
-the full contract + screenshot. Opt out with `BABYSIT_NO_VIEWER=1`.
-
-**ANSI status line (manual opt-in, terminal-only)** --
-`bin/babysit-pr-local-status.py` is a read-only SSOT script that prints
-one ANSI line summarizing the current branch's PR gate state. It
-exposes that line to three render points from a single source, none of
-which are wired by default (each requires the manual step listed):
-
-| Render point | How to enable |
-|---|---|
-| **Claude Code status bar** | Extend `bin/dev-kit-hooks-status.py`'s `status()` dict with a `pr_gate` key that shells out to this script. The existing user-level `~/.claude/statusline-command.sh` (already wired at `~/.claude/settings.json`) can then pick up the third line via `jq -r '.pr_gate'`. |
-| **Codex TUI footer** | Paste the following into `~/.codex/config.toml`:<br>`[tui.status_line]`<br>`type = "command"`<br>`command = "/Users/sanghee/dev/dev-harness-kit/bin/babysit-pr-local-status.py"` |
-| **Babysitter tail** | Append one line of `python3 bin/babysit-pr-local-status.py` after the per-iteration `LOG` block above (after step 11). The same line that the statusLine surfaces. |
-
-Example output:
-
-```
-PR#605 feat/foo │ review=✓ sec=✓ maint=✗ │ CI 3✓ 1✗ │ babysit iter=4
-```
-
-Glyphs: `✓` green (pass), `✗` red/yellow (fail/blocked/changes-requested),
-`·` yellow (pending), `?` dim (gh unavailable / parse error). The script
-exits 0 unconditionally and degrades every `gh` call to `?` glyphs on
-1s timeout — a broken status line is worse than no status line.
-
-The audit-comment parser handles space-in-value (e.g.
-`verdict=Changes Requested`) by walking known-key positions and slicing
-between them; the byte-stable line-1 shape is owned by
-`lib/maintenance_gate.py`'s `format_audit()`.
+- **HTML live viewer** (auto-wired by step 4L): the wrapper ensures
+  `bin/review-local-server.py` runs and opens `http://127.0.0.1:8765/pr/<N>?autostart=1`
+  once per PR per hour. Read-only mirror; never spawns a second
+  verdict pipeline. Full contract:
+  `docs/tools/review-local-html-viewer.md`. Opt out with `BABYSIT_NO_VIEWER=1`.
+- **ANSI status line** (manual opt-in): `bin/babysit-pr-local-status.py`
+  prints one line summarizing PR gate state. Wiring instructions for
+  the Claude Code status bar / Codex TUI footer / babysitter tail live
+  in the script's module docstring (`bin/babysit-pr-local-status.py:2-26`).
+  Format: `PR#605 feat/foo │ review=✓ sec=✓ maint=✗ │ CI 3✓ 1✗ │
+  babysit iter=4`; glyphs are `✓` pass, `✗` fail, `·` pending, `?`
+  gh-unavailable. Audit-comment parser contract:
+  `lib/maintenance_gate.py::format_audit_body`
+  (line 367, signature `(run_id, job, status, verdict, source, *, extras=None)`).
 
 ---
 
 ## Hook alignment
 
-- `stop-verify=ON` — every "done" claim must include a quoted exit code (L3).
-- `secret-scan=ON` — hard-aborts on detected credentials.
-- `slop-detector=ON` — blocks vacuous commits.
-- `tdd-guard=OFF` — not applicable (PR babysitting, not authoring new tests).
-- `bash-guard=ON` — guards `git push --force` patterns.
-- `push_confirm=off (auto, loop lifetime)` — first-push and force-with-lease asks are suppressed. The lock-file trap restores "on" on EXIT.
-- `git-guard=ON` — hard-blocks `gh pr merge` (any invocation); merging into
-  `main` is always a human action, run outside automation.
-- `worktree-guard=ON` — denies Edit/Write from the main checkout.
-
----
+Live state: `.dev-kit/.active-hooks.json` (the SSOT for which PreToolUse /
+PostToolUse hooks fire in this checkout). The skill sets `push_confirm=off`
+and resets it on EXIT; everything else is configured at the repo level.
 
 ## Output language
 
-All stdout/stderr messages in **English only**.
+All stdout / stderr in English only.
 
----
+## Test coverage
 
-## Minimal test fixture (manual)
-
-```bash
-# Mock gh + claude for offline regression; configure the verdict.
-alias gh='python3 tests/fixtures/gh_mock.py'
-export BABYSIT_STUB_EXIT=0  # 0=Approve / 1=Changes|Blocked
-
-# Case 1: clean PR (local Approve) → exit 0 after 1 iter
-# Case 2: red deterministic CI → 2 iters (fail → fix → pass)
-/dev-kit:babysit-pr-local
-```
-
-Automated coverage:
 - `tests/test_babysit_pr_local_cli.py` — parser + `is_local_mode` unit tests.
-- `tests/test_babysit_pr_local_sh.py` — wrapper shell tests + exit-code propagation.
-- `tests/test_skill_governance.py` — L6 `alpha: state` gate (existing).
-
----
+- `tests/test_babysit_pr_local_sh.py` — wrapper shell + exit-code propagation.
+- `tests/test_skill_governance.py` — L6 `alpha: state` gate.
 
 ## Next step
 
-When the loop terminates with `✅ PR approved`, recommend
-`/dev-kit:ship` to tag and release (the user still controls the
-actual merge + tag push). On abnormal exit, recommend
-`/dev-kit:evaluate` against the failing case + a manual patch via
-`/dev-kit:build` or `/dev-kit:refactor`. For the
-**GH-Actions-driven** sibling instead, use `/dev-kit:babysit-pr`
-unchanged.
-
-See [`recipes/canonical-wiring.md`](recipes/canonical-wiring.md) for
-the parent-side preflight block + sub-agent prompt body.
+On `✅ PR approved`, recommend `/dev-kit:ship` (human controls the actual
+merge + tag push). On abnormal exit, `/dev-kit:evaluate` against the
+failing case, then a manual patch via `/dev-kit:build` or
+`/dev-kit:refactor`. For the GH-Actions-driven sibling, use
+`/dev-kit:babysit-pr` unchanged. Parent-side preflight +
+sub-agent prompt body: [`recipes/canonical-wiring.md`](recipes/canonical-wiring.md).
