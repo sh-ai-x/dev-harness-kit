@@ -6,6 +6,8 @@ the skill shipped in #786, the maintenance gate's registry check was
 satisfied by a `docs/skills/README.md` touch alone, and the root README
 — the front door every operator reads first — never learned the skill
 existed. Same for `guard-mode`, `harness-mode`, and `worktree-prune`.
+The mirror (`docs/skills/README.md` + one MD per skill) was removed
+entirely; the gate's `_SECONDARY_REGISTRY_DOCS` is now empty.
 
 The invariant: every user-invocable skill is named in the root README.
 `lib/maintenance_gate.py::registry_index_updated_ok` enforces that a PR

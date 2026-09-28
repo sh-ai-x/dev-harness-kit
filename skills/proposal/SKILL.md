@@ -11,13 +11,13 @@ allowed-tools: Read Write Bash
 model: sonnet
 user-invocable: true
 ---
-> [← Skills index](../../README.md) · Detailed reference: [docs/skills/proposal.md](../../docs/skills/proposal.md)
+> [← Skills index](../../README.md) · Detailed reference: [skills/proposal/SKILL.md](../../skills/proposal/SKILL.md)
 
 # `/dev-kit:proposal`
 
 Render proposal YAML to one self-contained, escaped HTML document. The YAML
 is the SSOT; this skill does not author or silently edit it. Read
-`docs/skills/proposal.md` before changing renderer behavior or schema details.
+`skills/proposal/SKILL.md` before changing renderer behavior or schema details.
 
 ## Status-routed layout
 
@@ -165,7 +165,7 @@ Score each item per the rubric in § PCL Rubric (sum **17 / target ≥ 15**, 7 i
 
 Score each item per the rubric in § PCL Rubric (sum **3 / target ≤ 6**, 3 items; all "by design" = 1 each).
 
-- **[1/3] Two-file documentation split — by design.** `SKILL.md` is the brief; the full schema reference lives at `docs/skills/proposal.md`. The split keeps `SKILL.md` skimmable at slash-autocomplete (top-of-skill, ~180 lines) and lets the detailed schema go where contributors actually look. The trade-off (cross-URL lookup) is bounded by the pointer banner at line 14; readers who need a specific schema detail follow one link.
+- **[1/3] Two-file documentation split — by design.** `SKILL.md` is the brief; the full schema reference lives at `skills/proposal/SKILL.md`. The split keeps `SKILL.md` skimmable at slash-autocomplete (top-of-skill, ~180 lines) and lets the detailed schema go where contributors actually look. The trade-off (cross-URL lookup) is bounded by the pointer banner at line 14; readers who need a specific schema detail follow one link.
 - **[1/3] Markdown-lite grammar is intentionally narrow — by design.** Headings stop at H3; no nested lists, footnotes, images, or HTML pass-through. Every construct added costs ~30 LOC in `lib/render_proposal_html.py::_is_block_start` plus a matching detector in `render_body`; the trade-off is bounded per-construct, so most proposals fit without extension, and the cost of adding one is explicit (not hidden in a parser upgrade).
 - **[1/3] CLI driver lives in the lib's `__main__` — by design.** The entry point is `lib/render_proposal_html.py:__main__`, not `bin/dev-kit-*.py`, because the proposal skill is the only caller. The trade-off is a trip-hazard for new contributors who look for `bin/dev-kit-proposal.py`; the § Architecture section below explicitly documents the deviation, so it is discoverable in one read.
 
