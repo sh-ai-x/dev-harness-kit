@@ -1,0 +1,71 @@
+name: plugin-scan
+
+# Scans this repo (a single Claude Code plugin) with the HOL AI Plugin Scanner.
+# Detects risky tools, secret access, prompt injection, malicious packages,
+# MCP servers, plugins, and skills at scan time. SARIF + job summary are
+# emitted; failures block PR merge when fail_on_severity is met.
+#
+# Why this lives in its own workflow instead of ci.yml: the scanner installs
+# its own Python toolchain and pulls a pinned plugin-scanner wheel from PyPI
+# (SHA-256 verified, provenance checked against hashgraph-online/hol-guard).
+# Mixing that install path with the existing ruff+pytest job would either
+# duplicate the install or couple unrelated failure surfaces.
+#
+# Pinning policy: the GitHub Action is pinned to a full commit SHA per the
+# upstream supply-chain hygiene guidance (see hol-guard/action/README.md).
+# The scanner wheel itself is content-addressed by scanner-sha256.txt inside
+# the action bundle, so a compromised upstream release cannot silently
+# inject a different wheel.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Same minimal permissions as ci.yml — the scanner runs offline by default
+# (online: false), so it does NOT need network egress. SARIF upload to code
+# scanning is intentionally disabled until the repo grants security-events:write.
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: hol plugin scan
+    runs-on: ubuntu-latest
+    # Skip on bump-PRs — same skip rationale as test:/validate:/lint: in ci.yml.
+    # The auto-generated bump commit only edits .claude-plugin/plugin.json
+    # (version string); the scanner output is invariant under that edit,
+    # so re-running it produces noise without value.
+    if: |
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
+    steps:
+      - name: HOL AI Plugin Scanner
+        uses: hashgraph-online/ai-plugin-scanner-action@2d86c226ed36a19a78668ef6c14a01b1c7751ae2 # v1
+        with:
+          plugin_dir: .
+          mode: scan
+          format: markdown
+          profile: default
+          # Block the PR when the scanner surfaces high+ severity findings;
+          # medium / low / info are reported in the job summary but do not
+          # fail the gate. Tighten to critical once the baseline settles.
+          fail_on_severity: high
+          # online=false keeps the offline-by-default posture: external
+          # analyzer credentials (MCP_SCANNER_API_KEY, MCP_SCANNER_LLM_API_KEY)
+          # are stripped from the scan environment, and verify mode would
+          # skip live probing. dev-harness-kit does not need live probing —
+          # everything we ship is on disk.
+          online: false
+          # SARIF upload deferred: enabling this requires
+          #   permissions:
+          #     security-events: write
+          # on the workflow (or job). Revisit when the repo's code-scanning
+          # dashboard is set up.
+          upload_sarif: false
+          # write_step_summary defaults to true; explicit here so the
+          # dependency on the markdown format is documented.
+          write_step_summary: true
