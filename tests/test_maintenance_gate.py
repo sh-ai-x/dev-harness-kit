@@ -114,7 +114,7 @@ class TestDocsUpdatedCheck(unittest.TestCase):
             pr_body="",
         )
         # skills/ changes ARE prod changes (a skill ships with the
-        # plugin and should be paired with a docs/skills/* doc).
+        # plugin and should be paired with a doc update).
         self.assertFalse(ok)
 
     def test_auto_managed_docs_dont_count(self):
@@ -416,7 +416,7 @@ class TestCLISubprocess(unittest.TestCase):
              "--project-root", tempfile.mkdtemp(),
              "--docs-check",
              "--changed-files", "skills/foo/SKILL.md:added",
-             "--changed-files", "docs/skills/README.md:modified",
+             "--changed-files", "CHANGELOG.md:modified",
              "--pr-body", ""],
             capture_output=True, text=True,
             cwd=str(Path(__file__).parent.parent),
@@ -548,15 +548,18 @@ class TestRegistryIndexCheck(unittest.TestCase):
         )
         self.assertTrue(ok, reason)
 
-    def test_fails_when_only_docs_skills_readme_updated(self):
+    def test_fails_when_only_non_registry_doc_updated(self):
         # Regression: `/dev-kit:gate-select` shipped in #786 touching
-        # only docs/skills/README.md, so the root README never learned
-        # the skill existed. The root README is now MANDATORY — a
-        # secondary registry doc alone does NOT satisfy the check.
+        # only `docs/skills/README.md` (now removed), so the root README
+        # never learned the skill existed. After the `docs/skills/`
+        # mirror collapse, no secondary registry docs are registered;
+        # the contract stays: only `README.md` (the primary registry
+        # doc) satisfies the check. Using `CHANGELOG.md` here proves
+        # the same: a non-registry doc is insufficient.
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
                 "skills/foo/SKILL.md:added",
-                "docs/skills/README.md:modified",
+                "CHANGELOG.md:modified",
             ],
             pr_body="",
         )
@@ -564,25 +567,12 @@ class TestRegistryIndexCheck(unittest.TestCase):
         self.assertIn("README.md", reason)
         self.assertIn("skills/foo/SKILL.md", reason)
 
-    def test_passes_when_root_readme_and_secondary_both_updated(self):
-        # The recommended shape: root README (mandatory) plus the
-        # per-category index (good practice).
-        ok, reason = maintenance_gate.registry_index_updated_ok(
-            changed_files=[
-                "skills/foo/SKILL.md:added",
-                "README.md:modified",
-                "docs/skills/README.md:modified",
-            ],
-            pr_body="",
-        )
-        self.assertTrue(ok, reason)
-
     def test_passes_when_pr_body_carries_marker(self):
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=["skills/foo/SKILL.md:added"],
             pr_body=(
                 "Adds /dev-kit:foo.\n\n"
-                "docs-not-required: docs/skills/README.md already lists it.\n"
+                "docs-not-required: any pre-existing doc or issue link.\n"
             ),
         )
         self.assertTrue(ok, reason)
@@ -618,11 +608,15 @@ class TestRegistryIndexCheck(unittest.TestCase):
         self.assertIn("skills/foo/SKILL.md", reason)
 
     def test_fails_when_new_skill_updates_only_nested_readme(self):
-        # `docs/skills/README.md` is a SECONDARY registry doc — updating it
-        # does not exempt the PR from touching the root README.
+        # `docs/skills/README.md` was a SECONDARY registry doc — when it
+        # existed, touching it alone did not exempt the PR from touching
+        # the root README. After the `docs/skills/` mirror collapse no
+        # secondary registry docs are registered; the test now uses a
+        # nested `docs/foo.md` (a real non-registry doc) to keep the
+        # same "non-primary doc alone is not sufficient" intent.
         ok, reason = maintenance_gate.registry_index_updated_ok(
             changed_files=[
-                "docs/skills/README.md:added",
+                "docs/local-ci.md:added",
                 "skills/foo/SKILL.md:added",
             ],
             pr_body="",

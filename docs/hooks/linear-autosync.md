@@ -84,7 +84,7 @@ the main checkout.
 - [skills/linear/SKILL.md](../../skills/linear/SKILL.md) — user-facing
   skill that wraps the same Python script for explicit invocations
   (`/dev-kit:linear on`, `/dev-kit:linear list`, etc.).
-- [docs/skills/linear.md](../skills/linear.md) — public docs page for
+- [skills/linear/SKILL.md](../skills/linear.md) — public docs page for
   the linear skill.
 - [tools/linear_sync.py](../../tools/linear_sync.py) — the Python
   implementation (the hook only invokes it; all behavior lives here).

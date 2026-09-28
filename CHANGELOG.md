@@ -20,7 +20,7 @@ All notable changes to dev-harness-kit are documented here.
   `/dev-kit:bootstrap` sub-stage 8.5 strips `^\.dev-kit` from the
   target `.gitignore`. New files: `skills/team/SKILL.md`,
   `bin/dev_kit_team.py`, `hooks/lib/team-resolve.sh`,
-  `commands/team.md`, `docs/skills/team.md`,
+  `commands/team.md`, `skills/team/SKILL.md`,
   `tests/test_team_resolution.py`,
   `tests/test_dev_kit_team_cli.py`,
   `tests/test_bootstrap_team_wiring.py`. `lib/install.sh` no longer
@@ -129,7 +129,7 @@ workflows' judge steps changed.
 
   Deleted: `bin/dev-kit-lcs.py`, `bin/dev-kit-lcs-route.py`, `lib/lcs_server.py`, `lib/lcs_resources/` (8 handlers), `tests/test_lcs_*.py` (14 test files), `tests/test_dev_kit_lcs_cli.py`, `skills/lcs/SKILL.md`. Removed the Phase 4 valuation auto-gate in `lib/execute.py:_enforce_valuation_gate` (the build stage now proceeds unless the operator flags a non-PROCEED verdict manually). Renamed `lib/valuation_engine.py:decision_persists_to_lcs` → `decision_is_canonical_envelope` (the function was always a pure shape validator; the LCS-suffixed name lied about a persistence that never existed in the engine). Removed `audit_lcs` from `tools/harness_audit.py` (5 harnesses remain: hooks / eval / plan_value / research / interview). Stripped stale LCS narrative from `hooks/git-guard.sh` / `hooks/worktree-guard.sh` comments and from `lib/{interview,research,runtime_adapters,valuation}_engine.py` docstrings.
 
-  Deleted narrative docs: `docs/lcs/` (4 files), `docs/lcs-in-normal-workflow.{md,html}`, `docs/home/00-index.ko.{md,html}`, `docs/home/00-index.html`, `docs/skills/lcs.md`, `docs/proposals/harness-architecture/` (26 files), `docs/planning/PROPOSAL-IMPLEMENTATION-PLAN.{md,html}`. Rewrote `docs/home/00-index.md` to drop the LCS marketing narrative. Updated `docs/stages/STAGES.{md,html}` (Phase 4 gate narrative gone), `docs/skills/{valuate,interview}.md` (LCS URI → on-disk file references), `README.md` (rewrote the LCS section as a "Skill composition" table).
+  Deleted narrative docs: `docs/lcs/` (4 files), `docs/lcs-in-normal-workflow.{md,html}`, `docs/home/00-index.ko.{md,html}`, `docs/home/00-index.html`, `skills/lcs/SKILL.md`, `docs/proposals/harness-architecture/` (26 files), `docs/planning/PROPOSAL-IMPLEMENTATION-PLAN.{md,html}`. Rewrote `docs/home/00-index.md` to drop the LCS marketing narrative. Updated `docs/stages/STAGES.{md,html}` (Phase 4 gate narrative gone), `docs/skills/{valuate,interview}.md` (LCS URI → on-disk file references), `README.md` (rewrote the LCS section as a "Skill composition" table).
 
   Verification grep: `grep -rn 'lcs://\|dev-kit-lcs' hooks/ bin/ lib/ docs/ tools/ --include='*.sh' --include='*.py' --include='*.md' --include='*.yaml'` returns zero matches in shipped paths.
 
@@ -148,7 +148,7 @@ workflows' judge steps changed.
   deleted; `commands` field removed from both plugin manifests; SessionStart
   install-commands hook removed from `.claude/settings.json` + `.codex/hooks.json`;
   `_is_new_command` + `commands/` removed from `lib/maintenance_gate.py` and
-  `lib/role_config.py`; 17 stale references rebased across docs/skills/tests/
+  `lib/role_config.py`; 17 stale references rebased across skills/test/SKILL.mds/
   workflows/.gitignore/REPOSITORY-MAP/bin/review-local.sh. Two orphaned
   `commands/review-local.md` + `commands/skill-usage.md` were recreated as
   `skills/review-local/SKILL.md` + `skills/skill-usage/SKILL.md` so the

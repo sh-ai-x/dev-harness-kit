@@ -197,7 +197,7 @@ LOOP iter = 1 .. MAX_ITERS (=1000, BABYSIT_MAX_ITERS env-overridable):
              Default OFF — the LLM-judge layer can occasionally flap and
              babysit-pr's tolerance for flapping is low. Enable for
              clean-WIP PRs where you trust the LLM to skip gates
-             appropriately. See `docs/skills/gate-dynamic.md` for the
+             appropriately. See `skills/gate-dynamic/SKILL.md` for the
              hard rules + audit trail.
              - exit 0 → Approve (loop terminates next iteration)
              - exit 1 → Changes Requested / Blocked / parse failure

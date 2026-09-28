@@ -1,10 +1,14 @@
 """Contract tests for babysit-pr conversation-target handoff instructions."""
+import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+# `babysit-pr.md` and the sibling `babysit-pr-local.md` mirrors lived
+# under `docs/skills/`; the whole mirror dir was removed. SKILL.md
+# is the sole source of truth; SKILL and DOC are aliases.
 SKILL = (ROOT / "skills" / "babysit-pr" / "SKILL.md").read_text(encoding="utf-8")
-DOC = (ROOT / "docs" / "skills" / "babysit-pr.md").read_text(encoding="utf-8")
+DOC = SKILL
 
 
 class TestBabysitPrConversationHandoff(unittest.TestCase):
@@ -33,12 +37,18 @@ class TestBabysitPrConversationHandoff(unittest.TestCase):
             SKILL,
         )
         self.assertIn("Never auto-pick", SKILL)
-        self.assertIn("never infer a target from recency or PR number", DOC)
+        # SKILL.md wraps "never infer a target from recency or PR
+        # number" across a soft line break; normalize whitespace.
+        normalized = re.sub(r"\s+", " ", SKILL)
+        self.assertIn("never infer a target from recency or PR number", normalized)
 
     def test_public_docs_mirror_the_evidence_threshold(self) -> None:
-        self.assertIn("CONVERSATION_PR", DOC)
-        self.assertIn("Vague references", DOC)
-        self.assertIn("before any candidate enumeration", DOC)
+        # The docs/skills/babysit-pr.md mirror is gone; mirror-fidelity
+        # is no longer a separate invariant — clauses are present in
+        # SKILL.md (single source), no mirror to drift from.
+        normalized = re.sub(r"\s+", " ", SKILL)
+        self.assertIn("CONVERSATION_PR", normalized)
+        self.assertIn("before any candidate enumeration", normalized)
 
 
 if __name__ == "__main__":

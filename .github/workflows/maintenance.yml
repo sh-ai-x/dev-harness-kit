@@ -214,15 +214,15 @@ jobs:
             `skills/<name>/SKILL.md` (status `added`), the PR MUST also
             touch the ROOT `README.md`. The root README is the primary
             registry doc — the front door operators read first — and it
-            is MANDATORY, not one option among several. These are
-            good practice but do NOT substitute for it:
-              - docs/skills/README.md
-              - (commands/ removed in fix/commands-prefix-only)
-            The only exemption is `docs-not-required:` in the PR body.
-            The auto-generated `skills/README.md` does NOT count (it's
-            a no-op for the gate). If a new skill/command was added
-            without a root README entry, deduct from
-            `docs_coverage_score` accordingly.
+            is MANDATORY, not one option among several. The
+            mirror docs under `docs/skills/<name>.md` were removed
+            (the `skills/<n>/SKILL.md` frontmatter is the SSOT and
+            feeds the auto-generated `skills/README.md`); nothing else
+            substitutes for the root README. The only exemption is
+            `docs-not-required:` in the PR body. The auto-generated
+            `skills/README.md` does NOT count (it's a no-op for the
+            gate). If a new skill/command was added without a root
+            README entry, deduct from `docs_coverage_score` accordingly.
 
             Also check that the root README entry actually REGISTERS the
             skill (a table row naming `/dev-kit:<name>`), not just any
@@ -258,11 +258,11 @@ jobs:
             `skills/<name>/SKILL.md` (status `added`), the PR MUST also
             touch the ROOT `README.md` and register the skill there as a
             table row naming `/dev-kit:<name>`. The root README is the
-            primary registry doc and is MANDATORY; docs/skills/README.md,
-            docs/skills/README.md is good
-            practice but do NOT substitute for it. Only
-            `docs-not-required:` in the PR body exempts. Auto-generated
-            `skills/README.md` does NOT count. Deduct from
+            primary registry doc and is MANDATORY. The
+            `docs/skills/` mirror was removed; only the root README
+            satisfies the check. Only `docs-not-required:` in the PR
+            body exempts. Auto-generated `skills/README.md` does NOT
+            count. Deduct from
             `docs_coverage_score` if missing.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
@@ -298,8 +298,8 @@ jobs:
             `skills/<name>/SKILL.md` (status `added`), the PR MUST also
             touch the ROOT `README.md` and register the skill there as a
             table row naming `/dev-kit:<name>`. The root README is
-            MANDATORY; docs/skills/README.md does NOT substitute for it.
-            Only
+            MANDATORY. The `docs/skills/` mirror was removed; nothing
+            other than the root README satisfies the check. Only
             `docs-not-required:` in the PR body exempts. Auto-generated
             `skills/README.md` does NOT count. Deduct from
             `docs_coverage_score` if missing.
