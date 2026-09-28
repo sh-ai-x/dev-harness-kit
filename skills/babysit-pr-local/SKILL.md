@@ -445,10 +445,12 @@ violates MUST-L3.
 - **ANSI status line** (manual opt-in): `bin/babysit-pr-local-status.py`
   prints one line summarizing PR gate state. Wiring instructions for
   the Claude Code status bar / Codex TUI footer / babysitter tail live
-  in the script's `--help` output. Format: `PR#605 feat/foo │ review=✓
-  sec=✓ maint=✗ │ CI 3✓ 1✗ │ babysit iter=4`; glyphs are `✓` pass, `✗`
-  fail, `·` pending, `?` gh-unavailable. Audit-comment parser contract:
-  `lib/maintenance_gate.py::format_audit`.
+  in the script's module docstring (`bin/babysit-pr-local-status.py:2-26`).
+  Format: `PR#605 feat/foo │ review=✓ sec=✓ maint=✗ │ CI 3✓ 1✗ │
+  babysit iter=4`; glyphs are `✓` pass, `✗` fail, `·` pending, `?`
+  gh-unavailable. Audit-comment parser contract:
+  `lib/maintenance_gate.py::format_audit_body`
+  (line 367, signature `(run_id, job, status, verdict, source, *, extras=None)`).
 
 ---
 
