@@ -74,7 +74,18 @@ jobs:
           plugin_dir: .
           mode: scan
           format: markdown
-          profile: default
+          # Point the scanner at the project's checked-in config. The file
+          # documents each entry with the rationale (canned test secrets,
+          # embedded GitHub Actions expression syntax, etc.) and is
+          # reviewed on every PR like any other tracked file.
+          config: .plugin-scanner.toml
+          # The action defaults `trust_repository_policy` to false so a
+          # malicious PR cannot add a config that silently suppresses
+          # real findings. dev-harness-kit is a single-org repo: every
+          # change to .plugin-scanner.toml is reviewed in the same PR
+          # that depends on it, so the suppression surface is auditable.
+          trust_repository_policy: true
+          profile: public-marketplace
           # Block the PR when the scanner surfaces high+ severity findings;
           # medium / low / info are reported in the job summary but do not
           # fail the gate. Tighten to critical once the baseline settles.
