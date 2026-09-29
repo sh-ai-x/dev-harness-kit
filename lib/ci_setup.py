@@ -215,12 +215,14 @@ def _canonical_hook_paths() -> tuple[str, ...]:
     file prevents a new hook/helper from being omitted from consumer repos.
 
     `hooks/references/**` is included alongside the `.sh` files because a
-    hook can depend on non-code data it reads at runtime — e.g.
-    `slop-detector.sh` reads `hooks/references/slop/{phrases,structures}.md`.
-    Shipping `.sh` files without their data banks is the same "manifest ships
-    without everything it needs" failure class as #273/#277/#310, one level
-    down: the hook file itself is present but silently degrades (or crashes)
-    because a file it reads was never installed.
+    hook can depend on non-code data it reads at runtime. (The slop
+    detector used to read `hooks/references/slop/{phrases,structures}.md`;
+    v3 moved the detection logic to a `lib/llm_judge.py` LLM call with the
+    prompt at `eval/prompts/judge-slop.md`, so no runtime bank survives.)
+    Shipping `.sh` files without their data banks is the same "manifest
+    ships without everything it needs" failure class as #273/#277/#310,
+    one level down: the hook file itself is present but silently degrades
+    (or crashes) because a file it reads was never installed.
     """
     manifest = _HOOKS_ROOT / "hooks.json"
     if not manifest.is_file():
