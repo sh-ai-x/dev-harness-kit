@@ -119,6 +119,34 @@ STATUS_TO_BUCKET = {
 }
 
 
+# PCL scoring legend -- rendered above each pros/cons/limitations list so a
+# reviewer who has never seen a proposal can decode `[N/3]` inline without
+# leaving the document (issue #940). Per-item rubric lives in
+# `skills/proposal/SKILL.md` § PCL Rubric; the renderer only emits the
+# abbreviated scale next to the list it scores.
+PCL_LEGEND_PROS = (
+    "<strong>Score scale:</strong> "
+    "3 = concrete + cited + actionable + unique · "
+    "2 = concrete but generic · "
+    "1 = vague · "
+    "0 = not a real pro."
+)
+PCL_LEGEND_CONS = (
+    "<strong>Score scale:</strong> "
+    "0 = fully mitigated · "
+    "1 = acknowledged + mitigation · "
+    "2 = known trade-off · "
+    "3 = unmitigated blocker."
+)
+PCL_LEGEND_LIMITATIONS = (
+    "<strong>Score scale:</strong> "
+    "0 = out-of-scope + future-work path · "
+    "1 = out-of-scope by design · "
+    "2 = soft limitation · "
+    "3 = &quot;didn't get to it&quot;."
+)
+
+
 def bucket_for_status(status: str) -> str:
     """Return the filesystem bucket for a proposal status. Unknown
     statuses fall back to `reviewing` so a typo in the YAML still produces
@@ -311,6 +339,16 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+.pcl-legend {
+  margin: 0 0 0.6rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+  background: var(--th-bg);
+  border-left: 3px solid var(--border);
+  border-radius: 4px;
 }
 .pros-list, .cons-list, .limitations-list {
   list-style: none;
@@ -1205,7 +1243,9 @@ def _render_pros_cons_limitations(p: Proposal) -> str:
 
     Each list gets its own anchor + h3 so the TOC and direct links work.
     Order: Pros → Cons → Limitations (reviewer convention: strengths
-    first, weaknesses second, then what's known-not-solved).
+    first, weaknesses second, then what's known-not-solved). Each list
+    also emits a one-line score-scale legend so a reviewer can decode
+    `[N/3]` inline without leaving the document (issue #940).
     """
     parts: List[str] = []
     if p.pros:
@@ -1213,6 +1253,7 @@ def _render_pros_cons_limitations(p: Proposal) -> str:
         parts.append(
             '<section id="pcl-pros" class="pcl-section pcl-pros">'
             '<h3>Pros</h3>'
+            f'<p class="pcl-legend">{PCL_LEGEND_PROS}</p>'
             f'<ul class="pros-list">{items}</ul>'
             '</section>'
         )
@@ -1221,6 +1262,7 @@ def _render_pros_cons_limitations(p: Proposal) -> str:
         parts.append(
             '<section id="pcl-cons" class="pcl-section pcl-cons">'
             '<h3>Cons</h3>'
+            f'<p class="pcl-legend">{PCL_LEGEND_CONS}</p>'
             f'<ul class="cons-list">{items}</ul>'
             '</section>'
         )
@@ -1229,6 +1271,7 @@ def _render_pros_cons_limitations(p: Proposal) -> str:
         parts.append(
             '<section id="pcl-limit" class="pcl-section pcl-limit">'
             '<h3>Limitations</h3>'
+            f'<p class="pcl-legend">{PCL_LEGEND_LIMITATIONS}</p>'
             f'<ul class="limitations-list">{items}</ul>'
             '</section>'
         )

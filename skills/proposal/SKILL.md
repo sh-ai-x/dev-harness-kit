@@ -70,9 +70,16 @@ after:
   files:
     - path: repo/file
       change: What changes.
-pros: ["Cited gain"]
-cons: ["Accepted weakness and mitigation"]
-limitations: ["Out-of-scope design limit"]
+# PCL scoring scale (see § PCL Rubric for the full per-item rubric).
+# Prefix every list item with "[N/3]" matching the scale below; the rendered
+# HTML also emits the legend inline above each list so a reviewer can decode
+# the score without leaving the document (issue #940).
+#   pros         3 = concrete + cited + actionable + unique | 2 = concrete but generic | 1 = vague | 0 = not a real pro
+#   cons         3 = unmitigated blocker                    | 2 = known trade-off + escape path | 1 = acknowledged + mitigation | 0 = fully mitigated
+#   limitations  3 = "didn't get to it"                      | 2 = soft limitation                  | 1 = out-of-scope by design        | 0 = out-of-scope + future-work path
+pros: ["[2/3] Concrete gain with citation"]
+cons: ["[1/3] Acknowledged weakness with mitigation"]
+limitations: ["[0/3] Out-of-scope by design with future-work path"]
 pcl:                        # Optional PCL score block (see § PCL Rubric).
   pros: 0                  # Integer sum of pros items scored 0-3 each.
   cons: 0                  # Integer sum of cons items scored 0-3 each.
