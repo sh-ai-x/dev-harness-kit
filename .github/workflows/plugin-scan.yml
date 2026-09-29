@@ -1,0 +1,107 @@
+name: plugin-scan
+
+# Scans this repo (a single Claude Code plugin) with the HOL AI Plugin Scanner.
+# Detects risky tools, secret access, prompt injection, malicious packages,
+# MCP servers, plugins, and skills at scan time. SARIF + job summary are
+# emitted; failures block PR merge when fail_on_severity is met.
+#
+# Why this lives in its own workflow instead of ci.yml: the scanner installs
+# its own Python toolchain and pulls a pinned plugin-scanner wheel from PyPI
+# (SHA-256 verified, provenance checked against hashgraph-online/hol-guard).
+# Mixing that install path with the existing ruff+pytest job would either
+# duplicate the install or couple unrelated failure surfaces.
+#
+# Pinning policy: the GitHub Action is pinned to a full commit SHA per the
+# upstream supply-chain hygiene guidance (see hol-guard/action/README.md).
+# The scanner wheel itself is content-addressed by scanner-sha256.txt inside
+# the action bundle, so a compromised upstream release cannot silently
+# inject a different wheel.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Cancel superseded PR runs so a force-push or new commit doesn't pile up
+# scanner invocations against an obsolete head SHA. Mirrors the pattern in
+# `version-bump.yml` and `merge-queue-ready-check.yml` (cancel-in-progress
+# is the right choice for a scanning gate — losing an in-flight scan to a
+# newer head is strictly better than running two scans that disagree).
+concurrency:
+  group: plugin-scan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Same minimal permissions as ci.yml — the scanner runs offline by default
+# (online: false), so it does NOT need network egress. SARIF upload to code
+# scanning is intentionally disabled until the repo grants security-events:write.
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: hol plugin scan
+    runs-on: ubuntu-latest
+    # Bounded: setup-python + pip download + wheel-SHA check + PyPI provenance
+    # verification + scan all sit on the network. 15m matches maintenance.yml.
+    timeout-minutes: 15
+    # Skip on bump-PRs — same skip rationale as test:/validate:/lint: in ci.yml.
+    # The auto-generated bump commit only edits .claude-plugin/plugin.json
+    # (version string); the scanner output is invariant under that edit,
+    # so re-running it produces noise without value.
+    if: |
+      (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && !(github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v'))
+    steps:
+      - name: Checkout repository
+        # Every other workflow in this repo checks out explicitly; the
+        # third-party scanner action does not document its own checkout,
+        # and `plugin_dir: .` resolves against the runner workspace. Without
+        # this step the scanner runs against an empty directory and either
+        # passes trivially or surfaces a misleading baseline.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # fetch-depth: 0 matches ci.yml — full history keeps blame and
+          # baseline-delta semantics consistent with the other gates. The
+          # scanner itself doesn't need it; this is repo convention.
+          fetch-depth: 0
+
+      - name: HOL AI Plugin Scanner
+        uses: hashgraph-online/ai-plugin-scanner-action@2d86c226ed36a19a78668ef6c14a01b1c7751ae2 # v1
+        with:
+          plugin_dir: .
+          mode: scan
+          format: markdown
+          # Point the scanner at the project's checked-in config. The file
+          # documents each entry with the rationale (canned test secrets,
+          # embedded GitHub Actions expression syntax, etc.) and is
+          # reviewed on every PR like any other tracked file.
+          config: .plugin-scanner.toml
+          # The action defaults `trust_repository_policy` to false so a
+          # malicious PR cannot add a config that silently suppresses
+          # real findings. dev-harness-kit is a single-org repo: every
+          # change to .plugin-scanner.toml is reviewed in the same PR
+          # that depends on it, so the suppression surface is auditable.
+          trust_repository_policy: true
+          profile: public-marketplace
+          # Block the PR when the scanner surfaces high+ severity findings;
+          # medium / low / info are reported in the job summary but do not
+          # fail the gate. Tighten to critical once the baseline settles.
+          fail_on_severity: high
+          # online=false keeps the offline-by-default posture: external
+          # analyzer credentials (MCP_SCANNER_API_KEY, MCP_SCANNER_LLM_API_KEY)
+          # are stripped from the scan environment, and verify mode would
+          # skip live probing. dev-harness-kit does not need live probing —
+          # everything we ship is on disk.
+          online: false
+          # SARIF upload deferred: enabling this requires
+          #   permissions:
+          #     security-events: write
+          # on the workflow (or job). Revisit when the repo's code-scanning
+          # dashboard is set up.
+          upload_sarif: false
+          # write_step_summary defaults to true; explicit here so the
+          # dependency on the markdown format is documented.
+          write_step_summary: true
