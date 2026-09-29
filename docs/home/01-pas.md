@@ -97,9 +97,9 @@ Eight+ hooks fire automatically on every tool call, in both runtimes:
   commands deny unconditionally — even `DEV_KIT_STRICT=1` cannot
   override them) and a recoverable tier (destructive-but-reversible
   commands deny under strict mode).
-- `secret-scan` / `slop-detector` / `l4-todo-scan` — pattern banks
-  loaded from `hooks/references/` that block credential leaks,
-  high-signal "AI slop" patterns, and TODO/FIXME markers.
+- `secret-scan` / `slop-detector` — pattern banks loaded from
+  `hooks/references/` that block credential leaks and high-signal
+  "AI slop" patterns.
 - `stop-verify` — at `SessionEnd`/`Stop`, re-runs the regression test
   before the model is allowed to declare "done".
 

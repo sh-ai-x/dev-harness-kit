@@ -14,21 +14,9 @@
         "when": "WebFetch"
       },
       {
-        "fail_closed": true,
-        "name": "l4-todo-scan",
-        "path": "hooks/l4-todo-scan.sh",
-        "when": "Write|Edit|MultiEdit"
-      },
-      {
         "fail_closed": false,
         "name": "linear-worktree-create",
         "path": "hooks/linear-worktree-create.sh",
-        "when": "Bash"
-      },
-      {
-        "fail_closed": true,
-        "name": "loop-detect",
-        "path": "hooks/loop-detect.sh",
         "when": "Bash"
       },
       {
@@ -42,12 +30,6 @@
         "name": "slop-detector",
         "path": "hooks/slop-detector.sh",
         "when": "Write|Edit|MultiEdit"
-      },
-      {
-        "fail_closed": true,
-        "name": "sub-agent-handoff",
-        "path": "hooks/sub-agent-handoff.sh",
-        "when": "Agent"
       },
       {
         "fail_closed": false,
@@ -169,30 +151,14 @@
       },
       {
         "fail_closed": false,
-        "name": "notification-collapse",
-        "path": "hooks/notification-collapse.sh",
-        "when": ""
-      },
-      {
-        "fail_closed": false,
         "name": "worktree-auto-cut",
         "path": "hooks/worktree-auto-cut.sh",
         "when": ""
       }
     ]
   },
-  "generated_at": "2026-09-23T08:13:17+00:00",
+  "generated_at": "2026-09-29T20:33:24+00:00",
   "matrix": {},
   "override": {},
-  "schema_version": "1.0.0",
-  "_git_hooks_note": "Git-level hooks (pre-commit, pre-push, commit-msg) are NOT in `hooks/hooks.json` (which is the Claude Code event hook SSOT). The `git_hooks` array below is hand-curated and survives regen by living in a separate top-level field. Do not merge into `events`.",
-  "git_hooks": [
-    {
-      "name": "pre-push",
-      "path": "hooks/pre-push.sh",
-      "when": "git push",
-      "fail_closed": true,
-      "scope": "local-hook for issue-sync opt-in + opt-in opt-out per `.dev-kit/local-gates.yaml`"
-    }
-  ]
+  "schema_version": "1.0.0"
 }

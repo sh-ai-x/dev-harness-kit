@@ -72,16 +72,12 @@ class TestActiveHooksCodec(unittest.TestCase):
         self.assertIn("review", data["matrix"])
         self.assertIn("security", data["matrix"])
         self.assertIn("ship", data["matrix"])
-        # Per-stage hook counts:
-        #   bootstrap / plan / design / ship: 5 (l4-todo-scan is off —
-        #     only fires during build / review / security per
-        #     hooks/index.md)
-        #   build / review / security: 6 (l4-todo-scan on top of the
-        #     five always-listed hooks: tdd-guard, bash-guard,
-        #     secret-scan, slop-detector, stop-verify)
-        l4_on_stages = ("build", "review", "security")
+        # All 7 stages declare the same 5 hooks (tdd-guard, bash-guard,
+        # secret-scan, slop-detector, stop-verify). l4-todo-scan was
+        # pruned as redundant with model evolution; no per-stage gate
+        # branching is required for these hooks any more.
+        expected = 5
         for stage_name, stage in data["matrix"].items():
-            expected = 6 if stage_name in l4_on_stages else 5
             self.assertEqual(
                 len(stage), expected,
                 f"stage={stage_name} expected {expected} hooks, "

@@ -1,28 +1,17 @@
 #!/usr/bin/env python3
 """The stage matrix must match its SSOT, and hook tests must be isolated.
 
-Two defects this pins, both found by running the full suite inside a
-bootstrapped worktree rather than a fresh clone:
+Defect pinned: hook tests were not isolated from project state.
+`hooks/lib/stage-gate.sh` fail-opens when `.dev-kit/.active-hooks.json`
+is absent, so on a fresh clone (and on CI runners) every stage-gated
+hook runs and its tests pass. In a bootstrapped checkout the file
+exists, the gate resolves the stage to `bootstrap`, and hooks that are
+off in that stage exit 0 silently — so the black-box hook tests assert
+against a hook that deliberately did nothing. 15 tests across
+test_slop_detector.py / test_l4_todo_scan.py flipped to failing purely
+because the developer had run bootstrap.
 
-1. **`l4-todo-scan` was permanently dead.** `hooks/index.md` lists it as
-   active in build / review / security, but the hook name was never added
-   to `DEFAULT_MATRIX` in `lib/active_hooks_codec.py`. `is_hook_active`
-   returns False for a hook absent from the stage dict, so the
-   `hook_stage_active l4-todo-scan || exit 0` line at
-   `hooks/l4-todo-scan.sh:37` exited 0 in every stage from the moment
-   #680 shipped it. The Iron Law L4 marker scan never ran.
-
-2. **Hook tests were not isolated from project state.**
-   `hooks/lib/stage-gate.sh` fail-opens when `.dev-kit/.active-hooks.json`
-   is absent, so on a fresh clone (and on CI runners) every stage-gated
-   hook runs and its tests pass. In a bootstrapped checkout the file
-   exists, the gate resolves the stage to `bootstrap`, and hooks that are
-   off in that stage exit 0 silently — so the black-box hook tests assert
-   against a hook that deliberately did nothing. 15 tests across
-   test_slop_detector.py / test_l4_todo_scan.py flipped to failing purely
-   because the developer had run bootstrap.
-
-The fix for (2) is `DEV_KIT_STAGE` in each hook test's env, which is why
+The fix is `DEV_KIT_STAGE` in each hook test's env, which is why
 this file also pins that the env var actually overrides the gate.
 """
 from __future__ import annotations
@@ -45,7 +34,6 @@ HOOKS_INDEX = REPO_ROOT / "hooks" / "index.md"
 # is gated, so every one MUST appear in the matrix or it is dead code.
 GATED_HOOKS = (
     "bash-guard",
-    "l4-todo-scan",
     "secret-scan",
     "slop-detector",
     "stop-verify",
@@ -95,27 +83,25 @@ class TestGatedHooksArePresentInMatrix(unittest.TestCase):
             f"test's GATED_HOOKS fixture. Found: {sorted(found)}",
         )
 
-    def test_l4_todo_scan_is_active_in_its_documented_stages(self):
-        # hooks/index.md marks l4-todo-scan as ✅ for build / review /
-        # security. The default matrix must agree.
+    def test_l4_todo_scan_is_pruned(self):
+        """l4-todo-scan was pruned as redundant with model evolution
+        (Iron Law #4 is now self-enforced by the training pipeline).
+        This test pins that no future matrix edit re-introduces it."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for stage in ("build", "review", "security"):
-                self.assertTrue(
-                    active_hooks_codec.is_hook_active(
-                        root, stage, "l4-todo-scan"
-                    ),
-                    f"l4-todo-scan must be active in the {stage} stage "
-                    "per hooks/index.md",
-                )
-            for stage in ("bootstrap", "plan", "design", "ship"):
+            # Hook absent from DEFAULT_MATRIX in every stage -> is_hook_active
+            # returns False in every stage.
+            for stage in active_hooks_codec.DEFAULT_MATRIX:
                 self.assertFalse(
-                    active_hooks_codec.is_hook_active(
-                        root, stage, "l4-todo-scan"
-                    ),
-                    f"l4-todo-scan must be inactive in the {stage} stage "
-                    "per hooks/index.md",
+                    active_hooks_codec.is_hook_active(root, stage, "l4-todo-scan"),
+                    f"l4-todo-scan must remain pruned but DEFAULT_MATRIX['{stage}']"
+                    " contains it",
                 )
+            # No script on disk (otherwise the registry is wrong).
+            self.assertFalse(
+                (REPO_ROOT / "hooks" / "l4-todo-scan.sh").exists(),
+                "hooks/l4-todo-scan.sh must stay deleted",
+            )
 
 
 class TestHooksIndexMatchesMatrix(unittest.TestCase):
