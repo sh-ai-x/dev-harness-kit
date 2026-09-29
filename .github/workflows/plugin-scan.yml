@@ -25,6 +25,15 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+# Cancel superseded PR runs so a force-push or new commit doesn't pile up
+# scanner invocations against an obsolete head SHA. Mirrors the pattern in
+# `version-bump.yml` and `merge-queue-ready-check.yml` (cancel-in-progress
+# is the right choice for a scanning gate — losing an in-flight scan to a
+# newer head is strictly better than running two scans that disagree).
+concurrency:
+  group: plugin-scan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Same minimal permissions as ci.yml — the scanner runs offline by default
 # (online: false), so it does NOT need network egress. SARIF upload to code
 # scanning is intentionally disabled until the repo grants security-events:write.
@@ -35,14 +44,30 @@ jobs:
   scan:
     name: hol plugin scan
     runs-on: ubuntu-latest
+    # Bounded: setup-python + pip download + wheel-SHA check + PyPI provenance
+    # verification + scan all sit on the network. 15m matches maintenance.yml.
+    timeout-minutes: 15
     # Skip on bump-PRs — same skip rationale as test:/validate:/lint: in ci.yml.
     # The auto-generated bump commit only edits .claude-plugin/plugin.json
     # (version string); the scanner output is invariant under that edit,
     # so re-running it produces noise without value.
     if: |
-      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
-      && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
+      (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+      && !(github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v'))
     steps:
+      - name: Checkout repository
+        # Every other workflow in this repo checks out explicitly; the
+        # third-party scanner action does not document its own checkout,
+        # and `plugin_dir: .` resolves against the runner workspace. Without
+        # this step the scanner runs against an empty directory and either
+        # passes trivially or surfaces a misleading baseline.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # fetch-depth: 0 matches ci.yml — full history keeps blame and
+          # baseline-delta semantics consistent with the other gates. The
+          # scanner itself doesn't need it; this is repo convention.
+          fetch-depth: 0
+
       - name: HOL AI Plugin Scanner
         uses: hashgraph-online/ai-plugin-scanner-action@2d86c226ed36a19a78668ef6c14a01b1c7751ae2 # v1
         with:
