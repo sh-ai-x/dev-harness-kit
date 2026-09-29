@@ -4,8 +4,7 @@
 # session-start, worktree-auto-cut, worktree-session-cleanup,
 # log-on-session-start, acp-tier-assert, linear-session-start,
 # linear-task-change) that previously copy-pasted the same 3-line
-# `HOOK_CWD=... && cd ...` block. (`provider-divergence-check` was
-# one of the 9 before it was pruned in PR 941.)
+# `HOOK_CWD=... && cd ...` block.
 #
 # Extracted by inspect-pass4 (finding p10-p18, 2026-09-23) to
 # eliminate the 9-copy duplication. The contract is:
