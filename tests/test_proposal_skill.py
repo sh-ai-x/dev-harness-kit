@@ -1093,6 +1093,53 @@ class BeforeAfterRenderTests(unittest.TestCase):
         self.assertNotIn('class="cons-list"', html)
         self.assertNotIn('class="limitations-list"', html)
 
+    def test_render_emits_pcl_legend_for_each_list(self):
+        """Issue #940: every PCL list emits a one-line score-scale legend
+        so a reviewer who has never seen a proposal can decode `[N/3]`
+        inline without leaving the document. The legend must appear
+        once per list (Pros, Cons, Limitations), each with the per-list
+        rubric wording."""
+        text = (
+            "title: T\nstatus: draft\n"
+            "pros:\n  - '[3/3] Pure function.'\n"
+            "cons:\n  - '[1/3] Acknowledged weakness.'\n"
+            "limitations:\n  - '[1/3] Out-of-scope by design.'\n"
+            "sections: []\n"
+        )
+        html = rph.render_from_yaml(text)
+        # Three legends, one per list, each with the per-list anchor and class.
+        self.assertEqual(html.count('class="pcl-legend"'), 3)
+        self.assertIn('id="pcl-pros"', html)
+        self.assertIn('id="pcl-cons"', html)
+        self.assertIn('id="pcl-limit"', html)
+        # Per-list rubric wording surfaces verbatim (issue #940 must
+        # decode the `[N/3]` notation without leaving the document).
+        self.assertIn("concrete + cited + actionable + unique", html)
+        self.assertIn("fully mitigated", html)
+        self.assertIn("out-of-scope + future-work path", html)
+        # Existing `[N/3]` notation still renders unchanged.
+        self.assertIn("[3/3] Pure function.", html)
+        self.assertIn("[1/3] Acknowledged weakness.", html)
+
+    def test_render_legend_keeps_limitations_quote_intact(self):
+        """The limitations legend encodes the phrase `\"didn't get to it\"`;
+        both double-quote and apostrophe entities must survive the
+        render intact inside the limitations list's `<p class=\"pcl-legend\">`
+        so a reviewer can read the rubric without HTML garbling the quote."""
+        text = (
+            "title: T\nstatus: draft\n"
+            "limitations:\n  - '[0/3] Out-of-scope + future-work path.'\n"
+            "sections: []\n"
+        )
+        out = rph.render_from_yaml(text)
+        legend_idx = out.index('class="pcl-legend"')
+        # Grab the limitations legend (the third <p class="pcl-legend">).
+        end_idx = out.index("</p>", legend_idx)
+        legend_block = out[legend_idx:end_idx]
+        self.assertIn("&quot;didn't get to it&quot;", legend_block)
+        # And the limitations list still renders after the legend.
+        self.assertIn('class="limitations-list"', out)
+
     def test_render_escapes_script_in_before_summary(self):
         text = (
             "title: T\nstatus: draft\n"
