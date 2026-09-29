@@ -26,7 +26,6 @@ HOOKS_JSONS = [
 # "PostToolUse" so we keep it implicit; only the matcher matters here.
 EXPECTED_POSTTOOLUSE_WRITE_EDIT = {
     "secret-scan":     "Write|Edit|MultiEdit",
-    "slop-detector":   "Write|Edit|MultiEdit",
 }
 
 # Channel-level prompt-injection guards (iron-law L9). Wired under

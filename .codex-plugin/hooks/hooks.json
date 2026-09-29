@@ -119,11 +119,6 @@
             "type": "command",
             "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/secret-scan.sh",
             "fail_closed": true
-          },
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/slop-detector.sh",
-            "fail_closed": true
           }
         ]
       },

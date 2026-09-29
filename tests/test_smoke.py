@@ -65,7 +65,6 @@ HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",
     "secret-scan.sh",
-    "slop-detector.sh",
     "stop-verify.sh",
 }
 

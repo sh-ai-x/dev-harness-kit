@@ -72,11 +72,11 @@ class TestActiveHooksCodec(unittest.TestCase):
         self.assertIn("review", data["matrix"])
         self.assertIn("security", data["matrix"])
         self.assertIn("ship", data["matrix"])
-        # All 7 stages declare the same 5 hooks (tdd-guard, bash-guard,
-        # secret-scan, slop-detector, stop-verify). l4-todo-scan was
-        # pruned as redundant with model evolution; no per-stage gate
-        # branching is required for these hooks any more.
-        expected = 5
+        # All 7 stages declare the same 4 hooks (tdd-guard, bash-guard,
+        # secret-scan, stop-verify). l4-todo-scan and slop-detector
+        # were pruned as redundant with model evolution; no per-stage
+        # gate branching is required for these hooks any more.
+        expected = 4
         for stage_name, stage in data["matrix"].items():
             self.assertEqual(
                 len(stage), expected,
@@ -103,9 +103,9 @@ class TestActiveHooksCodec(unittest.TestCase):
 
     def test_env_override_disables_hook(self):
         active_hooks_codec.init_matrix(self.root)
-        with patch.dict(os.environ, {"DEV_KIT_HOOK_OFF": "tdd-guard,slop-detector"}):
+        with patch.dict(os.environ, {"DEV_KIT_HOOK_OFF": "tdd-guard,secret-scan"}):
             self.assertFalse(active_hooks_codec.is_hook_active(self.root, "build", "tdd-guard"))
-            self.assertFalse(active_hooks_codec.is_hook_active(self.root, "build", "slop-detector"))
+            self.assertFalse(active_hooks_codec.is_hook_active(self.root, "build", "secret-scan"))
             self.assertTrue(active_hooks_codec.is_hook_active(self.root, "build", "bash-guard"))
 
     def test_disable_override(self):
@@ -257,7 +257,7 @@ class TestCrossCodecCoexistence(unittest.TestCase):
     These tests pin the contract that BOTH writers namespace their
     own slice and PRESERVE the other writer's slice on re-run. The
     old shape wiped each other out — causing stage-gated hooks
-    (`tdd-guard`, `bash-guard`, `secret-scan`, `slop-detector`,
+    (`tdd-guard`, `bash-guard`, `secret-scan`,
     `stop-verify`, `pre_completion_checklist`) to silently turn off
     after the first SessionStart.
     """
@@ -330,7 +330,7 @@ class TestCrossCodecCoexistence(unittest.TestCase):
             active_hooks_codec.is_hook_active(self.root, "review", "secret-scan")
         )
         self.assertTrue(
-            active_hooks_codec.is_hook_active(self.root, "build", "slop-detector")
+            active_hooks_codec.is_hook_active(self.root, "build", "secret-scan")
         )
         self.assertTrue(
             active_hooks_codec.is_hook_active(self.root, "build", "stop-verify")
@@ -409,7 +409,7 @@ class TestCrossCodecCoexistence(unittest.TestCase):
         `is_hook_active()` must STILL return True for the stage-gated
         hooks. Without this guarantee, `stage-gate.sh` would stop
         fail-opening once the file exists, silently disabling
-        `tdd-guard`, `bash-guard`, `secret-scan`, `slop-detector`,
+        `tdd-guard`, `bash-guard`, `secret-scan`,
         and `stop-verify` on every fresh clone.
 
         The regen tool MUST NOT create the codec slice itself —
@@ -439,8 +439,8 @@ class TestCrossCodecCoexistence(unittest.TestCase):
             "regen alone must not disable build/secret-scan",
         )
         self.assertTrue(
-            active_hooks_codec.is_hook_active(self.root, "build", "slop-detector"),
-            "regen alone must not disable build/slop-detector",
+            active_hooks_codec.is_hook_active(self.root, "build", "secret-scan"),
+            "regen alone must not disable build/secret-scan",
         )
         self.assertTrue(
             active_hooks_codec.is_hook_active(self.root, "build", "stop-verify"),

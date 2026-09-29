@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""test_hooks_payload.py — exercise hooks/lib/payload-parse.sh + the four
-consumer hooks (bash-guard, git-guard, secret-scan, slop-detector).
+"""test_hooks_payload.py — exercise hooks/lib/payload-parse.sh + the three
+consumer hooks (bash-guard, git-guard, secret-scan).
 
 Regression coverage for issue #78:
   HIGH #2 (bash-guard jq fail-open)         → require_jq fail-closed
-  HIGH #3 (secret-scan / slop-detector       → extract_content joins
+  HIGH #3 (secret-scan                       → extract_content joins
             MultiEdit scan-skip)               MultiEdit edits[].new_string
 
 The helper itself is sourced in a subshell with a known stdin payload
@@ -73,10 +73,10 @@ def _run_hook(script: str, payload: dict, cwd: Path | None = None,
     Pin `DEV_KIT_STAGE=build` so the test is hermetic w.r.t. whatever
     `.dev-kit/.active-hooks.json` the developer has on disk. Without the
     pin, a bootstrapped checkout makes the stage gate resolve the stage
-    to `bootstrap`, where `slop-detector` is off, so the hook exits 0
-    silently and the test asserts against a hook that deliberately did
-    nothing. See test_stage_gate_matrix_ssot.py for the underlying
-    matrix contract.
+    to `bootstrap`, where the stage-gated hooks are off, so the hook
+    exits 0 silently and the test asserts against a hook that
+    deliberately did nothing. See test_stage_gate_matrix_ssot.py for
+    the underlying matrix contract.
     """
     p = HOOKS / script
     if not p.exists():
@@ -154,10 +154,9 @@ class TestReadStdinJson(unittest.TestCase):
 
 class TestExtractContent(unittest.TestCase):
     """extract_content — joins Write content + Edit new_string + MultiEdit
-    edits[].new_string. Regression: prior to #78, secret-scan and
-    slop-detector only checked `.tool_input.content // .tool_input.new_string`,
-    so MultiEdit payloads with credentials/slop in edits[].new_string
-    were silently skipped.
+    edits[].new_string. Regression: prior to #78, secret-scan only
+    checked `.tool_input.content // .tool_input.new_string`, so MultiEdit
+    payloads with credentials in edits[].new_string were silently skipped.
     """
 
     def _content(self, payload: str) -> str:
@@ -414,80 +413,6 @@ class TestSecretScanRefactor(unittest.TestCase):
         self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
         self.assertIn("jq is required", r.stderr)
         self.assertIn("secret-scan", r.stderr)
-
-
-class TestSlopDetectorRefactor(unittest.TestCase):
-    """slop-detector.sh now uses extract_content. Same MultiEdit gap
-    as secret-scan (HIGH #3). slop-detector has a single-grep pipeline
-    so the pre-existing set -e + pipefail bug is more contained:
-    when a slop phrase is found, the script prints + exits 0; when
-    no slop is found, grep returns 1 and the pipe fails (script exits 1).
-    Both behaviors are pre-existing — the HIGH #3 fix is verified at
-    the data layer (TestExtractContent) and at the behavior layer
-    below (MultiEdit with slop actually scans)."""
-
-    def setUp(self):
-        if not (HOOKS / "slop-detector.sh").exists():
-            self.skipTest("slop-detector.sh missing")
-
-    def test_detects_slop_in_multiedit(self):
-        """HIGH #3 regression: pre-fix, MultiEdit with slop phrase
-        silently exited 0 with empty stderr (scalar extraction
-        returned ""). Post-fix, the slop phrase is found in
-        edits[].new_string and printed to stderr."""
-        payload = _multiedit_payload("/tmp/marketing.py", [
-            {"new_string": "This is a comprehensive solution for the team."},
-        ])
-        r = _run_hook("slop-detector.sh", payload)
-        self.assertIn("comprehensive", r.stderr,
-            f"slop not flagged in MultiEdit: stderr={r.stderr!r}")
-
-    def test_detects_slop_in_write(self):
-        payload = _write_payload("/tmp/marketing.py", "This is a comprehensive solution.")
-        r = _run_hook("slop-detector.sh", payload)
-        self.assertIn("comprehensive", r.stderr,
-            f"slop not flagged in Write: stderr={r.stderr!r}")
-
-    def test_detects_slop_in_edit(self):
-        payload = _edit_payload("/tmp/marketing.py", "This is a comprehensive solution.")
-        r = _run_hook("slop-detector.sh", payload)
-        self.assertIn("comprehensive", r.stderr,
-            f"slop not flagged in Edit: stderr={r.stderr!r}")
-
-    def test_clean_multiedit_runs_without_error(self):
-        """Clean MultiEdit: script attempts the scan, may exit 0 or 1.
-        1 is the pre-existing set -e + grep-no-match issue, NOT a
-        regression."""
-        payload = _multiedit_payload("/tmp/clean.py", [
-            {"new_string": "def add(a, b):\n    return a + b\n"},
-        ])
-        r = _run_hook("slop-detector.sh", payload)
-        self.assertIn(r.returncode, (0, 1),
-            f"clean MultiEdit should exit 0 or 1, got {r.returncode}: {r.stderr!r}")
-        self.assertNotIn("comprehensive", r.stderr)
-        self.assertNotIn("tapestry", r.stderr)
-
-    def test_fails_closed_when_jq_missing(self):
-        """require_jq fail-closed contract also applies to slop-detector."""
-        jq_real = shutil.which("jq")
-        if not jq_real:
-            self.skipTest("jq not installed on host — cannot simulate missing-jq")
-        util_dirs = set()
-        for util in ("bash", "cat", "echo", "printf", "command"):
-            p = shutil.which(util)
-            if p:
-                util_dirs.add(os.path.dirname(p))
-        util_dirs.discard(os.path.dirname(jq_real))
-        minimal_path = os.pathsep.join(sorted(util_dirs)) or "/nonexistent"
-        payload = json.dumps(_write_payload("/tmp/x", "comprehensive solution"))
-        r = subprocess.run(
-            [_bash(), str(HOOKS / "slop-detector.sh")],
-            input=payload, capture_output=True, text=True, timeout=5,
-            env={**os.environ, "PATH": minimal_path},
-        )
-        self.assertEqual(r.returncode, 2, f"expected deny, got rc={r.returncode}, stderr={r.stderr}")
-        self.assertIn("jq is required", r.stderr)
-        self.assertIn("slop-detector", r.stderr)
 
 
 class TestGitGuardRefactor(unittest.TestCase):

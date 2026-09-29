@@ -36,7 +36,6 @@
 | bash-guard (tier 1)   |  C    |  C    |  C    |  C    |  C    |  C    |  C    |
 | destructive-confirm   |  K    |  K    |  K    |  K    |  K    |  K    |  K    |
 | secret-scan           |  R    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
-| slop-detector         |  -    |  -    |  -    |  ✅    |  ✅    |  ✅    |  -    |
 | stop-verify           |  -    |  ✅    |  ✅    |  ✅    |  ✅    |  ✅    |  ✅    |
 | linear-autosync       |  -    |  ✅*   |  -    |  ✅*   |  -    |  -    |  -    |
 | linear-session-start  |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |  ✅*   |
@@ -60,7 +59,6 @@ the terminal trace record before `save_log.py` runs with
 | `bash-guard` | build (tier 2) / all stages (tier 1) | Two tiers. **Tier 1 (catastrophic)** — `rm -rf /`, `rm -rf ~`, `chown -R /`, `mkfs.*`, `dd of=/dev/sd*`, `curl\|sh`, `npm publish`, `kubectl delete namespace`, `aws s3 rm --recursive`, `terraform destroy -auto-approve`, and any attempt to set `DEV_KIT_HOOK_OFF=.bash-guard`. Denies unconditionally, checked *before* the stage gate, not overridable by `DEV_KIT_STRICT`. **Tier 2 (recoverable)** — `git reset --hard`, `git clean -f`, force-push, `DROP TABLE`, `docker system prune`, `find -delete`, `pkill -9`. Stage-gated to build; advisory unless `DEV_KIT_STRICT=1`. |
 | `destructive-confirm` | all stages (not gated) | PreToolUse `Bash\|Write\|Edit\|MultiEdit` **ask-tier** gate — the only hook that emits `permissionDecision: "ask"` (human confirmation prompt) rather than deny-or-silence. Asks on: writes to `.env` / `*.pem` / `*.key` / `.ssh/*` / `.aws/credentials` / `.netrc` / `.kube/config` / `secrets.*` (`.env.example` and friends are exempt so the prompt stays meaningful); bare `git worktree remove` (bypasses `bin/worktree-remove-safe.sh`, discarding the worktree's `logs/`); `git push --force-with-lease`; and first-time `git push -u`. Opt out with `DEV_KIT_NO_CONFIRM=1`. Both push asks can be bypassed loop-locally via `push_confirm=off` in `.dev-kit/guard-mode.session.json` (set by `/dev-kit:babysit-pr` and `/dev-kit:babysit-pr-local` on entry, restored to `on` in the EXIT trap); the hard git-guard policy remains active. Fails closed when `jq` is missing. |
 | `secret-scan` | build / review / security | PostToolUse credential-pattern grep. |
-| `slop-detector` | build / review / security | KO+EN banned-phrase scan. |
 | `stop-verify` | plan / design / build / review / security / ship | Stop hook: AC claim verification. |
 | `worktree-session-cleanup` | all (Stop advisory) | After a completion-shaped response in a clean task worktree, asks the user to keep it or explicitly archive logs and remove it. Never deletes from the hook itself. |
 | `worktree-guard` | n/a | PreToolUse Edit/Write block on main checkout (this repo). Enabled only when `DEV_KIT_GUARDS=on`; session override: `/dev-kit:guard-mode off worktree` (see `session-start-guard-mode-reset` below). |
@@ -105,7 +103,6 @@ the terminal trace record before `save_log.py` runs with
 | `session-start-check.sh` | SessionStart (fanout) | `*` | Regenerates `.dev-kit/.active-hooks.json`; emits `trace.started`; runs first-pass-quality smoke probe; records enrollment. |
 | `session-start-guard-mode-reset.sh` | SessionStart (fanout) | `*` | Applies `DEV_KIT_GUARDS` policy (shell → local → project → default) to `.dev-kit/guard-mode.session.json`. |
 | `session-start-harness-mode-reset.sh` | SessionStart (fanout) | `*` | Resets `.dev-kit/harness-mode.session.json` to `{"mode": "full"}` every session (strict-by-default). |
-| `slop-detector.sh` | PostToolUse | `Write\|Edit\|MultiEdit` | KO+EN banned-phrase scan (model-output slop detector). |
 | `stop-verify.sh` | Stop | `*` | AC claim verification before session stop. |
 | `tdd-guard.sh` | PreToolUse | `Write\|Edit\|MultiEdit` | RED-evidence block on prod-code edits (no test was added/updated). |
 | `trace-session-end.sh` | Stop + SessionEnd | `*` | Terminal trace record. MUST be the first hook on Stop and SessionEnd so `save_log.py` archives the trace correctly. |

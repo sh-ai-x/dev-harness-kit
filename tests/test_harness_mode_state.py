@@ -14,7 +14,7 @@ Covers:
   has a category + type + description (issue #775)
 - `show` CLI output groups local hooks by category with `value`+`type`+`description`
   fields per gate, surfaces a `ci_gates_notice`, and keeps the flat `gates:` key
-  as a deprecated alias (legacy consumers in `hooks/slop-detector.sh` etc. read it)
+  as a deprecated alias (legacy consumers in `hooks/secret-scan.sh` etc. read it)
 - SKILL.md picker wording lock-in: every optional gate has a row in the
   `custom` Call-1/Call-2 tables AND every row's gate key exists in
   OPTIONAL_GATE_DEFAULTS (drift guard, issue #775)
@@ -70,10 +70,10 @@ class TestReadWriteRoundTrip(unittest.TestCase):
             hms.write_state("bogus", root=self.root)
 
     def test_write_state_drops_correctness_gate_keys(self):
-        hms.write_state("custom", gates={"stop_verify": "off", "slop_detector": "off"}, root=self.root)
+        hms.write_state("custom", gates={"stop_verify": "off", "maintenance": "off"}, root=self.root)
         state = hms.read_state(self.root)
         self.assertNotIn("stop_verify", state["gates"])
-        self.assertEqual(state["gates"]["slop_detector"], "off")
+        self.assertEqual(state["gates"]["maintenance"], "off")
 
 
 class TestResolvedGate(unittest.TestCase):
@@ -108,13 +108,13 @@ class TestResolvedGate(unittest.TestCase):
 
     def test_full_mode_all_optional_gates_on(self):
         hms.write_state("full", root=self.root)
-        self.assertEqual(hms.resolved_gate("slop_detector", self.root), "on")
+        self.assertEqual(hms.resolved_gate("maintenance", self.root), "on")
         self.assertEqual(hms.resolved_gate("security_owasp", self.root), "full")
         self.assertEqual(hms.resolved_gate("babysit_pr", self.root), "full")
 
     def test_fast_mode_all_optional_gates_off(self):
         hms.write_state("fast", root=self.root)
-        self.assertEqual(hms.resolved_gate("slop_detector", self.root), "off")
+        self.assertEqual(hms.resolved_gate("maintenance", self.root), "off")
         self.assertEqual(hms.resolved_gate("pre_commit_review", self.root), "off")
         self.assertEqual(hms.resolved_gate("maintenance", self.root), "off")
         self.assertEqual(hms.resolved_gate("security_owasp", self.root), "quick")
@@ -123,10 +123,10 @@ class TestResolvedGate(unittest.TestCase):
     def test_custom_mode_per_gate_override_wins(self):
         hms.write_state(
             "custom",
-            gates={"slop_detector": "on"},
+            gates={"maintenance": "on"},
             root=self.root,
         )
-        self.assertEqual(hms.resolved_gate("slop_detector", self.root), "on")
+        self.assertEqual(hms.resolved_gate("maintenance", self.root), "on")
         # Gates not explicitly overridden in custom mode fall back to "full"'s value.
         self.assertEqual(hms.resolved_gate("maintenance", self.root), "on")
 
@@ -231,7 +231,7 @@ class TestShowOutput(unittest.TestCase):
         self.assertIn("NOT toggled", out["ci_gates_notice"])
 
     def test_show_keeps_legacy_flat_gates_alias(self):
-        """The flat `gates:` key is consumed by `hooks/slop-detector.sh:31`
+        """The flat `gates:` key is consumed by `hooks/secret-scan.sh`
         via `python3 -m lib.harness_mode_state get <gate>` (separate code
         path), so the alias test here is about the `show` output's
         backward-compat shape: keep a flat map of name → value so

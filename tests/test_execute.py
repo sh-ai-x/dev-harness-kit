@@ -1464,19 +1464,19 @@ class TestGateSummaryLine(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_default_full_mode_reports_all_gates_on(self):
+    def test_default_full_mode_reports_correctness_gates_on(self):
         line = execute._gate_summary_line(self.root)
         self.assertIn("stop_verify=ON", line)
         self.assertIn("secret_scan=ON", line)
-        self.assertIn("slop_detector=ON", line)
+        self.assertNotIn("slop_detector", line)
 
-    def test_fast_mode_reports_optional_gates_off_correctness_stays_on(self):
+    def test_fast_mode_does_not_change_correctness_gates(self):
         import harness_mode_state
         harness_mode_state.write_state("fast", root=self.root)
         line = execute._gate_summary_line(self.root)
         self.assertIn("stop_verify=ON", line)
         self.assertIn("secret_scan=ON", line)
-        self.assertIn("slop_detector=OFF", line)
+        self.assertNotIn("slop_detector", line)
 
     def test_step_pre_spawn_appends_gate_summary_to_preamble(self):
         (self.root / "phases" / "0-mvp").mkdir(parents=True, exist_ok=True)

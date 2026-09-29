@@ -23,49 +23,42 @@ DEFAULT_MATRIX: Dict[str, Dict[str, object]] = {
         "tdd-guard": False,
         "bash-guard": False,
         "secret-scan": "read-only",
-        "slop-detector": False,
         "stop-verify": False,
     },
     "plan": {
         "tdd-guard": False,
         "bash-guard": False,
         "secret-scan": False,
-        "slop-detector": False,
         "stop-verify": True,
     },
     "design": {
         "tdd-guard": False,
         "bash-guard": False,
         "secret-scan": False,
-        "slop-detector": False,
         "stop-verify": True,
     },
     "build": {
         "tdd-guard": True,
         "bash-guard": True,
         "secret-scan": True,
-        "slop-detector": True,
         "stop-verify": True,
     },
     "review": {
         "tdd-guard": False,
         "bash-guard": False,
         "secret-scan": True,
-        "slop-detector": True,
         "stop-verify": True,
     },
     "security": {
         "tdd-guard": False,
         "bash-guard": False,
         "secret-scan": True,
-        "slop-detector": True,
         "stop-verify": True,
     },
     "ship": {
         "tdd-guard": False,
         "bash-guard": False,
         "secret-scan": False,
-        "slop-detector": False,
         "stop-verify": True,
     },
 }
@@ -183,8 +176,8 @@ def is_hook_active(project_root: Path, stage: str, hook_name: str) -> bool:
     contract is restored. Without this, the regen would create the
     file with no `matrix` key, `stage-gate.sh` would stop fail-opening,
     and `is_hook_active` would return False for every stage, silently
-    disabling the five stage-gated hooks (`tdd-guard`, `bash-guard`,
-    `secret-scan`, `slop-detector`, `stop-verify`).
+    disabling the four stage-gated hooks (`tdd-guard`, `bash-guard`,
+    `secret-scan`, `stop-verify`).
     """
     data = load_matrix(project_root)
     if hook_name in data.get("override", {}).get("disabled_hooks", []):

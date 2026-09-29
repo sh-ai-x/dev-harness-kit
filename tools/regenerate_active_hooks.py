@@ -102,8 +102,8 @@ def _normalize_path(raw: str) -> str:
             -> `hooks/tdd-guard.sh`
         `${PLUGIN_ROOT}/hooks/worktree-guard.sh`
             -> `hooks/worktree-guard.sh`
-        `hooks/slop-detector.sh`
-            -> `hooks/slop-detector.sh` (no-op)
+        `hooks/secret-scan.sh`
+            -> `hooks/secret-scan.sh` (no-op)
         `DEV_KIT_AGENT=claude-code bash ${CLAUDE_PLUGIN_ROOT}/hooks/tdd-guard.sh`
             -> `hooks/tdd-guard.sh`
     """

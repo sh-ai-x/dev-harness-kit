@@ -108,7 +108,7 @@ class TestHooksStatus(unittest.TestCase):
             "UserPromptSubmit": {"worktree-auto-cut.sh"},
             "SessionStart": {"session-start.sh"},
             "PostToolUse": {
-                "secret-scan.sh", "slop-detector.sh",
+                "secret-scan.sh",
                 "worktree-log-auto-install.sh",
             },
             "Stop": {"stop-verify.sh", "worktree-session-cleanup.sh"},

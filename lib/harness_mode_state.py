@@ -53,7 +53,6 @@ CORRECTNESS_GATES = frozenset({
 # one of these to its "off" value in one shot; `full` (the default) leaves
 # them all at their "on" value.
 OPTIONAL_GATE_DEFAULTS = {
-    "slop_detector": {"full": "on", "fast": "off"},
     "pre_commit_review": {"full": "on", "fast": "off"},
     "maintenance": {"full": "on", "fast": "off"},
     "security_owasp": {"full": "full", "fast": "quick"},
@@ -95,11 +94,6 @@ GATE_CATEGORIES = {
         "description": "local security scan depth this session (full 10-dim / quick / off)",
     },
     # style (picker-offered)
-    "slop_detector": {
-        "type": "local_hook",
-        "category": "style",
-        "description": "KO+EN banned-phrase scan on every Write/Edit (slop-phrase detector; CI runs the same check)",
-    },
     "maintenance": {
         "type": "local_hook",
         "category": "style",

@@ -8,7 +8,7 @@ hook runs and its tests pass. In a bootstrapped checkout the file
 exists, the gate resolves the stage to `bootstrap`, and hooks that are
 off in that stage exit 0 silently — so the black-box hook tests assert
 against a hook that deliberately did nothing. 15 tests across
-test_slop_detector.py / test_l4_todo_scan.py flipped to failing purely
+test_l4_todo_scan.py / related hook tests flipped to failing purely
 because the developer had run bootstrap.
 
 The fix is `DEV_KIT_STAGE` in each hook test's env, which is why
@@ -35,8 +35,7 @@ HOOKS_INDEX = REPO_ROOT / "hooks" / "index.md"
 GATED_HOOKS = (
     "bash-guard",
     "secret-scan",
-    "slop-detector",
-    "stop-verify",
+        "stop-verify",
     "tdd-guard",
 )
 
@@ -232,12 +231,13 @@ class TestStageGateEnvOverride(unittest.TestCase):
                 json.dumps({"schema_version": 1, "events": {}}),
                 encoding="utf-8",
             )
-            # slop-detector is off in bootstrap, on in build.
+            # stop-verify is off in bootstrap, on in build
+            # (the previous probe used slop-detector before #941 removed it).
             self.assertEqual(
-                self._probe("bootstrap", "slop-detector", root), "INACTIVE"
+                self._probe("bootstrap", "stop-verify", root), "INACTIVE"
             )
             self.assertEqual(
-                self._probe("build", "slop-detector", root), "ACTIVE"
+                self._probe("build", "stop-verify", root), "ACTIVE"
             )
 
 

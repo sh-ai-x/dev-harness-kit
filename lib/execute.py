@@ -43,7 +43,6 @@ try:
         observe as _eff_observe,
     )
     from .git_worktree import cut_worktree  # type: ignore  # canonical helper (issue #310)
-    from .harness_mode_state import resolved_gate  # type: ignore  # workflow-fast-mode-lean gate resolution
     from .trace_log import append_event, new_event_id, now_utc  # type: ignore  # additive effectiveness evidence
 except ImportError:
     from atomic import atomic_write_json, now_iso  # noqa: E402
@@ -61,7 +60,6 @@ except ImportError:
         observe as _eff_observe,
     )
     from git_worktree import cut_worktree  # noqa: E402 — canonical helper (issue #310)
-    from harness_mode_state import resolved_gate  # noqa: E402 — workflow-fast-mode-lean gate resolution
     from trace_log import append_event, new_event_id, now_utc  # noqa: E402 — additive effectiveness evidence
 
 SCHEMA_VERSION = "1.0.0"
@@ -86,23 +84,17 @@ def _agent_timeout_seconds() -> int:
     return max(60, min(value, 24 * 60 * 60))
 
 
-def _gate_summary_line(root: Path) -> str:
+def _gate_summary_line(root: Path) -> str:  # noqa: ARG001 — root reserved for future gate resolution
     """One-line gate summary appended to every step preamble.
 
-    Tells the sub-agent which optional gates are off this session and
-    reiterates that correctness gates (stop_verify, secret_scan) are
-    non-negotiable regardless of mode.
-
-    ``root`` is the orchestrator's main checkout (where the SessionStart
-    hook writes `.dev-kit/harness-mode.session.json`), NOT the per-step
-    worktree — resolved_gate() must read the session-scoped file, not a
-    fresh per-step worktree that never saw the SessionStart reset.
+    Reiterates that correctness gates (stop_verify, secret_scan) are
+    non-negotiable regardless of mode. ``root`` is reserved for any
+    future gate-resolution lookup; no such lookup is needed today
+    because the only remaining gates are correctness-gated and always on.
     """
-    slop = resolved_gate("slop_detector", root)
     return (
-        f"Gates in effect: stop_verify=ON, secret_scan=ON, "
-        f"slop_detector={slop.upper()}. If stop_verify or "
-        f"secret_scan fires, treat it as a hard stop regardless of mode."
+        "Gates in effect: stop_verify=ON, secret_scan=ON. If stop_verify "
+        "or secret_scan fires, treat it as a hard stop regardless of mode."
     )
 
 

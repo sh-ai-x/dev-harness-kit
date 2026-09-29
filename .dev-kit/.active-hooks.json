@@ -26,12 +26,6 @@
         "when": "Write|Edit|MultiEdit"
       },
       {
-        "fail_closed": true,
-        "name": "slop-detector",
-        "path": "hooks/slop-detector.sh",
-        "when": "Write|Edit|MultiEdit"
-      },
-      {
         "fail_closed": false,
         "name": "worktree-log-auto-install",
         "path": "hooks/worktree-log-auto-install.sh",
@@ -157,8 +151,55 @@
       }
     ]
   },
-  "generated_at": "2026-09-29T20:33:24+00:00",
-  "matrix": {},
-  "override": {},
+  "generated_at": "2026-09-29T22:01:06+00:00",
+  "matrix": {
+    "bootstrap": {
+      "bash-guard": false,
+      "secret-scan": "read-only",
+      "stop-verify": false,
+      "tdd-guard": false
+    },
+    "build": {
+      "bash-guard": true,
+      "secret-scan": true,
+      "stop-verify": true,
+      "tdd-guard": true
+    },
+    "design": {
+      "bash-guard": false,
+      "secret-scan": false,
+      "stop-verify": true,
+      "tdd-guard": false
+    },
+    "plan": {
+      "bash-guard": false,
+      "secret-scan": false,
+      "stop-verify": true,
+      "tdd-guard": false
+    },
+    "review": {
+      "bash-guard": false,
+      "secret-scan": true,
+      "stop-verify": true,
+      "tdd-guard": false
+    },
+    "security": {
+      "bash-guard": false,
+      "secret-scan": true,
+      "stop-verify": true,
+      "tdd-guard": false
+    },
+    "ship": {
+      "bash-guard": false,
+      "secret-scan": false,
+      "stop-verify": true,
+      "tdd-guard": false
+    }
+  },
+  "override": {
+    "disabled_hooks": [],
+    "env_override": {},
+    "strict_mode": false
+  },
   "schema_version": "1.0.0"
 }

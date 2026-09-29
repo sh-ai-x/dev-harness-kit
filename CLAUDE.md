@@ -6,6 +6,8 @@
 > Minimal pointer document. Detailed content lives in the linked index files.
 > Read each linked file on demand; do not duplicate content here.
 
+READ HOOK Error Message. Don't Skip
+
 ---
 
 ## References
