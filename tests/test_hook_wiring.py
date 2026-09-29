@@ -27,7 +27,6 @@ HOOKS_JSONS = [
 EXPECTED_POSTTOOLUSE_WRITE_EDIT = {
     "secret-scan":     "Write|Edit|MultiEdit",
     "slop-detector":   "Write|Edit|MultiEdit",
-    "l4-todo-scan":    "Write|Edit|MultiEdit",
 }
 
 # Channel-level prompt-injection guards (iron-law L9). Wired under
@@ -108,39 +107,27 @@ class TestHookWiring(unittest.TestCase):
                             f"in {hooks_json.relative_to(ROOT)}; got matchers={[m for m, _ in flat]}",
                         )
 
-    def test_l4_todo_scan_hook_file_exists(self) -> None:
-        """Sanity check: the hook shell file referenced in hooks.json
-        actually exists under hooks/."""
+    def test_posttooluse_agent_injection_guard_only(self) -> None:
+        """Only `injection-content-guard.sh` is wired under PostToolUse:Agent
+        after the l4-todo-scan / sub-agent-handoff prune. Lint check:
+        make sure no stale sub-agent-handoff wiring crept back in."""
         for hooks_json in HOOKS_JSONS:
             if not hooks_json.exists():
                 self.skipTest(f"{hooks_json.relative_to(ROOT)} missing")
             with self.subTest(runtime=hooks_json.relative_to(ROOT).parts[0]):
                 cfg = self._load_hooks_cfg(hooks_json)
-                for entry in cfg.get("PostToolUse", []):
-                    if entry.get("matcher") != "Write|Edit|MultiEdit":
-                        continue
-                    for h in entry.get("hooks", []):
-                        cmd = h.get("command", "")
-                        if "l4-todo-scan" not in cmd:
-                            continue
-                        # Extract the path after bash ${...}
-                        if "${CLAUDE_PLUGIN_ROOT}" in cmd:
-                            root_var = "CLAUDE_PLUGIN_ROOT"
-                        elif "${PLUGIN_ROOT}" in cmd:
-                            root_var = "PLUGIN_ROOT"
-                        else:
-                            self.fail(f"unexpected root var in command: {cmd}")
-                        # The path component is literal here (relative to plugin root).
-                        path_part = cmd.split("$" + "{" + root_var + "}", 1)[1].strip()
-                        self.assertTrue(
-                            path_part.startswith("/hooks/"),
-                            msg=f"unexpected path part: {path_part!r}",
-                        )
-                        hook_path = ROOT / path_part.lstrip("/")
-                        self.assertTrue(
-                            hook_path.exists(),
-                            msg=f"hook file missing: {hook_path}",
-                        )
+                flat = [
+                    (entry.get("matcher", ""), h.get("command", ""))
+                    for entry in cfg.get("PostToolUse", [])
+                    for h in entry.get("hooks", [])
+                ]
+                for hook_name in ("sub-agent-handoff", "l4-todo-scan"):
+                    leaks = [cmd for matcher, cmd in flat if hook_name in cmd]
+                    self.assertEqual(
+                        leaks, [],
+                        f"{hook_name} should be pruned but appears in "
+                        f"{hooks_json.relative_to(ROOT)}: {leaks}",
+                    )
 
 
 if __name__ == "__main__":

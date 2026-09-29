@@ -98,7 +98,7 @@ GATE_CATEGORIES = {
     "slop_detector": {
         "type": "local_hook",
         "category": "style",
-        "description": "TODO/stub/placeholder markers on every Write/Edit (skipping defers to l4-todo-scan.sh + CI)",
+        "description": "KO+EN banned-phrase scan on every Write/Edit (slop-phrase detector; CI runs the same check)",
     },
     "maintenance": {
         "type": "local_hook",

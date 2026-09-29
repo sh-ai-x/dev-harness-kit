@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # find-python.sh — resolve the first available Python 3 interpreter
-# from {python3, python, py}. Shared by hooks/sub-agent-handoff.sh
-# and hooks/worktree-auto-cut.sh (post-extract) — the linear-fast-path
+# from {python3, python, py}. Sole runtime consumer after the PR 941
+# hook prune is hooks/worktree-auto-cut.sh — the linear-fast-path
 # helper (hooks/lib/linear-fast-path.sh) bakes this lookup into the
 # fast-path body directly.
 #

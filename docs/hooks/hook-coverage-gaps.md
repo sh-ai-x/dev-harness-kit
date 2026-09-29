@@ -28,7 +28,7 @@ wrong OR fails to fire):
 | 5 | force-push a feature branch | bash-guard.sh (advisory) + git-guard.sh (always-on for -f / --force) | partial -- force-with-lease allowed per spec | -- | -- |
 | 6 | SessionStart inside main checkout | session-start-check.sh | none | -- | -- |
 | 7 | SessionStart in a fresh worktree without dev-kit hooks | log-on-session-start.sh | none | -- | -- |
-| 8 | User .env:CI_REVIEW_PROVIDER is off the allowlist OR diverges from .env.example default | nothing | **MISSING** -- bin/set-provider.sh refuses off-list writes (T4) but a hand-edited .env with `CI_REVIEW_PROVIDER=openai` slips through silently. The CI review workflow then dispatches with the wrong / no provider. Companion gap: when the local value drifts from .env.example (a tracked template that documents the repo-wide default), there is no per-session reminder. | MEDIUM | New SessionStart hook hooks/provider-divergence-check.sh that emits additionalContext when (a) .env CI_REVIEW_PROVIDER is off-list OR (b) on-list but != .env.example. No mutation, no commit. (Original gap target referenced the now-deleted .github/ci-review-provider.txt; this row re-states for the post-#265 contract.) |
+| 8 | User .env:CI_REVIEW_PROVIDER is off the allowlist OR diverges from .env.example default | nothing | **MISSING** -- bin/set-provider.sh refuses off-list writes (T4) but a hand-edited .env with `CI_REVIEW_PROVIDER=openai` slips through silently. The CI review workflow then dispatches with the wrong / no provider. Companion gap: when the local value drifts from .env.example (a tracked template that documents the repo-wide default), there is no per-session reminder. [pruned 2026-09-30 in PR 941: the proposed `provider-divergence-check.sh` SessionStart hook was removed as redundant; `bin/set-provider.sh` is the operator's manual control surface (issue #230), and the `review.yml` CI gate is the authoritative drift check.] |
 | 9 | Write contains credential pattern | secret-scan.sh (PostToolUse, advisory) | none (intentional) | -- | -- |
 | 10 | Write contains LLM-tell | slop-detector.sh (PostToolUse, advisory) | none (intentional) | -- | -- |
 | 11 | Babysit-pr loop runs while a stale babysit.lock is on disk | nothing checks TTL/PID | **MISSING** -- SKILL.md lock-file protocol only checks `[ -f .dev-kit/babysit.lock ]`. SIGKILL / OOM / network-partition leaves the lock forever and every future babysit-pr exits 1 with "already running". | MEDIUM | Ship lib/babysit_pr_reliability.py::is_stale_lock(path, ttl_seconds=1800). SKILL.md recovery text references the helper. |
@@ -64,10 +64,7 @@ without anyone noticing until CI fails, and (b) the tracked template
 reminds an operator that their local value drifts from it. Both are
 silent failure paths today.
 
-**Fix**: new SessionStart hook
-hooks/provider-divergence-check.sh that (i) reads .env and .env.example
-via the same parser as bin/set-provider.sh, (ii) validates the local
-value against the allowlist, and (iii) compares against the .env.example
+**Fix**: [pruned 2026-09-30 in PR 941 — provider-divergence-check.sh was removed as redundant with bin/set-provider.sh (manual control surface) and review.yml CI drift gate.]
 default. Either mismatch emits a SessionStart additionalContext --
 never mutates either file. Regression tests in
 tests/test_provider_divergence_hook.py (failing-before the hook,

@@ -14,7 +14,7 @@
 #
 # Both matchers are PostToolUse (cannot block — the tool has already
 # executed), so this hook emits a plain-stderr advisory in the same
-# pattern as sub-agent-handoff.sh / slop-detector.sh. The strict mode
+# pattern as slop-detector.sh. The strict mode
 # is a signal to the harness, not a real enforcement boundary.
 #
 # Fail-CLOSED only when `python3` is missing (exit 2 — the rule

@@ -46,7 +46,6 @@ DEFAULT_MATRIX: Dict[str, Dict[str, object]] = {
         "secret-scan": True,
         "slop-detector": True,
         "stop-verify": True,
-        "l4-todo-scan": True,
     },
     "review": {
         "tdd-guard": False,
@@ -54,7 +53,6 @@ DEFAULT_MATRIX: Dict[str, Dict[str, object]] = {
         "secret-scan": True,
         "slop-detector": True,
         "stop-verify": True,
-        "l4-todo-scan": True,
     },
     "security": {
         "tdd-guard": False,
@@ -62,7 +60,6 @@ DEFAULT_MATRIX: Dict[str, Dict[str, object]] = {
         "secret-scan": True,
         "slop-detector": True,
         "stop-verify": True,
-        "l4-todo-scan": True,
     },
     "ship": {
         "tdd-guard": False,
