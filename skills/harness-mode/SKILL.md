@@ -72,7 +72,7 @@ gates CI re-checks anyway).
 
 | Question | Options |
 |---|---|
-| Run the **slop-detector** local hook on each write? | Keep it ON (Recommended) / Skip locally (CI l4-todo-scan re-runs) |
+| Run the **slop-detector** local hook on each write? | Keep it ON (Recommended) / Skip locally (CI slop-detector + review gate re-runs) |
 | Run the **pre-commit codex:review** local hook before each commit? | Keep it ON (Recommended) / Skip locally (no CI equivalent) |
 
 **Call 2:**

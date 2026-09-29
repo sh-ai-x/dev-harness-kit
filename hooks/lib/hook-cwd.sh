@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # hook-cwd.sh — extract the effective working directory from the hook
-# payload. Shared by 9 hooks (session-start-check, worktree-janitor-
+# payload. Shared by 7 hooks (session-start-check, worktree-janitor-
 # session-start, worktree-auto-cut, worktree-session-cleanup,
 # log-on-session-start, acp-tier-assert, linear-session-start,
-# linear-task-change, provider-divergence-check) that previously
-# copy-pasted the same 3-line `HOOK_CWD=... && cd ...` block.
+# linear-task-change) that previously copy-pasted the same 3-line
+# `HOOK_CWD=... && cd ...` block. (`provider-divergence-check` was
+# one of the 9 before it was pruned in PR 941.)
 #
 # Extracted by inspect-pass4 (finding p10-p18, 2026-09-23) to
 # eliminate the 9-copy duplication. The contract is:
@@ -19,8 +20,7 @@
 #   - Does NOT cd. The caller decides the failure mode:
 #       cd "$HOOK_CWD" || exit 0   # SessionStart / UserPromptSubmit / Stop
 #       cd "$HOOK_CWD" || true     # advisory hooks that tolerate failure
-#       # or just inspect HOOK_CWD before deciding (acp-tier-assert,
-#       # provider-divergence-check).
+#       # or just inspect HOOK_CWD before deciding (acp-tier-assert).
 #
 # Usage:
 #   source "${BASH_SOURCE[0]%/*}/lib/hook-cwd.sh"

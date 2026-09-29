@@ -25,7 +25,6 @@ wrappers) so they match under Python `re` without locale-dependent collation.
 
 | File | Format | Loaded by | Fallback |
 |---|---|---|---|
-| `l4/markers.md` | POSIX ERE bank | `hooks/l4-todo-scan.sh` (and `lib/ci_setup.py` for marker sanity) | None — hook fails closed on missing bank |
 | `slop/phrases.md` | POSIX ERE bank | `hooks/slop-detector.sh` (T1), `skills/inspect --slop` (T1) | Inline v1 single regex (degraded; hook prints `WARN: references/slop/... not loaded`) |
 | `slop/structures.md` | POSIX ERE bank | `hooks/slop-detector.sh` (T2), `skills/inspect --slop` (T2) | Inline v1 single regex (same `WARN`) |
 | `slop/scoring.md` | plain markdown, no machine-parsed lines | `skills/inspect --slop` (1-10 × 5-dim rubric) | None |
@@ -52,7 +51,7 @@ README; this file is the per-directory index.
 - `docs/hooks/HOOK-REFERENCE.md` — full hook inventory (by what each guards
   + by the event that fires it). Each pattern bank is listed in the
   consuming hook's row.
-- `hooks/slop-detector.sh` and `hooks/l4-todo-scan.sh` — the consumers.
+- `hooks/slop-detector.sh` — the sole live consumer.
 - `tests/fixtures/slop/` — real before/after fixtures for the slop
   detector (distinct from `hooks/references/slop/examples.md`, which is the
   human-reference copy).
