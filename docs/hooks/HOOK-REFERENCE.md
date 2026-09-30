@@ -29,7 +29,6 @@ per-runtime wiring differences), see
 | `bash-guard` | Two-tier destructive-command block. Tier 1 (catastrophic: `rm -rf /`, `curl\|sh`, `mkfs.*`, `npm publish`, `kubectl delete namespace`, `terraform destroy -auto-approve`, guard self-disable) denies unconditionally in every stage. Tier 2 (recoverable: `git reset --hard`, force-push, `DROP TABLE`, `docker system prune`) is advisory unless `DEV_KIT_STRICT=1` | Tier 1 all / Tier 2 Build |
 | `destructive-confirm` | Ask-tier human confirmation (`permissionDecision: "ask"`) on credential-file writes, bare `git worktree remove`, `--force-with-lease`, and first `git push -u`. Opt out via `DEV_KIT_NO_CONFIRM=1`; the babysit loops additionally set session-scoped `push_confirm=off` for both push asks | All |
 | `secret-scan` | Redacts credential patterns in tool inputs | All |
-| `slop-detector` | Catches AI-typical patterns across phrase + structure banks (KO+EN) | Build + Review + Security |
 | `worktree-guard` | Hard-blocks Edit/Write in the main checkout; on deny, prints the live worktree list via `git worktree list --porcelain` | All |
 | `git-guard` | Enforces branch strategy: blocks commit/push to main, force-push, `gh pr merge`; verifies `plugin.json` slot on `git push` to a feature branch (slot check extracted to `hooks/lib/slot-check.sh` for unit-testable truth table — see *Shared helpers* below). Prefers the PreToolUse payload's `.cwd` over the hook process cwd so hook runners whose process cwd is in a worktree still target the parent session checkout | All |
 | `worktree-auto-cut` | Creates the per-task worktree + branch | All |
@@ -43,7 +42,7 @@ per-runtime wiring differences), see
 The same hooks, indexed by the Claude Code / Codex event that fires them —
 useful when you're debugging *why* a hook did or didn't run:
 
-The manifests register 25 command entries per runtime (was 27 before
+The manifests register 24 command entries per runtime (was 27 before
 PR 941's hook prune). SessionStart has one registered command,
 `session-start.sh`; it fans out to independently testable child modules
 and returns one combined advisory envelope. This trims registration
@@ -71,7 +70,6 @@ overhead without removing any retained SessionStart behavior.
 | `linear-session-start.sh` (child) | SessionStart via `session-start.sh` | Sync a Linear-configured worktree at session start | advisory |
 | `worktree-janitor-session-start.sh` (child) | SessionStart via `session-start.sh` | Nudge when merged-into-main or stale `fix/classify-request-*` worktrees are present; opt-out via `DEV_KIT_JANITOR_OFF=1` (issue #717). Optional auto-apply when `DEV_KIT_JANITOR_AUTO_PRUNE=1` *and* `DEV_KIT_JANITOR_AUTO_PRUNE_YES=1` are exported (capped at `DEV_KIT_JANITOR_AUTO_PRUNE_MAX`, default 50/session) — restricted to stale-classify predicate only, skips current + main worktree, requires clean `git status`, drops `--force`. Audit log at `.dev-kit/janitor-audit.log`. | advisory |
 | `secret-scan.sh` | PostToolUse (Write\|Edit) | Detect credentials in edits | hard-block |
-| `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
 | `worktree-log-auto-install.sh` | PostToolUse (Bash) | Install loghooks into a newly-added worktree | advisory |
 | `context-window-guard.sh` | UserPromptSubmit | Stderr tiered WARN at 100K / 200K / 300K cumulative input tokens recommending `/compact` | advisory (fails open) |
 | `acp-tier-assert.sh` | PreToolUse (`*`) | Enforce ACP agent tier-assertion line on first tool call (M/T/L) | hard-block |
@@ -104,7 +102,7 @@ inside a PreToolUse shell script). Each helper carries its own
 
 ## Reference data banks (`hooks/references/`)
 
-`slop-detector.sh` loads its detection patterns from runtime data files
+The hooks above load their detection patterns from runtime data files
 under [`hooks/references/`](../../hooks/references/) instead of inlining
 EREs in shell. Despite the `.md` extension, those files are
 **machine-readable data**, not user-facing docs — the top-level
@@ -112,15 +110,11 @@ EREs in shell. Despite the `.md` extension, those files are
 the loader contract (POSIX ERE, line-delimited, `#` comments skipped) and
 which consumer reads which bank.
 
-| Bank | Consumer | Purpose | Fallback |
-|---|---|---|---|
-| `hooks/references/slop/phrases.md` | `slop-detector.sh` (T1) + `inspect --slop` | High-signal n-gram bank (KO + EN) | Inline v1 single regex (degraded; WARN printed) |
-| `hooks/references/slop/structures.md` | `slop-detector.sh` (T2) + `inspect --slop` | Structural regex bank (binary contrast, false agency, Wh-starters, KO structure) | Inline v1 single regex |
-| `hooks/references/slop/scoring.md` | `inspect --slop` (only) | 1-10 × 5-dim rubric (Directness / Rhythm / Trust / Authenticity / Density) | None |
-| `hooks/references/slop/examples.md` | `inspect --slop` (reference only) | Before/after fixtures for human reviewers; real fixtures live in `tests/fixtures/slop/` | None |
-
-`hooks/references/slop/README.md` is the per-bank README (severity tier,
-`SLOP_LEVEL` / `SLOP_QUIET` / `SLOP_STRICT` env vars, fallback contract).
+> Removed 2026-09-30 (PR 944): the `hooks/references/slop/` directory
+> (phrases.md / structures.md / scoring.md / examples.md / README.md)
+> was tied to the removed `slop-detector.sh` hook. The `inspect --slop`
+> dimension still lives in `lib/analysis_core/dimensions.py` as an
+> LLM-judge surface, with no on-disk data bank.
 
 ---
 
@@ -132,7 +126,7 @@ slices, namespace-separated by top-level key. Issue #676 originally
 shipped the regen tool writing a single payload that clobbered the
 codec's `matrix` slice on every SessionStart, which silently turned
 off the stage-gated hooks (`tdd-guard`, `bash-guard`, `secret-scan`,
-`slop-detector`, `stop-verify`, `pre_completion_checklist`). The
+`stop-verify`, `pre_completion_checklist`). The
 current schema is two-slice:
 
 | Top-level key | Owner | Shape | Purpose |
@@ -169,7 +163,7 @@ the codec matrix (stage-keyed) answer different questions:
 pins the contract — ensure_matrix → regen → regen keeps the matrix
 slice byte-equal; regen → ensure_matrix → set_stage keeps the events
 slice byte-equal; the stage-gated hooks (`tdd-guard`, `bash-guard`,
-`secret-scan`, `slop-detector`, `stop-verify`) stay active after
+`secret-scan`, `stop-verify`) stay active after
 every transition.
 
 ## See also
