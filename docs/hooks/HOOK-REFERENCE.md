@@ -114,13 +114,12 @@ which consumer reads which bank.
 
 | Bank | Consumer | Purpose | Fallback |
 |---|---|---|---|
-| `hooks/references/slop/phrases.md` | `slop-detector.sh` (T1) + `inspect --slop` | High-signal n-gram bank (KO + EN) | Inline v1 single regex (degraded; WARN printed) |
-| `hooks/references/slop/structures.md` | `slop-detector.sh` (T2) + `inspect --slop` | Structural regex bank (binary contrast, false agency, Wh-starters, KO structure) | Inline v1 single regex |
-| `hooks/references/slop/scoring.md` | `inspect --slop` (only) | 1-10 × 5-dim rubric (Directness / Rhythm / Trust / Authenticity / Density) | None |
-| `hooks/references/slop/examples.md` | `inspect --slop` (reference only) | Before/after fixtures for human reviewers; real fixtures live in `tests/fixtures/slop/` | None |
+| *(none — the slop regex banks were replaced by `eval/prompts/judge-slop.md` in v3; new banks land here only when a hook needs data the LLM can't generate)* | | | |
 
-`hooks/references/slop/README.md` is the per-bank README (severity tier,
-`SLOP_LEVEL` / `SLOP_QUIET` / `SLOP_STRICT` env vars, fallback contract).
+v3 `slop-detector.sh` consumes the `slop` dim of `lib/llm_judge.py`
+(prompt at `eval/prompts/judge-slop.md`) instead of regex tiers — the
+regex bank drifted silently with model improvements, the LLM judge
+stays aligned without per-bank curation.
 
 ---
 

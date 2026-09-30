@@ -12,7 +12,7 @@ dev-harness-kit/
 ├── .codex-plugin/    # plugin.json + bundled hooks (Codex manifest)
 ├── skills/           # one SKILL.md per user-facing / internal skill
 │   └── README.md     # canonical human-readable index of all skills
-├── hooks/            # hook scripts + lib/ + hooks.json + references/slop/
+├── hooks/            # hook scripts + lib/ + hooks.json + references/ (currently empty; v3 slop detector is LLM-driven)
 ├── lib/              # Python engine (state, execute, ci_setup, eval, cost_gate, …)
 ├── bin/              # devkit-refresh.sh + set-provider.sh + dev-kit-* status scripts
 ├── tools/            # save_log.py + analyzer + cost-gate + session/skill telemetry

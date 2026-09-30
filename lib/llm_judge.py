@@ -122,6 +122,13 @@ DIM_AXES: Dict[str, Tuple[str, ...]] = {
         "confidence",
         "risk_level",
     ),
+    # Phase 9 (refactor/slop-detector-llm-judge): single-axis LLM
+    # judgment that replaces the v2 regex tier ladder. Higher = cleaner
+    # prose (less AI slop). Hook maps the score to severity:
+    #   ≥8 OK (silent), ≥5 LOW, ≥2 MEDIUM, <2 HIGH.
+    "slop": (
+        "slop_score",
+    ),
 }
 
 # Per-dim score range. Most dims are 0-10 (higher = better, with the
