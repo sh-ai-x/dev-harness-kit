@@ -97,14 +97,20 @@ class TemplateContract(unittest.TestCase):
                 f"canonical template is missing mandatory placeholder {placeholder}",
             )
 
-    def test_tier_assert_literal_present(self) -> None:
+    def test_template_contains_tier_assert_literal(self) -> None:
         # Closes the prompt-template half of the tier-cognition
         # contract (docs/architecture/acp-harness.md §2.2 + §2.3). If
         # a future refactor drops the literal, this fails before any
-        # dispatched T can be tempted to skip it.
+        # dispatched T can be tempted to skip it. The public name is
+        # pinned by docs/architecture/ACP-DISPATCH.md §6.
         self.assertIn(TIER_ASSERT_LITERAL, self.body, "canonical template missing tier-assert literal")
 
-    def test_tier_done_literal_present(self) -> None:
+    def test_template_contains_tier_done_literal(self) -> None:
+        # Companion to tier-assert: the done-condition marker from §2
+        # of acp-harness.md. Same rationale — the template must carry
+        # the literal so a dispatched T knows when to stop. Pinned by
+        # the same docs §6 row.
+        self.assertIn(TIER_DONE_LITERAL, self.body, "canonical template missing tier-done literal")
         # Companion to tier-assert: the done-condition marker from §2
         # of acp-harness.md. Same rationale — the template must carry
         # the literal so a dispatched T knows when to stop.

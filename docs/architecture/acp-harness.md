@@ -66,7 +66,7 @@ There is **no runtime tier-assertion hook** in this protocol. Earlier designs sh
 1. **Prompt-template contract** — `lib/sub-agent-prompt.md` is the canonical template; `tests/test_acp_hand_off.py` refuses any dispatch that drops the literal `[tier-assert] I am Tier` template line.
 2. **Worktree discipline** — `hooks/worktree-guard.sh` (orch-branch isolation; see §9 Related) prevents out-of-scope operations by blocking edits from non-orch checkouts. The orchestrator M cannot accidentally cross a tier boundary because its session is locked to its orch branch.
 
-If a future round finds a real violation that prompt-template + worktree-discipline cannot catch (audit trail in `.dev-kit/round-*/tier-state/*.json` or downstream consumer reports), the right move is to add a new contract here rather than re-add the runtime hook. See `docs/architecture/ACP-DISPATCH.md` §2.3 (the deprecated Tier sentinel section) for the deleted-hook rationale.
+If a future round finds a real violation that prompt-template + worktree-discipline cannot catch, the right move is to add a new contract here rather than re-add the runtime hook. Audit paths that still work: `git worktree list` against the dispatched T's branch, and parsing the envelope's `<WORKTREE_PATH>` / `<PARENT_SESSION_CWD>` placeholders (see `docs/architecture/ACP-DISPATCH.md` §2.3 for the deprecated Tier-sentinel audit path that no longer applies).
 
 ## 3. Hand-off format
 

@@ -213,8 +213,10 @@ Row 1 is now prompt-template-only (the runtime hook was removed by C-decision, s
 
 ## 7. Out of scope
 
-- **`lib/acp_hand_off.py`** — the hand-off lint (`tests/test_acp_hand_off.py`)
-  is a sibling PR (T3 in the thin-harness round).
+- **Hand-off lint** — `tests/test_acp_hand_off.py` is a sibling PR
+  (T3 in the thin-harness round) that asserts the canonical-template
+  contract on `lib/sub-agent-prompt.md`. The implementation that
+  fills the template is the dispatcher itself (`lib/acp_dispatch.py`).
 - **`bin/version-slot`** — extracted into a separate PR; the dispatcher
   accepts the pre-computed value via `--plugin-version-target`.
 - **`hooks/acp-cwd-discipline.sh`** — sibling PR; the dispatcher's
