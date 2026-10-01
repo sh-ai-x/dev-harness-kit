@@ -27,7 +27,7 @@ contract pinned here.
 | 1 | Sub-agent `cwd` is the parent session's main checkout, not the worktree. "Reuse this worktree" hints are not propagated; hooks trip and the agent runs from `main`. | Dispatch prompt carries no `<WORKTREE_PATH>` and no `<PARENT_SESSION_CWD>`; the child has no way to know the parent's cwd was wrong. | §3 hand-off template (mandatory placeholders) + §5 cwd-discipline hook |
 | 2 | Parallel branches see the same `origin/main` HEAD and each auto-bumps `+1` from it → identical `plugin.json` versions on multiple branches (slot collision). | The "+1" auto-bump is local; no allocator allocates slots across parallel branches. | §4 version-slot allocator |
 | 3 | After an agent finishes, a follow-up dispatch fires automatically ("next PR") — the user did not ask for it. | The dispatcher is event-driven, not user-gated. | §2 tier-cognition (T must stop and assert done; M decides next dispatch) |
-| 4 | Agents forget whether they are M / T / L and try out-of-scope operations (commit, push, source-file edits). | The role is implicit; nothing in the dispatch prompt makes it explicit. | §2 tier-cognition (prompt template declares M/T/L + ownership sentence) + §5 orch-branch isolation already in `worktree-guard.sh` |
+| 4 | Agents forget whether they are M / T / L and try out-of-scope operations (commit, push, source-file edits). | The role is implicit; nothing in the dispatch prompt makes it explicit. | §2 tier-cognition (prompt template declares M/T/L + ownership sentence); runtime backstop is `hooks/worktree-guard.sh` (see §9 Related) |
 | 5 | Six bash-heredoc bypass patterns accumulate because the hook chain reads session cwd, not file-path. | Hooks scope by cwd, not by resolved-file-path. | §5 cwd-discipline hook scopes by `git -C <path> symbolic-ref --short HEAD` resolved from the file_path the tool is touching |
 
 ## 2. Tier-cognition contract
@@ -64,9 +64,9 @@ The tier-cognition literal in §2.2 is a **prompt-template contract**, enforced 
 There is **no runtime tier-assertion hook** in this protocol. Earlier designs shipped `hooks/acp-tier-assert.sh` as a PreToolUse lint; that hook and its regression test were removed by the C-decision lateral_think (2026-10) because the per-tool-call hook fires on a per-session invariant, the `matcher: "*"` shadowed other plugins' matchers in pstack coexistence, and the three scan-path fallbacks (`transcript` / `prompt` / `cwd`) were defensive over-engineering for a literal-string match. Enforcement now lives at two complementary layers:
 
 1. **Prompt-template contract** — `lib/sub-agent-prompt.md` is the canonical template; `tests/test_acp_hand_off.py` refuses any dispatch that drops the literal `[tier-assert] I am Tier` template line.
-2. **Worktree discipline** — `hooks/worktree-guard.sh` (orch-branch isolation; §5 row #4 in the symptom table) prevents out-of-scope operations by blocking edits from non-orch checkouts. The orchestrator M cannot accidentally cross a tier boundary because its session is locked to its orch branch.
+2. **Worktree discipline** — `hooks/worktree-guard.sh` (orch-branch isolation; see §9 Related) prevents out-of-scope operations by blocking edits from non-orch checkouts. The orchestrator M cannot accidentally cross a tier boundary because its session is locked to its orch branch.
 
-If a future round finds a real violation that prompt-template + worktree-discipline cannot catch (audit trail in `.dev-kit/round-*/tier-state/*.json` or downstream consumer reports), the right move is to add a new contract here rather than re-add the runtime hook. See `docs/architecture/ACP-DISPATCH.md` §3 for the deleted-hook rationale.
+If a future round finds a real violation that prompt-template + worktree-discipline cannot catch (audit trail in `.dev-kit/round-*/tier-state/*.json` or downstream consumer reports), the right move is to add a new contract here rather than re-add the runtime hook. See `docs/architecture/ACP-DISPATCH.md` §2.3 (the deprecated Tier sentinel section) for the deleted-hook rationale.
 
 ## 3. Hand-off format
 
