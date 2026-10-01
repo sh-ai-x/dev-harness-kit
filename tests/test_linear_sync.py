@@ -2222,5 +2222,136 @@ class TestCleanupDoneCandidates(unittest.TestCase):
                              "fresh issues must be skipped when older_than_days > 0")
 
 
+class TestPermanentOffLock(unittest.TestCase):
+    """Regression tests for issue #950: hard-lock Linear auto-sync so an
+    AI-initiated `linear on` cannot silently re-enable it after the
+    operator has chosen to keep it off. The lock is enforced at two
+    layers: the CLI (`linear on` refuses with rc=2 when permanent_off
+    is true) and the activation gate (`_enabled()` returns False even
+    if `enabled=true` and the API key is present).
+    """
+
+    def _run_in_temp_repo(self, initial_config: dict, argv: list[str]) -> tuple[int, str, dict]:
+        """Spawn `linear_sync.main(argv)` against a temp repo with `_repo_root` mocked.
+
+        Returns (rc, captured_stdout_text, final_config_dict). Mirrors the
+        hermetic subprocess boundary via in-process mocks, so the project's
+        real `.dev-kit/linear-config.json` is never touched.
+        """
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "wt"
+            repo.mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit").mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit" / "hand-off" / "linear").mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit" / "linear-config.json").write_text(
+                json.dumps(initial_config), encoding="utf-8")
+            env = {"HOME": str(repo), "PATH": os.environ.get("PATH", "")}
+            buf = StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(linear_sync, "_repo_root", return_value=repo), \
+                 mock.patch("sys.stdout", buf):
+                rc = linear_sync.main(argv)
+            final_cfg = json.loads(
+                (repo / ".dev-kit" / "linear-config.json").read_text())
+            return rc, buf.getvalue(), final_cfg
+
+    def test_lock_sets_permanent_off_and_disables(self):
+        rc, _, cfg = self._run_in_temp_repo(
+            {"enabled": True}, ["lock"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(cfg["permanent_off"], "lock must set permanent_off=true")
+        self.assertFalse(cfg["enabled"], "lock must set enabled=false")
+
+    def test_lock_preserves_unrelated_operator_settings(self):
+        rc, _, cfg = self._run_in_temp_repo(
+            {"enabled": True, "project_name": "Team Alpha", "team_id": "team-x"},
+            ["lock"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(cfg["project_name"], "Team Alpha",
+                         "lock must preserve project_name")
+        self.assertEqual(cfg["team_id"], "team-x",
+                         "lock must preserve team_id")
+
+    def test_on_refuses_when_permanent_off_is_set(self):
+        rc, _, cfg = self._run_in_temp_repo(
+            {"enabled": False, "permanent_off": True, "project_name": "dev-harness-kit"},
+            ["on"])
+        self.assertEqual(rc, 2,
+                         "on must exit 2 when permanent_off is set (#950)")
+        self.assertTrue(cfg["permanent_off"], "lock must survive a refused on")
+        self.assertFalse(cfg["enabled"], "on must not flip enabled when permanent_off is set")
+
+    def test_unlock_clears_permanent_off(self):
+        rc, _, cfg = self._run_in_temp_repo(
+            {"enabled": False, "permanent_off": True},
+            ["unlock"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(cfg["permanent_off"], "unlock must clear permanent_off")
+        self.assertFalse(cfg["enabled"], "unlock must not change enabled")
+
+    def test_unlock_when_already_unlocked_is_noop(self):
+        rc, _, _ = self._run_in_temp_repo(
+            {"enabled": True, "permanent_off": False},
+            ["unlock"])
+        self.assertEqual(rc, 0)
+
+    def test_on_succeeds_after_unlock(self):
+        # Step 1: lock. Step 2: unlock. Step 3: on.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "wt"
+            repo.mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit").mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit" / "hand-off" / "linear").mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit" / "linear-config.json").write_text(json.dumps(
+                {"enabled": False, "permanent_off": True}))
+            env = {"HOME": str(repo), "PATH": os.environ.get("PATH", "")}
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(linear_sync, "_repo_root", return_value=repo):
+                rc_lock = linear_sync.main(["unlock"])
+                rc_on = linear_sync.main(["on"])
+            self.assertEqual(rc_lock, 0)
+            self.assertEqual(rc_on, 0,
+                             "on must succeed after unlock (#950 AC)")
+            cfg = json.loads((repo / ".dev-kit" / "linear-config.json").read_text())
+            self.assertTrue(cfg["enabled"], "on must set enabled=true after unlock")
+            self.assertFalse(cfg["permanent_off"], "permanent_off stays false after unlock")
+
+    def test_enabled_returns_false_when_permanent_off(self):
+        """The activation gate must respect permanent_off even when
+        enabled=true and the API key is reachable.
+        """
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config={"enabled": True, "permanent_off": True}):
+            self.assertFalse(linear_sync._enabled(),
+                             "_enabled() must return False when permanent_off=true")
+
+    def test_enabled_returns_true_when_unlocked_and_enabled(self):
+        with _fake_repo(linear_api_key="test-key",
+                        linear_config={"enabled": True, "permanent_off": False}):
+            self.assertTrue(linear_sync._enabled())
+
+    def test_status_includes_permanent_off_field(self):
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "wt"
+            repo.mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit").mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit" / "hand-off" / "linear").mkdir(parents=True, exist_ok=True)
+            (repo / ".dev-kit" / "linear-config.json").write_text(json.dumps(
+                {"enabled": False, "permanent_off": True}))
+            env = {"HOME": str(repo), "PATH": os.environ.get("PATH", "")}
+            buf = StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(linear_sync, "_repo_root", return_value=repo), \
+                 mock.patch("sys.stdout", buf):
+                rc = linear_sync.main(["status"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["permanent_off"],
+                            "status must surface permanent_off at top level")
+            self.assertTrue(payload["config"]["permanent_off"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
