@@ -20,5 +20,6 @@
     "ax",
     "harness"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "agents": "./agents/"
 }

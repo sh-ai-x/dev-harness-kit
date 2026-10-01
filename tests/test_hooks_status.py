@@ -109,7 +109,6 @@ class TestHooksStatus(unittest.TestCase):
             "SessionStart": {"session-start.sh"},
             "PostToolUse": {
                 "secret-scan.sh", "slop-detector.sh",
-                "worktree-log-auto-install.sh",
             },
             "Stop": {"stop-verify.sh", "worktree-session-cleanup.sh"},
         }
