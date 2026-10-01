@@ -205,6 +205,7 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 | Command | What it does |
 |---|---|
 | [`/dev-kit:ralph`](skills/ralph/SKILL.md) | Single slash that takes a 1-line idea through 4 user-approval gates (research → proposal → plan → ship-confirm) and then runs build/babysit-pr/ship **unattended** (`attended_lock` is a state-machine invariant that forbids AskUserQuestion mid-run). Linear is OUT OF SCOPE. Each gate supports Approve / Edit-then-approve (rewinds to that gate) / Abort. |
+| [`/dev-kit:archify`](skills/archify/SKILL.md) | 0-arg diagram chain — dispatches to the global `archify` skill (validate+deliver+check+browser-check owned by the global skill) for workflow / sequence / dataflow / lifecycle / architecture visualizations in front of an autonomous loop. Mirrors harness-lite flow-feature pattern. |
 
 ### Getting a PR over the line
 
