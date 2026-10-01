@@ -25,7 +25,6 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 CHILDREN=(
   session-start-check.sh
-  log-on-session-start.sh
   linear-session-start.sh
   worktree-janitor-session-start.sh
   session-start-harness-mode-reset.sh

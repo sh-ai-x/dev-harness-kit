@@ -134,11 +134,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/worktree-log-auto-install.sh",
-            "fail_closed": false
-          },
-          {
-            "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/linear-worktree-create.sh",
             "fail_closed": false
           }
