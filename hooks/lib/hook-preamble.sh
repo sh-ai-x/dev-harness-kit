@@ -57,7 +57,7 @@ fi
 # Populate $WORKTREE_DETECT. When jq is missing this returns 1 and
 # leaves $WORKTREE_DETECT="" — the hook body's existing `case "$WORKTREE_DETECT" in`
 # statements already handle "" as "silent / no-op", so this is safe
-# for advisory hooks. Hard-block hooks (worktree-guard.sh,
-# acp-tier-assert.sh) MUST still check `command -v jq` and fail closed
-# before relying on the discriminator.
+# for advisory hooks. The hard-block hook (worktree-guard.sh) MUST
+# still check `command -v jq` and fail closed before relying on the
+# discriminator.
 worktree_detect

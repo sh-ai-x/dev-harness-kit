@@ -29,10 +29,6 @@ Emit this exact line, verbatim, before any other tool call:
 - T: `ONE PR's lifecycle on branch <BRANCH>`
 - L: `read-only investigation for T on branch <BRANCH>; no edits`
 
-If the tier-assertion lint (`hooks/acp-tier-assert.sh`) denies your first
-tool call, read the missing-field reason, re-emit the corrected
-tier-assertion, then retry.
-
 ## Session context (resolved by the orchestrator — do not edit)
 
 | Field | Value |

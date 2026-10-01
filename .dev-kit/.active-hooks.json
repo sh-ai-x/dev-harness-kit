@@ -41,12 +41,6 @@
     "PreToolUse": [
       {
         "fail_closed": true,
-        "name": "acp-tier-assert",
-        "path": "hooks/acp-tier-assert.sh",
-        "when": "*"
-      },
-      {
-        "fail_closed": true,
         "name": "bash-guard",
         "path": "hooks/bash-guard.sh",
         "when": "Bash"

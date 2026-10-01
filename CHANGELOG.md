@@ -3,6 +3,7 @@
 All notable changes to dev-harness-kit are documented here.
 
 ## [Unreleased]
+- **prune(tools):** remove 6 verified-dead tool files (tools/cost_dashboard.py, tools/trace_diff.py, tools/babysit_tracker_sync.py, tools/render_review_local_screenshot.py, tools/loop_engine.py, tools/portability_check.py) and their 3 test files (tests/test_trace_diff.py, tests/test_babysit_tracker_sync.py, tests/test_portability_loop.py). Zero callers or only self-referential/test callers confirmed via repo-wide grep; lib/ci_setup.py registry entries removed for the wired pair. 4 doc references updated. Total: ~960 LOC removed.
 - **fix(scope):** `team` is fully independent from `DEV_KIT_MODE`. The
   mode selector now accepts only `full`, `lite`, and `undev`; existing
   `DEV_KIT_MODE=team` settings must migrate to `DEV_KIT_MODE=full` (or

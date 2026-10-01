@@ -94,7 +94,7 @@ The screenshot shows the three gate dots (review / security /
 maintenance) and the live stdout below. The header banner makes the
 "read-only" contract explicit; there is intentionally no Start / Stop
 button visible. To regenerate after HTML changes, run
-`tools/render_review_local_screenshot.py` (a Playwright capture script).
+`chrome --headless --screenshot=tools/review-local-preview.png file://$PWD/review-local.html`.
 
 ## Safety properties
 

@@ -122,8 +122,7 @@ Wired into all four manifests — `hooks/hooks.json` (plugin),
 `.codex/hooks.json` (Codex Stop), `.codex-plugin/hooks/hooks.json`
 (Codex plugin mirror). Sibling-hook additions, no existing hooks
 touched; portability parity with the Codex mirror is enforced by
-`tools/portability_check.py` (hard contract — `test_portability_loop.py`
-regression).
+`tests/test_hooks_json_parity.py` (regression).
 
 The `_subject_observability` submetric in `lib/harness_effectiveness.py`
 symmetric-ratios `|started ∩ terminal| / |started ∪ terminal|` so
