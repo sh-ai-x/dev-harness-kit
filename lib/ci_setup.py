@@ -150,8 +150,6 @@ WORKFLOWS: dict[str, dict[str, list[str]]] = {
             "tools/skill_usage.py",
             "tools/skill_usage_normalize.py",
             "tools/skill_usage_render.py",
-            "tools/portability_check.py",
-            "tools/loop_engine.py",
             # /dev-kit:babysit-pr-local entrypoints (issue #619).
             "bin/babysit-pr-local.sh",
             "bin/review-local.sh",
@@ -181,8 +179,6 @@ WORKFLOWS: dict[str, dict[str, list[str]]] = {
             "scripts/extract-verdict.py",
             "scripts/validate.py",
             "tools/skill_usage.py",
-            "tools/portability_check.py",
-            "tools/loop_engine.py",
             # /dev-kit:babysit-pr-local entrypoints (issue #619) — must be
             # +x so the consumer can invoke them by relative path from
             # anywhere (cwd-independent, per bin/review-local.sh's
@@ -955,8 +951,6 @@ def _build_marker(
             "tools/skill_usage.py",
             "tools/skill_usage_normalize.py",
             "tools/skill_usage_render.py",
-            "tools/portability_check.py",
-            "tools/loop_engine.py",
             "tools/_repo_name.py",
             "tools/linear_sync.py",
             "tools/linear_pr_sync.py",
