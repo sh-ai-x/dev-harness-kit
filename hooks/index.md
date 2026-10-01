@@ -85,7 +85,6 @@ the terminal trace record before `save_log.py` runs with
 
 | Script | Event | Matcher | Purpose |
 |---|---|---|---|
-| `acp-tier-assert.sh` | PreToolUse | `*` | ACP tier assertion (catch-all). PreToolUse safety net that asserts the active ACP tier before any tool call. |
 | `bash-guard.sh` | PreToolUse | `Bash` | Tier-1 catastrophic + Tier-2 recoverable deny gate. See row above. |
 | `context-window-guard.sh` | UserPromptSubmit | `*` | Warns when input-token count crosses 100K / 200K / 300K thresholds, nudging the operator to `/compact` or sub-agent delegation. |
 | `destructive-confirm.sh` | PreToolUse | `Write\|Edit\|MultiEdit\|Bash` | Ask-tier confirmation for `.env` / `*.pem` / `*.key` / `.ssh/*` / force-with-lease / first push / bare worktree remove. |

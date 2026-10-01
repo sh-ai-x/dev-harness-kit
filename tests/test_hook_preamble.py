@@ -4,16 +4,16 @@
 Verifies the new `hooks/lib/hook-preamble.sh` + `hooks/lib/secret-patterns.sh`
 land cleanly:
 
-  1. Each of the 6 hooks that now sources `lib/hook-preamble.sh` still
+  1. Each of the 5 hooks that now sources `lib/hook-preamble.sh` still
      parses its payload via `read_stdin_json` after the preamble. The
      payload-parse.sh + preamble helper integration is tested directly
-     by sourcing both in a subshell. The 6 hooks themselves are then
+     by sourcing both in a subshell. The 5 hooks themselves are then
      invoked as scripts (the way Claude Code invokes them in
      production) and verified to handle valid + empty + jq-missing
      payloads without crashing.
 
-     The 6 hooks: session-start-check, log-on-session-start,
-     worktree-auto-cut, acp-tier-assert, worktree-guard,
+     The 5 hooks: session-start-check, log-on-session-start,
+     worktree-auto-cut, worktree-guard,
      worktree-log-auto-install.
 
   2. Each entry in `SECRET_PATTERNS` fires on its corresponding test
@@ -43,12 +43,11 @@ PREAMBLE = LIB / "hook-preamble.sh"
 PATTERNS_FILE = LIB / "secret-patterns.sh"
 PAYLOAD_PARSE = LIB / "payload-parse.sh"
 
-# The 6 hooks wired to the preamble.
+# The 5 hooks wired to the preamble.
 PREAMBLE_HOOKS = [
     "session-start-check.sh",
     "log-on-session-start.sh",
     "worktree-auto-cut.sh",
-    "acp-tier-assert.sh",
     "worktree-guard.sh",
     "worktree-log-auto-install.sh",
 ]
@@ -174,19 +173,13 @@ class TestHookPreambleSourcing(unittest.TestCase):
             f"INPUT_JSON mismatch via payload-parse.sh: {r.stdout!r}")
 
     def test_each_wired_hook_runs_on_valid_payload(self):
-        """Each of the 6 hooks: feed it a Write-style JSON payload on
+        """Each of the 5 hooks: feed it a Write-style JSON payload on
         stdin (the way Claude Code invokes them in production) and
         confirm the hook runs without crashing.
 
-        For most hooks this means rc=0; the hard-block hooks
-        (worktree-guard.sh, acp-tier-assert.sh) may exit 2 on the
-        payload — that's the expected fail-closed behavior.
-
-        acp-tier-assert.sh has a pre-existing dir-walk that scans 5
-        levels deep looking for `.dev-kit/round-*/tier-state/`. On
-        REPO_ROOT that scan is slow (10s+). To keep the test fast,
-        we use a /tmp cwd for that hook. The other hooks do not
-        depend on cwd performance."""
+        For most hooks this means rc=0; the hard-block hook
+        (worktree-guard.sh) may exit 2 on the
+        payload — that's the expected fail-closed behavior."""
         tmp_cwd = Path("/tmp")
         # worktree-guard.sh resolves its discriminator from the
         # session cwd; running from /tmp means WORKTREE_DETECT will
@@ -209,8 +202,7 @@ class TestHookPreambleSourcing(unittest.TestCase):
 
     def test_each_wired_hook_runs_on_empty_payload(self):
         """Empty stdin = probe call. Every hook must exit 0 on empty
-        payload (no work to gate). Use /tmp cwd to avoid the slow
-        acp-tier-assert.sh dir-walk on REPO_ROOT."""
+        payload (no work to gate)."""
         tmp_cwd = Path("/tmp")
         for hook in PREAMBLE_HOOKS:
             with self.subTest(hook=hook):
@@ -223,12 +215,9 @@ class TestHookPreambleSourcing(unittest.TestCase):
 
     def test_jq_missing_warning_and_payload_fallback(self):
         """When jq is absent, the preamble emits `::warning::jq missing`
-        AND the hook exits cleanly (no crash). Hard-block hooks
-        (worktree-guard.sh, acp-tier-assert.sh) emit their own
-        deny JSON in addition — that's why their rc may be 2.
-
-        Use /tmp cwd to avoid the slow acp-tier-assert.sh dir-walk
-        on REPO_ROOT."""
+        AND the hook exits cleanly (no crash). Hard-block hook
+        (worktree-guard.sh) emits its own
+        deny JSON in addition — that's why its rc may be 2."""
         env_extra, jq_real = _jq_less_env()
         if not jq_real:
             self.skipTest("jq not on host — cannot simulate missing-jq")

@@ -21,7 +21,7 @@ Reuses (do not duplicate):
   * `lib/sub-agent-prompt.md` (canonical template)
   * `hooks/worktree-auto-cut.sh:247-269` (cut + boot + envelope pattern)
   * `hooks/lib/worktree-detect.sh` (`worktree_detect` helper)
-  * `hooks/acp-tier-assert.sh`, `hooks/acp-cwd-discipline.sh`
+  * `hooks/acp-cwd-discipline.sh` (cwd discipline hook, sibling PR)
 """
 from __future__ import annotations
 

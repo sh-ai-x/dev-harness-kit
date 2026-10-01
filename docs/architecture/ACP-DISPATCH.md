@@ -15,11 +15,17 @@
 | **T** | Task sub-agent | `fix/<slug>` / `feat/<slug>` / `refactor/<slug>` / `chore/<slug>` / `test/<slug>` / `docs/<slug>` / `perf/<slug>` / `hotfix/<slug>` (one branch per T) | One PR's lifecycle (branch → commits → push → PR → review → merge → cleanup) | Editing files outside the PR's scope; pushing to `main`; force-push after review has started | `[tier-assert] I am Tier 2 (T). …` |
 | **L** | Leaf sub-agent | inherits T's worktree | One read-only investigation: search files, read code, summarize — no edits | Any `Edit`/`Write`/`MultiEdit`; any `git commit`/`git push`; any `gh` mutation | `[tier-assert] I am Tier 3 (L). …` |
 
-The tier-assertion lint (`hooks/acp-tier-assert.sh`, wired in
-`hooks/hooks.json` PreToolUse `*`) refuses the first tool call of any
-session that has not emitted its mandatory `[tier-assert]` line. This
-single guard closes §1 #4 of `docs/architecture/acp-harness.md` (out-of-scope
-operations from agents that forgot their role).
+The `[tier-assert] I am Tier …` line in the "First tool call" column is a
+**prompt-template contract**, not a runtime gate. The dispatch template at
+`lib/sub-agent-prompt.md` embeds the literal; `tests/test_acp_hand_off.py`
+refuses any dispatch prompt that drops it. The original runtime lint
+(`hooks/acp-tier-assert.sh`) was removed by the C-decision lateral_think
+(see `docs/architecture/acp-harness.md` §2.3) because the per-tool-call
+hook fires on a per-session invariant, the `matcher: "*"` shadowed
+pstack matchers, and the three scan-path fallbacks were defensive
+over-engineering. Out-of-scope prevention now lives in
+`hooks/worktree-guard.sh` (orch-branch isolation, §5 row #3) plus the
+prompt-template contract here.
 
 ## 2. The four communication channels
 
@@ -75,13 +81,14 @@ Three sub-paths:
   surfaces the active branch set, and the M releases it after `git
   push` succeeds.
 
-### 2.3 Tier sentinel (T writes, M reads)
+### 2.3 Tier sentinel (T writes, M reads) — **deprecated**
 
-**Writer**: T (via `hooks/acp-tier-assert.sh`).
-**Reader**: M (audit), future `Eval` harness (regression scoring).
-**Location**: `<orch_worktree>/.dev-kit/round-<descriptor>/tier-state/<session-id>.json`.
+**Status**: removed by C-decision lateral_think, 2026-10. The runtime
+tier-assertion hook that wrote the sidecar is gone; the prompt-template
+contract (`lib/sub-agent-prompt.md` + `tests/test_acp_hand_off.py`) is
+now the sole enforcement layer (see `docs/architecture/acp-harness.md` §2.3).
 
-Once the tier-assertion lint passes for a session, the hook writes:
+The deleted sidecar shape was:
 
 ```json
 {
@@ -95,11 +102,14 @@ Once the tier-assertion lint passes for a session, the hook writes:
 }
 ```
 
-The hook then no-ops on every subsequent tool call in the same session
-(the sidecar is the "tier-asserted" cache). The M can read the sidecar
-set to confirm each T has actually asserted before `git push` is
-permitted; a future `Eval` regression can score the round on
-assertion-presence rate.
+The `tier-state/<session-id>.json` directory is **no longer created**.
+Tools that referenced it (audit dashboards, future `Eval` regressions
+on assertion-presence rate) should switch to:
+- M-time audit: `git worktree list` + `tests/test_acp_hand_off.py::test_*`
+  (hand-off lint coverage as the new assertion-presence proxy).
+- T-time audit: parse the dispatch envelope's
+  `<WORKTREE_PATH>` / `<PARENT_SESSION_CWD>` placeholders to confirm
+  the T's session cwd was set correctly at dispatch.
 
 ### 2.4 Hand-off notes (T → M, append-only)
 
@@ -178,13 +188,12 @@ order. Each closes a distinct failure mode from `docs/architecture/acp-harness.m
 
 | # | Hook (event) | Matcher | Closes | Mechanism |
 |---|---|---|---|---|
-| 1 | `acp-tier-assert.sh` (PreToolUse) | `*` | §1 #4 (out-of-scope ops from agents that forgot their role) | Deny the first tool call until the literal `[tier-assert] I am Tier …` line appears in the transcript. Sidecar at `tier-state/<sid>.json` caches the assert for the rest of the session. |
+| 1 | (prompt-template, no runtime hook) | n/a | §1 #4 (out-of-scope ops from agents that forgot their role) | The dispatch template at `lib/sub-agent-prompt.md` carries the literal `[tier-assert] I am Tier …` line. `tests/test_acp_hand_off.py` refuses any dispatch prompt that drops it. Runtime backstop: `worktree-guard.sh` (row 3) blocks edits from non-orch checkouts. |
 | 2 | `acp-cwd-discipline.sh` (PreToolUse) | `Bash` | §1 #1 (sub-agent cwd is parent checkout) | Resolves the command's intended cwd from argv (`git -C <path>`, `cd <path>`, etc.) and compares against the T's expected branch. Deny with literal reason when main is the resolved branch. |
 | 3 | `worktree-guard.sh` (PreToolUse) | `Write|Edit|MultiEdit` | §1 #5 (six bash-heredoc bypass patterns) | Hard block on Edit/Write in the main checkout; the discriminator is `git_dir != git_common_dir` resolved from the worktree, not the session cwd. |
 | 4 | `git-guard.sh` (PreToolUse) | `Bash` | §1 #2 (slot collision on parallel PRs) | Pre-push slot check via `bin/version-slot pre-push-gate`; refuses `git push` when current version < target slot. |
 
-Hooks 1 and 2 are ACP-specific (this PR + PR-3); hooks 3 and 4 are the
-existing project rules that ACP layers on top of.
+Row 1 is now prompt-template-only (the runtime hook was removed by C-decision, see §2.3 and `acp-harness.md` §2.3). Rows 2–4 are unchanged.
 
 ## 6. Acceptance criteria (closes #282)
 
@@ -193,15 +202,21 @@ existing project rules that ACP layers on top of.
 | `lib/acp_dispatch.py` exists with `ACPDispatcher.dispatch(round, prs)` | `tests/test_acp_dispatch.py::DispatchDryRun::test_dry_run_returns_results_without_cutting` |
 | 7 mandatory placeholders filled | `tests/test_acp_dispatch.py::FillPlaceholders::test_seven_placeholders_match_canonical_template` |
 | 3-PR decomposition → 3 worktrees + 3 envelopes | `tests/test_acp_dispatch.py::DispatchFullCut::test_three_prs_produce_three_worktrees_and_three_envelopes` |
-| `hooks/hooks.json` PreToolUse `*` wired to `acp-tier-assert.sh` | `tests/test_acp_tier_assert.py::WiringTests::test_hooks_json_wires_pretooluse_star_to_acp_tier_assert` |
-| Tier-assert lint denies missing / malformed assertions | `tests/test_acp_tier_assert.py::BehaviorTests::test_missing_assertion_denies` + `test_malformed_assertion_denies` |
-| Tier-assert lint allows valid T assertion and caches via sidecar | `tests/test_acp_tier_assert.py::BehaviorTests::test_valid_t_assertion_allows` + `test_repeat_call_with_sidecar_is_noop` |
-| Hook fails closed when `jq` missing | `hooks/acp-tier-assert.sh:23-26` (deny + exit 2 self-contained printf, mirrored from `worktree-guard.sh:74-79`) |
+| Tier-assert literal present in canonical template | `tests/test_acp_hand_off.py::test_template_contains_tier_assert_literal` (and siblings) |
+| Tier-assert literal in every dispatched envelope | `tests/test_acp_dispatch.py::FillPlaceholders::test_tier_assert_literal_survives_placeholder_fill` |
+
+> **Note:** the four AC bullets that referenced `tests/test_acp_tier_assert.py`
+> (wiring check, missing/malformed denial, sidecar cache, jq-missing
+> fail-closed) were retired with the runtime hook removal. Out-of-scope
+> prevention now relies on the prompt-template contract above plus
+> `hooks/worktree-guard.sh`'s orch-branch isolation.
 
 ## 7. Out of scope
 
-- **`lib/acp_hand_off.py`** — the hand-off lint (`tests/test_acp_hand_off.py`)
-  is a sibling PR (T3 in the thin-harness round).
+- **Hand-off lint** — `tests/test_acp_hand_off.py` is a sibling PR
+  (T3 in the thin-harness round) that asserts the canonical-template
+  contract on `lib/sub-agent-prompt.md`. The implementation that
+  fills the template is the dispatcher itself (`lib/acp_dispatch.py`).
 - **`bin/version-slot`** — extracted into a separate PR; the dispatcher
   accepts the pre-computed value via `--plugin-version-target`.
 - **`hooks/acp-cwd-discipline.sh`** — sibling PR; the dispatcher's
@@ -214,15 +229,14 @@ existing project rules that ACP layers on top of.
 
 ## 8. Related
 
-- `docs/architecture/acp-harness.md` — ACP design SSOT (§1–§6).
-- `lib/sub-agent-prompt.md` — canonical dispatch template.
-- `hooks/acp-tier-assert.sh` — tier-assertion lint (this PR).
+- `docs/architecture/acp-harness.md` — ACP design SSOT (§1–§6); §2.3 documents the prompt-template enforcement that replaced the deleted runtime hook.
+- `lib/sub-agent-prompt.md` — canonical dispatch template (the literal `[tier-assert] …` lives here).
 - `hooks/acp-cwd-discipline.sh` — cwd-discipline hook (sibling PR).
-- `hooks/worktree-guard.sh` — pre-existing worktree rule; layered on top of.
+- `hooks/worktree-guard.sh` — pre-existing worktree rule; layered on top of; this is the runtime backstop that replaced the deleted tier-assert lint for out-of-scope prevention.
 - `hooks/git-guard.sh` — pre-existing pre-push slot gate; layered on top of.
 - `lib/acp_dispatch.py` — M-tier dispatcher (this PR).
 - `tests/test_acp_dispatch.py` — dispatcher regression (this PR).
-- `tests/test_acp_tier_assert.py` — tier-assert wiring + behavior (this PR).
+- `tests/test_acp_hand_off.py` — prompt-template enforcement (replaces `tests/test_acp_tier_assert.py`).
 - `rules/git-workflow.md` — worktree + branch protocol.
 - `rules/session-hygiene.md` — model selection + cache discipline for ACP dispatches.
 - `bin/version-slot` — slot allocator (sibling PR).
