@@ -362,6 +362,7 @@ table — HTML / MD / what each doc gives you — lives in
 | Read the Problem · Analysis · Solution framing | [`docs/home/01-pas.md`](docs/home/01-pas.md) |
 | Wire dev-kit into a new repo | [`docs/quality/ci-setup.md`](docs/quality/ci-setup.md) |
 | See all stages in one place | [`docs/stages/STAGES.md`](docs/stages/STAGES.md) |
+| See the AI Suggestion Workflow pattern | [`docs/ai-suggestion-workflow.md`](docs/ai-suggestion-workflow.md) |
 | Recover from a broken flow | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | Audit cost or back a factual claim | [`docs/observability/token-efficiency.md`](docs/observability/token-efficiency.md) |
 | Resume interrupted work | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |

@@ -60,7 +60,10 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
 # feat/team-toggle: +1 for the `team` skill (DEV_KIT_TEAM toggle, orthogonal
 # to DEV_KIT_MODE). Mirrors `mode` shape; see skills/team/SKILL.md.
-SKILL_COUNT = 49  # 50 minus skills/build-debug/SKILL.md (prune/build-debug PR)
+# Added skills/archify/SKILL.md (0-arg diagram chain — dispatches to the global archify
+# skill for visualization in front of an autonomous loop; mirrors harness-lite flow-feature
+# pattern, see docs/ai-suggestion-workflow.md) (49 -> 50).
+SKILL_COUNT = 50  # 51 minus skills/build-debug/SKILL.md (prune/build-debug PR)
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

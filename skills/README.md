@@ -2,7 +2,7 @@
 
 This index lists every skill shipped by the `dev-kit` plugin. Click into any skill to read its full `SKILL.md`; every `SKILL.md` has a back-link at the top to return here.
 
-**49 skills** across 13 categories (48 human-invocable, 1 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
+**50 skills** across 13 categories (49 human-invocable, 1 model-invoked). The full path of each entry is `skills/<dir>/SKILL.md`. Use `find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l` to confirm.
 
 ## By category
 
@@ -50,10 +50,11 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 | [`linear`](linear/SKILL.md) | `state` | Optional Linear task tracker. Reconcile the current repository task with a canonical project and non-duplicate issue. Auto-syncs on every Claude Code edit when configured. Owner-gated auto-triggers also fire on worktree… |
 | [`team`](team/SKILL.md) | `state` | Read or write the team collaboration toggle (DEV_KIT_TEAM on|off). Default OFF, independent of DEV_KIT_MODE. When ON, team roles/dependency-aware planning is enabled and .dev-kit/ stays tracked in git. |
 
-### `design` (6)
+### `design` (7)
 
 | Skill | α | Description |
 |---|---|---|
+| [`archify`](archify/SKILL.md) | `state` | 0-arg diagram chain. Dispatches to the global `archify` skill for visualization; mirrors harness-lite's flow-feature pattern. |
 | [`evidence-plan`](evidence-plan/SKILL.md) | `state` | Idea → cited research → HTML proposal (human confirms) → /dev-kit:plan hand-off. The proposal is rendered and reviewed BEFORE the expensive 5-gate PRD work runs, not after. |
 | [`interview`](interview/SKILL.md) | `enforcement` | 5-field safety-contract interview that gates plan emission. Drives `lib.interview_engine` through one Ralph loop, enforces `safety_valve=8`, `narrowed_delta`, `dedup_metric` (identical-ambiguity-cycle=2), and `user_inte… |
 | [`proposal`](proposal/SKILL.md) | `state` | 0-arg YAML-to-HTML renderer for reviewable design proposals. |
@@ -124,53 +125,54 @@ This index lists every skill shipped by the `dev-kit` plugin. Click into any ski
 
 | # | Skill | Category | α | Invocable |
 |---|---|---|---|---|
-| 1 | [`babysit-pr`](babysit-pr/SKILL.md) | `ship` | `state` | human |
-| 2 | [`babysit-pr-local`](babysit-pr-local/SKILL.md) | `ship` | `state` | human |
-| 3 | [`bootstrap`](bootstrap/SKILL.md) | `bootstrap` | `state` | human |
-| 4 | [`build`](build/SKILL.md) | `build` | `state` | human |
-| 5 | [`bump`](bump/SKILL.md) | `ship` | `state` | human |
-| 6 | [`ci-doctor`](ci-doctor/SKILL.md) | `audit` | `enforcement` | human |
-| 7 | [`ci-setup`](ci-setup/SKILL.md) | `bootstrap` | `enforcement` | human |
-| 8 | [`ci-triage`](ci-triage/SKILL.md) | `audit` | `enforcement` | human |
-| 9 | [`ci-update`](ci-update/SKILL.md) | `bootstrap` | `state` | human |
-| 10 | [`code-viz`](code-viz/SKILL.md) | `audit` | `state` | human |
-| 11 | [`codex-cache-update`](codex-cache-update/SKILL.md) | `shortcuts` | `analysis` | human |
-| 12 | [`config`](config/SKILL.md) | `config` | `state` | human |
-| 13 | [`cost-gate`](cost-gate/SKILL.md) | `audit` | `enforcement` | human |
-| 14 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `audit` | `analysis` | human |
-| 15 | [`evaluate`](evaluate/SKILL.md) | `eval` | `enforcement` | human |
-| 16 | [`evidence-plan`](evidence-plan/SKILL.md) | `design` | `state` | human |
-| 17 | [`gate-artifacts`](gate-artifacts/SKILL.md) | `config` | `enforcement` | human |
-| 18 | [`gate-select`](gate-select/SKILL.md) | `config` | `state` | human |
-| 19 | [`guard-mode`](guard-mode/SKILL.md) | `config` | `state` | human |
-| 20 | [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `eval` | `enforcement` | human |
-| 21 | [`harness-mode`](harness-mode/SKILL.md) | `config` | `state` | human |
-| 22 | [`hook-doctor`](hook-doctor/SKILL.md) | `audit` | `enforcement` | model |
-| 23 | [`inspect`](inspect/SKILL.md) | `audit` | `analysis` | human |
-| 24 | [`interview`](interview/SKILL.md) | `design` | `enforcement` | human |
-| 25 | [`linear`](linear/SKILL.md) | `config` | `state` | human |
-| 26 | [`llm-refresh`](llm-refresh/SKILL.md) | `shortcuts` | `analysis` | human |
-| 27 | [`log`](log/SKILL.md) | `shortcuts` | `state` | human |
-| 28 | [`maintenance`](maintenance/SKILL.md) | `audit` | `enforcement` | human |
-| 29 | [`mode`](mode/SKILL.md) | `mode` | `state` | human |
-| 30 | [`plan`](plan/SKILL.md) | `plan` | `state` | human |
-| 31 | [`pr-verify`](pr-verify/SKILL.md) | `ship` | `enforcement` | human |
-| 32 | [`proposal`](proposal/SKILL.md) | `design` | `state` | human |
-| 33 | [`proposal-orch-issue-pr`](proposal-orch-issue-pr/SKILL.md) | `design` | `state` | human |
-| 34 | [`prune`](prune/SKILL.md) | `build` | `analysis` | human |
-| 35 | [`prune-propose`](prune-propose/SKILL.md) | `audit` | `state` | human |
-| 36 | [`ralph`](ralph/SKILL.md) | `audit` | `state` | human |
-| 37 | [`refactor`](refactor/SKILL.md) | `build` | `analysis` | human |
-| 38 | [`research`](research/SKILL.md) | `design` | `enforcement` | human |
-| 39 | [`review`](review/SKILL.md) | `review` | `analysis` | human |
-| 40 | [`review-local`](review-local/SKILL.md) | `ship` | `state` | human |
-| 41 | [`security`](security/SKILL.md) | `security` | `enforcement` | human |
-| 42 | [`security-metrics`](security-metrics/SKILL.md) | `security` | `enforcement` | human |
-| 43 | [`ship`](ship/SKILL.md) | `ship` | `state` | human |
-| 44 | [`skill-usage`](skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
-| 45 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
-| 46 | [`status`](status/SKILL.md) | `status` | `state` | human |
-| 47 | [`team`](team/SKILL.md) | `config` | `state` | human |
-| 48 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
-| 49 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
+| 1 | [`archify`](archify/SKILL.md) | `design` | `state` | human |
+| 2 | [`babysit-pr`](babysit-pr/SKILL.md) | `ship` | `state` | human |
+| 3 | [`babysit-pr-local`](babysit-pr-local/SKILL.md) | `ship` | `state` | human |
+| 4 | [`bootstrap`](bootstrap/SKILL.md) | `bootstrap` | `state` | human |
+| 5 | [`build`](build/SKILL.md) | `build` | `state` | human |
+| 6 | [`bump`](bump/SKILL.md) | `ship` | `state` | human |
+| 7 | [`ci-doctor`](ci-doctor/SKILL.md) | `audit` | `enforcement` | human |
+| 8 | [`ci-setup`](ci-setup/SKILL.md) | `bootstrap` | `enforcement` | human |
+| 9 | [`ci-triage`](ci-triage/SKILL.md) | `audit` | `enforcement` | human |
+| 10 | [`ci-update`](ci-update/SKILL.md) | `bootstrap` | `state` | human |
+| 11 | [`code-viz`](code-viz/SKILL.md) | `audit` | `state` | human |
+| 12 | [`codex-cache-update`](codex-cache-update/SKILL.md) | `shortcuts` | `analysis` | human |
+| 13 | [`config`](config/SKILL.md) | `config` | `state` | human |
+| 14 | [`cost-gate`](cost-gate/SKILL.md) | `audit` | `enforcement` | human |
+| 15 | [`docs-maintenance`](docs-maintenance/SKILL.md) | `audit` | `analysis` | human |
+| 16 | [`evaluate`](evaluate/SKILL.md) | `eval` | `enforcement` | human |
+| 17 | [`evidence-plan`](evidence-plan/SKILL.md) | `design` | `state` | human |
+| 18 | [`gate-artifacts`](gate-artifacts/SKILL.md) | `config` | `enforcement` | human |
+| 19 | [`gate-select`](gate-select/SKILL.md) | `config` | `state` | human |
+| 20 | [`guard-mode`](guard-mode/SKILL.md) | `config` | `state` | human |
+| 21 | [`harness-effectiveness`](harness-effectiveness/SKILL.md) | `eval` | `enforcement` | human |
+| 22 | [`harness-mode`](harness-mode/SKILL.md) | `config` | `state` | human |
+| 23 | [`hook-doctor`](hook-doctor/SKILL.md) | `audit` | `enforcement` | model |
+| 24 | [`inspect`](inspect/SKILL.md) | `audit` | `analysis` | human |
+| 25 | [`interview`](interview/SKILL.md) | `design` | `enforcement` | human |
+| 26 | [`linear`](linear/SKILL.md) | `config` | `state` | human |
+| 27 | [`llm-refresh`](llm-refresh/SKILL.md) | `shortcuts` | `analysis` | human |
+| 28 | [`log`](log/SKILL.md) | `shortcuts` | `state` | human |
+| 29 | [`maintenance`](maintenance/SKILL.md) | `audit` | `enforcement` | human |
+| 30 | [`mode`](mode/SKILL.md) | `mode` | `state` | human |
+| 31 | [`plan`](plan/SKILL.md) | `plan` | `state` | human |
+| 32 | [`pr-verify`](pr-verify/SKILL.md) | `ship` | `enforcement` | human |
+| 33 | [`proposal`](proposal/SKILL.md) | `design` | `state` | human |
+| 34 | [`proposal-orch-issue-pr`](proposal-orch-issue-pr/SKILL.md) | `design` | `state` | human |
+| 35 | [`prune`](prune/SKILL.md) | `build` | `analysis` | human |
+| 36 | [`prune-propose`](prune-propose/SKILL.md) | `audit` | `state` | human |
+| 37 | [`ralph`](ralph/SKILL.md) | `audit` | `state` | human |
+| 38 | [`refactor`](refactor/SKILL.md) | `build` | `analysis` | human |
+| 39 | [`research`](research/SKILL.md) | `design` | `enforcement` | human |
+| 40 | [`review`](review/SKILL.md) | `review` | `analysis` | human |
+| 41 | [`review-local`](review-local/SKILL.md) | `ship` | `state` | human |
+| 42 | [`security`](security/SKILL.md) | `security` | `enforcement` | human |
+| 43 | [`security-metrics`](security-metrics/SKILL.md) | `security` | `enforcement` | human |
+| 44 | [`ship`](ship/SKILL.md) | `ship` | `state` | human |
+| 45 | [`skill-usage`](skill-usage/SKILL.md) | `shortcuts` | `analysis` | human |
+| 46 | [`sot-harness-writer`](sot-harness-writer/SKILL.md) | `design` | `state` | human |
+| 47 | [`status`](status/SKILL.md) | `status` | `state` | human |
+| 48 | [`team`](team/SKILL.md) | `config` | `state` | human |
+| 49 | [`token-analyzer`](token-analyzer/SKILL.md) | `audit` | `analysis` | human |
+| 50 | [`worktree-prune`](worktree-prune/SKILL.md) | `shortcuts` | `state` | human |
 
