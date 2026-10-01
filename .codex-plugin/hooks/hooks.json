@@ -3,16 +3,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "DEV_KIT_AGENT=codex bash ${PLUGIN_ROOT}/hooks/acp-tier-assert.sh",
-            "fail_closed": true
-          }
-        ]
-      },
-      {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {

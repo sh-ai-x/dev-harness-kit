@@ -74,7 +74,6 @@ overhead without removing any retained SessionStart behavior.
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
 | `worktree-log-auto-install.sh` | PostToolUse (Bash) | Install loghooks into a newly-added worktree | advisory |
 | `context-window-guard.sh` | UserPromptSubmit | Stderr tiered WARN at 100K / 200K / 300K cumulative input tokens recommending `/compact` | advisory (fails open) |
-| `acp-tier-assert.sh` | PreToolUse (`*`) | Enforce ACP agent tier-assertion line on first tool call (M/T/L) | hard-block |
 | `stop-verify.sh` | Stop | Run regression tests + pre-completion intent checklist on session end | hard-block |
 | `pr-create-route.sh` | PreToolUse (Bash) | Classify `gh pr create` via `lib/actor_classifier`; persist `.dev-kit/.pr-route.json`; one-line route to stderr; opt-in ask via `fork_pr_confirm`. Non-blocking, 120s timeout, fail-closed per `feedback-tmux-long-running-safety.md`. | advisory (silent default, opt-in ask) |
 

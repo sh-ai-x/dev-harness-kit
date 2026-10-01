@@ -27,7 +27,7 @@ contract pinned here.
 | 1 | Sub-agent `cwd` is the parent session's main checkout, not the worktree. "Reuse this worktree" hints are not propagated; hooks trip and the agent runs from `main`. | Dispatch prompt carries no `<WORKTREE_PATH>` and no `<PARENT_SESSION_CWD>`; the child has no way to know the parent's cwd was wrong. | §3 hand-off template (mandatory placeholders) + §5 cwd-discipline hook |
 | 2 | Parallel branches see the same `origin/main` HEAD and each auto-bumps `+1` from it → identical `plugin.json` versions on multiple branches (slot collision). | The "+1" auto-bump is local; no allocator allocates slots across parallel branches. | §4 version-slot allocator |
 | 3 | After an agent finishes, a follow-up dispatch fires automatically ("next PR") — the user did not ask for it. | The dispatcher is event-driven, not user-gated. | §2 tier-cognition (T must stop and assert done; M decides next dispatch) |
-| 4 | Agents forget whether they are M / T / L and try out-of-scope operations (commit, push, source-file edits). | The role is implicit; nothing in the dispatch prompt makes it explicit. | §2 tier-assertion + §5 orch-branch isolation already in `worktree-guard.sh` |
+| 4 | Agents forget whether they are M / T / L and try out-of-scope operations (commit, push, source-file edits). | The role is implicit; nothing in the dispatch prompt makes it explicit. | §2 tier-cognition (prompt template declares M/T/L + ownership sentence) + §5 orch-branch isolation already in `worktree-guard.sh` |
 | 5 | Six bash-heredoc bypass patterns accumulate because the hook chain reads session cwd, not file-path. | Hooks scope by cwd, not by resolved-file-path. | §5 cwd-discipline hook scopes by `git -C <path> symbolic-ref --short HEAD` resolved from the file_path the tool is touching |
 
 ## 2. Tier-cognition contract
@@ -57,13 +57,16 @@ where:
   - T: `ONE PR's lifecycle on branch <BRANCH>`
   - L: `read-only investigation for T on branch <BRANCH>; no edits`
 
-### 2.3 Tier-assertion lint (`hooks/acp-tier-assert.sh`)
+### 2.3 Tier-assertion (prompt-template enforcement; no runtime gate)
 
-- **Event**: `PostToolUse`, matcher `Bash | Edit | Write | MultiEdit`.
-- **Trigger**: fires on every agent's first non-empty tool call. The hook tracks per-session state in a sidecar file under `<orch_worktree>/.dev-kit/round-<descriptor>/tier-state/<session-id>.json` (see §6).
-- **Behavior**: reads the first ~4 KiB of the agent's session transcript from stdin (`{"transcript":"..."}`); if the literal `[tier-assert] I am Tier` prefix is absent OR the `<WORKTREE_PATH>` does not match the discriminator (`git_dir != git_common_dir` resolved from the cwd) OR the `<OWNERSHIP_SENTENCE>` is malformed, **deny with reason** naming the missing field.
-- **Fail-closed contract**: missing `jq` → `PreToolUse` deny + exit 2 (same `require_jq` pattern as `hooks/lib/payload-parse.sh`).
-- **Test surface**: `tests/test_acp_tier_assert.py` — covers: presence + absence + cwd-mismatch + malformed ownership + jq-missing fail-closed + empty stdin no-op + non-Bash/Edit/Write matcher no-op.
+The tier-cognition literal in §2.2 is a **prompt-template contract**, enforced by `tests/test_acp_hand_off.py` (which refuses any dispatch prompt missing the literal) and by the `OWNERSHIP_SENTENCE` cross-checks in §1's symptom-#4 row.
+
+There is **no runtime tier-assertion hook** in this protocol. Earlier designs shipped `hooks/acp-tier-assert.sh` as a PreToolUse lint; that hook and its regression test were removed by the C-decision lateral_think (2026-10) because the per-tool-call hook fires on a per-session invariant, the `matcher: "*"` shadowed other plugins' matchers in pstack coexistence, and the three scan-path fallbacks (`transcript` / `prompt` / `cwd`) were defensive over-engineering for a literal-string match. Enforcement now lives at two complementary layers:
+
+1. **Prompt-template contract** — `lib/sub-agent-prompt.md` is the canonical template; `tests/test_acp_hand_off.py` refuses any dispatch that drops the literal `[tier-assert] I am Tier` template line.
+2. **Worktree discipline** — `hooks/worktree-guard.sh` (orch-branch isolation; §5 row #4 in the symptom table) prevents out-of-scope operations by blocking edits from non-orch checkouts. The orchestrator M cannot accidentally cross a tier boundary because its session is locked to its orch branch.
+
+If a future round finds a real violation that prompt-template + worktree-discipline cannot catch (audit trail in `.dev-kit/round-*/tier-state/*.json` or downstream consumer reports), the right move is to add a new contract here rather than re-add the runtime hook. See `docs/architecture/ACP-DISPATCH.md` §3 for the deleted-hook rationale.
 
 ## 3. Hand-off format
 
@@ -170,8 +173,6 @@ Layout:
 ├── handoffs.md         # M-only writer; T/L readers (see §6.2)
 ├── locks/              # branch-locks for parallel T dispatch (see §6.3)
 │   └── <branch>.lock   # flock(2)-style file lock per T branch
-├── tier-state/         # per-session tier-assert sidecar (see §2.3)
-│   └── <session-id>.json
 └── decisions.md        # M-only; material design choices and rationale
 ```
 
@@ -200,7 +201,7 @@ Each acceptance-criterion bullet from issue #274 maps to one future implementati
 
 | AC bullet (issue #274) | Future PR (one each, narrow scope) | Touches |
 |---|---|---|
-| Tier-cognition assertion in `tests/test_skill_governance.py` (L6 enforcement) | `feat(acp-tier-assert): lint hook + governance test` | `hooks/acp-tier-assert.sh`, `hooks/hooks.json`, `tests/test_acp_tier_assert.py`, `tests/test_skill_governance.py` |
+| Tier-cognition assertion in `tests/test_skill_governance.py` (L6 enforcement) | `feat(acp-tier-assert): lint hook + governance test` | **withdrawn — see §2.3 (C-decision lateral_think, 2026-10)** |
 | Hand-off template + tests | `feat(acp-hand-off): canonical template + lint` | `lib/sub-agent-prompt.md` (template scaffold only — the template ships with this design issue), `tests/test_acp_hand_off.py` |
 | `bin/version-slot` script + tests | `feat(acp-version-slot): standalone allocator + pre-push gate` | `bin/version-slot`, `tests/test_version_slot.py`, `hooks/git-guard.sh` (paired pre-push rule) |
 | `hooks/acp-cwd-discipline.sh` + tests | `feat(acp-cwd-discipline): bash-scoped worktree resolver` | `hooks/acp-cwd-discipline.sh`, `hooks/hooks.json`, `tests/test_acp_cwd.py` |
@@ -224,8 +225,8 @@ Each acceptance-criterion bullet from issue #274 maps to one future implementati
 - `rules/git-workflow.md` — branch + worktree protocol (every-task-new-worktree rule).
 - `rules/skill-authoring.md` — skill frontmatter contract (L6 alpha gate).
 - `rules/session-hygiene.md` — model selection + cache discipline for ACP dispatches.
-- `hooks/worktree-guard.sh` — orch-branch isolation (M lives on `orch/*`; only `.dev-kit/round-*/**` is writable from a `orch/*` worktree).
+- `hooks/worktree-guard.sh` — orch-branch isolation (M lives on `orch/*`; only `.dev-kit/round-*/**` is writable from a `orch/*` worktree). Runtime backstop that replaced the deleted tier-assert lint for out-of-scope prevention — see §1 row #4 and §2.3.
 - `hooks/lib/worktree-detect.sh` — shared `worktree_detect()` discriminator (single source of truth).
-- `hooks/lib/payload-parse.sh` — shared `require_jq` + `deny` envelope (fail-closed pattern reused by every ACP hook).
+- `hooks/lib/payload-parse.sh` — shared `require_jq` + `deny` envelope (still fail-closed for the remaining hard-block hooks; `worktree-guard.sh` is the only one of those left in this protocol).
 - `tools/token_efficiency_analyzer.py` — session cost dashboard; ACP dispatch prompts MUST follow session-hygiene §3 (volatile content in prompt tail).
 - Memory: `feedback-rounds-leave-no-files.md`, `feedback-minimal-action-on-vague-prompts.md`.
