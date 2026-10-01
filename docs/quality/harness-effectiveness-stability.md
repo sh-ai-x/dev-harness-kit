@@ -112,10 +112,9 @@ real worktree even though the plumbing existed. Two producers now set it:
   (Codex) prefix each event-emitting hook's command line with
   `DEV_KIT_AGENT=claude-code` / `DEV_KIT_AGENT=codex` respectively — the
   manifests are runtime-specific by construction, so the stamp is exact,
-  not a guess. `tools/portability_check.py` and
-  `tests/test_hooks_json_parity.py` normalize the prefix away before
-  comparing CC/Codex hook signatures, so it isn't flagged as manifest
-  drift.
+  not a guess. `tests/test_hooks_json_parity.py` normalizes the prefix
+  away before comparing CC/Codex hook signatures, so it isn't flagged as
+  manifest drift.
 - `lib/execute.py::_emit_effectiveness_event` stamps `agent` from
   `DEV_KIT_BUILD_AGENT` (the same env var `_agent_command` already reads
   to pick the step runner), normalized to the `claude-code`/`codex`

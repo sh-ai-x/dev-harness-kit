@@ -85,7 +85,6 @@ the terminal trace record before `save_log.py` runs with
 
 | Script | Event | Matcher | Purpose |
 |---|---|---|---|
-| `acp-tier-assert.sh` | PreToolUse | `*` | ACP tier assertion (catch-all). PreToolUse safety net that asserts the active ACP tier before any tool call. |
 | `bash-guard.sh` | PreToolUse | `Bash` | Tier-1 catastrophic + Tier-2 recoverable deny gate. See row above. |
 | `context-window-guard.sh` | UserPromptSubmit | `*` | Warns when input-token count crosses 100K / 200K / 300K thresholds, nudging the operator to `/compact` or sub-agent delegation. |
 | `destructive-confirm.sh` | PreToolUse | `Write\|Edit\|MultiEdit\|Bash` | Ask-tier confirmation for `.env` / `*.pem` / `*.key` / `.ssh/*` / force-with-lease / first push / bare worktree remove. |
@@ -95,7 +94,7 @@ the terminal trace record before `save_log.py` runs with
 | `linear-session-start.sh` | SessionStart (fanout) | `*` | One auto-sync round at session start inside a Linear-configured worktree. |
 | `linear-task-change.sh` | UserPromptSubmit | `*` | Detects plan / task scope change mid-session; triggers one sync round only on scope diff. |
 | `linear-worktree-create.sh` | PostToolUse | `Bash` | Catches `git worktree add` and syncs from inside the new worktree before the first Edit/Write. |
-| `log-on-session-start.sh` | SessionStart (fanout) | `*` | Auto-installs loghooks into the active `.claude/settings.json` on a fresh checkout. Best-effort. |
+| `log-on-session-start.sh` | (no longer auto-fired) | — | Loghooks auto-install script. Retained for explicit `/dev-kit:log on` invocation; not registered on SessionStart since #945 (consumer install at user scope must not write into the consumer repo). |
 | `plugin-cache-refresh.sh` | SessionStart (fanout) | `*` | rsyncs marketplace → versioned cache on HEAD drift. Closes the same-version-update gap left by `/reload-plugins`. |
 | `pr-create-route.sh` | PreToolUse | `Bash` | Routes `gh pr create` through `actor_classifier` so fork PRs use the review-environment path. |
 | `ralph-attended-lock.sh` | PreToolUse | `AskUserQuestion` | During `/dev-kit:ralph`, locks `AskUserQuestion` so autonomous-loop can't escape into user prompts. |
@@ -112,7 +111,7 @@ the terminal trace record before `save_log.py` runs with
 | `worktree-auto-cut.sh` | UserPromptSubmit | `*` | Suggests auto-cutting a fresh worktree from main when the operator's prompt indicates a new task. |
 | `worktree-guard.sh` | PreToolUse | `Write\|Edit\|MultiEdit` | Hard block on Edit/Write in the main checkout. Forces the worktree protocol. |
 | `worktree-janitor-session-start.sh` | SessionStart (fanout) | `*` | Orphan-worktree nudge at session start; optional auto-prune when configured. |
-| `worktree-log-auto-install.sh` | PostToolUse | `Bash` | Auto-installs loghooks in a fresh worktree when `git worktree add` is detected. |
+| `worktree-log-auto-install.sh` | (no longer auto-fired) | — | Loghooks auto-install script for fresh worktrees. Retained for explicit `/dev-kit:log on` invocation; not registered on PostToolUse Bash since #945 (consumer install at user scope must not write into the consumer repo). |
 | `worktree-session-cleanup.sh` | Stop | `*` | After a completion-shaped response in a clean task worktree, asks the user to keep it or archive logs + remove. Never deletes from the hook itself. |
 
 ### SessionStart fanout children
@@ -127,7 +126,7 @@ none of these have their own `SessionStart` matcher in `hooks.json`.
 | `session-start-harness-mode-reset.sh` | `harness-mode.session.json` → `{"mode": "full"}` |
 | `session-start-guard-mode-reset.sh` | `guard-mode.session.json` ← scoped `DEV_KIT_GUARDS` |
 | `plugin-cache-refresh.sh` | marketplace → cache rsync on HEAD drift |
-| `log-on-session-start.sh` | loghooks auto-install |
+| `log-on-session-start.sh` | loghooks auto-install (opt-in via `/dev-kit:log on`; no longer fanned out from SessionStart since #945) |
 | `worktree-janitor-session-start.sh` | orphan worktree nudge |
 
 ### Helpers (`hooks/lib/`)

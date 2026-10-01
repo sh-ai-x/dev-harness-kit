@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parent.parent
 DISPATCHER = ROOT / "hooks" / "session-start.sh"
 CHILDREN = (
     "session-start-check.sh",
-    "log-on-session-start.sh",
     "linear-session-start.sh",
     "worktree-janitor-session-start.sh",
     "session-start-harness-mode-reset.sh",
@@ -32,7 +31,7 @@ class TestSessionStartDispatcher(unittest.TestCase):
                 for group in groups
                 for hook in group.get("hooks", [])
             ]
-            self.assertEqual(len(entries), 24, manifest.as_posix())
+            self.assertEqual(len(entries), 22, manifest.as_posix())
             stop_hooks = config["hooks"]["Stop"]
             self.assertIn("trace-session-end.sh", stop_hooks[0]["hooks"][0]["command"])
             self.assertIn("stop-verify.sh", stop_hooks[1]["hooks"][0]["command"])

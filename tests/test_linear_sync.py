@@ -2203,6 +2203,14 @@ class TestCleanupDoneCandidates(unittest.TestCase):
             self.assertEqual([c["id"] for c in candidates], ["iss-fresh"])
 
     def test_older_than_skips_fresh_issues(self):
+        # Fixture dates are computed relative to `now` so the test stays
+        # date-independent (a hard-coded "fresh" date ages out and breaks
+        # the assertion; #issue-2026-10-01 regression).
+        import datetime as _dt
+        _now = _dt.datetime.now(_dt.timezone.utc)
+        _fresh_iso = (_now - _dt.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _old_iso = (_now - _dt.timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         def handler(payload):
             q = payload["query"]
             if "projects(filter:" in q and "projectCreate" not in q:
@@ -2210,8 +2218,8 @@ class TestCleanupDoneCandidates(unittest.TestCase):
             if "issues(filter:" in q:
                 # One old, one fresh. updatedAt < cutoff -> old.
                 return {"data": {"issues": {"nodes": [
-                    {"id": "iss-old", "identifier": "DEMO-1", "updatedAt": "2020-01-01T00:00:00Z", "state": {"name": "Done"}},
-                    {"id": "iss-new", "identifier": "DEMO-2", "updatedAt": "2026-08-31T00:00:00Z", "state": {"name": "Done"}},
+                    {"id": "iss-old", "identifier": "DEMO-1", "updatedAt": _old_iso, "state": {"name": "Done"}},
+                    {"id": "iss-new", "identifier": "DEMO-2", "updatedAt": _fresh_iso, "state": {"name": "Done"}},
                 ]}}}
             raise AssertionError(f"unexpected query: {q}")
 

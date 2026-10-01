@@ -67,14 +67,13 @@ overhead without removing any retained SessionStart behavior.
 | `worktree-auto-cut.sh` | UserPromptSubmit | Auto-cut a worktree for a new-task prompt in main | advisory (fails open) |
 | `session-start.sh` | SessionStart | Dispatch the lifecycle bundle and combine child context | advisory / fail-open |
 | `session-start-check.sh` (child) | SessionStart via `session-start.sh` | Remind about the worktree rule and regenerate active-hook state | advisory |
-| `log-on-session-start.sh` (child) | SessionStart via `session-start.sh` | Auto-install loghooks each session (idempotent) | advisory |
+| `log-on-session-start.sh` (child) | (no longer wired since #945) | Loghooks auto-install script; opt-in via `/dev-kit:log on` | advisory |
 | `linear-session-start.sh` (child) | SessionStart via `session-start.sh` | Sync a Linear-configured worktree at session start | advisory |
 | `worktree-janitor-session-start.sh` (child) | SessionStart via `session-start.sh` | Nudge when merged-into-main or stale `fix/classify-request-*` worktrees are present; opt-out via `DEV_KIT_JANITOR_OFF=1` (issue #717). Optional auto-apply when `DEV_KIT_JANITOR_AUTO_PRUNE=1` *and* `DEV_KIT_JANITOR_AUTO_PRUNE_YES=1` are exported (capped at `DEV_KIT_JANITOR_AUTO_PRUNE_MAX`, default 50/session) — restricted to stale-classify predicate only, skips current + main worktree, requires clean `git status`, drops `--force`. Audit log at `.dev-kit/janitor-audit.log`. | advisory |
 | `secret-scan.sh` | PostToolUse (Write\|Edit) | Detect credentials in edits | hard-block |
 | `slop-detector.sh` | PostToolUse (Write\|Edit) | Block AI slop (phrase + structure + scoring, KO+EN) | advisory (opt-in strict) |
-| `worktree-log-auto-install.sh` | PostToolUse (Bash) | Install loghooks into a newly-added worktree | advisory |
+| `worktree-log-auto-install.sh` | (no longer wired since #945) | Loghooks auto-install for fresh worktrees; opt-in via `/dev-kit:log on` | advisory |
 | `context-window-guard.sh` | UserPromptSubmit | Stderr tiered WARN at 100K / 200K / 300K cumulative input tokens recommending `/compact` | advisory (fails open) |
-| `acp-tier-assert.sh` | PreToolUse (`*`) | Enforce ACP agent tier-assertion line on first tool call (M/T/L) | hard-block |
 | `stop-verify.sh` | Stop | Run regression tests + pre-completion intent checklist on session end | hard-block |
 | `pr-create-route.sh` | PreToolUse (Bash) | Classify `gh pr create` via `lib/actor_classifier`; persist `.dev-kit/.pr-route.json`; one-line route to stderr; opt-in ask via `fork_pr_confirm`. Non-blocking, 120s timeout, fail-closed per `feedback-tmux-long-running-safety.md`. | advisory (silent default, opt-in ask) |
 

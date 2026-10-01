@@ -58,10 +58,10 @@ Loaded on top of project rules for every session. Used for:
 
 The plugin ships a personal hook set wired into `hooks/hooks.json` and the
 Codex mirror at `.codex-plugin/hooks/hooks.json`. The exact count drifts
-as the plugin evolves (worktree-rule, ACP-tier-assert, and
-provider-divergence hooks were added on top of the original core; the
-provider-divergence hook was [pruned 2026-09-30 in PR 941] as
-redundant with `bin/set-provider.sh`), so it is NOT recorded here.
+as the plugin evolves (worktree-rule and provider-divergence hooks were
+added on top of the original core; the provider-divergence hook was
+[pruned 2026-09-30 in PR 941] as redundant with `bin/set-provider.sh`),
+so it is NOT recorded here.
 Inspect the live inventory with:
 
 ```bash

@@ -153,6 +153,32 @@ class FillPlaceholders(unittest.TestCase):
                 f"canonical template is missing placeholder {placeholder}",
             )
 
+    def test_tier_assert_literal_survives_placeholder_fill(self) -> None:
+        # Closes the dispatcher half of the tier-cognition contract
+        # after the C-decision lateral_think (2026-10) deleted
+        # `hooks/acp-tier-assert.sh`. _fill_placeholders must not
+        # touch the [tier-assert] / [tier-done] literal substrings —
+        # those are sentinels the dispatched T reads to know its role,
+        # not template placeholders.
+        template_text = REPO_TEMPLATE.read_text(encoding="utf-8")
+        values = {
+            "TASK": "tier-assert literal survives",
+            "BRANCH": "feat/sample",
+            "WORKTREE_PATH": "/tmp/sample",
+            "CWD": "/tmp/sample",
+            "PLUGIN_VERSION_TARGET": "0.0.0",
+            "LOCK_FILE": "/tmp/sample.lock",
+            "PARENT_SESSION_CWD": "/tmp",
+        }
+        rendered = _fill_placeholders(template_text, values)
+        # Tier-cognition sentinels must be present in the rendered output.
+        self.assertIn("[tier-assert]", rendered, "[tier-assert] sentinel stripped by placeholder fill")
+        self.assertIn("[tier-done]", rendered, "[tier-done] sentinel stripped by placeholder fill")
+        # And the substituted worktree path must appear in the rendered
+        # body so the sentinel's resolved form is real, not just literal
+        # text the agent has to fill in.
+        self.assertIn("/tmp/sample", rendered)
+
 
 class DispatchDryRun(unittest.TestCase):
     def setUp(self) -> None:

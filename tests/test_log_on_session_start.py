@@ -407,13 +407,19 @@ class TestLogOnSessionStartWiring(unittest.TestCase):
                 flat.append(h)
         return flat
 
-    def test_log_on_session_start_wired_into_sessionstart(self):
+    def test_log_on_session_start_NOT_wired_into_sessionstart(self):
+        """Regression: consumer install at user scope must NOT auto-install
+        loghooks into the consumer repo. log-on-session-start.sh is the
+        script the user runs explicitly via `/dev-kit:log on`; it must
+        never auto-fire on SessionStart (otherwise the consumer repo gets
+        a fresh `.claude/settings.local.json` loghooks entry on first
+        session, defeating the clean-install-at-user-scope contract)."""
         hooks = self._hooks_under("SessionStart")
         match = [h for h in hooks if "session-start.sh" in h.get("command", "")]
         self.assertEqual(len(match), 1, f"dispatcher missing or duplicated: {hooks}")
         self.assertNotIn("timeout", match[0], f"hook timeout must be unset: {match[0]}")
         dispatcher = (HOOKS / "session-start.sh").read_text(encoding="utf-8")
-        self.assertIn("log-on-session-start.sh", dispatcher)
+        self.assertNotIn("log-on-session-start.sh", dispatcher)
 
     def test_session_start_check_still_wired(self):
         """Regression: existing child modules remain under the dispatcher."""
@@ -424,7 +430,7 @@ class TestLogOnSessionStartWiring(unittest.TestCase):
         )
         dispatcher = (HOOKS / "session-start.sh").read_text(encoding="utf-8")
         self.assertIn("session-start-check.sh", dispatcher)
-        self.assertIn("log-on-session-start.sh", dispatcher)
+        self.assertNotIn("log-on-session-start.sh", dispatcher)
 
 
 if __name__ == "__main__":
