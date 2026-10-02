@@ -240,6 +240,13 @@ def _enabled() -> bool:
         # Load env AFTER reading the config so a partial .env.linear
         # (LINEAR_API_KEY=) cannot blank the env var the gate needs.
         _load_env_file(repo)
+        # `permanent_off` is a hard lock (#950): it overrides `enabled`
+        # so that an AI-initiated `linear on` cannot bypass the user's
+        # explicit choice to keep Linear auto-sync off in this worktree.
+        if cfg.get("permanent_off") is True:
+            key = os.environ.get("LINEAR_API_KEY", "").strip()
+            _log("False", "linear-config.json:permanent_off is true (locked)", "set" if key else "missing")
+            return False
         key = os.environ.get("LINEAR_API_KEY", "").strip()
         if not cfg.get("enabled"):
             _log("False", "linear-config.json:enabled is false", "set" if key else "missing")
@@ -322,6 +329,18 @@ def _auto_archive_done_enabled(repo: Path) -> bool:
     return config.get("auto_archive_done") is True
 
 
+def _permanent_off_enabled(repo: Path) -> bool:
+    """Return whether Linear auto-sync is hard-locked off in this worktree (#950).
+
+    A `True` value means `linear on` is refused and `_enabled()` returns
+    False even when an API key is reachable. Set via `linear lock`,
+    cleared via `linear unlock`. Absent or `False` is the soft-toggle
+    default; `linear off` (soft) does not touch this flag.
+    """
+    config = _read_worktree_config(repo) or {}
+    return config.get("permanent_off") is True
+
+
 def _write_linear_config(repo: Path, **updates: Any) -> Path:
     """Update Linear config while preserving unrelated operator settings."""
     config = _read_worktree_config(repo) or {}
@@ -330,6 +349,7 @@ def _write_linear_config(repo: Path, **updates: Any) -> Path:
     config.setdefault("project_name", "")
     config.setdefault("team_id", "")
     config.setdefault("auto_archive_done", True)
+    config.setdefault("permanent_off", False)
     config["set_at"] = _utc_now_iso()
     return _write_worktree_config(repo, config)
 
@@ -1952,11 +1972,15 @@ def sync() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point. Subcommands: setup|on|off|free-tier-cleanup|auto-archive|cleanup-done|project-name|status|list|sync.
+    """CLI entry point. Subcommands: setup|on|off|lock|unlock|free-tier-cleanup|auto-archive|cleanup-done|project-name|status|list|sync.
 
     Default (no args, or `sync`) runs the auto-sync once and returns
     its exit code. All other subcommands manipulate the per-worktree
     `.dev-kit/linear-config.json` and exit 0 on success.
+
+    `lock` (set `permanent_off=true`) and `unlock` (clear it) implement
+    #950: they prevent AI-initiated `linear on` calls from silently
+    re-enabling auto-sync after the operator has chosen to keep it off.
     """
     if argv is None:
         argv = sys.argv[1:]
@@ -1984,6 +2008,7 @@ def main(argv: list[str] | None = None) -> int:
             "user_env_path": str(user_env),
             "user_env_present": user_env.is_file(),
             "env_file_present": env_file,
+            "permanent_off": _permanent_off_enabled(repo),
             "resolved_project": project,
             "resolved_team_id": team or None,
         }, indent=2, sort_keys=True))
@@ -1991,12 +2016,41 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "list":
         return _cmd_list(rest)
     if cmd == "on":
+        if _permanent_off_enabled(repo):
+            print(
+                "linear: refused (permanent_off is set in this worktree; "
+                "run `linear unlock` to allow re-enabling).",
+                file=sys.stderr,
+            )
+            return 2
         path = _write_linear_config(repo, enabled=True)
         print(f"linear: on (worktree={_worktree_slug(repo)} config={path})")
         return 0
     if cmd == "off":
         path = _write_linear_config(repo, enabled=False)
         print(f"linear: off (worktree={_worktree_slug(repo)} config={path})")
+        return 0
+    if cmd == "lock":
+        # Hard lock: refuse `linear on` and override _enabled() in this worktree.
+        # Preserves `project_name`, `team_id`, and any other operator-set keys.
+        path = _write_linear_config(repo, enabled=False, permanent_off=True)
+        print(
+            f"linear: locked (worktree={_worktree_slug(repo)} config={path}). "
+            "Run `linear unlock` to allow re-enabling."
+        )
+        return 0
+    if cmd == "unlock":
+        if not _permanent_off_enabled(repo):
+            print(
+                "linear: already unlocked "
+                f"(worktree={_worktree_slug(repo)} permanent_off not set).",
+            )
+            return 0
+        path = _write_linear_config(repo, permanent_off=False)
+        print(
+            f"linear: unlocked (worktree={_worktree_slug(repo)} config={path}). "
+            "`linear on` is now allowed."
+        )
         return 0
     if cmd == "project-name":
         if not rest:
@@ -2063,8 +2117,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  auto-archive on Done transition: {'on (default — archives Done issues)' if auto_archive else 'off (Done issues stay visible)'}")
         print("  free-tier cleanup: disabled by default; enable with `free-tier-cleanup on`")
         print("  manual cleanup:    `linear cleanup-done [--dry-run] [--older-than <N>]` archives every Done/Canceled issue now")
+        print("  hard lock (#950):  `linear lock` sets permanent_off=true so AI-initiated `linear on` is refused; `linear unlock` clears it")
         return 0
-    print(f"linear: unknown command {cmd!r} (try: setup|on|off|free-tier-cleanup|auto-archive|cleanup-done|project-name|status|list|sync)")
+    print(f"linear: unknown command {cmd!r} (try: setup|on|off|lock|unlock|free-tier-cleanup|auto-archive|cleanup-done|project-name|status|list|sync)")
     return 2
 
 
