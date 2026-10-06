@@ -52,3 +52,6 @@ logs/.archive/
 dashboard-*.html
 dashboard-*.assets/
 evals/results/
+
+# aislop local session tracking (not a build artifact, stays local)
+.aislop/
