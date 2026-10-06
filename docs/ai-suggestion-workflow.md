@@ -60,5 +60,4 @@ The rule of thumb: **emit when the operator's next decision depends on seeing th
 
 - [`skills/ralph/SKILL.md`](skills/ralph/SKILL.md) — the autonomous orchestrator this pattern wraps around.
 - `~/.agents/skills/archify/SKILL.md` — the global archify skill this pattern invokes (no wrapper in dev-kit).
-- [`docs/architecture/visualization.md`](architecture/visualization.md) — sibling doc on dev-kit's own diagram conventions (`/dev-kit:code-viz`, per-skill Mermaid); archify is a different engine.
 - [`docs/workflow/WORKFLOW-SCENARIOS.md`](workflow/WORKFLOW-SCENARIOS.md) — companion doc for "flow doesn't go straight through" cases.
