@@ -89,3 +89,21 @@ the main checkout.
 - [tools/linear_sync.py](../../tools/linear_sync.py) — the Python
   implementation (the hook only invokes it; all behavior lives here).
 - [HOOK-REFERENCE.md](./HOOK-REFERENCE.md) — the hook index.
+
+## Hard-lock layer (`permanent_off`, added in #950)
+
+The hook delegates activation to `tools/linear_sync.py::_enabled()`,
+which honors a per-worktree `permanent_off` flag at
+`.dev-kit/linear-config.json`. When set (via `/dev-kit:linear lock`),
+the activation gate returns False even when the API key is reachable
+and the `enabled` field is true, so this hook becomes a no-op even on
+every Edit|Write. The lock is the structural defense against an
+AI-initiated `linear on` re-enabling auto-sync after the operator has
+chosen to keep it off. The skill body documents the contract: AI must
+surface an AskUserQuestion before `linear on`; the lock enforces it
+without prompting.
+
+- Set: `/dev-kit:linear lock` (writes `permanent_off: true`)
+- Clear: `/dev-kit:linear unlock` (writes `permanent_off: false`)
+- Effect on this hook: zero network calls, zero handoff writes, zero
+  GraphQL traffic — the hook fast-paths on `_enabled() == False`.
