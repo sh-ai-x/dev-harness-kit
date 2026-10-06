@@ -232,7 +232,7 @@ class TestLinearSync(unittest.TestCase):
 
     def test_skips_read_only_prompts(self):
         """#539: 'Do not invoke Linear for read-only work such as
-        inspect, review, security, or code-viz unless the user
+        inspect, review, or security unless the user
         explicitly requests registration.'"""
         with _fake_repo(linear_api_key="test-key", handoff={"prompt": "ls -la"}):
             with mock.patch("urllib.request.urlopen") as urlopen:

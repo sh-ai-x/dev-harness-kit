@@ -60,7 +60,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # should equal this constant at HEAD (excluding worktrees of in-flight PRs).
 # feat/team-toggle: +1 for the `team` skill (DEV_KIT_TEAM toggle, orthogonal
 # to DEV_KIT_MODE). Mirrors `mode` shape; see skills/team/SKILL.md.
-SKILL_COUNT = 49  # 50 minus skills/build-debug/SKILL.md (prune/build-debug PR)
+SKILL_COUNT = 48  # 49 minus skills/code-viz/SKILL.md (drop-code-viz-skill)
 HOOK_SCRIPTS = {
     "tdd-guard.sh",
     "bash-guard.sh",

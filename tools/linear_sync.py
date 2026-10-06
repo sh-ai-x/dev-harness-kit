@@ -519,7 +519,7 @@ def _has_work_verb(text: str) -> bool:
 
 def _should_skip_prompt(prompt: str) -> bool:
     """Filter read-only / non-task prompts (per #539: no Linear for
-    inspect / review / security / code-viz unless explicit)."""
+    inspect / review / security unless explicit)."""
     s = prompt.strip().lower()
     if not s:
         return True
