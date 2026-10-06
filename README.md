@@ -111,9 +111,7 @@ When review is green, `/dev-kit:ship` cuts the release tag. That's the whole loo
 
 ### Core workflow at a glance
 
-The most important state transitions are intentionally small and resumable. The
-full repair state machine (and the per-step breakdown) lives in
-[`docs/architecture/visualization.md`](docs/architecture/visualization.md#diagrams).
+The most important state transitions are intentionally small and resumable.
 
 ```mermaid
 flowchart LR
@@ -138,11 +136,11 @@ rechecks the PR.
 
 ### Portability and long-running loop
 
-Three commands pin the portable contract — Claude and Codex parity, the
-deterministic loop engine, and a cold-context resume verifier. `ci-setup`
-ships both CLIs to consumer repositories, so the loop is independent of the
-plugin checkout path. See
-[`docs/architecture/PORTABILITY-AND-LOOP.md`](docs/architecture/PORTABILITY-AND-LOOP.md).
+Claude Code ↔ Codex parity is enforced by `tests/test_hooks_json_parity.py`,
+which normalizes the `DEV_KIT_AGENT` env prefix and diffs the two
+`hooks/hooks.json` signatures. `ci-setup` ships the parity test plus the
+hook wiring to consumer repositories, so the contract is independent of
+which CLI installed the plugin checkout.
 
 > A full "I have a brand-new repo" walkthrough (create repo → install →
 > bootstrap → first commit) is at
@@ -559,9 +557,8 @@ Missing evidence is reported explicitly rather than inferred. Details in
 
 **Codex compatibility** — the same skills and hooks run under Codex CLI via a
 `.codex-plugin/` manifest that mirrors the canonical hook config; a regression
-test keeps the two in sync. Check local hook status with
-`python3 bin/dev-kit-hooks-status.py`. Runtime portability is documented in
-[`docs/architecture/RUNTIME-PORTABILITY.md`](docs/architecture/RUNTIME-PORTABILITY.md).
+test (`tests/test_hooks_json_parity.py`) keeps the two in sync. Check local
+hook status with `python3 bin/dev-kit-hooks-status.py`.
 
 **Repository layout** — the directory-by-directory guide is the
 [repository map](docs/repo/REPOSITORY-MAP.md). **MCP integration is intentionally out of scope** — slash commands, hooks, and library functions only; rationale in

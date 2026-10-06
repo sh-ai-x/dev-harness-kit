@@ -175,7 +175,7 @@ every transition.
 - [Hook coverage gaps](hook-coverage-gaps.md) — known gaps in this matrix and per-runtime wiring differences (Claude Code vs. Codex).
 - [`linear-autosync.sh`](linear-autosync.md) — per-edit Linear auto-sync hook (PROJECT_DIR guard, env fast-path, non-blocking contract).
 - [`rules/git-workflow.md`](../../rules/git-workflow.md) — the worktree + branch rules `worktree-guard` and `git-guard` enforce.
-- [`docs/architecture/RUNTIME-PORTABILITY.md`](../architecture/RUNTIME-PORTABILITY.md) — how the same hooks run under both Claude Code and Codex.
+- The same hooks run under both Claude Code and Codex via the `DEV_KIT_AGENT` env prefix and the `tests/test_hooks_json_parity.py` regression — see the `Codex compatibility` paragraph in the root README.
 - Main [`README.md`](../../README.md) — the short version, under "Under the hood".
 
 ## Timeout policy
