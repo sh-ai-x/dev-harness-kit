@@ -30,7 +30,7 @@ Resolve the current repository name and the user's Linear capability before maki
 - If this is an implicit workflow call and Linear is disabled or unavailable, return `LINEAR_SKIP` and let the caller continue.
 - If this is an explicit `/dev-kit:linear` call and Linear is unavailable, report the missing connection/setup clearly; do not pretend the task was registered.
 - If `.dev-kit/.enabled.json` exists, respect its Linear/MCP selection. Missing configuration means `auto`, not a hard failure.
-- Do not invoke Linear for read-only work such as inspect, review, security, or code-viz unless the user explicitly requests registration.
+- Do not invoke Linear for read-only work such as inspect, review, or security unless the user explicitly requests registration.
 
 ### Gate-select integration
 
