@@ -14,8 +14,6 @@ Markdown-only.
 | CI install (run dev-kit CI elsewhere) | — | [`docs/quality/ci-setup.md`](../quality/ci-setup.md) | `branch-policy` + validate + test + auto-fix workflows |
 | CI template drift refresh (selective) | — | [`docs/quality/ci-update.md`](../quality/ci-update.md) | Detect + selectively apply dev-kit ⇄ consumer template drift; 4-state per-file classification with backup-before-overwrite (no `--force` blast) |
 | Maintenance gate (PR-only quality) | — | [`docs/quality/maintenance-gate.md`](../quality/maintenance-gate.md) | 20-checkbox rubric enforced in `.github/workflows/maintenance.yml` |
-| Runtime portability (Claude Code ↔ Codex) | [`docs/architecture/RUNTIME-PORTABILITY.html`](../architecture/RUNTIME-PORTABILITY.html) | [`docs/architecture/RUNTIME-PORTABILITY.md`](../architecture/RUNTIME-PORTABILITY.md) | The contract both runtimes honor so plugin.json means the same thing |
-| Visualization (code-viz output + mechanics) | — | [`docs/architecture/visualization.md`](../architecture/visualization.md) | The four per-skill Mermaid diagrams + GH Actions gate workflow + per-skill extraction / loop-back / edge-semantics rules that `code-viz` follows |
 | Naming convention (SSOT) | [`docs/naming/NAMING.html`](../naming/NAMING.html) | [`docs/naming/NAMING.md`](../naming/NAMING.md) · [ADR-0010](../adr/ADR-0010-naming-convention.md) | Why a hook is `bash-guard.sh`, not `bashHook.sh` |
 | Pre-implementation gate | [`docs/planning/PRE-IMPL-CHECK.html`](../planning/PRE-IMPL-CHECK.html) | [`docs/planning/PRE-IMPL-CHECK.md`](../planning/PRE-IMPL-CHECK.md) | 9 questions before code |
 | Cost & risk | — | [`docs/quality/COST-ANALYSIS.md`](../quality/COST-ANALYSIS.md) | Token ceilings, cost-gate trailer format |
