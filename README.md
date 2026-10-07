@@ -136,13 +136,21 @@ rechecks the PR.
 
 ### Stage by stage
 
-The three steps each have their own focused flow:
+The mermaid above names the six stages. Each one has its own focused
+sub-flow — the nodes below are what's *inside* each stage, not a re-statement
+of the high-level loop.
 
-![Planning — idea → safety interview → optional evidence-plan → PRD.md + phases/index.json → approve gate](docs/screenshots/planning.png)
+![Bootstrap — fresh repo → ci-setup prompt (y/N) → CLAUDE.md + AGENTS.md + hooks always written → ready to plan](docs/screenshots/bootstrap.png)
 
-![Building — PRD.md + index.json → step worktree → code + tests → acceptance check → commit → all steps done](docs/screenshots/building.png)
+![Evidence-plan *(optional)* — non-trivial idea → cited research (Phase 0–3 escalation) → HTML proposal → 3-way gate (Approve / Edit-then-approve / Abort) → hand-off to /dev-kit:plan, never to /dev-kit:build](docs/screenshots/evidence-plan.png)
 
-![Reviewing — PR diff → /dev-kit:review fans out to three parallel judges → verdict gate → either Approve (ship) or Changes/Blocked (/dev-kit:babysit-pr loops back to re-review)](docs/screenshots/reviewing.png)
+![Planning — one-line idea → safety interview (5 fields) → either skip evidence-plan or proceed → PRD.md + phases/index.json → approve gate → build-ready handoff](docs/screenshots/planning.png)
+
+![Building — PRD.md + index.json → per-step worktree → code + tests (TDD red→green) → acceptance check (fail loops back, pass commits and advances index) → all steps done](docs/screenshots/building.png)
+
+![Reviewing — PR diff → /dev-kit:review fans out to 3 parallel judges (correctness / security / design) → verdict gate → either Approve → ship, or Changes/Blocked → /dev-kit:babysit-pr (diagnose → patch → verify → push) → re-review](docs/screenshots/reviewing.png)
+
+![Ship — review verdict=Approve + main-block pass → release tag (read from `plugin.json:version`) → marketplace auto-picks up on next install](docs/screenshots/ship.png)
 
 ### Portability and long-running loop
 
