@@ -117,7 +117,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: "MiniMax-M3[1m]"
           ANTHROPIC_DEFAULT_OPUS_MODEL: "MiniMax-M3[1m]"
           ANTHROPIC_DEFAULT_HAIKU_MODEL: "MiniMax-M3[1m]"
-        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1, pinned
+        uses: anthropics/claude-code-action@8ce9314fa9a404564fa7e954cd84f25bcba2b829 # v1, pinned
         with:
           track_progress: false
           prompt: |
