@@ -108,20 +108,15 @@ and the matrix in [`hooks/index.md`](../../hooks/index.md).
 
 ### Stateful layer — stage machine
 
-The same plugin pins a stage spec:
-
-```
-bootstrap → (evidence-plan?) → plan → build → review → security → ship
-```
-
-Each stage owns its own slash (`/dev-kit:plan`, `/dev-kit:build`,
-`/dev-kit:review`, etc.), reads from a deterministic input, and writes
-a deterministic output (a `PRD.md`, a `phases/<name>/index.json`, a
-verdict JSON envelope). Re-running a stage is always safe — it picks
-up from the first step that isn't `completed`.
+The same plugin pins a stage spec — see [`docs/stages/STAGES.md`](../stages/STAGES.md)
+for the canonical sequence. Each stage owns its own slash
+(`/dev-kit:plan`, `/dev-kit:build`, `/dev-kit:review`, etc.), reads from a
+deterministic input, and writes a deterministic output (a `PRD.md`, a
+`phases/<name>/index.json`, a verdict JSON envelope). Re-running a stage
+is always safe — it picks up from the first step that isn't `completed`.
 
 The stage spec is the single source of truth; the prose is just
-orientation. See [`docs/stages/STAGES.md`](../stages/STAGES.md).
+orientation.
 
 ### Verifiable layer — the Eval-Repair loop
 
