@@ -134,6 +134,24 @@ owns one step at a time and resumes from `index.json`. `babysit-pr` is the
 single repair entrypoint: it watches CI and review, applies bounded fixes, and
 rechecks the PR.
 
+### Stage by stage
+
+The mermaid above names the six stages. Each one has its own focused
+sub-flow — the nodes below are what's *inside* each stage, not a re-statement
+of the high-level loop.
+
+![Bootstrap — fresh repo → ci-setup prompt (y/N) → CLAUDE.md + AGENTS.md + hooks always written → ready to plan](docs/screenshots/bootstrap.png)
+
+![Evidence-plan *(optional)* — non-trivial idea → cited research (Phase 0–3 escalation) → HTML proposal → 3-way gate (Approve / Edit-then-approve / Abort) → hand-off to /dev-kit:plan, never to /dev-kit:build](docs/screenshots/evidence-plan.png)
+
+![Planning — one-line idea → safety interview (5 fields) → either skip evidence-plan or proceed → PRD.md + phases/index.json → approve gate → build-ready handoff](docs/screenshots/planning.png)
+
+![Building — PRD.md + index.json → per-step worktree → code + tests (TDD red→green) → acceptance check (fail loops back, pass commits and advances index) → all steps done](docs/screenshots/building.png)
+
+![Reviewing — PR diff → /dev-kit:review fans out to 3 parallel judges (correctness / security / design) → verdict gate → either Approve → ship, or Changes/Blocked → /dev-kit:babysit-pr (diagnose → patch → verify → push) → re-review](docs/screenshots/reviewing.png)
+
+![Ship — review verdict=Approve + main-block pass → release tag (read from `plugin.json:version`) → marketplace auto-picks up on next install](docs/screenshots/ship.png)
+
 ### Portability and long-running loop
 
 Claude Code ↔ Codex parity is enforced by `tests/test_hooks_json_parity.py`,
@@ -190,11 +208,10 @@ slash command is `/dev-kit:<name>`. Each links to its detailed page.
 
 | Command | What it does |
 |---|---|
-| [`/dev-kit:babysit-pr`]() | Watches your open PR, fixes failing checks, pushes, repeats until CI is green and review approves. |
+| [`/dev-kit:babysit-pr`](skills/babysit-pr/SKILL.md) | Watches your open PR, fixes failing checks, pushes, repeats until CI is green and review approves. |
 | [`/dev-kit:babysit-pr-local`](skills/babysit-pr-local/SKILL.md) | Same algorithm, but the LLM-judge verdict loop runs locally via `bin/review-local.sh` — use when GH-Actions minutes are exhausted. |
 | [`/dev-kit:pr-verify`](skills/pr-verify/SKILL.md) | Deterministic 5-gate PR verifier — fresh `gh` fetch per gate, catches the "stale CI / LLM-judge still running" false positive. |
-| [`/dev-kit:bump`](skills/bump/SKILL.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. |
-| [`/dev-kit:sync-version`]() | Inverse of `bump` — sync local `plugin.json:version` to `origin/main`. Same operation the pre-push hook runs automatically. |
+| [`/dev-kit:bump`](skills/bump/SKILL.md) | Explicit local `plugin.json` version bump + push of `chore/bump-vX.Y.Z` — race recovery and pre-PR explicit bumps. The pre-push hook runs the same operation automatically; use `/dev-kit:bump` for race recovery. |
 | [`/dev-kit:maintenance`](skills/maintenance/SKILL.md) | Code-sanity gate (CC-1..8 / OE-1..8 / VM-1..4). Fires in `review.yml` and locally via `/dev-kit:review-local`; verdict maps `>=8.0` → Approve, `5.0..7.99` → Changes Requested, `<5.0` → Blocked. |
 | [`/dev-kit:review-local`](skills/review-local/SKILL.md) | Local equivalent of the GH-Actions review workflow — runs `/dev-kit:review` + `/dev-kit:security` + `/dev-kit:maintenance` via local `claude -p`. Full playbook in [`docs/local-ci.md`](docs/local-ci.md). |
 
@@ -264,12 +281,6 @@ needed. Use `--scope=local` to test a mode without committing the change.
 The full resolution order
 (shell env → `settings.json` → `settings.local.json`) lives in
 [`docs/scopes/modes.md`](docs/scopes/modes.md).
-
-**You want to skip the Valuate step.** The Valuate stage was removed entirely
-(PR chore/remove-valuate); the prior advisory verdict envelope is gone. `/dev-kit:plan`
-covers value judgment via its interview hand-off, and `/dev-kit:build` proceeds
-regardless. Nothing to skip.
-small obvious work; rely on it as a sanity check on bigger bets.
 
 **You want to skip straight to Build without a full plan.** There is **no
 one-command bypass** today. Your honest options are to scope `/dev-kit:plan` very
@@ -344,7 +355,6 @@ table — HTML / MD / what each doc gives you — lives in
 | Recover from a broken flow | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
 | Audit cost or back a factual claim | [`docs/observability/token-efficiency.md`](docs/observability/token-efficiency.md) |
 | Resume interrupted work | [`docs/workflow/WORKFLOW-SCENARIOS.md`](docs/workflow/WORKFLOW-SCENARIOS.md) |
-| See what custom subagents this repo ships | [`docs/proposals/review/agent-architecture/multi-agent-design.md`](docs/proposals/review/agent-architecture/multi-agent-design.md) |
 
 Everything else — HTML siblings, deep reference — is in
 [`docs/home/DOC-MAP.md`](docs/home/DOC-MAP.md). If you have five minutes, open
@@ -549,8 +559,8 @@ per-runtime wiring gaps in [`docs/hooks/hook-coverage-gaps.md`](docs/hooks/hook-
 is the canonical table.
 
 **Eval layer** — `/dev-kit:evaluate` keeps the existing transcript/rubric
-evaluation and adds a workflow-native harness-effectiveness report (five
-components: prevention, first-pass, recovery, learning, measurement integrity).
+evaluation and adds a workflow-native harness-effectiveness report (four
+components: prevention, first-pass, recovery, measurement integrity).
 Missing evidence is reported explicitly rather than inferred. Details in
 [`skills/evaluate/SKILL.md`](skills/evaluate/SKILL.md), rationale in
 `docs/adr/ADR-0022-eval-agent-behavior.md`.
