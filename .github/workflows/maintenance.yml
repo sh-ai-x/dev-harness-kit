@@ -181,7 +181,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
+        uses: anthropics/claude-code-action@8ce9314fa9a404564fa7e954cd84f25bcba2b829 # v1
         with:
           allowed_bots: '*'
           anthropic_oidc_audience: anthropic
@@ -234,7 +234,7 @@ jobs:
 
       - name: Run /dev-kit:maintenance via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic' && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
-        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
+        uses: anthropics/claude-code-action@8ce9314fa9a404564fa7e954cd84f25bcba2b829 # v1
         with:
           allowed_bots: '*'
           anthropic_oidc_audience: anthropic
@@ -277,7 +277,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-v4-flash'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-v4-pro'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-v4-flash'
-        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
+        uses: anthropics/claude-code-action@8ce9314fa9a404564fa7e954cd84f25bcba2b829 # v1
         with:
           allowed_bots: '*'
           anthropic_oidc_audience: anthropic

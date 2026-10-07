@@ -1,11 +1,11 @@
 ---
 name: linear
 category: config
-description: Optional Linear task tracker. Reconcile the current repository task with a canonical project and non-duplicate issue. Auto-syncs on every Claude Code edit when configured. Owner-gated auto-triggers also fire on worktree create, session start, and task change.
+description: Optional Linear task tracker. Reconcile the current repository task with a canonical project and non-duplicate issue. Auto-syncs on every Claude Code edit when configured. Owner-gated auto-triggers also fire on worktree create, session start, and task change. Supports a hard lock (`linear lock`) that prevents AI-initiated re-enables.
 alpha: state
 when_to_use: |
   - User types /dev-kit:linear
-  - User types /dev-kit:linear on | off | free-tier-cleanup | status | setup | project-name <name>
+  - User types /dev-kit:linear on | off | lock | unlock | free-tier-cleanup | status | setup | project-name <name>
   - A workflow skill starts a new implementation, debugging, refactor, or plan task
   - The user asks to register, reconcile, or update work in Linear
   - Every Edit|Write|MultiEdit fires the auto-sync hook (when configured)
@@ -30,7 +30,7 @@ Resolve the current repository name and the user's Linear capability before maki
 - If this is an implicit workflow call and Linear is disabled or unavailable, return `LINEAR_SKIP` and let the caller continue.
 - If this is an explicit `/dev-kit:linear` call and Linear is unavailable, report the missing connection/setup clearly; do not pretend the task was registered.
 - If `.dev-kit/.enabled.json` exists, respect its Linear/MCP selection. Missing configuration means `auto`, not a hard failure.
-- Do not invoke Linear for read-only work such as inspect, review, security, or code-viz unless the user explicitly requests registration.
+- Do not invoke Linear for read-only work such as inspect, review, or security unless the user explicitly requests registration.
 
 ### Gate-select integration
 
@@ -112,8 +112,10 @@ Set `LINEAR_DEBUG=1` to surface every activation decision, state transition, and
 | Subcommand | Effect |
 |---|---|
 | `/dev-kit:linear` (no args) | Run one auto-sync round (re-evaluates the current task and creates/updates the matching Linear issue). |
-| `/dev-kit:linear on` | Enable auto-sync in this worktree. Writes `enabled: true` to `<worktree>/.dev-kit/linear-config.json`. |
-| `/dev-kit:linear off` | Disable auto-sync in this worktree. Writes `enabled: false`. Project name and team id are preserved. |
+| `/dev-kit:linear on` | Enable auto-sync in this worktree. Writes `enabled: true` to `<worktree>/.dev-kit/linear-config.json`. Refused (exit 2) when `permanent_off` is set — see `/dev-kit:linear lock` below. |
+| `/dev-kit:linear off` | Disable auto-sync in this worktree (soft toggle). Writes `enabled: false`. Project name and team id are preserved. Does NOT touch `permanent_off`. |
+| `/dev-kit:linear lock` | Hard-lock auto-sync off (#950). Writes `enabled: false` AND `permanent_off: true`. While locked, `linear on` exits 2 and `_enabled()` returns False regardless of the API key. Use when the AI keeps re-enabling after `linear off`. |
+| `/dev-kit:linear unlock` | Clear `permanent_off`. Does NOT flip `enabled`. After unlock, `linear on` works again. |
 | `/dev-kit:gate-select enable\|disable linear` | Unified gate-select alias for `/dev-kit:linear on\|off`; keeps Linear outside the CI gate schema. |
 | `/dev-kit:linear setup` | Print the one-time setup checklist + the current state (whether `LINEAR_API_KEY` is set, what the resolved project name is, whether the worktree config exists). |
 | `/dev-kit:linear project-name <name>` | Override the auto-detected project name for this worktree. Without an argument, prints the resolved name. |
@@ -130,6 +132,10 @@ python3 tools/linear_sync.py <subcommand> [args...]
 ```
 
 The CLI writes the config at `<repo>/.dev-kit/linear-config.json` (untracked) and the handoff at `<repo>/.dev-kit/hand-off/linear/<worktree-slug>.json`. The API key is **read from** (but never written to) disk via the env files documented in the Setup section below.
+
+### AI must AskUserQuestion before `linear on` (#950)
+
+The `on` subcommand flips auto-sync on for the entire worktree. Because the user can disable it (`linear off`) but cannot block the AI from re-enabling it on the next session, the contract is: **the AI must surface an AskUserQuestion prompt before invoking `linear on`.** The user explicitly opts in for the session. A `linear on` call without a preceding user prompt is a contract violation. The structural guard (`permanent_off` / `lock`) is the second line of defense for users who do not want to be prompted — when set, `linear on` exits 2 regardless.
 
 ### Setup (one-time, per machine)
 
@@ -211,9 +217,12 @@ The MCP server uses the same `LINEAR_*` scope (issues / projects / comments) as 
   "team_id": "",
   "free_tier_cleanup": false,
   "auto_archive_done": true,
+  "permanent_off": false,
   "set_at": "2026-08-03T00:54:03Z"
 }
 ```
+
+`permanent_off` (added in #950) is the hard-lock flag. When `true`, `linear on` exits 2 and `_enabled()` returns False even when the API key is reachable. Set via `linear lock`, cleared via `linear unlock`. `linear off` (the soft toggle) does not touch it.
 
 ### Why per-worktree?
 

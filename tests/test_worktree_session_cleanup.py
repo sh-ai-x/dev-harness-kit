@@ -173,6 +173,79 @@ class TestWorktreeSessionCleanupHook(unittest.TestCase):
         finally:
             td.cleanup()
 
+    def test_stop_prompt_surfaces_unpushed_commits_issue_959(self) -> None:
+        """When the branch has commits the user has not pushed, the Stop-hook
+        prompt must mention the unpushed count so the user makes an informed
+        KEEP/REMOVE choice. Regression coverage for #959."""
+        td, root, wt = _make_repo()
+        try:
+            # Two local commits ahead of `main` (the test fixture has no
+            # remote, so the fallback comparison is against local main).
+            (wt / "a.txt").write_text("a\n")
+            _git(wt, "add", "a.txt")
+            _git(wt, "commit", "-q", "-m", "first unpushed")
+            (wt / "b.txt").write_text("b\n")
+            _git(wt, "add", "b.txt")
+            _git(wt, "commit", "-q", "-m", "second unpushed")
+            self.assertEqual(
+                _git(wt, "rev-list", "--count", "main..HEAD").stdout.strip(),
+                "2",
+            )
+
+            payload = {
+                "hook_event_name": "Stop",
+                "cwd": str(wt),
+                "last_assistant_message": "Tests passed.",
+            }
+            env = os.environ.copy()
+            env["CLAUDE_PLUGIN_ROOT"] = str(ROOT)
+            result = subprocess.run(
+                ["bash", str(HOOK)], input=json.dumps(payload), cwd=str(ROOT),
+                capture_output=True, text=True, env=env, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            document = json.loads(result.stdout)
+            context = document["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("KEEP or REMOVE", context)
+            self.assertIn("Unpushed: 2 commit(s) ahead of main", context)
+            self.assertIn("push first if you want them on a remote", context)
+            # Worktree must still exist; the hook is advisory only.
+            self.assertTrue(wt.exists())
+        finally:
+            td.cleanup()
+
+    def test_stop_prompt_omits_unpushed_line_when_branch_is_synced_issue_959(self) -> None:
+        """When the branch has no unpushed commits, the Stop-hook prompt must
+        not mention unpushed state — keeps the prompt tight. Regression
+        coverage for #959."""
+        td, root, wt = _make_repo()
+        try:
+            # The fixture creates the worktree branched from main with no
+            # commits ahead — exactly the "fully synced" case.
+            self.assertEqual(
+                _git(wt, "rev-list", "--count", "main..HEAD").stdout.strip(),
+                "0",
+            )
+            payload = {
+                "hook_event_name": "Stop",
+                "cwd": str(wt),
+                "last_assistant_message": "Done.",
+            }
+            env = os.environ.copy()
+            env["CLAUDE_PLUGIN_ROOT"] = str(ROOT)
+            result = subprocess.run(
+                ["bash", str(HOOK)], input=json.dumps(payload), cwd=str(ROOT),
+                capture_output=True, text=True, env=env, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            document = json.loads(result.stdout)
+            context = document["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("KEEP or REMOVE", context)
+            self.assertNotIn("Unpushed:", context)
+            self.assertTrue(wt.exists())
+        finally:
+            td.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
