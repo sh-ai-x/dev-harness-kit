@@ -134,6 +134,16 @@ owns one step at a time and resumes from `index.json`. `babysit-pr` is the
 single repair entrypoint: it watches CI and review, applies bounded fixes, and
 rechecks the PR.
 
+### Stage by stage
+
+The three steps each have their own focused flow:
+
+![Planning — idea → safety interview → optional evidence-plan → PRD.md + phases/index.json → approve gate](docs/screenshots/planning.png)
+
+![Building — PRD.md + index.json → step worktree → code + tests → acceptance check → commit → all steps done](docs/screenshots/building.png)
+
+![Reviewing — PR diff → /dev-kit:review fans out to three parallel judges → verdict gate → either Approve (ship) or Changes/Blocked (/dev-kit:babysit-pr loops back to re-review)](docs/screenshots/reviewing.png)
+
 ### Portability and long-running loop
 
 Claude Code ↔ Codex parity is enforced by `tests/test_hooks_json_parity.py`,
