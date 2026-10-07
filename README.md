@@ -12,11 +12,9 @@
 
 `dev-harness-kit` installs one plugin — called `dev-kit` — into your project. Once
 it's installed, you drive real development work through a handful of slash
-commands that always follow the same loop:
-
-```
-bootstrap → evidence-plan? → plan → build → review → ship
-```
+commands that always follow the same loop (canonical stage spec at
+[`docs/stages/STAGES.md`](docs/stages/STAGES.md); the diagram below is the
+runtime view of one idea through the loop):
 
 Each step does one job: `plan` turns an idea into a written spec and a checklist
 of build steps; `build` works through that checklist one step at a time with
