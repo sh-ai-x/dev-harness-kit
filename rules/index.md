@@ -2,7 +2,7 @@
 
 AGENTS.md → CLAUDE.md → these rule files. Read each before planning or editing.
 
-- [`iron-laws.md`](iron-laws.md) — Iron Laws (MUST-8 SSOT). Project invariants; read once before any decision.
+- [`iron-laws.md`](iron-laws.md) — Iron Laws (MUST-10 SSOT). Project invariants; read once before any decision.
 - [`guidelines.md`](guidelines.md) — Coding guidelines (Karpathy-style behavioral, abbreviated).
 - [`git-workflow.md`](git-workflow.md) — The canonical worktree root is `.worktrees/`. This path is shared by Claude
 - [`session-hygiene.md`](session-hygiene.md) — These rules govern *how Claude Code sessions behave* in this repo — model
