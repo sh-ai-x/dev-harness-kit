@@ -132,11 +132,12 @@ class TestSmoke(unittest.TestCase):
     def test_iron_laws_in_iron_laws_index(self):
         """Iron Laws SSOT lives at rules/iron-laws.md (lazy-loaded by CLAUDE.md).
 
-        Bumped from L1-L5 to L1-L8 after issue #263 (alpha-declare + alpha-location
-        + prose-trim laws were added).
+        Bumped L1-L5 → L1-L8 (issue #263: alpha-declare + alpha-location +
+        prose-trim), then L1-L10 in PR #963 (L9 untrusted-payload fences +
+        L10 no-React-useEffect-for-derived-state).
         """
         laws_md = (PROJECT_ROOT / "rules" / "iron-laws.md").read_text(encoding="utf-8")
-        for i in range(1, 10):
+        for i in range(1, 11):
             # Iron law may be "**L1 Title**" or "**L1** Title:" — accept both forms
             self.assertTrue(
                 f"**L{i}" in laws_md or f"L{i}**" in laws_md,

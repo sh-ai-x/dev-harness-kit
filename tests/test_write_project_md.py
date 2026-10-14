@@ -46,7 +46,7 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertIn("alpha", laws[5].lower())
         self.assertIn("can't self-impose", laws[6])
         self.assertIn("state-machine", laws[7])
-        # L9 untrusted payloads, L10 no-useEffect (issue #X)
+        # L9 untrusted payloads, L10 no-useEffect (PR #963)
         self.assertIn("untrusted", laws[8].lower())
         self.assertIn("useeffect", laws[9].lower())
 
@@ -93,9 +93,9 @@ class TestWriteProjectMd(unittest.TestCase):
         self.assertNotIn(".dev-kit/state.json", md)
 
     def test_render_claude_md_no_inline_laws_or_guidelines(self):
-        """CLAUDE.md must NOT inline L1-L8 or G1-G4 (lazy-load via index)."""
+        """CLAUDE.md must NOT inline L1-L10 or G1-G4 (lazy-load via index)."""
         md = write_project_md.render_claude_md(self.root)
-        for i in range(1, 9):
+        for i in range(1, 11):
             self.assertNotIn(
                 f"**L{i}**", md, f"CLAUDE.md must not inline L{i} (moved to rules/iron-laws.md)"
             )
