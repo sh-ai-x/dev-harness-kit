@@ -46,7 +46,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           # fetch-depth: 0 so tests/test_skill_governance.py can resolve
           # origin/main as the L6 baseline (new-skill set is local - origin/main).
@@ -109,7 +109,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           # Full history needed for the Version freshness step (git show
           # $BASE_SHA:.claude-plugin/plugin.json); the default
@@ -265,7 +265,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && !startsWith(github.event.pull_request.title, 'chore(release): bump dev-kit to v')
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           # fetch-depth: 0 so ruff can blame ownership / detect introduced-in-
           # PR violations vs. baseline-leaked violations (parity with the
