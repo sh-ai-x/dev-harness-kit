@@ -43,10 +43,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           fetch-depth: 1
-      - uses: astral-sh/ruff-action@6776b969097d5da0423e7ed8bbda68e2c8b92b60  # v4.1.0
+      - uses: astral-sh/ruff-action@a9506688fc3cf2815915b2034e9ba3e584a183d9  # v4.1.0
         with:
           args: check
-      - uses: astral-sh/ruff-action@6776b969097d5da0423e7ed8bbda68e2c8b92b60  # v4.1.0
+      - uses: astral-sh/ruff-action@a9506688fc3cf2815915b2034e9ba3e584a183d9  # v4.1.0
         with:
           args: format --check
 
