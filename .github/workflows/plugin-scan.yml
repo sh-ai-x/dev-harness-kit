@@ -61,7 +61,7 @@ jobs:
         # and `plugin_dir: .` resolves against the runner workspace. Without
         # this step the scanner runs against an empty directory and either
         # passes trivially or surfaces a misleading baseline.
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           # fetch-depth: 0 matches ci.yml — full history keeps blame and
           # baseline-delta semantics consistent with the other gates. The
