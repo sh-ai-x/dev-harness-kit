@@ -22,7 +22,19 @@ def fetch_required_status_checks(gh_available_fn, repo: str) -> tuple[set[str], 
     if not gh:
         return set(), degraded or "gh not on PATH"
 
-    def _run(jq_expr: str) -> tuple[set[str], bool]:
+    def _run(jq_expr: str) -> tuple[set[str], str]:
+        """Run one `gh api --jq` probe.
+
+        Returns `(names, err_msg)`. `err_msg` is non-empty iff the probe
+        hard-failed; in that case `names` is always empty and `err_msg`
+        is the human-readable reason.
+
+        (Previously the error string was smuggled through the `names`
+        set as `set(f"gh api failed: {err}")` and popped back out with
+        `.pop()`. `set(<str>)` splits the string into individual
+        characters, so the caller received a single arbitrary character
+        — e.g. `'a'` — instead of the actual failure reason.)
+        """
         try:
             cp = subprocess.run(
                 [gh, "api",
@@ -30,22 +42,22 @@ def fetch_required_status_checks(gh_available_fn, repo: str) -> tuple[set[str], 
                  "--jq", jq_expr],
                 capture_output=True, text=True, timeout=10,
             )
-        except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError):
-            return set(), True
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError) as e:
+            return set(), f"gh api error: {type(e).__name__}"
         if cp.returncode != 0:
             err = (cp.stderr or "").strip().splitlines()[-1] if cp.stderr else ""
-            return set(f"gh api failed: {err or cp.returncode}"), True
+            return set(), f"gh api failed: {err or cp.returncode}"
         names = {ln.strip() for ln in cp.stdout.splitlines() if ln.strip()}
-        return names, False
+        return names, ""
 
-    names, hard = _run(".contexts[]?")
-    if hard:
-        return set(), names.pop() if names else "gh api failed"
+    names, err = _run(".contexts[]?")
+    if err:
+        return set(), err
     if names:
         return names, ""
-    names2, hard2 = _run(".checks[].context")
-    if hard2:
-        return set(), names2.pop() if names2 else "gh api failed"
+    names2, err2 = _run(".checks[].context")
+    if err2:
+        return set(), err2
     if not names2:
         return set(), "no contexts found"
     return names2, ""
